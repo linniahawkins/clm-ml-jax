@@ -495,7 +495,7 @@ class Outputs:
     soil_latent_heat_flux: Array
     transpiration_latent_heat: Array
     canopy_evaporation_latent_heat: Array
-    soil_wetness_factor: Array
+    rsl_beta: Array  # u*/U(h), roughness-sublayer beta (flux.out col 17; was mislabeled before)
     vegetation_storage_flux: Array
 
     # Sunlit/shaded (fsun.out); trailing (3,) = [total, sunlit, shaded]

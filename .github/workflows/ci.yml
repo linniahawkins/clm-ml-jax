@@ -58,6 +58,12 @@ jobs:
             --no-cov \
             --tb=short
 
+      - name: Run clm_ml tests (config, params, domain, run.yaml)
+        run: |
+          pytest tests/clm_ml/ -q \
+            --no-cov \
+            --tb=short
+
       - name: Run unit tests
         run: |
           pytest tests/ -m "unit" -q \

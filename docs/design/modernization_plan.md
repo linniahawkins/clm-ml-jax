@@ -1,7 +1,7 @@
 # CLM-ML-JAX Modernization Plan
 
-**Status:** Draft v3. Phase 0 is done (branch `phase0/safety-net`). v3 adds the gridcell/patch
-structure (§3.1).
+**Status:** v3. Phase 0 done (branch `phase0/safety-net`); Phase 1 done (branch
+`phase1/config-api`). v3 adds the gridcell/patch structure (§3.1).
 
 **Companion files:**
 - [`api_sketch.py`](api_sketch.py): the proposed Python API, as typed signatures with docstrings.
@@ -519,7 +519,20 @@ at the end of every phase.**
   simulated day on an Apple Silicon CPU. **GPU timing is deferred until after Phase 4.** Until
   then, the code dispatches many small operations from Python, which a GPU handles poorly.
 
-### Phase 1: Configuration files and the new API as a wrapper (no physics changes)
+### Phase 1: Configuration files and the new API as a wrapper (no physics changes) ✅
+
+**As built** (`src/clm_ml/`): `config.py` (model.yaml), `params.py` (per-PFT table with
+`extends:`), `domain.py` (towers.yaml → gridcells/patches/soil columns), `run.py`
+(run.yaml, `load_run`, `Run.execute`), `outputs.py` (64 named variables with units →
+netCDF at patch and gridcell level), `cli.py` (`clm-ml run|check|convert`), and
+`legacy/` (the adapter: `worker.py` runs the unchanged legacy driver in a fresh process after
+installing all options, PFT tables and the tower; `tables.py` generates the shipped YAML from
+the legacy tables; `namelist.py` converts namelists). Acceptance: the converted CHATS7
+50-step case run through `clm-ml` is bit-for-bit identical to `clm-ml-offline` in all 86
+recorded fields and in all six `.out` files (`tests/regression/test_clm_ml_equivalence.py`).
+
+Planned scope:
+
 
 - Create `src/clm_ml/` with `ModelConfig`, `Domain`, `Params`, `Run`, the YAML loaders and
   validation, and the CLI (`run`, `check`, `convert`).
@@ -672,13 +685,14 @@ Milestones for users:
 | # | Question | Answer |
 |---|---|---|
 | 1 | Minimum Python version | **3.10** |
-| 2 | Default `max_layers` | **50.** CHATS7 needs 46 layers with the default spacing: a 10 m canopy at 0.5 m gives 20 layers inside it, plus 26 above it up to the 23 m measurement height. Patches needing more fail at load time with a message naming them, and can raise `max_layers` in `model.yaml` (the Fortran limit was `nlevmlcan = 100`). **Follow-up needed:** with default spacing, 9 of the 15 built-in towers need more than 50 (US-Ha1 60, US-Me2 64, US-UMB 92, US-MMS 96; US-ARM 300, beyond even the Fortran limit). Bonan et al. (2021) found 5–10 within-canopy layers reproduce the 50 cm benchmark, so explicit `n_layers_within`/`n_layers_above`, or coarser above-canopy spacing, may be the better default for multi-tower and global runs. To confirm before Phase 1. |
+| 2 | Default `max_layers` | **50.** CHATS7 needs 46 layers with the default spacing: a 10 m canopy at 0.5 m gives 20 layers inside it, plus 26 above it up to the 23 m measurement height. Patches needing more fail at load time with a message naming them, and can raise `max_layers` in `model.yaml` (the Fortran limit was `nlevmlcan = 100`). **Resolved by row 9:** only CHATS7 is built in. (For reference: with default spacing, 9 of the 15 legacy towers need more than 50 (US-Ha1 60, US-Me2 64, US-UMB 92, US-MMS 96; US-ARM 300, beyond even the Fortran limit). Bonan et al. (2021) found 5–10 within-canopy layers reproduce the 50 cm benchmark, so explicit `n_layers_within`/`n_layers_above`, or coarser above-canopy spacing, may be the better default for multi-tower and global runs.) |
 | 3 | Regression tolerance | **`rtol=1e-6`** against the current JAX output |
 | 4 | Legacy lifetime | Undecided. Default: keep `clm-ml-offline` until Phase 7, and keep the namelist converter permanently. Revisit at Phase 7. |
 | 5 | Soil model scope | Undecided. Default: soil routines go behind the same process interface, migrated last in Phase 5. Making them swappable is not a goal yet. Revisit at Phase 5. (Soil column sharing is decided separately: option A now, option B later; see §6.7.) |
 | 6 | Legacy `.out` format | **Not needed after validation.** It is kept only as long as the Fortran comparison test needs it, and is replaced by netCDF output once that test reads netCDF. `output.format` options become `netcdf` only. |
 | 7 | GPU timing | **Deferred until after Phase 4.** GPU doesn't change the design. Note that the model runs in float64: data-center GPUs (A100/H100) handle this well, but consumer GPUs run float64 30–60× slower. A `precision` option could be considered in Phase 4, with its own validation. |
 | 8 | Minimum patch weight | Default `0.0` (keep all patches). For global runs, dropping patches below, for example, 1% of a gridcell is a science choice left to `run.yaml` (`domain.min_patch_weight`). Remaining weights are renormalized to sum to 1. |
+| 9 | Built-in towers | **CHATS7 only.** It is the only tower validated against Fortran, and the only one with input data in the repo. The other 14 `TowerDataMod` entries are not carried into `towers.yaml`. Users can describe other towers in their own `towers.yaml` (`domain.towers_file`), setting explicit layer counts where the default spacing gives too many layers (short canopies under tall towers). This also settles the `max_layers` follow-up in row 2. |
 
 ---
 

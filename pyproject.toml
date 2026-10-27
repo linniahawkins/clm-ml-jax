@@ -28,11 +28,13 @@ dev = [
 ]
 
 [project.scripts]
+clm-ml = "clm_ml.cli:main"
 clm-ml-offline = "offline_executable.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = [
+    "clm_ml*",
     "clm_share*",
     "clm_src_biogeophys*",
     "clm_src_cpl*",
@@ -58,3 +60,6 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["F401"]
+
+[tool.setuptools.package-data]
+clm_ml = ["data/*.yaml", "data/params/*.yaml"]

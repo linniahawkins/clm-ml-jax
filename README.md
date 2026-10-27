@@ -42,6 +42,36 @@ This installs the `clm-ml-offline` command and all physics modules (`clm_share`,
 
 ## Run a Simulation
 
+### With YAML configuration (`clm-ml`)
+
+A run is described by `run.yaml` (dates, tower, forcing files, output), which points to
+`model.yaml` (physics schemes and numerics) and a parameter file (per plant functional type).
+Convert an existing namelist to get started:
+
+```bash
+clm-ml convert src/offline_executable/nl.CHATS7.1day -o chats7/   # writes run.yaml + model.yaml
+clm-ml check chats7/run.yaml        # validate everything and print a summary, without running
+clm-ml run chats7/run.yaml          # run; writes netCDF output with names and units
+clm-ml run chats7/run.yaml --set time.days=7 --set model.physics.stomatal_conductance=medlyn
+```
+
+Or from Python:
+
+```python
+from clm_ml.run import load_run
+
+run = load_run("chats7/run.yaml")
+out = run.execute()
+ds = out.to_xarray()          # dims (time, patch, layer, ...), with units
+ds["latent_heat_flux"].plot()
+```
+
+The built-in parameter sets are `clm5_defaults` and `chats` (the CHATS walnut-orchard
+values of Bonan, Burns & Patton 2026, Table 2); see `src/clm_ml/data/params/`. See
+`docs/design/modernization_plan.md` for where this interface is heading.
+
+### With a namelist (`clm-ml-offline`)
+
 Execute a 1-day tower-site simulation with the CHATS7 site:
 
 ```bash
