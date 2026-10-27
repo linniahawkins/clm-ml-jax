@@ -1,7 +1,7 @@
 # CLM-ML-JAX Modernization Plan
 
-**Status:** v3. Phase 0 done (branch `phase0/safety-net`); Phase 1 done (branch
-`phase1/config-api`). v3 adds the gridcell/patch structure (§3.1).
+**Status:** v3. Phases 0–2 done (branches `phase0/safety-net`, `phase1/config-api`,
+`phase2/forcing-time`). v3 adds the gridcell/patch structure (§3.1).
 
 **Companion files:**
 - [`api_sketch.py`](api_sketch.py): the proposed Python API, as typed signatures with docstrings.
@@ -550,7 +550,33 @@ Planned scope:
 **Done when:** `clm-ml run` on the converted CHATS7 files gives identical output to
 `clm-ml-offline`, the regression test passes, and a tutorial notebook runs.
 
-### Phase 2: Forcing and time become data
+### Phase 2: Forcing and time become data ✅
+
+**As built**, in three steps, each bit-for-bit identical to `clm-ml-offline`:
+
+- **2a, forcing as data.** `TowerMetMod` and `clmDataMod` read every record a run needs
+  once, before the time loop. The tower derivations that `TowerMetCurr` and `TowerMetNext`
+  each repeated now live once, in `derive_tower_met`. `clm_ml.forcing.Forcing` holds the
+  forcing as arrays shaped `(time, gridcell)` and `(time, patch)`. `ModelAdvance`/`clm_drv`
+  receive a CLM-history record instead of file names. The unused duplicate driver
+  `CLMml_drv` was removed.
+- **2b, time as data.** The time manager has pure functions (`date_after`, `calday_of`,
+  `step_time` → `StepTime`), and the physics (`MLCanopyFluxes`, `CanopyTurbulence`,
+  `SoilTemperature`) receives time as an argument. `main.py` computes the time axis once.
+  The start-date "hack" is replaced by a direct calculation, and the loop no longer
+  mutates `itim`.
+- **2c, forcing window.** The 24 `*_bef/_cur/_next_forcing` fields are gone from
+  `mlcanopy_type`. `GetAtmForcing` takes an `AtmForcingWindow`, built each step from
+  `Forcing`. The "previous" record uses the same conversion as `_GetCLMVar`
+  (`clm_forcing_to_ml`), and "next" the same values as the former `TowerMetNext`, so
+  results are unchanged.
+
+Not done here, by design: the time manager still holds the static start date and step
+length (read by the legacy output writer), and the driver still runs in `main.py` until
+Phase 3 moves it into `clm_ml`.
+
+Planned scope:
+
 
 - The loaders read all tower and CLM-history records into a `Forcing` pytree before the run,
   including derived quantities (solar zenith angle, CO₂, emissivity). Meteorology has shape

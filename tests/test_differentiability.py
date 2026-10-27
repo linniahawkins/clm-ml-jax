@@ -106,11 +106,17 @@ def _build_initialized_model():
 
     _clm_driver_mod.filter = _new_filter
 
-    from clm_ml.legacy.forcing import clm_record_at, load_forcing, tower_met_at
+    from clm_ml.legacy.forcing import (
+        atm_record_current,
+        atm_record_next,
+        clm_record_at,
+        load_forcing,
+        tower_met_at,
+    )
     from clm_share.shr_orb_mod import shr_orb_params
     from clm_src_utils import clm_varorb
     from offline_driver.CLMml_driver import SoilInit, TowerVeg, init_acclim
-    from offline_driver.TowerMetMod import TowerMetCurr, TowerMetNext
+    from offline_driver.TowerMetMod import TowerMetCurr
 
     _eccen, _obliq, _mvelp, _obliqr, _lambm0, _mvelpp = shr_orb_params(iyear)
     clm_varorb.eccen = _eccen
@@ -189,16 +195,13 @@ def _build_initialized_model():
         )
     )
 
-    if MLclm_varctl.met_type == 3:
-        clm_instMod.mlcanopy_inst = TowerMetNext(
-            tower_met_at(forcing, min(1, ntimes - 1)),
-            bounds.begp,
-            bounds.endp,
-            clm_instMod.mlcanopy_inst,
-        )
+    # Forcing window ends for the first step: previous = current at the first step
+    n_patch = bounds.endp + 1
+    forcing_bef = atm_record_current(forcing, 0, n_patch)
+    forcing_next = atm_record_next(forcing, min(1, ntimes - 1), n_patch)
 
     # Run 1 warm-up timestep
-    ModelAdvance(bounds, clm_record_at(forcing, 0), times[0])
+    ModelAdvance(bounds, clm_record_at(forcing, 0), times[0], forcing_bef, forcing_next)
 
     mlcanopy_inst = clm_instMod.mlcanopy_inst
     filt = _clm_driver_mod.filter
@@ -225,6 +228,8 @@ def _build_initialized_model():
         wateratm2lndbulk_inst=clm_instMod.wateratm2lndbulk_inst,
         waterdiagnosticbulk_inst=clm_instMod.waterdiagnosticbulk_inst,
         step_time=times[0],
+        forcing_bef=forcing_bef,
+        forcing_next=forcing_next,
     )
 
     return forward_fn, mlcanopy_inst, {"num_evp": num_evp, "evp_list": evp_list}

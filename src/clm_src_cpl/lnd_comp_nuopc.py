@@ -41,6 +41,8 @@ def ModelAdvance(
     bounds: bounds_type,
     clm_record,
     step_time,
+    forcing_bef,
+    forcing_next,
 ) -> None:
     """
     Advance the CLM model by one time step.
@@ -58,7 +60,9 @@ def ModelAdvance(
             read once before the time loop.
         step_time: Time information for this step
             (``clm_time_manager.StepTime``).
+        forcing_bef, forcing_next: Multilayer canopy forcing at the previous
+            and next CLM steps (``MLGetAtmForcingMod.AtmForcingRecord``).
     """
     from clm_src_main.clm_driver import clm_drv  # noqa: F401
 
-    clm_drv(bounds, clm_record, step_time)
+    clm_drv(bounds, clm_record, step_time, forcing_bef, forcing_next)

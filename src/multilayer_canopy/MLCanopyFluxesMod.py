@@ -58,7 +58,12 @@ from multilayer_canopy.MLclm_varctl import (  # noqa: F401
 )
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf, nlevmlcan  # noqa: F401
 from multilayer_canopy.MLFluxProfileSolutionMod import FluxProfileSolution  # noqa: F401
-from multilayer_canopy.MLGetAtmForcingMod import GetAtmForcing  # noqa: F401
+from multilayer_canopy.MLGetAtmForcingMod import (  # noqa: F401
+    AtmForcingRecord,
+    AtmForcingWindow,
+    GetAtmForcing,
+    clm_forcing_to_ml,
+)
 from multilayer_canopy.MLinitVerticalMod import (  # noqa: F401
     getPADparameters,
     initVerticalProfiles,
@@ -124,44 +129,6 @@ def _copy_bef_state(
 
 
 # ---------------------------------------------------------------------------
-# JIT-compiled helper: save current forcing as *_bef for next CLM timestep
-# ---------------------------------------------------------------------------
-
-
-@partial(jax.jit, static_argnums=(0,))
-def _save_bef_forcing(
-    filter_mlcan: tuple,
-    mlcanopy_inst: mlcanopy_type,
-) -> mlcanopy_type:
-    """Copy ``*_cur_forcing`` fields to their ``*_bef_forcing`` counterparts.
-
-    Fuses 8 separate scatter operations (uref, tref, qref, pref, co2ref,
-    swskyb, swskyd, lwsky) into one JIT-compiled XLA program — reducing
-    Python→GPU dispatch from 8+ roundtrips to 1.
-
-    ``filter_mlcan`` is static so the patch-index loop is unrolled at trace
-    time; recompilation only occurs when the active-patch set changes
-    (never for a fixed site).
-
-    Mirrors Fortran lines 332-343 of ``MLCanopyFluxes``.
-    """
-    inst = mlcanopy_inst
-    for p in filter_mlcan:
-        inst = inst._replace(
-            uref_bef_forcing=inst.uref_bef_forcing.at[p].set(inst.uref_cur_forcing[p]),
-            tref_bef_forcing=inst.tref_bef_forcing.at[p].set(inst.tref_cur_forcing[p]),
-            qref_bef_forcing=inst.qref_bef_forcing.at[p].set(inst.qref_cur_forcing[p]),
-            pref_bef_forcing=inst.pref_bef_forcing.at[p].set(inst.pref_cur_forcing[p]),
-            co2ref_bef_forcing=inst.co2ref_bef_forcing.at[p].set(inst.co2ref_cur_forcing[p]),
-            lwsky_bef_forcing=inst.lwsky_bef_forcing.at[p].set(inst.lwsky_cur_forcing[p]),
-            # Copy full band slice for swskyb/swskyd (ivis + inir) in one op
-            swskyb_bef_forcing=inst.swskyb_bef_forcing.at[p, :].set(inst.swskyb_cur_forcing[p, :]),
-            swskyd_bef_forcing=inst.swskyd_bef_forcing.at[p, :].set(inst.swskyd_cur_forcing[p, :]),
-        )
-    return inst
-
-
-# ---------------------------------------------------------------------------
 # Public: MLCanopyFluxes
 # ---------------------------------------------------------------------------
 
@@ -184,6 +151,8 @@ def MLCanopyFluxes(
     wateratm2lndbulk_inst: Any,
     waterdiagnosticbulk_inst: Any,
     step_time: StepTime,
+    forcing_bef: AtmForcingRecord,
+    forcing_next: AtmForcingRecord,
     grid: "GridInfo | None" = None,
     _o2ref_py: "float | None" = None,
     vcmaxpft_jax=None,
@@ -205,8 +174,10 @@ def MLCanopyFluxes(
        Runge-Kutta coefficients (Fortran lines 162-198).
     4. Copies CLM state into ``mlcanopy_inst`` via ``_GetCLMVar``
        (Fortran line 201).
-    5. Seeds the ``*_bef`` forcing fields on the first timestep
-       (Fortran lines 204-218).
+    5. Forms the forcing window (previous, current, next CLM step) from
+       ``forcing_bef``, the current forcing from ``_GetCLMVar`` and
+       ``forcing_next`` (Fortran stored these as ``*_bef/_cur/_next_forcing``
+       and seeded ``*_bef`` on the first timestep, lines 204-218).
     6. Updates the leaf/stem area profiles for current LAI/SAI and
        checks total PAI conservation (Fortran lines 220-243).
     7. Computes soil hydraulic resistance, plant resistance, leaf heat
@@ -234,8 +205,8 @@ def MLCanopyFluxes(
 
        d. Accumulates fluxes over ML sub-steps.
 
-    9. Saves current forcing as ``*_bef`` for next CLM timestep
-       (Fortran lines 332-343).
+    9. (Fortran lines 332-343 saved the current forcing as ``*_bef`` for the
+       next CLM timestep; the caller now supplies ``forcing_bef`` instead.)
     10. Calls :func:`_CanopyFluxesDiagnostics`.
     11. Merges sun/shade leaf temperature and water potential to a
         layer-mean prognostic state (Fortran lines 355-375).
@@ -290,6 +261,11 @@ def MLCanopyFluxes(
         step_time: Time information for this CLM time step (step number,
             step length, calendar day at the beginning and end of the step).
             Replaces the Fortran calls to the time manager (lines 155-165).
+        forcing_bef: Forcing at the previous CLM time step (the current step at
+            the first step), for time interpolation. Replaces the Fortran
+            ``*_bef_forcing`` fields carried in ``mlcanopy_type``.
+        forcing_next: Forcing at the next CLM time step (replaces
+            ``*_next_forcing``, which Fortran ``TowerMetNext`` filled).
 
     Returns:
         Updated :class:`mlcanopy_type` holding end-of-timestep state
@@ -386,7 +362,7 @@ def MLCanopyFluxes(
     # ------------------------------------------------------------------
     # Copy CLM variables to mlcanopy container — Fortran line 201
     # ------------------------------------------------------------------
-    mlcanopy_inst = _GetCLMVar(
+    mlcanopy_inst, forcing_cur = _GetCLMVar(
         nstep,
         dtime_clm,
         curr_calday_beg,
@@ -400,39 +376,10 @@ def MLCanopyFluxes(
         mlcanopy_inst,
     )
     # ------------------------------------------------------------------
-    # Seed *_bef forcing on first timestep — Fortran lines 204-218
+    # Forcing window for time interpolation — replaces the Fortran
+    # *_bef/_cur/_next_forcing fields (and the *_bef seeding, lines 204-218)
     # ------------------------------------------------------------------
-    if _ml_vert_init == 1:
-        uref_bef = mlcanopy_inst.uref_bef_forcing
-        tref_bef = mlcanopy_inst.tref_bef_forcing
-        qref_bef = mlcanopy_inst.qref_bef_forcing
-        pref_bef = mlcanopy_inst.pref_bef_forcing
-        co2ref_bef = mlcanopy_inst.co2ref_bef_forcing
-        swskyb_bef = mlcanopy_inst.swskyb_bef_forcing
-        swskyd_bef = mlcanopy_inst.swskyd_bef_forcing
-        lwsky_bef = mlcanopy_inst.lwsky_bef_forcing
-
-        for p in filter_mlcan:
-            uref_bef = uref_bef.at[p].set(mlcanopy_inst.uref_cur_forcing[p])
-            tref_bef = tref_bef.at[p].set(mlcanopy_inst.tref_cur_forcing[p])
-            qref_bef = qref_bef.at[p].set(mlcanopy_inst.qref_cur_forcing[p])
-            pref_bef = pref_bef.at[p].set(mlcanopy_inst.pref_cur_forcing[p])
-            co2ref_bef = co2ref_bef.at[p].set(mlcanopy_inst.co2ref_cur_forcing[p])
-            for ib in (ivis, inir):
-                swskyb_bef = swskyb_bef.at[p, ib].set(mlcanopy_inst.swskyb_cur_forcing[p, ib])
-                swskyd_bef = swskyd_bef.at[p, ib].set(mlcanopy_inst.swskyd_cur_forcing[p, ib])
-            lwsky_bef = lwsky_bef.at[p].set(mlcanopy_inst.lwsky_cur_forcing[p])
-
-        mlcanopy_inst = mlcanopy_inst._replace(
-            uref_bef_forcing=uref_bef,
-            tref_bef_forcing=tref_bef,
-            qref_bef_forcing=qref_bef,
-            pref_bef_forcing=pref_bef,
-            co2ref_bef_forcing=co2ref_bef,
-            swskyb_bef_forcing=swskyb_bef,
-            swskyd_bef_forcing=swskyd_bef,
-            lwsky_bef_forcing=lwsky_bef,
-        )
+    forcing_window = AtmForcingWindow(bef=forcing_bef, cur=forcing_cur, next=forcing_next)
 
     # ------------------------------------------------------------------
     # Update leaf/stem area profiles for current LAI/SAI — Fortran lines 220-243
@@ -598,6 +545,7 @@ def MLCanopyFluxes(
             num_mlcan,
             filter_mlcan,
             inst,
+            forcing_window,
             grid=grid,
         )
         # Solar radiation — Fortran line 290
@@ -748,12 +696,6 @@ def MLCanopyFluxes(
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # Save current forcing as *_bef for next CLM timestep — Fortran lines 332-343
-    # JIT-compiled helper fuses 8 scatter ops into one XLA dispatch.
-    # ------------------------------------------------------------------
-    mlcanopy_inst = _save_bef_forcing(filter_mlcan, mlcanopy_inst)
-
-    # ------------------------------------------------------------------
     # Canopy-level diagnostics — Fortran line 346
     # ------------------------------------------------------------------
     if not _diff_mode:
@@ -853,7 +795,7 @@ def _GetCLMVar(
     surfalb_inst: Any,
     wateratm2lndbulk_inst: Any,
     mlcanopy_inst: mlcanopy_type,
-) -> mlcanopy_type:
+) -> "tuple[mlcanopy_type, AtmForcingRecord]":
     """
     Copy CLM variables into the multilayer canopy container.
 
@@ -939,9 +881,10 @@ def _GetCLMVar(
         mlcanopy_inst: Canopy container to update.
 
     Returns:
-        Updated :class:`mlcanopy_type` with all ``*_cur_forcing``,
-        ``*_soil``, and ``solar_zen_forcing`` fields set for the
-        current CLM timestep.
+        ``(mlcanopy_inst, forcing_cur)``: the container with ``*_soil`` and
+        ``solar_zen_forcing`` fields set for the current CLM timestep, and the
+        current-step forcing (Fortran ``*_cur_forcing``) as an
+        :class:`AtmForcingRecord`.
     """
     from clm_share.shr_orb_mod import shr_orb_cosz, shr_orb_decl  # noqa: F401
     from clm_src_main.clm_varcon import pi  # noqa: F401 (pi = rpi)
@@ -987,16 +930,17 @@ def _GetCLMVar(
     # ------------------------------------------------------------------
     # Mutable copies of the mlcanopy arrays to update
     # ------------------------------------------------------------------
-    tref_cur = mlcanopy_inst.tref_cur_forcing
-    qref_cur = mlcanopy_inst.qref_cur_forcing
-    uref_cur = mlcanopy_inst.uref_cur_forcing
-    pref_cur = mlcanopy_inst.pref_cur_forcing
-    co2ref_cur = mlcanopy_inst.co2ref_cur_forcing
+    # Current-step forcing (Fortran *_cur_forcing), returned as a record
+    tref_cur = jnp.zeros_like(mlcanopy_inst.tref_forcing)
+    qref_cur = jnp.zeros_like(mlcanopy_inst.qref_forcing)
+    uref_cur = jnp.zeros_like(mlcanopy_inst.uref_forcing)
+    pref_cur = jnp.zeros_like(mlcanopy_inst.pref_forcing)
+    co2ref_cur = jnp.zeros_like(mlcanopy_inst.co2ref_forcing)
     o2ref = mlcanopy_inst.o2ref_forcing
     solar_zen = mlcanopy_inst.solar_zen_forcing
-    swskyb_cur = mlcanopy_inst.swskyb_cur_forcing
-    swskyd_cur = mlcanopy_inst.swskyd_cur_forcing
-    lwsky_cur = mlcanopy_inst.lwsky_cur_forcing
+    swskyb_cur = jnp.zeros_like(mlcanopy_inst.swskyb_forcing)
+    swskyd_cur = jnp.zeros_like(mlcanopy_inst.swskyd_forcing)
+    lwsky_cur = jnp.zeros_like(mlcanopy_inst.lwsky_forcing)
     qflx_rain = mlcanopy_inst.qflx_rain_forcing
     qflx_snow = mlcanopy_inst.qflx_snow_forcing
     tacclim = mlcanopy_inst.tacclim_forcing
@@ -1020,26 +964,34 @@ def _GetCLMVar(
         c = int(_patch_column_np[p])
         g = int(_patch_gridcell_np[p])
 
-        # Wind: resultant from east/north components — Fortran line 67
-        uref_cur = uref_cur.at[p].set(jnp.sqrt(forc_u[g] ** 2 + forc_v[g] ** 2))
-
-        # Diffuse solar (grid cell g → patch p) — Fortran lines 68-69
-        swskyd_cur = swskyd_cur.at[p, ivis].set(forc_solai[g, ivis])
-        swskyd_cur = swskyd_cur.at[p, inir].set(forc_solai[g, inir])
-
-        # Column (c) → patch (p) scalars — Fortran lines 72-80
-        tref_cur = tref_cur.at[p].set(forc_t[c])
-        qref_cur = qref_cur.at[p].set(forc_q[c])
-        pref_cur = pref_cur.at[p].set(forc_pbot[c])
-        lwsky_cur = lwsky_cur.at[p].set(forc_lwrad[c])
+        # Current-step forcing: wind resultant, CLM gridcell/column -> patch,
+        # CO2 Pa -> umol/mol — Fortran lines 67-84 (see clm_forcing_to_ml)
+        _u, _t, _q, _p, _co2, _solad, _solai, _lw = clm_forcing_to_ml(
+            forc_u[g],
+            forc_v[g],
+            forc_t[c],
+            forc_q[c],
+            forc_pbot[c],
+            forc_pco2[g],
+            (forc_solad_col[c, ivis], forc_solad_col[c, inir]),
+            (forc_solai[g, ivis], forc_solai[g, inir]),
+            forc_lwrad[c],
+        )
+        uref_cur = uref_cur.at[p].set(_u)
+        tref_cur = tref_cur.at[p].set(_t)
+        qref_cur = qref_cur.at[p].set(_q)
+        pref_cur = pref_cur.at[p].set(_p)
+        co2ref_cur = co2ref_cur.at[p].set(_co2)
+        swskyb_cur = swskyb_cur.at[p, ivis].set(_solad[0])
+        swskyb_cur = swskyb_cur.at[p, inir].set(_solad[1])
+        swskyd_cur = swskyd_cur.at[p, ivis].set(_solai[0])
+        swskyd_cur = swskyd_cur.at[p, inir].set(_solai[1])
+        lwsky_cur = lwsky_cur.at[p].set(_lw)
         qflx_rain = qflx_rain.at[p].set(forc_rain[c])
         qflx_snow = qflx_snow.at[p].set(forc_snow[c])
-        swskyb_cur = swskyb_cur.at[p, ivis].set(forc_solad_col[c, ivis])
-        swskyb_cur = swskyb_cur.at[p, inir].set(forc_solad_col[c, inir])
 
-        # CO2 and O2 unit conversions — Fortran lines 83-84
+        # O2 unit conversion — Fortran line 84
         pbot_val = forc_pbot[c]
-        co2ref_cur = co2ref_cur.at[p].set(forc_pco2[g] / pbot_val * 1.0e6)  # Pa -> umol/mol
         o2ref = o2ref.at[p].set(forc_po2[g] / pbot_val * 1.0e3)  # Pa -> mmol/mol
 
         # Acclimation temperature — Fortran line 87
@@ -1100,26 +1052,31 @@ def _GetCLMVar(
     # ------------------------------------------------------------------
     # Return updated container
     # ------------------------------------------------------------------
-    return mlcanopy_inst._replace(
-        tref_cur_forcing=tref_cur,
-        qref_cur_forcing=qref_cur,
-        uref_cur_forcing=uref_cur,
-        pref_cur_forcing=pref_cur,
-        co2ref_cur_forcing=co2ref_cur,
-        o2ref_forcing=o2ref,
-        solar_zen_forcing=solar_zen,
-        swskyb_cur_forcing=swskyb_cur,
-        swskyd_cur_forcing=swskyd_cur,
-        lwsky_cur_forcing=lwsky_cur,
-        qflx_rain_forcing=qflx_rain,
-        qflx_snow_forcing=qflx_snow,
-        tacclim_forcing=tacclim,
-        albsoib_soil=albsoib,
-        albsoid_soil=albsoid,
-        soilres_soil=soilres,
-        soil_t_soil=soil_t,
-        soil_dz_soil=soil_dz,
-        soil_tk_soil=soil_tk,
+    forcing_cur = AtmForcingRecord(
+        uref=uref_cur,
+        tref=tref_cur,
+        qref=qref_cur,
+        pref=pref_cur,
+        co2ref=co2ref_cur,
+        swskyb=swskyb_cur,
+        swskyd=swskyd_cur,
+        lwsky=lwsky_cur,
+    )
+    return (
+        mlcanopy_inst._replace(
+            o2ref_forcing=o2ref,
+            solar_zen_forcing=solar_zen,
+            qflx_rain_forcing=qflx_rain,
+            qflx_snow_forcing=qflx_snow,
+            tacclim_forcing=tacclim,
+            albsoib_soil=albsoib,
+            albsoid_soil=albsoid,
+            soilres_soil=soilres,
+            soil_t_soil=soil_t,
+            soil_dz_soil=soil_dz,
+            soil_tk_soil=soil_tk,
+        ),
+        forcing_cur,
     )
 
 
@@ -2081,6 +2038,8 @@ def make_clm_ml_forward(
     wateratm2lndbulk_inst: Any,
     waterdiagnosticbulk_inst: Any,
     step_time: StepTime,
+    forcing_bef: AtmForcingRecord,
+    forcing_next: AtmForcingRecord,
 ):
     """Create a differentiable forward function with baked-in structural params.
 
@@ -2130,6 +2089,8 @@ def make_clm_ml_forward(
             wateratm2lndbulk_inst=wateratm2lndbulk_inst,
             waterdiagnosticbulk_inst=waterdiagnosticbulk_inst,
             step_time=step_time,
+            forcing_bef=forcing_bef,
+            forcing_next=forcing_next,
             grid=grid,
             _o2ref_py=_o2ref_py_fwd,
         )

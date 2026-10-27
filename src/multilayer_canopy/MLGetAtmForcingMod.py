@@ -9,6 +9,8 @@ Original Fortran module: MLGetAtmForcingMod
 Fortran lines 1-175
 """
 
+from typing import NamedTuple
+
 import jax.numpy as jnp
 from jax import Array
 
@@ -26,6 +28,58 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     wind_forc_min,
 )
 from multilayer_canopy.MLclm_varctl import GridInfo, met_type  # noqa: F401
+
+# ---------------------------------------------------------------------------
+# Forcing at the previous, current and next CLM time steps
+#
+# In Fortran these are stored in mlcanopy_type as *_bef/_cur/_next_forcing and
+# carried from step to step. Here they are an explicit argument (the "forcing
+# window"), built from the run's forcing data, so they are not model state.
+# ---------------------------------------------------------------------------
+
+
+class AtmForcingRecord(NamedTuple):
+    """Atmospheric forcing at one CLM time step, per patch.
+
+    Same arrays (and shapes) as the Fortran ``*_bef/_cur/_next_forcing`` fields:
+    ``(np,)``, or ``(np, numrad+1)`` for shortwave (columns ``ivis``, ``inir``).
+    """
+
+    uref: Array  # Wind speed (m/s)
+    tref: Array  # Air temperature (K)
+    qref: Array  # Specific humidity (kg/kg)
+    pref: Array  # Air pressure (Pa)
+    co2ref: Array  # Atmospheric CO2 (umol/mol)
+    swskyb: Array  # Direct beam solar radiation (W/m2)
+    swskyd: Array  # Diffuse solar radiation (W/m2)
+    lwsky: Array  # Atmospheric longwave radiation (W/m2)
+
+
+class AtmForcingWindow(NamedTuple):
+    """Forcing at the previous, current and next CLM time steps, for time interpolation."""
+
+    bef: AtmForcingRecord
+    cur: AtmForcingRecord
+    next: AtmForcingRecord
+
+
+def clm_forcing_to_ml(u, v, t, q, pbot, pco2, solad, solai, lwrad):
+    """
+    Convert CLM forcing at one patch to the multilayer canopy's current-step forcing.
+
+    Fortran ``GetCLMVar`` (MLCanopyFluxesMod, lines 67-84): wind speed is the
+    resultant of the east/north components and CO2 is converted from partial
+    pressure (Pa) to mole fraction (umol/mol). ``solad`` and ``solai`` are
+    ``(vis, nir)`` pairs. Shared by ``_GetCLMVar`` and the construction of the
+    previous-step record, so both use identical arithmetic.
+
+    Returns:
+        ``(uref, tref, qref, pref, co2ref, swskyb, swskyd, lwsky)``.
+    """
+    uref = jnp.sqrt(u**2 + v**2)
+    co2ref = pco2 / pbot * 1.0e6  # Pa -> umol/mol
+    return uref, t, q, pbot, co2ref, solad, solai, lwrad
+
 
 # ---------------------------------------------------------------------------
 # Private: 2-point linear interpolation
@@ -123,6 +177,7 @@ def GetAtmForcing(
     num_filter: int,
     filter: Array,
     mlcanopy_inst: mlcanopy_type,
+    window: AtmForcingWindow,
     grid: "GridInfo | None" = None,
 ) -> mlcanopy_type:
     """
@@ -158,6 +213,8 @@ def GetAtmForcing(
         num_filter: Number of patches in the filter.
         filter: 1-D array of patch indices to process.
         mlcanopy_inst: Multilayer canopy state container.
+        window: Forcing at the previous, current and next CLM time steps
+            (the Fortran ``*_bef/_cur/_next_forcing`` fields).
 
     Returns:
         Updated :class:`mlcanopy_type` with interpolated and derived
@@ -166,30 +223,31 @@ def GetAtmForcing(
     # ------------------------------------------------------------------
     # Unpack input forcing arrays (Fortran associate block, lines 108-153)
     # ------------------------------------------------------------------
-    tref_bef = mlcanopy_inst.tref_bef_forcing
-    tref_cur = mlcanopy_inst.tref_cur_forcing
-    tref_next = mlcanopy_inst.tref_next_forcing
-    qref_bef = mlcanopy_inst.qref_bef_forcing
-    qref_cur = mlcanopy_inst.qref_cur_forcing
-    qref_next = mlcanopy_inst.qref_next_forcing
-    uref_bef = mlcanopy_inst.uref_bef_forcing
-    uref_cur = mlcanopy_inst.uref_cur_forcing
-    uref_next = mlcanopy_inst.uref_next_forcing
-    pref_bef = mlcanopy_inst.pref_bef_forcing
-    pref_cur = mlcanopy_inst.pref_cur_forcing
-    pref_next = mlcanopy_inst.pref_next_forcing
-    co2ref_bef = mlcanopy_inst.co2ref_bef_forcing
-    co2ref_cur = mlcanopy_inst.co2ref_cur_forcing
-    co2ref_next = mlcanopy_inst.co2ref_next_forcing
-    swskyb_bef = mlcanopy_inst.swskyb_bef_forcing
-    swskyb_cur = mlcanopy_inst.swskyb_cur_forcing
-    swskyb_next = mlcanopy_inst.swskyb_next_forcing
-    swskyd_bef = mlcanopy_inst.swskyd_bef_forcing
-    swskyd_cur = mlcanopy_inst.swskyd_cur_forcing
-    swskyd_next = mlcanopy_inst.swskyd_next_forcing
-    lwsky_bef = mlcanopy_inst.lwsky_bef_forcing
-    lwsky_cur = mlcanopy_inst.lwsky_cur_forcing
-    lwsky_next = mlcanopy_inst.lwsky_next_forcing
+    tref_bef = window.bef.tref
+    tref_cur = window.cur.tref
+    tref_next = window.next.tref
+    qref_bef = window.bef.qref
+    qref_cur = window.cur.qref
+    qref_next = window.next.qref
+    uref_bef = window.bef.uref
+    uref_cur = window.cur.uref
+    uref_next = window.next.uref
+    pref_bef = window.bef.pref
+    pref_cur = window.cur.pref
+    pref_next = window.next.pref
+    co2ref_bef = window.bef.co2ref
+    co2ref_cur = window.cur.co2ref
+    co2ref_next = window.next.co2ref
+    swskyb_bef = window.bef.swskyb
+    swskyb_cur = window.cur.swskyb
+    swskyb_next = window.next.swskyb
+    swskyd_bef = window.bef.swskyd
+    swskyd_cur = window.cur.swskyd
+    swskyd_next = window.next.swskyd
+    lwsky_bef = window.bef.lwsky
+    lwsky_cur = window.cur.lwsky
+    lwsky_next = window.next.lwsky
+
     zref = mlcanopy_inst.zref_forcing
 
     # Mutable output arrays — written per patch then stored back

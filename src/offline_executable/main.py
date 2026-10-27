@@ -237,17 +237,20 @@ def main():
     # ------------------------------------------------------------------
     # 6. Pre-loop setup  (mirrors CLMml_drv lines 84-120)
     # ------------------------------------------------------------------
-    from clm_ml.legacy.forcing import clm_record_at, load_forcing, tower_met_at
+    from clm_ml.legacy.forcing import (
+        atm_record_current,
+        atm_record_next,
+        clm_record_at,
+        load_forcing,
+        tower_met_at,
+    )
     from offline_driver.CLMml_driver import (
         SoilInit,
         TowerVeg,
         init_acclim,
         output,
     )
-    from offline_driver.TowerMetMod import (
-        TowerMetCurr,
-        TowerMetNext,
-    )
+    from offline_driver.TowerMetMod import TowerMetCurr
 
     # 6-pre. Time axis of the run, and the matching time slice of the CLM history file
     #     for every step. Fortran CLMml_drv computed the history file's first calendar day
@@ -351,7 +354,6 @@ def main():
     # ------------------------------------------------------------------
     # 8. Time loop  (mirrors CLMml_drv lines 165-196)
     # ------------------------------------------------------------------
-    met_type = MLclm_varctl.met_type
     progress_nsteps = int(params.get("progress_nsteps", 1))
     if progress_nsteps <= 0:
         progress_nsteps = 1
@@ -385,19 +387,16 @@ def main():
                 clm_instMod.frictionvel_inst,
             )
 
-            # Install next-step meteorology for 3-point interpolation
-            if met_type == 3:
-                clm_instMod.mlcanopy_inst = TowerMetNext(
-                    tower_met_at(forcing, t_next),
-                    bounds.begp,
-                    bounds.endp,
-                    clm_instMod.mlcanopy_inst,
-                )
+            # Forcing at the previous and next steps, for the multilayer canopy's
+            # 3-point time interpolation (Fortran *_bef/_next_forcing; TowerMetNext)
+            n_patch = bounds.endp + 1
+            forcing_bef = atm_record_current(forcing, t_prev, n_patch)
+            forcing_next = atm_record_next(forcing, t_next, n_patch)
             t_met = time.perf_counter() - t_met0
 
             # Advance physics
             t_adv0 = time.perf_counter()
-            ModelAdvance(bounds, clm_record_at(forcing, t_curr), now)
+            ModelAdvance(bounds, clm_record_at(forcing, t_curr), now, forcing_bef, forcing_next)
             t_adv = time.perf_counter() - t_adv0
 
             # Write output

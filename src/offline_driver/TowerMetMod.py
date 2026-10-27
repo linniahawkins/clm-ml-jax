@@ -7,8 +7,10 @@ The whole tower record needed by a run is read once before the time loop
 (:func:`read_tower_met_series`); :func:`derive_tower_met` derives missing
 quantities (specific humidity, longwave radiation) and partitions solar
 radiation into direct and diffuse components per waveband;
-:func:`TowerMetCurr` and :func:`TowerMetNext` install one derived record into
-the CLM and CLMml forcing containers.
+:func:`TowerMetCurr` installs one derived record into the CLM forcing
+containers. (Fortran ``TowerMetNext`` filled the multilayer canopy's
+next-step forcing; that is now part of the forcing window passed to
+``MLCanopyFluxes``.)
 
 Original Fortran module: TowerMetMod
 Fortran lines 1-290
@@ -163,7 +165,7 @@ class TowerMetRaw(NamedTuple):
 
 
 class TowerMet(NamedTuple):
-    """Forcing derived from one tower record: what TowerMetCurr/TowerMetNext install.
+    """Forcing derived from one tower record (Fortran TowerMetCurr/TowerMetNext).
 
     Wavebands are (vis, nir).
     """
@@ -374,60 +376,4 @@ def TowerMetCurr(
         frictionvel_inst._replace(
             forc_hgt_u_patch=forc_hgt_u,
         ),
-    )
-
-
-def TowerMetNext(
-    met_next: TowerMet,
-    begp: int,
-    endp: int,
-    mlcanopy_inst: mlcanopy_type,
-) -> mlcanopy_type:
-    """
-    Install the forcing for the next CLM time step.
-
-    Mirrors Fortran subroutine ``TowerMetNext`` (lines 216-280). Required by the
-    3-point time interpolation of atmospheric forcing (``met_type == 3``).
-    Populates ``*_next_forcing`` fields in ``mlcanopy_type``; CO2 is stored in
-    ppm, matching the CLMml convention (Fortran line 280).
-
-    Args:
-        met_next: Derived forcing for the next time step.
-        begp: First patch index.
-        endp: Last patch index.
-        mlcanopy_inst: Multilayer canopy container.
-
-    Returns:
-        Updated :class:`mlcanopy_type`.
-    """
-    tref_next: Array = mlcanopy_inst.tref_next_forcing
-    qref_next: Array = mlcanopy_inst.qref_next_forcing
-    uref_next: Array = mlcanopy_inst.uref_next_forcing
-    pref_next: Array = mlcanopy_inst.pref_next_forcing
-    co2ref_next: Array = mlcanopy_inst.co2ref_next_forcing
-    swskyb_next: Array = mlcanopy_inst.swskyb_next_forcing
-    swskyd_next: Array = mlcanopy_inst.swskyd_next_forcing
-    lwsky_next: Array = mlcanopy_inst.lwsky_next_forcing
-
-    for p in range(begp, endp + 1):  # Fortran: do p = begp, endp
-        uref_next = uref_next.at[p].set(met_next.uref)
-        tref_next = tref_next.at[p].set(met_next.tref)
-        qref_next = qref_next.at[p].set(met_next.qref)
-        pref_next = pref_next.at[p].set(met_next.pref)
-        lwsky_next = lwsky_next.at[p].set(met_next.lwsky)
-        swskyb_next = swskyb_next.at[p, ivis].set(met_next.solad[0])
-        swskyd_next = swskyd_next.at[p, ivis].set(met_next.solai[0])
-        swskyb_next = swskyb_next.at[p, inir].set(met_next.solad[1])
-        swskyd_next = swskyd_next.at[p, inir].set(met_next.solai[1])
-        co2ref_next = co2ref_next.at[p].set(met_next.co2_ppm)
-
-    return mlcanopy_inst._replace(
-        tref_next_forcing=tref_next,
-        qref_next_forcing=qref_next,
-        uref_next_forcing=uref_next,
-        pref_next_forcing=pref_next,
-        co2ref_next_forcing=co2ref_next,
-        swskyb_next_forcing=swskyb_next,
-        swskyd_next_forcing=swskyd_next,
-        lwsky_next_forcing=lwsky_next,
     )

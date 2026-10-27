@@ -31,7 +31,7 @@ from clm_src_main.clm_varctl import iulog  # noqa: F401
 from clm_src_main.PatchType import patch  # noqa: F401
 from clm_src_main.wateratm2lndBulkType import wateratm2lndbulk_type  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
-from offline_driver.TowerMetMod import TowerMet, TowerMetCurr, TowerMetNext  # noqa: F401
+from offline_driver.TowerMetMod import TowerMet, TowerMetCurr  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Driver routines

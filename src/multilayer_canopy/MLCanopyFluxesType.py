@@ -85,38 +85,14 @@ class mlcanopy_type(NamedTuple):
     # ------------------------------------------------------------------
     zref_forcing: jnp.ndarray  # Reference height (m)
     tref_forcing: jnp.ndarray  # Air temperature at zref, interpolated (K)
-    tref_bef_forcing: jnp.ndarray  # Air temperature, previous CLM step (K)
-    tref_cur_forcing: jnp.ndarray  # Air temperature, current CLM step (K)
-    tref_next_forcing: jnp.ndarray  # Air temperature, next CLM step (K)
     qref_forcing: jnp.ndarray  # Specific humidity at zref, interpolated (kg/kg)
-    qref_bef_forcing: jnp.ndarray  # Specific humidity, previous CLM step (kg/kg)
-    qref_cur_forcing: jnp.ndarray  # Specific humidity, current CLM step (kg/kg)
-    qref_next_forcing: jnp.ndarray  # Specific humidity, next CLM step (kg/kg)
     uref_forcing: jnp.ndarray  # Wind speed at zref, interpolated (m/s)
-    uref_bef_forcing: jnp.ndarray  # Wind speed, previous CLM step (m/s)
-    uref_cur_forcing: jnp.ndarray  # Wind speed, current CLM step (m/s)
-    uref_next_forcing: jnp.ndarray  # Wind speed, next CLM step (m/s)
     pref_forcing: jnp.ndarray  # Air pressure, interpolated (Pa)
-    pref_bef_forcing: jnp.ndarray  # Air pressure, previous CLM step (Pa)
-    pref_cur_forcing: jnp.ndarray  # Air pressure, current CLM step (Pa)
-    pref_next_forcing: jnp.ndarray  # Air pressure, next CLM step (Pa)
     co2ref_forcing: jnp.ndarray  # Atmospheric CO2, interpolated (umol/mol)
-    co2ref_bef_forcing: jnp.ndarray  # Atmospheric CO2, previous CLM step (umol/mol)
-    co2ref_cur_forcing: jnp.ndarray  # Atmospheric CO2, current CLM step (umol/mol)
-    co2ref_next_forcing: jnp.ndarray  # Atmospheric CO2, next CLM step (umol/mol)
     o2ref_forcing: jnp.ndarray  # Atmospheric O2 (mmol/mol)
     swskyb_forcing: jnp.ndarray  # Direct beam SW, interpolated (W/m2); shape (np, numrad+1)
-    swskyb_bef_forcing: jnp.ndarray  # Direct beam SW, previous CLM step (W/m2)
-    swskyb_cur_forcing: jnp.ndarray  # Direct beam SW, current CLM step (W/m2)
-    swskyb_next_forcing: jnp.ndarray  # Direct beam SW, next CLM step (W/m2)
     swskyd_forcing: jnp.ndarray  # Diffuse SW, interpolated (W/m2); shape (np, numrad+1)
-    swskyd_bef_forcing: jnp.ndarray  # Diffuse SW, previous CLM step (W/m2)
-    swskyd_cur_forcing: jnp.ndarray  # Diffuse SW, current CLM step (W/m2)
-    swskyd_next_forcing: jnp.ndarray  # Diffuse SW, next CLM step (W/m2)
     lwsky_forcing: jnp.ndarray  # Atmospheric LW, interpolated (W/m2)
-    lwsky_bef_forcing: jnp.ndarray  # Atmospheric LW, previous CLM step (W/m2)
-    lwsky_cur_forcing: jnp.ndarray  # Atmospheric LW, current CLM step (W/m2)
-    lwsky_next_forcing: jnp.ndarray  # Atmospheric LW, next CLM step (W/m2)
     qflx_rain_forcing: jnp.ndarray  # Rainfall (kg H2O/m2/s)
     qflx_snow_forcing: jnp.ndarray  # Snowfall (kg H2O/m2/s)
     tacclim_forcing: jnp.ndarray  # Average temperature for acclimation (K)
@@ -478,38 +454,14 @@ def create_mlcanopy(begp: int, endp: int) -> mlcanopy_type:
         # Atmospheric forcing
         zref_forcing=_r(np_),
         tref_forcing=_r(np_),
-        tref_bef_forcing=_r(np_),
-        tref_cur_forcing=_r(np_),
-        tref_next_forcing=_r(np_),
         qref_forcing=_r(np_),
-        qref_bef_forcing=_r(np_),
-        qref_cur_forcing=_r(np_),
-        qref_next_forcing=_r(np_),
         uref_forcing=_r(np_),
-        uref_bef_forcing=_r(np_),
-        uref_cur_forcing=_r(np_),
-        uref_next_forcing=_r(np_),
         pref_forcing=_r(np_),
-        pref_bef_forcing=_r(np_),
-        pref_cur_forcing=_r(np_),
-        pref_next_forcing=_r(np_),
         co2ref_forcing=_r(np_),
-        co2ref_bef_forcing=_r(np_),
-        co2ref_cur_forcing=_r(np_),
-        co2ref_next_forcing=_r(np_),
         o2ref_forcing=_r(np_),
         swskyb_forcing=_r(np_, nr),
-        swskyb_bef_forcing=_r(np_, nr),
-        swskyb_cur_forcing=_r(np_, nr),
-        swskyb_next_forcing=_r(np_, nr),
         swskyd_forcing=_r(np_, nr),
-        swskyd_bef_forcing=_r(np_, nr),
-        swskyd_cur_forcing=_r(np_, nr),
-        swskyd_next_forcing=_r(np_, nr),
         lwsky_forcing=_r(np_),
-        lwsky_bef_forcing=_r(np_),
-        lwsky_cur_forcing=_r(np_),
-        lwsky_next_forcing=_r(np_),
         qflx_rain_forcing=_r(np_),
         qflx_snow_forcing=_r(np_),
         tacclim_forcing=_r(np_),

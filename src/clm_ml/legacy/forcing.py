@@ -12,6 +12,8 @@ from typing import Sequence
 import numpy as np
 
 from clm_ml.forcing import ClmHistoryForcing, Forcing, TowerForcing
+from clm_src_main.clm_varpar import inir, ivis, numrad
+from multilayer_canopy.MLGetAtmForcingMod import AtmForcingRecord, clm_forcing_to_ml
 from offline_driver.clmDataMod import ClmHistoryRecord, read_clm_history_series
 from offline_driver.TowerMetMod import TowerMet, derive_tower_met, read_tower_met_series
 
@@ -94,3 +96,49 @@ def clm_record_at(forcing: Forcing, t: int, c: int = 0) -> ClmHistoryRecord:
         h2osoi_clm50=jnp.asarray(h.soil_water_clm50[t, c], dtype=jnp.float64),
         h2osoi_factor=None if h.soil_water_factor is None else float(h.soil_water_factor[t, c]),
     )
+
+
+def _record(values, n_patch: int) -> AtmForcingRecord:
+    """Per-patch forcing arrays (all patches of one gridcell share ``values``)."""
+    import jax.numpy as jnp
+
+    u, t, q, p, co2, solad, solai, lw = values
+    one = jnp.zeros((n_patch,), dtype=jnp.float64)
+    bands = jnp.zeros((n_patch, numrad + 1), dtype=jnp.float64)
+    sel = slice(0, n_patch)
+    return AtmForcingRecord(
+        uref=one.at[sel].set(u),
+        tref=one.at[sel].set(t),
+        qref=one.at[sel].set(q),
+        pref=one.at[sel].set(p),
+        co2ref=one.at[sel].set(co2),
+        swskyb=bands.at[sel, ivis].set(solad[0]).at[sel, inir].set(solad[1]),
+        swskyd=bands.at[sel, ivis].set(solai[0]).at[sel, inir].set(solai[1]),
+        lwsky=one.at[sel].set(lw),
+    )
+
+
+def atm_record_current(forcing: Forcing, t: int, n_patch: int, g: int = 0) -> AtmForcingRecord:
+    """Multilayer canopy forcing for step ``t`` as ``_GetCLMVar`` derives it from the CLM
+    forcing (wind resultant, CO2 from partial pressure): used as the previous-step
+    record of the forcing window."""
+    import jax.numpy as jnp
+
+    m = tower_met_at(forcing, t, g)
+
+    def f(x):
+        return jnp.asarray(x, dtype=jnp.float64)
+
+    values = clm_forcing_to_ml(
+        f(m.uref), f(0.0), f(m.tref), f(m.qref), f(m.pref), f(m.pco2),
+        (f(m.solad[0]), f(m.solad[1])), (f(m.solai[0]), f(m.solai[1])), f(m.lwsky),
+    )  # fmt: skip
+    return _record(values, n_patch)
+
+
+def atm_record_next(forcing: Forcing, t: int, n_patch: int, g: int = 0) -> AtmForcingRecord:
+    """Multilayer canopy forcing for step ``t`` as Fortran ``TowerMetNext`` stored it (wind
+    speed and CO2 mole fraction taken directly): the next-step record of the window."""
+    m = tower_met_at(forcing, t, g)
+    values = (m.uref, m.tref, m.qref, m.pref, m.co2_ppm, m.solad, m.solai, m.lwsky)
+    return _record(values, n_patch)
