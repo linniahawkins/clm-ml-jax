@@ -24,7 +24,7 @@ numerics:
   checkpoint_steps: true                  # trade compute for memory when taking gradients
 
 canopy_layers:
-  max_layers: 50                          # fixed array size for every site (CHATS7 uses 46)
+  max_layers: 50                          # fixed array size for every patch (CHATS7 uses 46)
   dz_tall: 0.5                            # m
   dz_short: 0.1                           # m
   tall_canopy_threshold: 2.0              # m                                  (dz_param)
@@ -34,3 +34,6 @@ canopy_layers:
 
 soil:
   layer_structure: clm5_0                 # clm5_0 | clm4_5; must match the CLM history file (clm_phys)
+  columns: per_patch                      # per_patch: each patch has its own soil column (option A,
+                                          #   identical to today) | shared: patches on a gridcell share
+                                          #   one column (option B; later science change)

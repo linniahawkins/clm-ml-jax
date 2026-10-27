@@ -1,27 +1,38 @@
 """
-Proposed public API for ``clm_ml`` (design sketch v2: signatures only, no implementation).
+Proposed public API for ``clm_ml`` (design sketch v3: signatures only, no implementation).
 
-Read alongside ``modernization_plan.md`` and the YAML files in ``examples/``.
+Read alongside ``modernization_plan.md`` (vocabulary in §3.1) and the YAML files in
+``examples/``.
 
 How the pieces fit
 ------------------
     run.yaml ──► load_run() ──► Run
-      ├─ model.yaml   ──► ModelConfig        (static: changing it recompiles)
-      ├─ params.yaml  ──► Params             (per-PFT table; differentiable)
-      ├─ sites        ──► Sites ──► Layers   (fixed max_layers + masks)
-      ├─ forcing      ──► Forcing            (time, site, ...); differentiable
-      └─ initial cond ──► State              (site, ...);       differentiable
+      ├─ model.yaml   ──► ModelConfig   (static: changing it recompiles)
+      ├─ params.yaml  ──► Params        (per-PFT table; differentiable)
+      ├─ towers       ──► Domain        (gridcells, patches, soil columns + index maps)
+      │                     └─► Layers  (per patch: fixed max_layers + masks)
+      ├─ forcing      ──► Forcing       (time, gridcell | patch | column, ...); differentiable
+      └─ initial cond ──► State         (patch | column, ...);                  differentiable
 
     Run.execute() == Model.run(state, forcing, params) + write outputs
+
+Vocabulary
+----------
+- gridcell:    a location with its own atmospheric forcing.
+- patch:       one PFT's canopy on a gridcell, with an area weight. THE UNIT OF COMPUTATION.
+- soil column: the soil under a patch. Option A (default): one column per patch.
+- tower:       a named flux-tower location in the registry; it defines a gridcell and its patches.
 
 Conventions
 -----------
 - Every container is a frozen dataclass registered as a JAX pytree.
 - ``static`` fields are compile-time constants (not differentiable).
-- Shapes: ``nt`` = time steps, ``ns`` = sites, ``nl`` = ``max_layers``,
-  ``nsoil`` = soil layers, ``npft`` = PFTs. Leaf arrays end in ``(2,)`` = [sunlit, shaded].
-  Spectral arrays end in ``(2,)`` = [vis, nir].
-- The physics is written for ONE column. ``Model`` adds the site axis with ``jax.vmap``.
+- Shapes: ``nt`` = time steps, ``ng`` = gridcells, ``np`` = patches, ``nc`` = soil columns,
+  ``nl`` = ``max_layers``, ``nsoil`` = soil layers, ``npft`` = PFTs.
+  Leaf arrays end in ``(2,)`` = [sunlit, shaded]. Spectral arrays end in ``(2,)`` = [vis, nir].
+- The physics is written for ONE patch. ``Model`` adds the patch axis with ``jax.vmap``,
+  gathers gridcell forcing and PFT parameters to patches, and aggregates patch output to
+  gridcells with an area-weighted ``segment_sum``.
 """
 
 from __future__ import annotations
@@ -64,6 +75,7 @@ class RunSettings:
     output_format: Literal["netcdf", "legacy_ascii"] = "netcdf"  # legacy_ascii: transitional
     output_variables: Union[Literal["all"], tuple[str, ...]] = "all"
     output_frequency: Literal["step", "hourly", "daily"] = "step"
+    output_level: tuple[Literal["patch", "gridcell"], ...] = ("patch", "gridcell")
     source_files: Mapping[str, Path] = dataclasses.field(default_factory=dict)  # provenance
 
 
@@ -82,7 +94,8 @@ class Run:
         ...
 
     def summary(self) -> str:
-        """What ``clm-ml check`` prints: sites, PFTs, layer counts, run length, memory estimate."""
+        """What ``clm-ml check`` prints: gridcells, patches (PFT, weight, layer count),
+        run length, memory estimate."""
         ...
 
 
@@ -124,7 +137,7 @@ class NumericsOptions:
 
 @dataclasses.dataclass(frozen=True)
 class CanopyLayerOptions:
-    max_layers: int = 50  # fixed array size for every site (CHATS7 uses 46)
+    max_layers: int = 50  # fixed array size for every patch (CHATS7 uses 46)
     dz_tall: float = 0.5
     dz_short: float = 0.1
     tall_canopy_threshold: float = 2.0
@@ -136,6 +149,9 @@ class CanopyLayerOptions:
 @dataclasses.dataclass(frozen=True)
 class SoilOptions:
     layer_structure: Literal["clm5_0", "clm4_5"] = "clm5_0"
+    # per_patch = option A (each patch has its own soil column; identical to today).
+    # shared    = option B (patches on a gridcell share one column; later science change).
+    columns: Literal["per_patch", "shared"] = "per_patch"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -224,8 +240,9 @@ class Params:
         """Return a copy with values changed for one PFT (values may be JAX tracers)."""
         ...
 
-    def for_sites(self, pft_index: Array) -> "SiteParams":
-        """Gather each site's row. Differentiable: gradients flow back to the PFT table."""
+    def for_patches(self, pft_index: Array) -> "PatchParams":
+        """Gather each patch's row. Differentiable: gradients flow back to the PFT table,
+        summed over all patches that share a PFT."""
         ...
 
     def describe(self) -> str:
@@ -234,8 +251,8 @@ class Params:
 
 
 @dataclasses.dataclass(frozen=True)
-class SiteParams:
-    """Same fields as ``Params`` but shaped ``(ns,)`` / ``(ns, 2)``: one row per site.
+class PatchParams:
+    """Same fields as ``Params`` but shaped ``(np,)`` / ``(np, 2)``: one row per patch.
     Internal: this is what the physics sees (one row, after vmap)."""
 
 
@@ -249,63 +266,101 @@ def perturb(params: Params, pft: str, **batched_values: Array) -> Params:
 
 
 # =============================================================================
-# Sites and Layers                   (replaces TowerDataMod, MLinitVerticalMod, GridInfo)
+# Domain: gridcells, patches, soil columns   (replaces TowerDataMod, CLM subgrid modules)
 # =============================================================================
 
 
 @dataclasses.dataclass(frozen=True)
-class Sites:
-    """Site descriptions, one row per site (leading axis ``ns``)."""
+class Gridcells:
+    """Locations with their own atmospheric forcing. Leading axis ``ng``."""
 
-    names: tuple[str, ...]  # static
-    latitude: Array  # (ns,) degrees north
-    longitude: Array  # (ns,) degrees east
-    pft_index: Array  # (ns,) int, row into Params
-    sand_percent: Array  # (ns,)
-    clay_percent: Array  # (ns,)
-    organic_matter: Array  # (ns,) kg m-3
-    soil_color_class: Array  # (ns,) int
-    bedrock_depth: Array  # (ns,) m
-    reference_height: Array  # (ns,) m
-    canopy_height: Array  # (ns,) m
-    root_biomass: Array  # (ns,) g m-2
-    leaf_area_profile_beta: Array  # (ns, 2)
-    stem_area_profile_beta: Array  # (ns, 2)
+    names: tuple[str, ...]  # static; tower names for tower runs
+    latitude: Array  # (ng,) degrees north
+    longitude: Array  # (ng,) degrees east
+    measurement_height: Array  # (ng,) forcing (reference) height, m
+
+
+@dataclasses.dataclass(frozen=True)
+class Patches:
+    """One PFT's canopy on a gridcell. Leading axis ``np``. The unit of computation."""
+
+    gridcell_index: Array  # (np,) int, static: which gridcell each patch is on
+    column_index: Array  # (np,) int, static: which soil column is under it (option A: arange)
+    pft_index: Array  # (np,) int, row into Params
+    weight: Array  # (np,) fraction of the gridcell; sums to 1 per gridcell; differentiable
+    canopy_height: Array  # (np,) m
+    root_biomass: Array  # (np,) g m-2
+    leaf_area_profile_beta: Array  # (np, 2)
+    stem_area_profile_beta: Array  # (np, 2)
+
+
+@dataclasses.dataclass(frozen=True)
+class SoilColumns:
+    """Soil under patches. Leading axis ``nc`` (option A: ``nc == np``)."""
+
+    sand_percent: Array  # (nc,)
+    clay_percent: Array  # (nc,)
+    organic_matter: Array  # (nc,) kg m-3
+    color_class: Array  # (nc,) int
+    bedrock_depth: Array  # (nc,) m
+
+
+@dataclasses.dataclass(frozen=True)
+class Domain:
+    """Everything spatial: gridcells, their patches, and the soil columns under them."""
+
+    gridcells: Gridcells
+    patches: Patches
+    columns: SoilColumns
 
     @classmethod
-    def from_names(cls, names: Sequence[str], sites_file: Optional[PathLike] = None,
-                   params: Optional[Params] = None) -> "Sites":
-        """Look up sites in the built-in registry and/or a user sites.yaml.
-        ``params`` is used to resolve PFT names to row indices."""
+    def from_towers(cls, names: Sequence[str], towers_file: Optional[PathLike] = None, *,
+                    params: Params, config: ModelConfig,
+                    min_patch_weight: float = 0.0) -> "Domain":
+        """Build a domain from built-in and/or user towers (``towers.yaml`` format).
+
+        ``params`` resolves PFT names to rows. ``config.soil.columns`` decides whether each
+        patch gets its own soil column (option A) or shares one per gridcell (option B).
+        Patches below ``min_patch_weight`` are dropped and the rest renormalized.
+        """
         ...
 
     @staticmethod
-    def available() -> list[str]:
-        """Names in the built-in registry."""
+    def available_towers() -> list[str]:
+        """Names in the built-in tower registry."""
+        ...
+
+    @property
+    def n_gridcells(self) -> int:
+        ...
+
+    @property
+    def n_patches(self) -> int:
         ...
 
 
 @dataclasses.dataclass(frozen=True)
 class Layers:
-    """Canopy vertical grid for every site, padded to a common ``max_layers``.
+    """Canopy vertical grid for every patch, padded to a common ``max_layers``.
 
     Padded layers have zero thickness and zero plant area, are excluded from all sums,
     and are identity rows in tridiagonal solves, so padding does not change results.
     """
 
     max_layers: int  # static
-    n_layers: Array  # (ns,) int, real air layers per site (was ncan)
-    top_leaf_layer: Array  # (ns,) int, 0-based (was ntop)
-    bottom_leaf_layer: Array  # (ns,) int, 0-based (was nbot)
-    heights: Array  # (ns, nl) layer mid-point height (m)
-    thickness: Array  # (ns, nl) m; 0 in padded layers
-    is_air_layer: Array  # (ns, nl) bool mask
-    has_leaf: Array  # (ns, nl) bool mask
+    n_layers: Array  # (np,) int, real air layers per patch (was ncan)
+    top_leaf_layer: Array  # (np,) int, 0-based (was ntop)
+    bottom_leaf_layer: Array  # (np,) int, 0-based (was nbot)
+    heights: Array  # (np, nl) layer mid-point height (m)
+    thickness: Array  # (np, nl) m; 0 in padded layers
+    is_air_layer: Array  # (np, nl) bool mask
+    has_leaf: Array  # (np, nl) bool mask
 
     @classmethod
-    def build(cls, sites: Sites, config: ModelConfig) -> "Layers":
-        """Compute each site's layers and pad. Raises ``ConfigError`` naming the site
-        if it needs more than ``config.canopy_layers.max_layers``."""
+    def build(cls, domain: Domain, config: ModelConfig) -> "Layers":
+        """Compute each patch's layers (canopy height up to its gridcell's measurement height)
+        and pad. Raises ``ConfigError`` naming the tower and patch if it needs more than
+        ``config.canopy_layers.max_layers``."""
         ...
 
 
@@ -316,46 +371,45 @@ class Layers:
 
 @dataclasses.dataclass(frozen=True)
 class Forcing:
-    """Everything prescribed from outside the model. Leading axes ``(nt, ns)``.
-    All float fields are differentiable."""
+    """Everything prescribed from outside the model. All float fields are differentiable.
+    Meteorology is per gridcell; prescribed vegetation per patch; soil moisture per column."""
 
-    # Time (shared by all sites)
+    # Time (shared)
     time: Array  # (nt,) seconds since run start, end of each step
     calendar_day: Array  # (nt,) fractional day of year
     step_seconds: float  # static
     interpolation: Literal["none", "three_point"]  # static
 
-    # Meteorology at reference height
-    air_temperature: Array  # (nt, ns) K
-    specific_humidity: Array  # (nt, ns) kg kg-1
-    wind_speed: Array  # (nt, ns) m s-1
-    air_pressure: Array  # (nt, ns) Pa
-    co2: Array  # (nt, ns) umol mol-1
-    o2: Array  # (nt, ns) mmol mol-1
-    shortwave_direct: Array  # (nt, ns, 2) W m-2
-    shortwave_diffuse: Array  # (nt, ns, 2) W m-2
-    longwave_down: Array  # (nt, ns) W m-2
-    rainfall: Array  # (nt, ns) kg m-2 s-1
-    snowfall: Array  # (nt, ns) kg m-2 s-1
-    solar_zenith: Array  # (nt, ns) rad, precomputed
+    # Meteorology at measurement height, per gridcell
+    air_temperature: Array  # (nt, ng) K
+    specific_humidity: Array  # (nt, ng) kg kg-1
+    wind_speed: Array  # (nt, ng) m s-1
+    air_pressure: Array  # (nt, ng) Pa
+    co2: Array  # (nt, ng) umol mol-1
+    o2: Array  # (nt, ng) mmol mol-1
+    shortwave_direct: Array  # (nt, ng, 2) W m-2
+    shortwave_diffuse: Array  # (nt, ng, 2) W m-2
+    longwave_down: Array  # (nt, ng) W m-2
+    rainfall: Array  # (nt, ng) kg m-2 s-1
+    snowfall: Array  # (nt, ng) kg m-2 s-1
+    solar_zenith: Array  # (nt, ng) rad, precomputed
 
-    # Prescribed land state from CLM history
-    lai: Array  # (nt, ns)
-    sai: Array  # (nt, ns)
-    soil_liquid_water: Array  # (nt, ns, nsoil) kg m-2, after adjustment
-    soil_ice: Array  # (nt, ns, nsoil) kg m-2
-    ground_albedo: Array  # (nt, ns, 2)
+    # Prescribed vegetation from CLM history, per patch
+    lai: Array  # (nt, np)
+    sai: Array  # (nt, np)
 
-    acclimation_temperature: Array  # (ns,) K, mean over the record (was init_acclim)
+    # Prescribed soil state from CLM history, per soil column
+    soil_liquid_water: Array  # (nt, nc, nsoil) kg m-2, after adjustment
+    soil_ice: Array  # (nt, nc, nsoil) kg m-2
+    ground_albedo: Array  # (nt, nc, 2)
+
+    acclimation_temperature: Array  # (ng,) K, mean over the record (was init_acclim)
 
     def window(self, t: int) -> "ForcingWindow":
         """Previous/current/next records around step ``t``, used by ``Model.step``."""
         ...
 
     def slice_time(self, start: int, stop: int) -> "Forcing":
-        ...
-
-    def select_sites(self, index: Sequence[int]) -> "Forcing":
         ...
 
 
@@ -366,9 +420,9 @@ class ForcingWindow:
     next: Forcing
 
 
-def load_forcing(forcing_section: Mapping[str, Any], sites: Sites, settings: RunSettings,
+def load_forcing(forcing_section: Mapping[str, Any], domain: Domain, settings: RunSettings,
                  config: ModelConfig) -> Forcing:
-    """Read every file named in run.yaml's ``forcing:`` section (filling ``{site}``)
+    """Read every file named in run.yaml's ``forcing:`` section (filling ``{tower}``)
     into memory. All netCDF I/O and unit conversion happens here, once."""
     ...
 
@@ -380,20 +434,24 @@ def load_forcing(forcing_section: Mapping[str, Any], sites: Sites, settings: Run
 
 @dataclasses.dataclass(frozen=True)
 class CanopyState:
-    air_temperature: Array  # (ns, nl) K
-    vapor_pressure: Array  # (ns, nl) Pa
-    co2: Array  # (ns, nl) umol mol-1
-    leaf_temperature: Array  # (ns, nl, 2) K
-    leaf_water_potential: Array  # (ns, nl, 2) MPa
-    intercepted_water: Array  # (ns, nl) kg m-2
-    ground_temperature: Array  # (ns,) K
+    """Per patch."""
+
+    air_temperature: Array  # (np, nl) K
+    vapor_pressure: Array  # (np, nl) Pa
+    co2: Array  # (np, nl) umol mol-1
+    leaf_temperature: Array  # (np, nl, 2) K
+    leaf_water_potential: Array  # (np, nl, 2) MPa
+    intercepted_water: Array  # (np, nl) kg m-2
+    ground_temperature: Array  # (np,) K  (option B will need a rule relating this to the column)
 
 
 @dataclasses.dataclass(frozen=True)
 class SoilState:
-    temperature: Array  # (ns, nsoil) K
-    liquid_water: Array  # (ns, nsoil) kg m-2
-    ice: Array  # (ns, nsoil) kg m-2
+    """Per soil column."""
+
+    temperature: Array  # (nc, nsoil) K
+    liquid_water: Array  # (nc, nsoil) kg m-2
+    ice: Array  # (nc, nsoil) kg m-2
 
 
 @dataclasses.dataclass(frozen=True)
@@ -417,8 +475,9 @@ class State:
 
 @dataclasses.dataclass(frozen=True)
 class Outputs:
-    """Leading axes ``(nt, ns)`` from ``Model.run`` (``(ns,)`` from ``Model.step``).
-    Unselected variables (``output.variables``) are ``None``."""
+    """Per-patch output. Leading axes ``(nt, np)`` from ``Model.run`` (``(np,)`` from
+    ``Model.step``). Unselected variables (``output.variables``) are ``None``.
+    ``gridcell_mean()`` returns the same structure with ``np`` replaced by ``ng``."""
 
     # Canopy-scale fluxes (flux.out)
     net_radiation: Array  # W m-2
@@ -449,7 +508,8 @@ class Outputs:
     stomatal_conductance_by_leaf_class: Array
     leaf_temperature_by_leaf_class: Array
 
-    # Profiles (profile.out, fluxprofile.out); NaN in padded layers when exported
+    # Profiles (profile.out, fluxprofile.out); NaN in padded layers when exported.
+    # Profiles are per patch only (patches on a gridcell have different layer grids).
     air_temperature_profile: Array  # (..., nl)
     vapor_pressure_profile: Array
     wind_speed_profile: Array
@@ -458,23 +518,29 @@ class Outputs:
     latent_heat_profile: Array
     photosynthesis_profile: Array  # (..., nl, 2)
 
-    # Soil (soiltemp.out)
-    soil_temperature: Array  # (..., nsoil)
+    # Soil (soiltemp.out), per column
+    soil_temperature: Array  # (..., nc, nsoil)
 
     # Conservation checks
     energy_balance_error: Array
     water_balance_error: Array
 
-    def to_xarray(self, sites: Sites, forcing: Forcing, layers: Layers):
-        """``xarray.Dataset`` with dims (time, site, layer, soil_layer, leaf_class, band),
-        units and long names. Padded layers are NaN."""
+    def gridcell_mean(self, domain: Domain) -> "Outputs":
+        """Area-weighted mean over each gridcell's patches (``segment_sum`` of
+        ``weight * value``). Differentiable. Profile fields are dropped."""
         ...
 
-    def to_netcdf(self, path: PathLike, sites: Sites, forcing: Forcing, layers: Layers) -> None:
+    def to_xarray(self, domain: Domain, forcing: Forcing, layers: Layers):
+        """``xarray.Dataset`` with dims (time, patch, layer, soil_layer, leaf_class, band),
+        a ``gridcell`` coordinate on ``patch``, units and long names. Padded layers are NaN."""
         ...
 
-    def write_legacy_ascii(self, directory: PathLike, sites: Sites, forcing: Forcing) -> list[Path]:
-        """Six Fortran-format ``.out`` files per site, byte-compatible with today's output.
+    def to_netcdf(self, path: PathLike, domain: Domain, forcing: Forcing, layers: Layers) -> None:
+        ...
+
+    def write_legacy_ascii(self, directory: PathLike, domain: Domain, forcing: Forcing
+                           ) -> list[Path]:
+        """Six Fortran-format ``.out`` files per patch, byte-compatible with today's output.
         Transitional: removed once the Fortran comparison test reads netCDF."""
         ...
 
@@ -485,13 +551,13 @@ class Outputs:
 
 
 class Model:
-    """Configured model for a set of sites. Holds only static structure; no mutable state."""
+    """Configured model for a domain. Holds only static structure; no mutable state."""
 
     config: ModelConfig
-    sites: Sites
-    layers: Layers  # built from sites + config
+    domain: Domain
+    layers: Layers  # built from domain + config
 
-    def __init__(self, config: ModelConfig, sites: Sites) -> None:
+    def __init__(self, config: ModelConfig, domain: Domain) -> None:
         ...
 
     def initial_state(self, forcing: Forcing, *, source: Literal["clm_history"] = "clm_history"
@@ -500,16 +566,18 @@ class Model:
         ...
 
     def step(self, state: State, forcing: ForcingWindow, params: Params) -> tuple[State, Outputs]:
-        """Advance every site by one forcing step (vmap of the one-column step). Pure."""
+        """Advance every patch by one forcing step. Gathers gridcell forcing and PFT
+        parameters to patches, then vmaps the one-patch step. Pure."""
         ...
 
     def run(self, state: State, forcing: Forcing, params: Params, *,
             outputs: Union[Literal["all"], Sequence[str]] = "all",
             frequency: Literal["step", "hourly", "daily"] = "step",
             check: bool = False) -> Outputs:
-        """Whole run as one compiled call: ``scan`` over time of ``vmap`` over sites.
+        """Whole run as one compiled call: ``scan`` over time of ``vmap`` over patches.
 
-        Differentiable w.r.t. ``state``, ``forcing`` and ``params``.
+        Differentiable w.r.t. ``state``, ``forcing`` and ``params`` (and patch weights via
+        ``Outputs.gridcell_mean``).
         """
         ...
 
@@ -531,10 +599,10 @@ class Model:
 # Process interface (for contributors)
 # =============================================================================
 #
-# Each process in clm_ml/physics/ acts on ONE column with (max_layers,) arrays and masks:
+# Each process in clm_ml/physics/ acts on ONE patch with (max_layers,) arrays and masks:
 #
-#     def two_stream(step: StepState, inputs: StepInputs, params: SiteParams,
-#                    layers: SiteLayers, config: ModelConfig) -> StepState:
+#     def two_stream(step: StepState, inputs: StepInputs, params: PatchParams,
+#                    layers: PatchLayers, config: ModelConfig) -> StepState:
 #         """Two-stream solar radiative transfer.
 #
 #         Reads:  inputs.solar_zenith, inputs.shortwave_direct, step.lai_profile, layers.has_leaf

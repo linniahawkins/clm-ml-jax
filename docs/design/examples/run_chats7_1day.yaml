@@ -11,18 +11,19 @@ time:
 
 domain:
   type: towers                     # towers | grid (grid reserved for later)
-  sites: [CHATS7]                  # names from the built-in registry and/or sites_file
-  sites_file: null                 # optional: your own sites.yaml (see sites_example.yaml)
+  towers: [CHATS7]                 # names from the built-in registry and/or towers_file
+  towers_file: null                # optional: your own towers.yaml (see towers_example.yaml)
+  min_patch_weight: 0.0            # drop patches covering less than this fraction of a gridcell
 
 forcing:
-  # {site} is replaced by each site's name, so one file serves many sites
-  meteorology: ../../../src/input_files/tower-forcing/{site}/2007-05.nc   # was fin_tower
+  # {tower} is replaced by each tower's name, so one entry serves many towers
+  meteorology: ../../../src/input_files/tower-forcing/{tower}/2007-05.nc   # was fin_tower
   interpolation: three_point       # none | three_point   (was met_type 0 / 3)
   clm_history:
-    file: ../../../src/input_files/clm5_0/{site}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc  # was fin_clm
+    file: ../../../src/input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc  # was fin_clm
     start: 2007-04-01T00:00        # was clm_start_ymd / clm_start_tod
   soil_moisture_adjustment:
-    file: ../../../src/input_files/clm5_0/{site}/CHATS_soil_moisture_correction_29Jul25.nc       # was fin_soil_adjust
+    file: ../../../src/input_files/clm5_0/{tower}/CHATS_soil_moisture_correction_29Jul25.nc       # was fin_soil_adjust
     levels: 3                      # was nlev_soil_adjust
 
 initial_conditions:
@@ -34,3 +35,4 @@ output:
   format: netcdf                   # netcdf (legacy_ascii only while validating against Fortran)
   variables: all                   # all, or a list such as [latent_heat_flux, gpp]
   frequency: step                  # step | hourly | daily
+  level: [patch, gridcell]         # per-patch output, area-weighted gridcell means, or both

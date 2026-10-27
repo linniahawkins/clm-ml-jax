@@ -1,6 +1,6 @@
 # Parameters for the CHATS walnut orchard: replaces pftcon_val = 1.
 # Starts from the shipped CLM5 defaults and overrides only what differs.
-# Values per PFT; every site looks up its own PFT's values.
+# Values per PFT; every patch looks up its own PFT's values.
 
 extends: clm5_defaults
 
