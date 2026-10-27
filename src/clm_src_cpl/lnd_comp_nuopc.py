@@ -40,6 +40,7 @@ def InitializeRealize(bounds: bounds_type) -> None:
 def ModelAdvance(
     bounds: bounds_type,
     clm_record,
+    step_time,
 ) -> None:
     """
     Advance the CLM model by one time step.
@@ -55,7 +56,9 @@ def ModelAdvance(
             (``clmDataMod.ClmHistoryRecord``). Replaces the Fortran
             arguments ``time_indx``, ``fin1`` and ``fin2``: input files are
             read once before the time loop.
+        step_time: Time information for this step
+            (``clm_time_manager.StepTime``).
     """
     from clm_src_main.clm_driver import clm_drv  # noqa: F401
 
-    clm_drv(bounds, clm_record)
+    clm_drv(bounds, clm_record, step_time)

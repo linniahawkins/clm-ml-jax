@@ -2139,6 +2139,7 @@ def _HF2008(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
+    nstep: int = 0,
 ) -> mlcanopy_type:
     """
     Canopy turbulence, wind profile, and aerodynamic conductances using
@@ -2169,13 +2170,12 @@ def _HF2008(
         filter_patch: Patch index filter (1-based values).
         mlcanopy_inst: Canopy container; all turbulence output fields
             updated.
+        nstep: Current CLM time step (for warning messages; was read from
+            the time manager).
 
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    from clm_src_utils.clm_time_manager import get_nstep  # noqa: F401
-
-    nstep = get_nstep()
 
     Lc = mlcanopy_inst.Lc_canopy
     taf = mlcanopy_inst.taf_canopy
@@ -2331,6 +2331,7 @@ def CanopyTurbulence(
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
     grid: "GridInfo | None" = None,
+    nstep: int = 0,
 ) -> mlcanopy_type:
     """
     Main driver for the canopy turbulence parameterisation.
@@ -2347,6 +2348,7 @@ def CanopyTurbulence(
         mlcanopy_inst: Canopy container; all turbulence output fields
             updated by :func:`_HF2008`.
         grid: If provided, use differentiable code path.
+        nstep: Current CLM time step (for warning messages only).
 
     Returns:
         Updated :class:`mlcanopy_type`.
@@ -2354,7 +2356,7 @@ def CanopyTurbulence(
     if turb_type == 1:
         if grid is not None:
             return _HF2008_diff(grid, mlcanopy_inst)
-        return _HF2008(nstep_ml, num_filter, filter_patch, mlcanopy_inst)
+        return _HF2008(nstep_ml, num_filter, filter_patch, mlcanopy_inst, nstep=nstep)
     else:
         endrun(msg=" ERROR: CanopyTurbulence: turb_type not valid")
         return mlcanopy_inst  # Unreachable

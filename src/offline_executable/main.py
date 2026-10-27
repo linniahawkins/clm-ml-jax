@@ -160,7 +160,7 @@ def main():
     # 2b. Resolve tower index and propagate key settings to global modules
     # ------------------------------------------------------------------
     from clm_src_utils import clm_time_manager
-    from clm_src_utils.clm_time_manager import get_curr_calday, get_curr_date
+    from clm_src_utils.clm_time_manager import step_time
     from multilayer_canopy import MLclm_varctl
     from offline_driver import TowerDataMod, clmSoilOptionMod
 
@@ -249,32 +249,22 @@ def main():
         TowerMetNext,
     )
 
-    # 6-pre. Time slice index into the CLM history file for every step
-    #     (mirrors CLMml_drv "hack" at lines 97-116 and the per-step index at line 176)
+    # 6-pre. Time axis of the run, and the matching time slice of the CLM history file
+    #     for every step. Fortran CLMml_drv computed the history file's first calendar day
+    #     by temporarily overwriting the run start date ("hack", lines 97-116); here it is
+    #     computed directly from the history file's start date.
+    run_start_tod = int(params.get("start_tod", 0))
     clm_start_ymd = int(params.get("clm_start_ymd", start_ymd))
     clm_start_tod = int(params.get("clm_start_tod", 0))
 
-    run_start_ymd = clm_time_manager.start_date_ymd
-    run_start_tod = clm_time_manager.start_date_tod
+    times = [step_time(start_ymd, run_start_tod, dtstep_sec, n) for n in range(1, ntimes + 1)]
+    start_calday_clm = step_time(clm_start_ymd, clm_start_tod, dtstep_sec, 1).calday
 
-    clm_time_manager.start_date_ymd = clm_start_ymd
-    clm_time_manager.start_date_tod = clm_start_tod
-    clm_time_manager.itim = 1
-    start_calday_clm = get_curr_calday(offset=0)
+    def _history_index(calday: float) -> int:
+        return round((calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
 
-    clm_time_manager.start_date_ymd = run_start_ymd
-    clm_time_manager.start_date_tod = run_start_tod
-    clm_time_manager.itim = 1
-    curr_calday = get_curr_calday(offset=0)
-
-    soil_init_time_indx = round((curr_calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
-
-    history_index = []
-    for _itim in range(1, ntimes + 1):
-        clm_time_manager.itim = _itim
-        calday = get_curr_calday(offset=0)
-        history_index.append(round((calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1)
-    clm_time_manager.itim = 1
+    soil_init_time_indx = _history_index(times[0].calday)
+    history_index = [_history_index(t.calday) for t in times]
 
     # 6-load. All forcing for the run, read before the time loop (no file reads in the loop)
     forcing = load_forcing(
@@ -375,10 +365,8 @@ def main():
     try:
         for _itim in range(1, ntimes + 1):
             step_t0 = time.perf_counter()
-            clm_time_manager.itim = _itim
-
-            yr, mon, day, _ = get_curr_date()
-            curr_calday = get_curr_calday(offset=0)
+            now = times[_itim - 1]
+            curr_calday = now.calday
             t_prev, t_curr, t_next = forcing.window_indices(_itim - 1)
 
             # Install current-step tower meteorology
@@ -409,7 +397,7 @@ def main():
 
             # Advance physics
             t_adv0 = time.perf_counter()
-            ModelAdvance(bounds, clm_record_at(forcing, t_curr))
+            ModelAdvance(bounds, clm_record_at(forcing, t_curr), now)
             t_adv = time.perf_counter() - t_adv0
 
             # Write output

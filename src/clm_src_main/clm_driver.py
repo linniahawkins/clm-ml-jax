@@ -22,6 +22,7 @@ from clm_src_main.clm_varpar import nlevgrnd, nlevsno  # noqa: F401
 from clm_src_main.ColumnType import col  # noqa: F401
 from clm_src_main.decompMod import bounds_type  # noqa: F401
 from clm_src_main.filterMod import filter, setExposedvegpFilter  # noqa: F401
+from clm_src_utils.clm_time_manager import StepTime
 from multilayer_canopy.MLCanopyFluxesMod import MLCanopyFluxes  # noqa: F401
 from multilayer_canopy.MLSoilTemperatureMod import SoilTemperature, SoilThermProp  # noqa: F401
 from offline_driver.clmDataMod import ClmHistoryRecord, clmData  # noqa: F401
@@ -34,6 +35,7 @@ from offline_driver.clmDataMod import ClmHistoryRecord, clmData  # noqa: F401
 def clm_drv(
     bounds: bounds_type,
     clm_record: ClmHistoryRecord,
+    step_time: StepTime,
 ) -> None:
     """
     Main CLM model driver to calculate surface fluxes.
@@ -72,6 +74,8 @@ def clm_drv(
             file is read once before the time loop. Fortran ``time_indx``
             was the time index from the reference date (0Z January 1
             of the current year, where ``calday == 1.000``).
+        step_time: Time information for this step (replaces the Fortran
+            calls to the time manager inside the physics).
     """
     # ------------------------------------------------------------------
     # Read all state instances live from clm_instMod to avoid stale
@@ -240,6 +244,7 @@ def clm_drv(
         mlcanopy_inst,
         wateratm2lndbulk_inst,
         waterdiagnosticbulk_inst,
+        step_time,
     )
 
     # ------------------------------------------------------------------
@@ -257,6 +262,7 @@ def clm_drv(
         waterstatebulk_inst,
         water_inst,
         mlcanopy_inst,
+        step_time.dtime,
     )
 
     # ------------------------------------------------------------------

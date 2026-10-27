@@ -44,6 +44,7 @@ def SoilTemperature(
     waterstatebulk_inst: waterstatebulk_type,
     water_inst: water_type,
     mlcanopy_inst: mlcanopy_type,
+    dtime: float,
 ) -> tuple:
     """
     Compute soil temperature via implicit tridiagonal solver.
@@ -81,13 +82,14 @@ def SoilTemperature(
         waterstatebulk_inst:      Water state bulk (in/out).
         water_inst:               Water instance (in/out).
         mlcanopy_inst:            Multilayer canopy instance (in/out).
+        dtime:                    CLM time step (s); Fortran line 96 read it
+                                  from the time manager.
 
     Returns:
         Tuple ``(temperature_inst, soilstate_inst)`` with updated
         ``t_soisno_col`` and thermal properties.
     """
     from clm_src_main.clm_varpar import nlevgrnd
-    from clm_src_utils.clm_time_manager import get_step_size
 
     endc = bounds.endc
     nc = endc + 1
@@ -110,11 +112,6 @@ def SoilTemperature(
     for fc in range(1, num_nolakec + 1):
         c = int(filter_nolakec[fc - 1])
         pfilter[c] = c
-
-    # ------------------------------------------------------------------
-    # CLM timestep — Fortran line 96
-    # ------------------------------------------------------------------
-    dtime = get_step_size()
 
     # ------------------------------------------------------------------
     # Save soil temperature for energy conservation — Fortran lines 99-104

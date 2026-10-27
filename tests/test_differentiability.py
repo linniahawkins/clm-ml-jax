@@ -63,7 +63,7 @@ def _build_initialized_model():
     dirout = _main_mod._resolve_path(dirout_raw) if dirout_raw else ""
 
     from clm_src_utils import clm_time_manager
-    from clm_src_utils.clm_time_manager import get_curr_calday
+    from clm_src_utils.clm_time_manager import step_time
     from multilayer_canopy import MLclm_varctl
     from offline_driver import TowerDataMod, clmSoilOptionMod, controlMod
 
@@ -120,24 +120,15 @@ def _build_initialized_model():
 
     clm_start_ymd = int(params.get("clm_start_ymd", start_ymd))
     clm_start_tod = int(params.get("clm_start_tod", 0))
-    run_start_ymd = clm_time_manager.start_date_ymd
-    run_start_tod = clm_time_manager.start_date_tod
-    clm_time_manager.start_date_ymd = clm_start_ymd
-    clm_time_manager.start_date_tod = clm_start_tod
-    clm_time_manager.itim = 1
-    start_calday_clm = get_curr_calday(offset=0)
-    clm_time_manager.start_date_ymd = run_start_ymd
-    clm_time_manager.start_date_tod = run_start_tod
-    clm_time_manager.itim = 1
-    curr_calday = get_curr_calday(offset=0)
-    soil_init_time_indx = round((curr_calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
+    run_start_tod = int(params.get("start_tod", 0))
+    times = [step_time(start_ymd, run_start_tod, dtstep_sec, n) for n in range(1, ntimes + 1)]
+    start_calday_clm = step_time(clm_start_ymd, clm_start_tod, dtstep_sec, 1).calday
 
-    history_index = []
-    for _itim in range(1, ntimes + 1):
-        clm_time_manager.itim = _itim
-        calday = get_curr_calday(offset=0)
-        history_index.append(round((calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1)
-    clm_time_manager.itim = 1
+    def _history_index(calday):
+        return round((calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
+
+    soil_init_time_indx = _history_index(times[0].calday)
+    history_index = [_history_index(t.calday) for t in times]
     forcing = load_forcing(
         fin_tower,
         fin_clm,
@@ -186,10 +177,6 @@ def _build_initialized_model():
 
     os.makedirs(dirout, exist_ok=True)
 
-    from clm_src_utils.clm_time_manager import get_curr_date
-
-    clm_time_manager.itim = 1
-
     clm_instMod.atm2lnd_inst, clm_instMod.wateratm2lndbulk_inst, clm_instMod.frictionvel_inst = (
         TowerMetCurr(
             tower_met_at(forcing, 0),
@@ -211,7 +198,7 @@ def _build_initialized_model():
         )
 
     # Run 1 warm-up timestep
-    ModelAdvance(bounds, clm_record_at(forcing, 0))
+    ModelAdvance(bounds, clm_record_at(forcing, 0), times[0])
 
     mlcanopy_inst = clm_instMod.mlcanopy_inst
     filt = _clm_driver_mod.filter
@@ -237,6 +224,7 @@ def _build_initialized_model():
         solarabs_inst=clm_instMod.solarabs_inst,
         wateratm2lndbulk_inst=clm_instMod.wateratm2lndbulk_inst,
         waterdiagnosticbulk_inst=clm_instMod.waterdiagnosticbulk_inst,
+        step_time=times[0],
     )
 
     return forward_fn, mlcanopy_inst, {"num_evp": num_evp, "evp_list": evp_list}

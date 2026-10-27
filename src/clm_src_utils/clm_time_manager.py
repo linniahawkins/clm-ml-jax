@@ -26,6 +26,11 @@ Public API
 - :func:`is_end_curr_day`
 - :func:`is_end_curr_month`
 
+Pure functions (no module state)
+-------------------------------
+- :func:`date_after`, :func:`calday_of`
+- :func:`step_time` / :class:`StepTime` — everything the model needs about one step
+
 Private helpers
 ---------------
 - :func:`_get_prev_date`
@@ -35,6 +40,8 @@ Original Fortran module: clm_time_manager
 """
 
 from __future__ import annotations
+
+from typing import NamedTuple
 
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
@@ -174,48 +181,9 @@ def get_curr_date() -> tuple:
         - ``tod`` — time of day (seconds past 0Z, 0–86399)
     """
     global curr_date_ymd, curr_date_tod
-
-    mcyear = start_date_ymd // 10000
-
-    nsecs = itim * dtstep
-    ndays = (nsecs + start_date_tod) // 86400
-
-    if isleap(mcyear, calkindflag):
-        nyears = ndays // 366
-    else:
-        nyears = ndays // 365
-
-    # Day of current year
-    if isleap(mcyear, calkindflag):
-        ndays = ndays % 366
-    else:
-        ndays = ndays % 365
-
-    tod = (nsecs + start_date_tod) % 86400
-
-    # Initialise current year, month, day from start date + offsets
-    mcyear = start_date_ymd // 10000 + nyears
-    mcmnth = (start_date_ymd % 10000) // 100
-    mcday = (start_date_ymd % 100) + ndays
-
-    # Roll over month/year boundaries — replaces Fortran "go to 10"
-    while True:
-        days_per_month = _mdayleap[mcmnth - 1] if isleap(mcyear, calkindflag) else _mday[mcmnth - 1]
-        if mcday > days_per_month:
-            mcday -= days_per_month
-            mcmnth += 1
-            if mcmnth == 13:
-                mcyear += 1
-                mcmnth = 1
-        else:
-            break
-
-    curr_date_ymd = mcyear * 10000 + mcmnth * 100 + mcday
-
-    yr = curr_date_ymd // 10000
-    mon = (curr_date_ymd % 10000) // 100
-    day = curr_date_ymd % 100
-
+    yr, mon, day, tod = date_after(start_date_ymd, start_date_tod, itim * dtstep)
+    curr_date_ymd = yr * 10000 + mon * 100 + day
+    curr_date_tod = tod
     return yr, mon, day, tod
 
 
@@ -236,45 +204,7 @@ def _get_prev_date() -> tuple:
     Returns:
         Tuple ``(yr, mon, day, tod)``.
     """
-    mcyear = start_date_ymd // 10000
-
-    nsecs = (itim - 1) * dtstep  # Fortran: nsecs = (itim-1)*dtstep
-    ndays = (nsecs + start_date_tod) // 86400
-
-    if isleap(mcyear, calkindflag):
-        nyears = ndays // 366
-    else:
-        nyears = ndays // 365
-
-    if isleap(mcyear, calkindflag):
-        ndays = ndays % 366
-    else:
-        ndays = ndays % 365
-
-    tod = (nsecs + start_date_tod) % 86400
-
-    mcyear = start_date_ymd // 10000 + nyears
-    mcmnth = (start_date_ymd % 10000) // 100
-    mcday = (start_date_ymd % 100) + ndays
-
-    while True:
-        days_per_month = _mdayleap[mcmnth - 1] if isleap(mcyear, calkindflag) else _mday[mcmnth - 1]
-        if mcday > days_per_month:
-            mcday -= days_per_month
-            mcmnth += 1
-            if mcmnth == 13:
-                mcyear += 1
-                mcmnth = 1
-        else:
-            break
-
-    date_ymd = mcyear * 10000 + mcmnth * 100 + mcday
-
-    yr = date_ymd // 10000
-    mon = (date_ymd % 10000) // 100
-    day = date_ymd % 100
-
-    return yr, mon, day, tod
+    return date_after(start_date_ymd, start_date_tod, (itim - 1) * dtstep)
 
 
 # ---------------------------------------------------------------------------
@@ -322,22 +252,7 @@ def _get_prev_calday() -> float:
     Returns:
         Floating-point calendar day in [1, 366].
     """
-    yr, mon, day, tod = _get_prev_date()
-
-    if isleap(yr, calkindflag):
-        calday = float(_mdayleapcum[mon - 1]) + float(day) + float(tod) / 86400.0
-    else:
-        calday = float(_mdaycum[mon - 1]) + float(day) + float(tod) / 86400.0
-
-    # Gregorian calendar hack — Fortran lines 320-327
-    if 366.0 < calday <= 367.0 and calkindflag.strip() == "GREGORIAN":
-        calday -= 1.0
-
-    if calday < 1.0 or calday > 366.0:
-        print(f"{iulog}: get_prev_calday error: out of bounds")
-        endrun()
-
-    return calday
+    return calday_of(*_get_prev_date(), caller="get_prev_calday")
 
 
 # ---------------------------------------------------------------------------
@@ -381,32 +296,14 @@ def get_curr_calday(offset: int = 0) -> float:
     """
     if offset < 0:
         # Return calendar day at beginning of timestep — Fortran lines 273-275
-        calday = _get_prev_calday()
-
-    elif offset > 0:
+        return _get_prev_calday()
+    if offset > 0:
         # Not implemented — Fortran lines 277-279
         print(f"{iulog}: get_curr_calday error: offset > 0")
         endrun()
-        calday = 0.0  # unreachable; silences type checkers
-
-    else:
-        # Current timestep: end-of-step date — Fortran lines 281-293
-        yr, mon, day, tod = get_curr_date()
-
-        if isleap(yr, calkindflag):
-            calday = float(_mdayleapcum[mon - 1]) + float(day) + float(tod) / 86400.0
-        else:
-            calday = float(_mdaycum[mon - 1]) + float(day) + float(tod) / 86400.0
-
-        # Gregorian hack — Fortran lines 284-290
-        if 366.0 < calday <= 367.0 and calkindflag.strip() == "GREGORIAN":
-            calday -= 1.0
-
-        if calday < 1.0 or calday > 366.0:
-            print(f"{iulog}: get_curr_calday error: out of bounds")
-            endrun()
-
-    return calday
+        return 0.0  # unreachable; silences type checkers
+    # Current timestep: end-of-step date — Fortran lines 281-293
+    return calday_of(*get_curr_date(), caller="get_curr_calday")
 
 
 # ---------------------------------------------------------------------------
@@ -451,3 +348,110 @@ def is_end_curr_month() -> bool:
     """
     _yr, _mon, day, tod = get_curr_date()
     return day == 1 and tod == 0
+
+
+# ---------------------------------------------------------------------------
+# Pure calendar functions (no module state)
+#
+# The get_* functions above and below read the module-level time state; the
+# functions here take it as arguments, so a whole run's time axis can be computed
+# up front (see :func:`step_time`) instead of mutating ``itim`` every step.
+# ---------------------------------------------------------------------------
+
+
+def date_after(start_ymd: int, start_tod: int, nsecs: int) -> tuple:
+    """
+    Date ``nsecs`` seconds after ``start_ymd`` / ``start_tod``.
+
+    The arithmetic of Fortran ``get_curr_date`` (lines 103-153): the number of
+    years is taken from whole days elapsed, using the leap status of the
+    *start* year, and month/year rollover is applied afterwards.
+
+    Returns:
+        ``(yr, mon, day, tod)``.
+    """
+    mcyear = start_ymd // 10000
+    ndays = (nsecs + start_tod) // 86400
+
+    if isleap(mcyear, calkindflag):
+        nyears = ndays // 366
+    else:
+        nyears = ndays // 365
+
+    # Day of current year
+    if isleap(mcyear, calkindflag):
+        ndays = ndays % 366
+    else:
+        ndays = ndays % 365
+
+    tod = (nsecs + start_tod) % 86400
+
+    # Initialise current year, month, day from start date + offsets
+    mcyear = start_ymd // 10000 + nyears
+    mcmnth = (start_ymd % 10000) // 100
+    mcday = (start_ymd % 100) + ndays
+
+    # Roll over month/year boundaries — replaces Fortran "go to 10"
+    while True:
+        days_per_month = _mdayleap[mcmnth - 1] if isleap(mcyear, calkindflag) else _mday[mcmnth - 1]
+        if mcday > days_per_month:
+            mcday -= days_per_month
+            mcmnth += 1
+            if mcmnth == 13:
+                mcyear += 1
+                mcmnth = 1
+        else:
+            break
+
+    date_ymd = mcyear * 10000 + mcmnth * 100 + mcday
+    return date_ymd // 10000, (date_ymd % 10000) // 100, date_ymd % 100, tod
+
+
+def calday_of(yr: int, mon: int, day: int, tod: int, caller: str = "calday_of") -> float:
+    """
+    Calendar day (1.000 = 0Z 1 January) of a date.
+
+    Includes the Gregorian hack of Fortran ``get_curr_calday`` (lines 284-290):
+    ``366 < calday <= 367`` becomes ``calday - 1``, keeping calendar days in
+    [1, 366] for ``shr_orb_decl``.
+    """
+    if isleap(yr, calkindflag):
+        calday = float(_mdayleapcum[mon - 1]) + float(day) + float(tod) / 86400.0
+    else:
+        calday = float(_mdaycum[mon - 1]) + float(day) + float(tod) / 86400.0
+
+    if 366.0 < calday <= 367.0 and calkindflag.strip() == "GREGORIAN":
+        calday -= 1.0
+
+    if calday < 1.0 or calday > 366.0:
+        print(f"{iulog}: {caller} error: out of bounds")
+        endrun()
+
+    return calday
+
+
+class StepTime(NamedTuple):
+    """Time information for one model time step (``nstep`` = Fortran ``itim``)."""
+
+    nstep: int  # 1-based time step number
+    dtime: int  # time step length (s)
+    year: int  # date at the end of the step
+    month: int
+    day: int
+    tod: int  # seconds past 0Z at the end of the step
+    calday: float  # calendar day at the end of the step (get_curr_calday(0))
+    calday_beg: float  # calendar day at the beginning of the step (get_curr_calday(<0))
+
+
+def step_time(start_ymd: int, start_tod: int, dtime: int, nstep: int) -> StepTime:
+    """Time information for step ``nstep`` of a run starting at ``start_ymd`` / ``start_tod``.
+
+    Equal to what ``get_curr_date``, ``get_curr_calday(0)`` and
+    ``get_curr_calday(-dtime)`` return with ``itim = nstep``.
+    """
+    yr, mon, day, tod = date_after(start_ymd, start_tod, nstep * dtime)
+    calday = calday_of(yr, mon, day, tod, caller="get_curr_calday")
+    calday_beg = calday_of(
+        *date_after(start_ymd, start_tod, (nstep - 1) * dtime), caller="get_prev_calday"
+    )
+    return StepTime(nstep, dtime, yr, mon, day, tod, calday, calday_beg)

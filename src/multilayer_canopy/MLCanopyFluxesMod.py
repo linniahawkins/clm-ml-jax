@@ -34,6 +34,7 @@ from clm_src_main.clm_varcon import grav, spval  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
 from clm_src_main.clm_varpar import inir, ivis  # noqa: F401
 from clm_src_main.PatchType import patch  # noqa: F401
+from clm_src_utils.clm_time_manager import StepTime
 from clm_src_utils.spmdMod import masterproc  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 
@@ -182,6 +183,7 @@ def MLCanopyFluxes(
     mlcanopy_inst: mlcanopy_type,
     wateratm2lndbulk_inst: Any,
     waterdiagnosticbulk_inst: Any,
+    step_time: StepTime,
     grid: "GridInfo | None" = None,
     _o2ref_py: "float | None" = None,
     vcmaxpft_jax=None,
@@ -285,17 +287,15 @@ def MLCanopyFluxes(
         wateratm2lndbulk_inst: CLM water forcing instance.
         waterdiagnosticbulk_inst: CLM water diagnostic instance
             (output receiver).
+        step_time: Time information for this CLM time step (step number,
+            step length, calendar day at the beginning and end of the step).
+            Replaces the Fortran calls to the time manager (lines 155-165).
 
     Returns:
         Updated :class:`mlcanopy_type` holding end-of-timestep state
         and CLM-timestep-mean fluxes.
     """
     import multilayer_canopy.MLclm_varctl as _ml_ctl  # for ml_vert_init mutation
-    from clm_src_utils.clm_time_manager import (
-        get_curr_calday,
-        get_nstep,
-        get_step_size,
-    )  # noqa: F401
 
     _diff_mode = grid is not None
 
@@ -305,12 +305,13 @@ def MLCanopyFluxes(
 
     # ------------------------------------------------------------------
     # CLM time information — Fortran lines 155-165
+    # (passed in as step_time instead of read from the time manager)
     # ------------------------------------------------------------------
-    nstep = get_nstep()
-    dtime_clm = float(get_step_size())
+    nstep = step_time.nstep
+    dtime_clm = float(step_time.dtime)
 
-    curr_calday_end = float(get_curr_calday(offset=0))
-    curr_calday_beg = float(get_curr_calday(offset=-int(dtime_clm)))
+    curr_calday_end = float(step_time.calday)
+    curr_calday_beg = float(step_time.calday_beg)
 
     # Interpolation calendar days — Fortran lines 105-130
     if met_type == 0:
@@ -388,6 +389,7 @@ def MLCanopyFluxes(
     mlcanopy_inst = _GetCLMVar(
         nstep,
         dtime_clm,
+        curr_calday_beg,
         num_mlcan,
         filter_mlcan,
         atm2lnd_inst,
@@ -614,7 +616,7 @@ def MLCanopyFluxes(
             )
             # nstep_ml is 0 in diff mode; _HF2008_diff ignores it entirely.
             # In non-diff mode it carries the current sub-step index (warning only).
-            inst = CanopyTurbulence(nstep_ml, num_mlcan, filter_mlcan, inst, grid=grid)
+            inst = CanopyTurbulence(nstep_ml, num_mlcan, filter_mlcan, inst, grid=grid, nstep=nstep)
             # Both sun and shade in one fused GPU dispatch (2× fewer round-trips)
             inst = LeafBoundaryLayerBoth(num_mlcan, filter_mlcan, inst)
             inst = LeafPhotosynthesis(
@@ -842,6 +844,7 @@ def MLCanopyFluxes(
 def _GetCLMVar(
     nstep: int,
     dtime_clm: float,
+    calday_beg: float,
     num_filter: int,
     filter: List[int],
     atm2lnd_inst: Any,
@@ -950,7 +953,6 @@ def _GetCLMVar(
     from clm_src_main.ColumnType import col  # noqa: F401
     from clm_src_main.GridcellType import grc  # noqa: F401
     from clm_src_main.PatchType import patch  # noqa: F401
-    from clm_src_utils.clm_time_manager import get_curr_calday  # noqa: F401
     from clm_src_utils.clm_varorb import eccen, lambm0, mvelpp, obliqr  # noqa: F401
 
     # ------------------------------------------------------------------
@@ -1067,9 +1069,10 @@ def _GetCLMVar(
     # Solar zenith angle — Fortran lines 92-110
     #
     # Computed for the beginning of the CLM timestep, i.e. at
-    # calday(nstep-1):  caldaym1 = get_curr_calday(offset=-dtime_clm)
+    # calday(nstep-1):  caldaym1 = get_curr_calday(offset=-dtime_clm),
+    # passed in as calday_beg
     # ------------------------------------------------------------------
-    caldaym1 = float(get_curr_calday(offset=-int(dtime_clm)))
+    caldaym1 = float(calday_beg)
 
     # Orbital declination for caldaym1 — Fortran line 105
     declinm1, eccf = shr_orb_decl(caldaym1, eccen, mvelpp, lambm0, obliqr)
@@ -2077,6 +2080,7 @@ def make_clm_ml_forward(
     solarabs_inst: Any,
     wateratm2lndbulk_inst: Any,
     waterdiagnosticbulk_inst: Any,
+    step_time: StepTime,
 ):
     """Create a differentiable forward function with baked-in structural params.
 
@@ -2125,6 +2129,7 @@ def make_clm_ml_forward(
             mlcanopy_inst=mlcanopy_inst,
             wateratm2lndbulk_inst=wateratm2lndbulk_inst,
             waterdiagnosticbulk_inst=waterdiagnosticbulk_inst,
+            step_time=step_time,
             grid=grid,
             _o2ref_py=_o2ref_py_fwd,
         )
