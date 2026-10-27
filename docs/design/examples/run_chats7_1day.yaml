@@ -1,0 +1,36 @@
+# Experiment file: replaces offline_executable/nl.CHATS7.1day
+# Run with:  clm-ml run run_chats7_1day.yaml
+# Paths are relative to this file.
+
+model: model.yaml
+params: params_chats.yaml
+
+time:
+  start: 2007-05-01T00:00          # was start_ymd / start_tod
+  end: 2007-05-02T00:00            # was stop_option='ndays', stop_n=1  (alternatively: days: 1)
+
+domain:
+  type: towers                     # towers | grid (grid reserved for later)
+  sites: [CHATS7]                  # names from the built-in registry and/or sites_file
+  sites_file: null                 # optional: your own sites.yaml (see sites_example.yaml)
+
+forcing:
+  # {site} is replaced by each site's name, so one file serves many sites
+  meteorology: ../../../src/input_files/tower-forcing/{site}/2007-05.nc   # was fin_tower
+  interpolation: three_point       # none | three_point   (was met_type 0 / 3)
+  clm_history:
+    file: ../../../src/input_files/clm5_0/{site}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc  # was fin_clm
+    start: 2007-04-01T00:00        # was clm_start_ymd / clm_start_tod
+  soil_moisture_adjustment:
+    file: ../../../src/input_files/clm5_0/{site}/CHATS_soil_moisture_correction_29Jul25.nc       # was fin_soil_adjust
+    levels: 3                      # was nlev_soil_adjust
+
+initial_conditions:
+  source: clm_history              # clm_history | restart
+  restart_file: null
+
+output:
+  directory: ../../../src/output_files/   # was dirout
+  format: netcdf                   # netcdf | legacy_ascii | both
+  variables: all                   # all, or a list such as [latent_heat_flux, gpp]
+  frequency: step                  # step | hourly | daily

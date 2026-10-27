@@ -1,0 +1,59 @@
+# EXCERPT of the file shipped as clm_ml/data/params/clm5_defaults.yaml
+# (the real file lists every PFT; generated in Phase 1 from MLpftconMod.py and pftconMod.py
+#  and tested to match them exactly).
+
+units:
+  vcmax25: umol m-2 s-1
+  g0_medlyn: mol H2O m-2 s-1
+  g1_medlyn: kPa^0.5
+  g0_ball_berry: mol H2O m-2 s-1
+  g1_ball_berry: "-"
+  iota: umol CO2 mol-1 H2O
+  gs_min: mol H2O m-2 s-1
+  psi50_gs: MPa
+  shape_gs: "-"
+  plant_conductance: mmol H2O m-2 s-1 MPa-1
+  plant_capacitance: mmol H2O m-2 MPa-1
+  root_radius: m
+  root_density: g m-3
+  root_resistivity: MPa s g mmol-1
+  leaf_emissivity: "-"
+  clumping_index: "-"
+  leaf_dimension: m
+  leaf_angle_index: "-"
+  leaf_reflectance: "-"        # [vis, nir]
+  leaf_transmittance: "-"      # [vis, nir]
+  stem_reflectance: "-"        # [vis, nir]
+  stem_transmittance: "-"      # [vis, nir]
+  root_profile_beta: "-"
+  sla_top: m2 gC-1
+  c3_photosynthesis: bool      # structural; not differentiated
+
+pft:
+  broadleaf_deciduous_temperate_tree:      # CLM PFT 7
+    vcmax25: 57.7
+    g0_medlyn: 0.0001
+    g1_medlyn: 4.45
+    g0_ball_berry: 0.01
+    g1_ball_berry: 9.0
+    iota: 750.0
+    gs_min: 0.002
+    psi50_gs: -2.3
+    shape_gs: 40.0
+    plant_conductance: 4.0
+    plant_capacitance: 2500.0
+    root_radius: 0.29e-3
+    root_density: 0.31e6
+    root_resistivity: 25.0
+    leaf_emissivity: 0.98
+    clumping_index: 1.0
+    leaf_dimension: 0.04
+    leaf_angle_index: 0.25
+    leaf_reflectance: [0.10, 0.45]
+    leaf_transmittance: [0.05, 0.25]
+    stem_reflectance: [0.16, 0.39]
+    stem_transmittance: [0.001, 0.001]
+    root_profile_beta: 0.966
+    sla_top: 0.030
+    c3_photosynthesis: true
+  # ... every other PFT in CLM order ...

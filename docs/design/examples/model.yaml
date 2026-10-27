@@ -1,0 +1,36 @@
+# Model configuration: how the physics and numerics work.
+# Changing anything here recompiles the model. Every key is optional; shown values are defaults.
+
+physics:
+  stomatal_conductance: wue               # medlyn | ball_berry | wue          (gs_type 0/1/2)
+  water_stress_on_conductance: true       #                                    (gspot_type)
+  wue_solver: bisection                   # brent | bisection                  (gs_solver 1/2)
+  photosynthesis_colimitation: true       #                                    (colim_type)
+  temperature_acclimation: true           #                                    (acclim_type)
+  nitrogen_decay_kn: null                 # null = computed                    (kn_val)
+  roughness_sublayer: harman_finnigan     #                                    (turb_type 1)
+  sparse_canopy: true                     #                                    (sparse_canopy_type)
+  ground_conductance: log_profile         # extend_hf | log_profile            (HF_extension_type 1/2)
+  flux_profile_solution: implicit         # well_mixed | implicit              (flux_profile_type 0/1)
+  leaf_boundary_layer: free_convection    # laminar | turbulent | free_convection  (gb_type 1/2/3)
+  solar_radiation: two_stream             # norman | two_stream                (light_type 1/2)
+  leaf_optics_vary_with_height: false     #                                    (leaf_optics_type)
+  longwave_radiation: norman              #                                    (longwave_type 1)
+
+numerics:
+  substep_seconds: 300                    # must divide the forcing step     (dtime_ml)
+  integrator: rk4                         # euler | rk2_trapezoid | rk2_midpoint | rk2_ralston |
+                                          # rk3_heun | rk3_ralston | rk3_kutta | rk4   (runge_kutta_type)
+  checkpoint_steps: true                  # trade compute for memory when taking gradients
+
+canopy_layers:
+  max_layers: 60                          # fixed array size for every site (default TBD in Phase 1)
+  dz_tall: 0.5                            # m
+  dz_short: 0.1                           # m
+  tall_canopy_threshold: 2.0              # m                                  (dz_param)
+  n_layers_above: null                    # null = from dz                     (nlayer_above)
+  n_layers_within: null                   # null = from dz                     (nlayer_within)
+  min_plant_area_per_layer: 0.01          # m2/m2                              (dpai_min)
+
+soil:
+  layer_structure: clm5_0                 # clm5_0 | clm4_5; must match the CLM history file (clm_phys)

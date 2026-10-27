@@ -1,9 +1,29 @@
 # CLM-ML-JAX Modernization Plan
 
-**Status:** Draft for review. No code changes until this plan and the API are approved.
+**Status:** Draft v2 for review. No code changes until this plan and the API are approved.
 **Branch:** `design/modern-api-plan`
-**Companion file:** [`api_sketch.py`](api_sketch.py) contains the proposed public API as typed
-signatures with docstrings. Review the two files together.
+
+**Companion files:**
+- [`api_sketch.py`](api_sketch.py): the proposed Python API, as typed signatures with docstrings.
+- [`examples/`](examples/): example `run.yaml`, `model.yaml`, `params_chats.yaml` and
+  `sites.yaml` files, written as a user would write them.
+
+---
+
+## 0. Decisions recorded
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Package name | Import as **`import clm_ml`**. The install name stays `clm-ml-jax` (the repo name). The command-line tool is `clm-ml`. |
+| 2 | Option names | **Readable strings** (`stomatal_conductance: wue`). Fortran integer codes are accepted only by the namelist converter. |
+| 3 | Spatial scope | **One site up to global.** A global run is many independent sites (no lateral exchange between grid cells). The design uses a **site dimension, a fixed number of canopy layers, and masks** from the start. |
+| 4 | Gradients | With respect to **parameters, meteorological forcing, and state variables** (initial state). |
+| 5 | Configuration | **YAML files**: `model.yaml` (physics and numerics), `params.yaml` (parameters by PFT), and `run.yaml` (the experiment, replacing the namelist). They are loaded into typed Python objects, which are what JAX runs on and differentiates. |
+| 6 | Parameters | A **per-PFT table**. Each site looks up its PFT's values, so gradients come out per PFT. |
+| 7 | Config framework | **Plain YAML plus our own validation** (dataclasses with clear error messages). No Hydra. |
+| 8 | Namelists | Kept as a **one-time converter**: `clm-ml convert nl.CHATS7.1day` writes the YAML files. |
+
+Still open: see §8.
 
 ---
 
@@ -11,28 +31,29 @@ signatures with docstrings. Review the two files together.
 
 ### Goals
 
-1. **A Python-first interface.** A scientist should be able to run a site, change a parameter,
-   run an ensemble, or take a gradient in a few lines of Python. They should not need to edit a
-   namelist or know the Fortran module structure.
+1. **A file-driven, Python-friendly interface.** A run is described by three YAML files and
+   started with one command (`clm-ml run run.yaml`). The same files load in Python, where a
+   scientist can run ensembles or take gradients in a few lines.
 2. **Explicit state, no hidden globals.** Everything the model depends on goes in as an argument,
    and everything it changes comes back as a return value. This is what makes `jit`, `grad` and
    `vmap` work reliably.
-3. **One code path.** Today there is a "normal" mode (Python loops, file output, diagnostics) and a
-   "differentiable" mode (`lax.scan`, diagnostics skipped). These should become a single path
-   that is both fast and differentiable.
-4. **Swappable process schemes.** Choosing Medlyn vs Ball-Berry vs WUE stomatal conductance, or
-   Norman vs two-stream radiation, should be a readable configuration choice. Adding a new scheme
-   should not require editing the driver.
-5. **Keep scientific fidelity.** The refactored model must reproduce the current JAX output (to
+3. **One site up to many sites with the same code.** Physics is written for one column. Running
+   many sites is batching (`vmap`), and later splitting sites across GPUs.
+4. **One code path.** Today there is a "normal" mode (Python loops, file output, diagnostics) and a
+   "differentiable" mode (`lax.scan`, diagnostics skipped). These become a single path that is
+   both fast and differentiable.
+5. **Swappable process schemes**, chosen by name in `model.yaml`.
+6. **Keep scientific fidelity.** The refactored model must reproduce the current JAX output (to
    near machine precision) and therefore the Fortran output, at every phase.
 
 ### Non-goals (for this effort)
 
 - Changing the science or adding new physics.
-- Global or gridded runs. Single-site runs are the target. Multi-site runs come from `vmap`
-  (see §7, question 3).
+- **Loading gridded/global forcing.** The architecture supports many sites, and `run.yaml`
+  reserves `domain.type: grid`. Reading gridded datasets (for example, CLM surface datasets and
+  reanalysis forcing) is a follow-on project.
 - Coupling to CESM/CTSM. The `clm_src_cpl` code stays as a reference only.
-- Rewriting the numerics of each routine. Internals are refactored gradually, behind tests.
+- Rewriting the numerics of each routine, beyond what fixed layers and masks require (Phase 5).
 
 ---
 
@@ -41,438 +62,586 @@ signatures with docstrings. Review the two files together.
 | Area | Current design | Problem it causes |
 |---|---|---|
 | Code organization | One Python file per Fortran module (`clm_src_main/`, `MLCanopyFluxesMod.py`, …), with ~1,760 "Fortran line" references | You have to know the Fortran CLM layout to navigate. The top-level package names (`clm_src_main`, `utils`, …) are generic and can collide with other installed packages. |
-| Model state | ~15 `*_inst` objects held as module globals in `clm_instMod` and reassigned after every step (25 `global` statements in total) | Invisible to `jit`/`grad`/`vmap`. You cannot run two simulations side by side in one Python process. |
+| Model state | ~15 `*_inst` objects held as module globals in `clm_instMod` and reassigned after every step (25 `global` statements in total) | Invisible to `jit`/`grad`/`vmap`. You cannot run two simulations side by side. |
 | Time | `clm_time_manager.itim`, `start_date_ymd`, … are module globals that the driver mutates (including a documented "hack" that temporarily overwrites the start date) | Time cannot be traced, so the outer loop cannot be compiled. |
-| Run options | `MLclm_varctl` module globals (`gs_type = 2`, `light_type = 2`, `runge_kutta_type = 41`, …) plus a Fortran namelist read from stdin | Options are "magic integers". Changing them means mutating module state before import order matters. |
-| Parameters | `MLpftcon` global singleton. Differentiable parameters are threaded through as special-case arguments (`vcmaxpft_jax`, `g1_MED_jax`). | Only parameters someone has manually plumbed through can be differentiated. |
-| Interfaces | `MLCanopyFluxes` takes 20 arguments, mostly typed `Any`. `mlcanopy_type` has hundreds of fields mixing inputs, forcing, prognostic state, scratch space and diagnostics. | It is hard to see what a routine reads or writes, and every routine can touch everything. |
-| Forcing | Tower and CLM-history netCDF files are re-read inside the time loop (`TowerMetCurr`, `TowerMetNext`, `clmData`). For 3-point interpolation, the state carries `*_bef/_cur/_next` copies of forcing. | File I/O inside the loop blocks compilation. Forcing is mixed into model state. |
-| Time loop | The outer loop is a Python `for` with ASCII writes each step. The inner 300 s sub-step loop is a Python `for` in normal mode and a `lax.scan` in differentiable mode. | It is slow (no whole-run compilation), and two code paths can silently diverge. |
-| Indexing | 1-based arrays with an unused index 0. A "patch" dimension (`np = endp + 1`) and Fortran-style filters, even though a run has one patch. | Off-by-one risk, wasted memory, and Python loops over filter indices. |
-| Output | Six fixed-format ASCII files (`flux.out`, `fsun.out`, …). | Not self-describing (no names, units or time coordinate), and hard to analyze or differentiate. |
-| Validation | Strong: 160+ routine-level golden tests at `rtol=1e-9`, plus end-to-end Fortran comparison (2.5% / r ≥ 0.9999) and differentiability tests. | Needs one addition: a tight end-to-end regression against the current JAX output (see Phase 0). |
-
-The physics itself is in good shape, and the routine-level golden tests are a real asset. The work
-is mostly in the "plumbing": how state, time, options and I/O flow.
+| Run options | `MLclm_varctl` module globals (`gs_type = 2`, …) plus a Fortran namelist read from stdin | Options are "magic integers" set by mutating module state. |
+| Parameters | `MLpftcon`/`pftcon` global singletons. Differentiable parameters are threaded through as special-case arguments (`vcmaxpft_jax`, `g1_MED_jax`). CHATS values are switched on with `pftcon_val = 1`. | Only parameters someone has manually plumbed through can be differentiated. Site-specific values are hard-coded. |
+| Interfaces | `MLCanopyFluxes` takes 20 arguments, mostly typed `Any`. `mlcanopy_type` has hundreds of fields mixing inputs, forcing, prognostic state, scratch space and diagnostics. | It is hard to see what a routine reads or writes. |
+| Forcing | Tower and CLM-history netCDF files are re-read inside the time loop. For 3-point interpolation, the state carries `*_bef/_cur/_next` copies of forcing. | File I/O inside the loop blocks compilation. Forcing is mixed into model state. |
+| Time loop | The outer loop is a Python `for` with ASCII writes each step. The inner 300 s sub-step loop is a Python `for` in normal mode and a `lax.scan` in differentiable mode. | It is slow, and two code paths can silently diverge. |
+| Layers and sites | The number of canopy layers (`ncan`, `ntop`, `nbot`) depends on canopy height, and is used as a Python loop bound. Arrays are 1-based with a "patch" dimension and Fortran-style filters. | Sites with different canopy heights have different array shapes, so they **cannot be batched together**. This is the main blocker for multi-site and global runs. |
+| Output | Six fixed-format ASCII files (`flux.out`, `fsun.out`, …) | Not self-describing (no names, units or time coordinate). |
+| Validation | Strong: 160+ routine-level golden tests at `rtol=1e-9`, plus end-to-end Fortran comparison (2.5% / r ≥ 0.9999) and differentiability tests. | Needs one addition: a tight end-to-end regression against the current JAX output (Phase 0). |
 
 ---
 
 ## 3. Design principles
 
-These come from jax-gcm and general JAX practice, adapted to a single-site land model.
-
 1. **Pure functions.** Every physics function has the shape `f(inputs) -> outputs`. It reads no
    globals and mutates nothing.
-2. **Separate the kinds of data.** Each kind gets its own container, because each is treated
-   differently by JAX:
+2. **Files describe, objects run.** Each YAML file loads into a typed Python object. Validation
+   happens at load time, with messages that name the file and key. JAX only ever sees the objects.
+3. **Separate the kinds of data.** Each kind gets its own container, because JAX treats each one
+   differently:
 
-   | Container | What it holds | JAX treatment | Today's equivalent |
+   | Container | Comes from | What it holds | JAX treatment |
    |---|---|---|---|
-   | `Config` | Scheme choices, time steps, layer settings | **Static.** Changing it recompiles. Not differentiable. | `MLclm_varctl` globals, namelist |
-   | `Site` | Location, PFT, soil texture, canopy/tower heights, LAI/SAI shape parameters | Mostly static (it decides the layer count) | `TowerDataMod` tables |
-   | `Layers` | Derived grid: number of canopy layers, top/bottom foliage layer, heights | **Static** integers and arrays computed once | `GridInfo`, `ml_vert_init`, `MLinitVerticalMod` |
-   | `Params` | Tunable physical parameters (Vcmax25, g1, hydraulic conductances, emissivity, clumping, …) | **Traced and differentiable** | `MLpftcon`, `vcmaxpft_jax`, `g1_MED_jax` |
-   | `Forcing` | Time series of tower meteorology plus prescribed CLM vegetation and soil data | Traced and differentiable, loaded fully **before** the run | `TowerMetMod`, `clmDataMod`, `*_forcing` fields |
-   | `State` | Prognostic variables only: canopy air T/q/CO₂ profiles, leaf temperatures, leaf water potential, intercepted water, soil temperature/moisture | Traced and differentiable. It is the `lax.scan` carry. | Parts of `mlcanopy_type`, `temperature_inst`, … |
-   | `Outputs` | Fluxes, profiles and diagnostics per time step | Returned from each step, stacked by `scan` | `*_canopy` diagnostic fields, the `.out` files |
+   | `ModelConfig` | `model.yaml` | Scheme choices, time steps, layer settings, `max_layers` | **Static.** Changing it recompiles. |
+   | `Sites` | `run.yaml` → built-in or user `sites.yaml` | Per-site location, PFT, soil texture, heights, profile shapes | Arrays with a leading site axis |
+   | `Layers` | Derived from `Sites` + `ModelConfig` | Per-site layer heights and **masks** inside a fixed `max_layers` | `max_layers` is static. Heights and masks are arrays. |
+   | `Params` | `params.yaml` | **Per-PFT table** of physical parameters | **Traced and differentiable** |
+   | `Forcing` | `run.yaml` → netCDF files | Meteorology plus prescribed CLM vegetation/soil, shape `(time, site, …)` | **Traced and differentiable**, loaded fully before the run |
+   | `State` | `run.yaml` → initial conditions | Prognostic variables only, shape `(site, …)` | **Traced and differentiable**. It is the `lax.scan` carry. |
+   | `Outputs` | Produced by the run | Fluxes, profiles and diagnostics, shape `(time, site, …)` | Returned and stacked by `scan` |
 
-3. **A model run is one compiled function.**
-   `run = scan(step, State₀, Forcing)`, where `step(state, forcing_t, params) -> (state, outputs)`.
-4. **Processes have a uniform interface.** Each physical process (radiation, turbulence,
-   photosynthesis, …) is a function with a consistent signature, and `Config` selects which
-   variant runs. This is a lighter version of jax-gcm's `PhysicsTerm` composition (see §5.4).
-5. **Adapters first, rewrites later.** Put the new interface *around* the existing translated code
-   first. Then move internals across one process at a time, each step verified by tests. jax-gcm
-   did the same with its translated SPEEDY physics.
-6. **Fortran traceability moves to docstrings.** Each refactored function keeps a
-   `Fortran reference:` line in its docstring, rather than mirroring Fortran file and variable
-   names.
-7. **No new heavy dependencies.** Containers are standard `dataclasses` registered as JAX pytrees.
-   No Flax or Equinox is needed for this model's size. `xarray` becomes a runtime dependency for
-   output.
+4. **Write physics for one column, batch over sites.** Each process is written as if there is one
+   site, with arrays of shape `(max_layers,)`. The model applies `jax.vmap` over the site axis.
+   jax-gcm does the same with `vectorize_columns`. Splitting sites across GPUs is then a sharding
+   annotation on that axis, not a code change.
+5. **Fixed layers plus masks.** Every site gets `max_layers` canopy layers. A per-site mask says
+   which layers are real air layers, and another says which contain leaves. Physics uses masks,
+   never site-specific loop bounds. Padded layers must have no effect: they are zero-weighted in
+   sums and decoupled (identity rows) in the tridiagonal solves.
+6. **Parameters by PFT.** `Params` holds a table with a value per PFT for every field. Inside a
+   run, each site's values are gathered from its PFT (`params.for_sites(sites.pft)`). Gathering is
+   differentiable, so gradients come back per PFT and sites that share a PFT add up.
+7. **A run is one compiled function.**
+   `run = scan over time of (vmap over sites of step)`, where
+   `step(state, forcing_window, params) -> (state, outputs)` acts on one column.
+8. **Adapters first, rewrites later.** Put the new interface around the existing translated code
+   first. Then move internals across one process at a time, each step verified by tests.
+9. **Fortran traceability moves to docstrings.** Each refactored function keeps a
+   `Fortran reference:` line in its docstring.
+10. **Few dependencies.** Containers are standard `dataclasses` registered as JAX pytrees. New
+    runtime dependencies: `pyyaml`, `xarray`, `netCDF4` (currently dev-only but needed at
+    runtime).
 
 ---
 
-## 4. Proposed user-facing API (summary)
+## 4. Configuration files
 
-Full signatures are in [`api_sketch.py`](api_sketch.py). The everyday experience would look like
-this:
+Full examples are in [`examples/`](examples/). Every key has a default, except where marked
+required, so most files stay short.
 
-```python
-import clmml
+### 4.1 `run.yaml`: the experiment (replaces the namelist)
 
-# 1. Describe the site and load forcing (all file I/O happens here, once)
-site = clmml.Site.from_tower("CHATS7")
-forcing = clmml.load_tower_forcing(
-    site,
-    tower_file="input_files/tower-forcing/CHATS7/2007-05.nc",
-    clm_history_file="input_files/clm5_0/CHATS7/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc",
-    soil_adjust_file="input_files/clm5_0/CHATS7/CHATS_soil_moisture_correction_29Jul25.nc",
-    start="2007-05-01", days=1,
-)
-
-# 2. Choose schemes (readable names instead of integer codes)
-config = clmml.Config(stomatal_conductance="wue", solar_radiation="two_stream",
-                      integrator="rk4", substep_seconds=300.0)
-
-# 3. Build the model, get parameters and the initial state
-model = clmml.Model(site, config)
-params = clmml.default_params(site, preset="chats")   # replaces pftcon_val = 1
-state0 = model.initial_state(forcing)
-
-# 4. Run: one compiled call; outputs are arrays with a time axis
-result = model.run(state0, forcing, params)
-ds = result.to_xarray()                   # named variables, units, time coordinate
-ds["latent_heat_flux"].plot()
-result.write_legacy_ascii("output_files/")  # identical .out files, for Fortran comparison
+```yaml
+model: model.yaml                 # path, relative to this file
+params: params_chats.yaml
+time:
+  start: 2007-05-01T00:00         # required
+  end:   2007-05-02T00:00         # or: days: 1
+  step_seconds: 1800              # tower / forcing time step
+domain:
+  type: towers                    # towers | grid (reserved for later)
+  sites: [CHATS7]                 # names from the built-in registry or sites_file
+  sites_file: null                # optional: your own sites.yaml
+forcing:
+  meteorology: input_files/tower-forcing/{site}/2007-05.nc     # {site} is filled per site
+  interpolation: three_point      # none | three_point (met_type 0 / 3)
+  clm_history:
+    file: input_files/clm5_0/{site}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    start: 2007-04-01T00:00       # was clm_start_ymd / clm_start_tod
+  soil_moisture_adjustment:
+    file: input_files/clm5_0/{site}/CHATS_soil_moisture_correction_29Jul25.nc
+    levels: 3                     # was nlev_soil_adjust
+initial_conditions:
+  source: clm_history             # clm_history | restart
+  restart_file: null
+output:
+  directory: output_files/
+  format: netcdf                  # netcdf | legacy_ascii | both
+  variables: all                  # or a list of names
+  frequency: step                 # step | hourly | daily
 ```
 
-Gradient-based calibration:
+### 4.2 `model.yaml`: physics and numerics
+
+```yaml
+physics:
+  stomatal_conductance: wue               # medlyn | ball_berry | wue
+  water_stress_on_conductance: true
+  wue_solver: bisection                   # brent | bisection
+  photosynthesis_colimitation: true
+  temperature_acclimation: true
+  nitrogen_decay_kn: null                 # null = computed
+  roughness_sublayer: harman_finnigan
+  sparse_canopy: true
+  ground_conductance: log_profile         # extend_hf | log_profile
+  flux_profile_solution: implicit         # well_mixed | implicit
+  leaf_boundary_layer: free_convection    # laminar | turbulent | free_convection
+  solar_radiation: two_stream             # norman | two_stream
+  leaf_optics_vary_with_height: false
+  longwave_radiation: norman
+numerics:
+  substep_seconds: 300
+  integrator: rk4                         # euler | rk2_* | rk3_* | rk4
+  checkpoint_steps: true                  # less memory when taking gradients
+canopy_layers:
+  max_layers: 60                          # fixed array size for every site
+  dz_tall: 0.5
+  dz_short: 0.1
+  tall_canopy_threshold: 2.0
+  n_layers_above: null
+  n_layers_within: null
+  min_plant_area_per_layer: 0.01          # dpai_min
+soil:
+  layer_structure: clm5_0                 # clm5_0 | clm4_5 (was clm_phys)
+```
+
+### 4.3 `params.yaml`: parameters by PFT
+
+The package ships `clm5_defaults.yaml` with every parameter for every PFT, in this format:
+
+```yaml
+units:
+  vcmax25: umol m-2 s-1
+  ...
+pft:
+  broadleaf_deciduous_temperate_tree:
+    vcmax25: 57.7
+    g1_medlyn: 4.45
+    ...
+```
+
+A site or experiment file **extends** the defaults and lists only what changes. This replaces
+`pftcon_val = 1`:
+
+```yaml
+extends: clm5_defaults
+pft:
+  broadleaf_deciduous_temperate_tree:   # CHATS walnut orchard
+    vcmax25: 125.0              # Rosati et al. (2006)
+    plant_conductance: 7.0      # Tyree et al. (1993)
+    iota: 375.0                 # Rosati et al. (2006)
+    root_resistivity: 14.0      # Tyree et al. (1994)
+    psi50_gs: -1.60             # SPA-walnut
+    leaf_angle_index: 0.53      # walnut
+```
+
+Validation rejects unknown PFT names, unknown parameter names, and missing values for any PFT
+used by a site in the run. Ranges from the units table are checked as warnings.
+
+### 4.4 `sites.yaml`: site descriptions
+
+The built-in tower table (now in `TowerDataMod.py`) moves to `clm_ml/data/sites.yaml`. Users can
+supply their own file in the same format:
+
+```yaml
+CHATS7:
+  latitude: 38.49
+  longitude: -121.84
+  pft: broadleaf_deciduous_temperate_tree
+  soil: {texture_class: silty clay loam, sand_percent: 10.0, clay_percent: 35.0,
+         organic_matter: 50.0, color_class: 15, bedrock_depth: 2.0}
+  reference_height: 23.0
+  canopy_height: 10.0
+  root_biomass: 500.0
+  leaf_area_profile_beta: [2.6, 1.3]
+  stem_area_profile_beta: [1.8, 1.3]
+  forcing_step_minutes: 30
+```
+
+`null` means "use the default", replacing the Fortran `-999` sentinel. See
+[`examples/sites_example.yaml`](examples/sites_example.yaml).
+
+### 4.5 Commands
+
+```bash
+clm-ml run run.yaml
+clm-ml run run.yaml --set model.physics.stomatal_conductance=medlyn --set time.end=2007-05-08
+clm-ml check run.yaml                    # validate all files, report layer counts, no run
+clm-ml convert nl.CHATS7.1day -o chats7/ # namelist -> run.yaml, model.yaml, params.yaml
+clm-ml-offline < nl.CHATS7.1day          # legacy entry point, kept during transition
+```
+
+---
+
+## 5. Python API (summary)
+
+Full signatures are in [`api_sketch.py`](api_sketch.py).
 
 ```python
-def loss(params):
+import clm_ml
+
+run = clm_ml.load_run("run.yaml")      # reads and validates run + model + params + sites, loads forcing
+result = run.execute()                 # same as `clm-ml run run.yaml`
+ds = result.to_xarray()                # dims (time, site, layer, ...), with units
+```
+
+Gradients with respect to parameters, forcing and initial state:
+
+```python
+model, params, forcing, state0 = run.model, run.params, run.forcing, run.initial_state
+
+def loss(params, forcing, state0):
     out = model.run(state0, forcing, params)
     return jnp.mean((out.latent_heat_flux - obs_lh) ** 2)
 
-grads = jax.grad(loss)(params)          # gradient w.r.t. every parameter
-print(grads.vcmax25, grads.g1_medlyn)
+g_params, g_forcing, g_state = jax.grad(loss, argnums=(0, 1, 2))(params, forcing, state0)
+g_params.vcmax25          # shape (n_pft,): gradient per plant functional type
+g_forcing.air_temperature # shape (time, site)
 ```
 
-Ensembles and sensitivity analysis:
+Ensembles:
 
 ```python
-params_batch = clmml.perturb(params, vcmax25=jnp.linspace(60, 140, 32))
-lh = jax.vmap(lambda p: model.run(state0, forcing, p).latent_heat_flux)(params_batch)
+batch = clm_ml.perturb(params, pft="broadleaf_deciduous_temperate_tree",
+                       vcmax25=jnp.linspace(60, 140, 32))
+lh = jax.vmap(lambda p: model.run(state0, forcing, p).latent_heat_flux)(batch)  # (32, time, site)
 ```
 
-Advanced use (custom loops, data assimilation, coupling):
+Changing settings in Python without editing files:
 
 ```python
-state, out_t = model.step(state, forcing.at_step(t), params)
-```
-
-Backward compatibility for existing workflows:
-
-```bash
-clm-ml-offline input_files/nl.CHATS7.1day          # still works, now built on the new API
-```
-
-```python
-config, site, files = clmml.legacy.from_namelist("nl.CHATS7.1day")
+params = params.set("broadleaf_deciduous_temperate_tree", vcmax25=110.0)
+model = clm_ml.Model(model.config.replace(integrator="rk2_midpoint"), model.sites)
 ```
 
 ---
 
-## 5. Target architecture
+## 6. Target architecture
 
-### 5.1 Package layout
+### 6.1 Package layout
 
 ```
-src/clmml/
-  __init__.py            # public API re-exports (Model, Config, Site, Params, ...)
-  model.py               # Model: initial_state, step, run
-  config.py              # Config (frozen dataclass, string-valued scheme choices)
-  site.py                # Site, built-in tower registry (data/towers.csv)
-  layers.py              # Layers: canopy vertical discretization (from MLinitVerticalMod)
-  params.py              # Params pytree, PFT defaults, presets, perturb()
-  forcing.py             # Forcing pytree, load_tower_forcing, time interpolation
+src/clm_ml/
+  __init__.py            # public API (load_run, Model, ModelConfig, Params, ...)
+  run.py                 # Run: load_run(), execute()
+  model.py               # Model: initial_state, step, run (scan over time, vmap over sites)
+  config.py              # ModelConfig + YAML loading/validation
+  sites.py               # Sites + registry
+  layers.py              # Layers: fixed-size vertical grid + masks (from MLinitVerticalMod)
+  params.py              # Params (per-PFT table), YAML loading, extends/overrides, perturb()
+  forcing.py             # Forcing, loaders, time interpolation
   state.py               # CanopyState, SoilState, State
-  outputs.py             # Outputs pytree, to_xarray, write_legacy_ascii, variable metadata
-  constants.py           # physical constants (from clm_varcon / MLclm_varcon)
-  physics/
-    __init__.py          # process registry: name -> implementation
-    solar_radiation.py   # norman, two_stream
-    longwave.py
-    turbulence.py        # Harman & Finnigan RSL, flux-profile solution
-    leaf_boundary_layer.py
-    photosynthesis.py    # Farquhar + stomatal conductance variants (medlyn, ball_berry, wue)
-    plant_hydraulics.py
-    canopy_water.py      # interception, wetted fraction, evaporation
-    soil.py              # soil fluxes, thermal properties, soil temperature
-    integrators.py       # Euler / RK2 / RK3 / RK4 tables
-    math.py              # tridiagonal, quadratic, beta distribution, ...
-  legacy/
-    namelist.py          # from_namelist(): .nl file -> (Config, Site, files)
-    ascii_output.py      # bit-compatible .out writers
-  cli.py                 # clm-ml-offline entry point
-  data/towers.csv        # site table (moved out of TowerDataMod.py)
+  outputs.py             # Outputs, to_xarray, netCDF / legacy ASCII writers, variable metadata
+  constants.py
+  physics/               # one-column, mask-aware processes
+    solar_radiation.py  longwave.py  turbulence.py  leaf_boundary_layer.py
+    photosynthesis.py   plant_hydraulics.py  canopy_water.py  soil.py
+    integrators.py      math.py
+  io/
+    yaml_schema.py       # shared validation helpers, error formatting
+    netcdf.py
+    legacy.py            # namelist converter, Fortran option-code table, .out writers
+  cli.py                 # `clm-ml run|check|convert`
+  data/
+    sites.yaml           # built-in towers (moved from TowerDataMod.py)
+    params/clm5_defaults.yaml
+    rsl_lookup_tables/psihat.nc
 ```
 
 The existing packages (`clm_src_*`, `multilayer_canopy`, `offline_driver`, …) stay in place during
-the transition. The new API calls into them through adapters. Each process moves into
-`clmml/physics/` as it is refactored, and old modules are deleted only when nothing imports them.
+the transition, and the new API calls into them through adapters. Each process moves into
+`clm_ml/physics/` as it is refactored, and old modules are deleted only when nothing imports them.
 
-### 5.2 One time step
+### 6.2 One time step (for one column)
 
-Today, one 30-minute CLM step runs `clm_drv` followed by `MLCanopyFluxes`. The new structure keeps
-the same science order, but each box is a pure function:
+The science order is the same as today. Each box is a pure function:
 
 ```
-step(state, forcing_window, params)            # one 30-min tower step
+step(state, forcing_window, params_for_this_site, layers_for_this_site)
  ├─ interpolate prescribed CLM veg/soil data at this step     (was clmData)
- ├─ soil_properties(state.soil, ...)                          (SoilAlbedo, calc_soilevap_resis,
+ ├─ soil_properties(...)                                      (SoilAlbedo, calc_soilevap_resis,
  │                                                             SoilThermProp, SoilWater)
  ├─ canopy_setup(...)                                         (PAD profiles, SoilResistance,
  │                                                             PlantResistance, LeafHeatCapacity)
- ├─ scan over 6 x 300 s sub-steps:                            (one path; was two)
- │    ├─ atm_forcing = interpolate(forcing_window, t_sub)     (GetAtmForcing, met_type 3)
+ ├─ scan over sub-steps (e.g. 6 x 300 s):                     (one path; was two)
+ │    ├─ atm_forcing = interpolate(forcing_window, t_sub)     (GetAtmForcing)
  │    ├─ solar_radiation[config.solar_radiation]
  │    ├─ nitrogen_profile
  │    └─ integrator[config.integrator]: for each RK stage
  │         wetted_fraction → longwave → turbulence → leaf_boundary_layer
  │         → photosynthesis(sun, shade) → flux_profile_solution
  │         → leaf_water_potential → interception/evaporation
- ├─ average sub-step fluxes                                   (_MLAccumulateFluxes/_MLScaleAndWriteBack)
+ ├─ average sub-step fluxes
  ├─ canopy diagnostics                                        (always computed now)
  └─ soil_temperature(...)
 returns (new_state, outputs_t)
 ```
 
-`forcing_window` contains the previous, current and next tower records. That removes the need to
-carry `*_bef/_cur/_next` forcing copies in model state.
+`Model.run` wraps this as follows:
 
-### 5.3 Static vs traced: what can change without recompiling
+```
+scan over time:                       # carry = State (site, ...)
+    vmap over sites:
+        step(state[s], forcing_window[:, s], params.for_sites(pft)[s], layers[s])
+```
 
-Changing any of these **recompiles** (they are static): `Config`, the `Site` structure, `Layers`
-(number of canopy layers), and run length.
+`forcing_window` holds the previous, current and next tower records. That removes the
+`*_bef/_cur/_next` forcing copies from model state.
 
-Changing any of these does **not** recompile, and all are differentiable: `Params`, `Forcing`
-values, and the initial `State`.
+### 6.3 Static vs traced: what can change without recompiling
+
+These **recompile** (they are static): anything in `model.yaml` (including `max_layers`), the
+number of sites, and the number of time steps.
+
+These do **not** recompile, and all are differentiable: parameter values, forcing values, and
+initial state. Site properties (heights, soil texture, PFT) are also arrays and can change without
+recompiling, provided every site still fits within `max_layers`. PFT indices and layer masks are
+integers and booleans, so they are not differentiated.
 
 This replaces today's `DIFFERENTIABLE_MODE` flag and `GridInfo` workaround with a single rule.
 
-### 5.4 Process interface
+### 6.4 Fixed layers and masks
 
-Each process is a plain function with the same signature:
+- `Layers` is computed per site at load time, with the same algorithm as `MLinitVerticalMod`.
+  It is then **padded to `max_layers`**.
+- Fields (each per site): `n_layers` (int), `top_leaf_layer`/`bottom_leaf_layer` (int),
+  `heights`/`thickness` `(max_layers,)`, `is_air_layer` `(max_layers,)` bool, and
+  `has_leaf` `(max_layers,)` bool.
+- **Padding rule.** Padded layers sit above the domain top. They have zero thickness and zero
+  plant area, are excluded from every sum, and are identity rows in the tridiagonal systems. So
+  a padded single site gives the same answer as the unpadded run. The regression test checks this.
+- If any site needs more than `max_layers`, `clm-ml check`/`load_run` fails with a message giving
+  the site, the layers needed, and the configured maximum.
+- **Cost.** Short canopies compute on unused layers. If this matters for global runs, a later
+  optimization can group sites into buckets with similar layer counts, each compiled separately.
+
+### 6.5 Parameters by PFT
+
+- `Params` fields have shape `(n_pft,)`, or `(n_pft, 2)` for spectral optics. PFT order is fixed
+  by the defaults file (CLM ordering, `not_vegetated` = 0).
+- `params.for_sites(sites.pft)` returns per-site values with shape `(n_site,)`. The physics only
+  ever sees per-site values.
+- Includes both today's `MLpftcon` fields and the CLM `pftcon` fields the canopy model uses (leaf
+  dimension, leaf angle, leaf/stem optics, root profile, SLA, C3/C4 flag). The C3/C4 flag is a
+  model structure choice, so it is stored as an integer and is not differentiated.
+- **Future extension** (not in this plan): allow a parameter to vary per site or per grid cell
+  through a netCDF override file. The `for_sites` gather is the single place that would change.
+
+### 6.6 Process interface
+
+Each process is a plain function on one column:
 
 ```python
-def process(state: StepState, inputs: StepInputs, params: Params, layers: Layers,
-            config: Config) -> StepState
+def process(step: StepState, inputs: StepInputs, params: SiteParams, layers: SiteLayers,
+            config: ModelConfig) -> StepState
 ```
 
-- `StepState` is the working state inside a sub-step (prognostic state plus intermediate fluxes).
-- Scheme variants are registered by name, for example
+- Variants are registered by name, for example
   `SOLAR_RADIATION = {"norman": norman, "two_stream": two_stream}`.
-  `Config(solar_radiation="two_stream")` selects one.
-- Each process declares in its docstring which fields it **reads** and which it **writes**. A
-  test checks the declared write set against what actually changes (a light version of jax-gcm's
-  `requires`/`provides` validation).
+  `model.yaml` selects one.
+- Each process's docstring declares which fields it **reads** and **writes**. A test checks the
+  declared write set against what actually changes.
 
-**Why not full jax-gcm-style composable terms?** jax-gcm needs to mix and match dozens of
-schemes across several physics packages. This model has one fixed process order with a few
-variant choices per process. A name-to-function registry gives most of the benefit with much less
-machinery. If arbitrary user-supplied process lists become a goal later, the registry can be
-upgraded without changing the public API.
+**Why not full jax-gcm-style composable terms?** This model has one fixed process order with a
+few variant choices per process, so a name-to-function registry gives most of the benefit with
+much less machinery. It can be upgraded later without changing the YAML or the public API.
 
-### 5.5 Arrays and indexing
+### 6.7 Errors and checks
 
-- 0-based indexing, with no unused slot 0.
-- No patch dimension. A `Model` simulates one column. Multiple sites or ensembles use
-  `jax.vmap`.
-- Canopy profiles have shape `(n_layers,)`. Leaf arrays have shape `(n_layers, 2)`, where the
-  last axis is `[sunlit, shaded]`. Spectral arrays have a trailing `(2,)` axis for `[vis, nir]`.
-- Layers without vegetation are handled with a mask array (`layers.has_leaf`) instead of
-  `ntop`/`nbot` loop bounds. This removes the Python loops over layers and filters.
-
-### 5.6 Errors and checks
-
-`endrun` calls inside traced code cannot raise errors under `jit`. They will be replaced by:
-
-- Input validation in constructors (for example, `Config` rejects
-  `substep_seconds` that does not divide 1800).
-- An opt-in `model.run(..., check=True)` using `jax.experimental.checkify` for runtime checks
-  such as energy-balance closure and NaN detection.
-- Energy- and water-balance error diagnostics included in `Outputs` by default.
+- Load-time validation of all YAML. Errors name the file, key, bad value and allowed values.
+- `clm-ml check` validates everything and prints a summary (sites, PFTs, layer counts, run
+  length, estimated memory) without running.
+- `endrun` calls inside traced code are replaced by an opt-in `check: true` mode using
+  `jax.experimental.checkify` (for NaNs and balance errors).
+- Energy- and water-balance errors are included in `Outputs` by default.
 
 ---
 
-## 6. Migration plan
+## 7. Migration plan
 
 Each phase ends with all tests passing and a mergeable PR. **The model must give the same answer
-at the end of every phase**, so if something breaks, we know which phase caused it.
+at the end of every phase.**
 
-### Phase 0: Safety net (before any refactoring)
+### Phase 0: Safety net
 
-- **Add an end-to-end regression test against the current JAX output**, at tight tolerance
-  (proposed `rtol=1e-10`). Use the existing `nl.CHATS7.50steps` namelist. Commit the reference
-  output as `.npz`. The Fortran comparison (2.5%) is too loose to catch refactoring mistakes. This
-  test is the main guardrail for the rest of the plan.
-- Fix `requires-python`. JAX ≥ 0.4.30 requires Python ≥ 3.10 (the local environment has JAX
-  0.6.2). Proposed minimum: Python 3.10 (see question 5).
-- Move `netCDF4` from dev to runtime dependencies (the loaders need it). Add `xarray`.
-- Record a baseline benchmark: compile time and wall time per simulated day on CPU and on GPU.
+- **Add an end-to-end regression test against the current JAX output** at tight tolerance
+  (proposed `rtol=1e-10`). Use `nl.CHATS7.50steps` and commit the reference output as `.npz`. The
+  Fortran comparison (2.5%) is too loose to catch refactoring mistakes.
+- Fix `requires-python` (current JAX needs ≥ 3.10). Add `pyyaml` and `xarray`, and move
+  `netCDF4` to runtime dependencies.
+- Record a baseline benchmark: compile time and wall time per simulated day on CPU and GPU.
 
-**Done when:** the regression test passes on `main`, and benchmark numbers are recorded in
-`docs/design/benchmarks.md`.
+**Done when:** the regression test passes on `main`, and benchmark numbers are recorded.
 
-### Phase 1: New API as a wrapper (no physics changes)
+### Phase 1: Configuration files and the new API as a wrapper (no physics changes)
 
-- Create `src/clmml/` with `Config`, `Site`, `Params`, `Forcing`, `Outputs` and `Model` exactly
-  as in `api_sketch.py`.
-- Internally, `Model.run` translates the new objects into the existing globals, calls the existing
-  driver step by step, and collects outputs into arrays instead of files.
-- `Outputs.to_xarray()` attaches names, units and long names, derived from the variables written
-  to the six `.out` files.
-- `write_legacy_ascii()` reproduces the six files byte-for-byte.
-- Rewrite the `clm-ml-offline` CLI on top of `clmml.legacy.from_namelist` and `Model.run`.
-- Move the tower site table from `TowerDataMod.py` to `data/towers.csv`.
+- Create `src/clm_ml/` with `ModelConfig`, `Sites`, `Params`, `Run`, the YAML loaders and
+  validation, and the CLI (`run`, `check`, `convert`).
+- Write `data/params/clm5_defaults.yaml` from `MLpftconMod`/`pftconMod`, and
+  `data/sites.yaml` from `TowerDataMod`. Add a test that the YAML values equal the current Python
+  tables exactly.
+- `Run.execute()` translates the new objects into the existing globals, calls the existing driver,
+  and collects outputs into arrays. It writes netCDF (with names and units) and/or the legacy
+  `.out` files byte-for-byte.
+- In this phase, **one site per run**. Multi-site `run.yaml` files are validated but rejected
+  with a clear "not yet supported" error.
+- `clm-ml convert` turns every namelist in `offline_executable/` into YAML, and a test runs each
+  converted set.
 
-**Done when:** the CLI produces identical files, the regression test passes through the new API,
-and a short tutorial notebook runs. At this point, users already get the new interface.
+**Done when:** `clm-ml run` on the converted CHATS7 files gives identical output to
+`clm-ml-offline`, the regression test passes, and a tutorial notebook runs.
 
 ### Phase 2: Forcing and time become data
 
-- `load_tower_forcing` reads all required tower and CLM-history records into one `Forcing` pytree
-  before the run, including derived quantities (solar zenith angle, CO₂, emissivity).
-- Replace the `clm_time_manager` globals with time arrays in `Forcing`: calendar day, seconds of
-  day, and sub-step offsets.
-- Remove the start-date "hack" in `CLMml_drv`. The CLM-history time index is computed once in the
-  loader.
-- Remove `*_bef/_cur/_next` forcing fields from the state. The step receives a three-record
-  forcing window instead.
+- The loaders read all tower and CLM-history records into a `Forcing` pytree before the run,
+  including derived quantities (solar zenith angle, CO₂, emissivity). Shape is
+  `(time, site, …)`, already with the site axis (size 1 for now).
+- Replace the `clm_time_manager` globals with time arrays. Remove the start-date "hack".
+- Remove `*_bef/_cur/_next` forcing fields from the state, in favor of the forcing window.
 
-**Done when:** no file is opened during `run`, and the regression test passes.
+**Done when:** no file is opened during the run, and the regression test passes.
 
 ### Phase 3: Explicit state and a pure `step`
 
-- Define `State` (`CanopyState`, `SoilState`) with only the prognostic variables. Identify them by
-  listing what `_copy_bef_state`, `RungeKuttaUpdate` and `SoilTemperature` carry across steps.
-- Write `Model.step(state, forcing_window, params) -> (state, outputs)`. Internally it unpacks
-  into the existing `*_inst` objects (an adapter), calls `clm_drv`'s physics sequence, and packs
-  the results back. **No module globals are read or written.**
-- Delete `clm_instMod` globals, `global filter`, `DIFFERENTIABLE_MODE` and the non-diff/diff
-  branching in `MLCanopyFluxes`. Keep one path based on `lax.scan`. Diagnostics are computed in
-  that path too.
-- Move first-step initialization (`ml_vert_init`, `zref == spval` checks, RK coefficient globals)
-  into `Model.__init__` and `initial_state`.
-- Replace `vcmaxpft_jax`/`g1_MED_jax` threading with `Params` passed everywhere.
+- Define `State` (`CanopyState`, `SoilState`) with only the prognostic variables, shape
+  `(site, max_layers, …)`. Find the prognostic fields by recording which `mlcanopy_type` fields are
+  read before they are written in a step. The adapter slices the padded arrays down to the
+  site's `n_layers` for the old code.
+- Write `Model.step` for one column. Internally it unpacks into the existing `*_inst` objects,
+  calls the existing physics sequence, and packs the results back. **No module globals are read
+  or written.**
+- Delete the `clm_instMod` globals, `global filter`, `DIFFERENTIABLE_MODE`, and the
+  non-diff/diff branching in `MLCanopyFluxes`. Keep one path based on `lax.scan`.
+- Move first-step initialization (`ml_vert_init`, RK coefficient globals) into `Model` and
+  `initial_state`.
+- Pass `Params` everywhere, replacing the `vcmaxpft_jax`/`g1_MED_jax` threading.
 
-**Done when:** `jax.grad` works through `step` with respect to any `Params` field, the regression
-test passes, and `grep -r "global "` in `src/` returns nothing in the run path.
+**Done when:** `jax.grad` works with respect to `Params`, `Forcing` and `State`, the regression
+test passes, and no `global` statement remains in the run path.
 
-### Phase 4: Whole-run compilation
+### Phase 4: Whole-run compilation (single site)
 
-- `Model.run` = `jax.jit(lax.scan(step, ...))` over all tower steps. Apply `jax.checkpoint`
-  (rematerialization) on the step for memory-efficient gradients, keeping the current
-  `CLM_ML_NO_CHECKPOINT`-style opt-out as a `Config` option.
-- Add `Outputs` selection (`model.run(..., outputs=[...])`) so long runs do not store every
-  profile.
-- Add chunked runs for long simulations (for example, one month at a time, carrying `State`).
-- Benchmark against the Phase 0 baseline. Watch compile time in particular: `main.py` notes
-  ~290 s today.
+- `Model.run` = `jit(scan(step))` over all time steps, with `jax.checkpoint` on the step.
+- Output selection and output frequency (`output.variables`, `output.frequency`). Averaging to
+  hourly/daily happens inside the scan, so long runs don't store every step.
+- Chunked runs and restart files (`initial_conditions.source: restart`).
+- `vmap` over a **parameter ensemble** at one site.
+- Benchmark against Phase 0. Watch compile time in particular (`main.py` notes ~290 s today).
 
-**Done when:** a 1-day and a 31-day run are each one compiled call, `vmap` over a 32-member
-parameter ensemble works, and benchmark results are recorded.
+**Done when:** 1-day and 31-day runs are each one compiled call, a 32-member ensemble works, and
+benchmark results are recorded.
 
-### Phase 5: Process interface and parameters
+### Phase 5: Mask-aware, one-column processes
 
-- Move each process from `multilayer_canopy/ML*Mod.py` into `clmml/physics/` behind the uniform
-  interface (§5.4), one PR per process. Suggested order, simplest first: math utilities →
-  water vapor/constants → leaf heat capacity → canopy water → longwave → solar radiation → leaf
-  boundary layer → plant hydraulics → photosynthesis/stomata → turbulence/flux-profile → soil.
-- Turn integer option codes into named choices (`gs_type=2` → `"wue"`). Keep a mapping table in
-  `clmml.legacy` for namelists.
-- Define `Params` fields with names, units, valid ranges and per-PFT defaults. Presets
-  (`"default"`, `"chats"`) replace `pftcon_val`.
-- Move the routine-level golden tests to call the new functions. Keep the JSON golden files
-  unchanged.
+This phase is what enables multi-site runs. The old internals use `ncan`/`ntop`/`nbot` as Python
+loop bounds, so sites with different layer counts cannot be batched until each process is
+rewritten to use masks.
 
-**Done when:** `multilayer_canopy/` is no longer imported by the run path, all golden tests pass
-against the new functions, and the regression test passes.
+- Move each process from `multilayer_canopy/ML*Mod.py` into `clm_ml/physics/`, one PR per process.
+  Each one is rewritten to work on one column with `(max_layers,)` arrays and masks, 0-based
+  indexing, and no patch dimension.
+- Suggested order, simplest first: math utilities (make the tridiagonal solver padding-safe) →
+  water vapor → leaf heat capacity → canopy water → longwave → solar radiation → leaf boundary
+  layer → plant hydraulics → photosynthesis/stomata → turbulence/flux-profile → soil.
+- Each PR passes three tests: the golden tests for that routine (with the JSON files unchanged),
+  the end-to-end regression test, and a **padding test** (the same site run with `max_layers` at
+  its exact layer count and at 2×; results must agree).
 
-### Phase 6: Internal cleanup
+**Done when:** `multilayer_canopy/` is no longer imported by the run path, and all three kinds of
+tests pass.
 
-- Convert to 0-based indexing, remove the patch dimension, and use masks instead of
-  `ntop`/`nbot` loops (§5.5). Do one process at a time, behind the regression test.
+### Phase 6: Multi-site runs
+
+- Turn on `vmap` over the site axis. Remove the "one site per run" restriction from Phase 1.
+- Load forcing for several towers (the `{site}` placeholders in file paths).
+- Multi-site test: running CHATS7 and US-UMB together must match running each alone.
+- Device sharding over the site axis (`jax.sharding`) so large site counts spread across GPUs.
+  Benchmark sites per second on one GPU.
+- Document how a gridded/global run will plug in (a `domain.type: grid` loader that builds
+  `Sites` and `Forcing` from gridded datasets). Implementing it is the follow-on project.
+
+**Done when:** a multi-site run matches single-site runs, and sharding works on a multi-GPU
+machine (or on CPU with simulated devices in CI).
+
+### Phase 7: Cleanup
+
 - Delete unused Fortran-mirroring modules: `clm_src_cpl`, `decompMod`, `spmdMod`, `ncdio_pio`,
   `histFileMod`, `restUtilMod`, duplicated `cime_src_share_util`/`clm_share`, and the remaining
   `*Type.py` containers.
-- Move data files out of `src/` (`input_files/`, `output_files/`, `rsl_lookup_tables/`). Package
-  lookup tables via `importlib.resources`. Keep example data under `examples/data/`.
-- Fix the duplicated `src/pyproject.toml` and `src/pytest.ini`.
+- Move data files out of `src/`. Package lookup tables via `importlib.resources`. Keep example
+  data under `examples/data/`.
+- Remove the duplicated `src/pyproject.toml` and `src/pytest.ini`.
+- Retire `clm-ml-offline` in favor of `clm-ml convert` + `clm-ml run` (see §8, question 4).
 
-**Done when:** `src/` contains only `clmml/`, and the regression and golden tests pass.
+**Done when:** `src/` contains only `clm_ml/`, and all tests pass.
 
-### Phase 7: Documentation and release
+### Phase 8: Documentation and release
 
-- A getting-started guide, a gradient-calibration example, an ensemble example, and a
-  "for Fortran CLM-ml users" page mapping old names and options to the new ones.
+- A getting-started guide (YAML-first), a full reference for every YAML key (generated from the
+  dataclasses so it can't drift), a gradient-calibration example, an ensemble example, a
+  multi-site example, and a "for Fortran CLM-ml users" page mapping namelist keys and option
+  codes to YAML.
 - An API reference generated from docstrings.
 - Update `CONTRIBUTING.md`: "add a process variant" replaces "mirror the Fortran module".
-- Version 1.0.0. The `clm-ml-offline` CLI and namelist support remain for compatibility.
+- Version 1.0.0.
 
 ### Rough effort
 
 | Phase | Size | Notes |
 |---|---|---|
-| 0 | Small | Mostly test and config work |
-| 1 | Medium | Mostly new code. It touches no physics. |
+| 0 | Small | Tests and packaging |
+| 1 | Medium | YAML schema, loaders, CLI, converter. No physics changes. |
 | 2 | Medium | The 3-point interpolation needs care |
-| 3 | Large | The hardest phase. Untangling `mlcanopy_type` state from scratch fields. |
+| 3 | Large | Untangling `mlcanopy_type` state from scratch fields |
 | 4 | Small to medium | Mostly benchmarking and compile-time tuning |
-| 5 | Large | Many small PRs. Can be parallelized. |
-| 6 | Medium | Mechanical, but touches everything |
-| 7 | Small to medium | |
+| 5 | Large | The biggest phase. Many small PRs, which can be parallelized. |
+| 6 | Medium | Small if Phase 5 is done well |
+| 7 | Medium | Mechanical |
+| 8 | Small to medium | |
 
-Phases 0–1 give users the new interface quickly. Phases 2–4 deliver the speed and
-differentiability benefits. Phases 5–7 are about long-term maintainability.
-
----
-
-## 7. Decisions needed from you (please answer before Phase 0)
-
-1. **Package/import name.** I propose `clmml` (`import clmml`) and keeping `clm-ml-jax` as the
-   distribution name. Alternatives: `clm_ml`, `mlcanopy`.
-2. **Option names.** Should options use readable strings (`stomatal_conductance="wue"`), as
-   proposed, or keep the Fortran integer codes (`gs_type=2`)? The proposal keeps the integer codes
-   available only through `clmml.legacy`.
-3. **Multi-site runs.** Different sites have different numbers of canopy layers, which changes
-   array shapes. Do you need to `vmap` across *sites* (requiring padding to a common layer count
-   with masks)? Or is `vmap` across *parameters/ensembles* at one site enough for now? The proposal
-   assumes the latter and leaves room for the former.
-4. **Differentiable inputs.** Which quantities must gradients be available for: PFT parameters
-   only, also physical constants, forcing, or initial state? The proposal makes `Params`, `Forcing`
-   and `State` all differentiable, and keeps constants fixed.
-5. **Minimum Python version.** Python 3.10 is proposed (current JAX needs it). jax-gcm requires
-   3.11.
-6. **xarray as a required dependency?** Proposed: yes.
-7. **Legacy support lifetime.** Keep the namelist CLI and `.out` files indefinitely, or deprecate
-   them after 1.0?
-8. **Regression tolerance.** Is `rtol=1e-10` against current JAX output the right bar? XLA may
-   reorder floating-point operations when whole-run compilation is introduced (Phase 4). That
-   phase may need `1e-8`, with the Fortran comparison still passing.
-9. **Scope of the soil model.** `SoilTemperature` and the CLM soil routines currently sit outside
-   the canopy model. Should they be first-class processes, as proposed, or stay as a fixed
-   "lower boundary"?
+Milestones for users:
+- After **Phase 1**: YAML configuration and the new CLI.
+- After **Phase 4**: fast, differentiable single-site runs and ensembles.
+- After **Phase 6**: many sites at once, ready for global work.
 
 ---
 
-## 8. Risks and mitigations
+## 8. Still open (smaller decisions)
+
+1. **Minimum Python version.** 3.10 is proposed (current JAX needs it). jax-gcm uses 3.11.
+2. **Default `max_layers`.** It must cover the tallest canopy you expect. CHATS7's layer count is
+   computed in Phase 1, and the default will be set with headroom. Should global runs use a
+   different value?
+3. **Regression tolerance.** `rtol=1e-10` against current JAX output is proposed. XLA may reorder
+   floating-point operations when whole-run compilation arrives (Phase 4), so that phase may need
+   `1e-8`, with the Fortran comparison still passing.
+4. **Legacy lifetime.** Proposed: keep `clm-ml-offline` until Phase 7, and keep the namelist
+   converter permanently.
+5. **Soil model scope.** Should `SoilTemperature` and the CLM soil routines be first-class,
+   swappable processes (as proposed), or a fixed lower boundary?
+6. **Output format.** netCDF via xarray is the default. Is the legacy `.out` format needed after
+   validation is done?
+
+---
+
+## 9. Risks and mitigations
 
 | Risk | Mitigation |
 |---|---|
 | Refactoring silently changes results | Tight regression test (Phase 0) on every PR, plus the golden tests and the Fortran comparison |
-| `mlcanopy_type` mixes state and scratch fields in non-obvious ways | In Phase 3, derive the `State` field list by instrumenting one step and recording which fields are read before they are written |
-| Whole-run compilation is slow to compile (already ~290 s) | Keep the persistent compilation cache. Use `scan` (compiled once per step body), not unrolled loops. Benchmark in Phase 4. Fall back to per-step `jit` if needed. |
-| Gradient memory for month-long runs | `jax.checkpoint` on the step, chunked runs, and selectable outputs |
-| Value-dependent Python `if`s inside physics (for example, `zref == spval`) break tracing | Move them to initialization, or replace them with `jnp.where`/`lax.cond`. Most were already handled for the diff-mode path. |
-| Long-lived branch drifts from `main` | Every phase is merged on its own. No long-lived refactor branch. |
-| Contributors used to the Fortran-mirroring layout | Phase 7 mapping page. Every function keeps its `Fortran reference:` docstring line. |
+| Padding changes results (for example, padded layers leaking into solvers or sums) | Padding test in every Phase 5 PR. Identity rows in the tridiagonal solves. Masks in every reduction. |
+| `mlcanopy_type` mixes state and scratch fields in non-obvious ways | Derive `State` by recording which fields are read before being written in a step |
+| YAML files drift from the code (keys renamed, defaults changed) | The schema is generated from the dataclasses. `clm-ml check` runs in CI on every example. The key reference docs are generated from the same source. |
+| Whole-run compilation is slow to compile (already ~290 s) | Keep the persistent compilation cache. Use `scan`, not unrolled loops. Benchmark. Fall back to per-step `jit` if needed. |
+| Gradient memory for long or many-site runs | `jax.checkpoint` on the step, chunked runs, output selection and averaging inside the scan |
+| Wasted compute on padded layers in global runs | Measure in Phase 6. Group sites by layer count if needed. |
+| Value-dependent Python `if`s inside physics break tracing | Move them to initialization, or use `jnp.where`/`lax.cond`. Most were already handled for the diff-mode path. |
+| Long-lived branch drifts from `main` | Every phase is merged on its own |
 
 ---
 
-## 9. Glossary
+## 10. Glossary
 
 - **Pure function:** a function whose result depends only on its arguments, and which changes
   nothing outside itself. JAX's transformations assume this.
 - **Pytree:** any nested structure of containers (dataclasses, tuples, dicts) holding arrays. JAX
   can `jit`, `grad` and `vmap` through pytrees as a whole.
-- **Static vs traced:** *static* values (such as the layer count or a scheme choice) are fixed at
+- **Static vs traced:** *static* values (such as `max_layers` or a scheme choice) are fixed at
   compile time, and changing them triggers a recompile. *Traced* values (such as parameters or
   forcing) can change freely and can be differentiated.
-- **`lax.scan`:** JAX's compiled loop. It runs `step` repeatedly while carrying `state` forward,
-  and stacks each step's outputs.
-- **Adapter:** a thin layer that translates between the new interface and the old code. This lets
-  the inside change later without changing what users see.
+- **`lax.scan`:** JAX's compiled loop. It carries `state` forward step by step and stacks each
+  step's outputs.
+- **`vmap`:** runs a one-site (one-column) function on many sites at once, as a single batched
+  computation.
+- **Mask:** a true/false array saying which entries are real. Padded layers are false and are
+  ignored by the physics.
+- **Sharding:** splitting an array's site axis across several GPUs so each one computes a share of
+  the sites.
+- **Adapter:** a thin layer that translates between the new interface and the old code, so the
+  inside can change later without changing what users see.
 - **Regression test:** a test that checks that output has not changed compared to a saved
   reference.
