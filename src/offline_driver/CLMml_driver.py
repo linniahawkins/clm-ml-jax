@@ -1,11 +1,11 @@
 """
 JAX translation of CLMml_driver Fortran module.
 
-Top-level model driver for the CLMml (multilayer canopy) offline
-tower-site simulation. Orchestrates the full run sequence: namelist
-parsing, CLM initialization, orbital parameters, acclimation
-temperature calculation, vegetation and soil initialization, output
-file management, and the main time-stepping loop.
+Routines of the CLMml (multilayer canopy) offline tower driver:
+acclimation temperature (``init_acclim``), tower vegetation
+(``TowerVeg``), soil initialization (``SoilInit``) and the legacy ASCII
+output writer (``output``). The run sequence and time loop of Fortran
+``CLMml_drv`` are in ``offline_executable/main.py``.
 
 Original Fortran module: CLMml_driver
 Fortran lines 1-200
@@ -14,302 +14,32 @@ Fortran lines 1-200
 from __future__ import annotations
 
 import math
-import os
-from typing import IO
+from typing import IO, Sequence
 
 import jax.numpy as jnp
 
-from clm_share.shr_orb_mod import shr_orb_params  # noqa: F401
 from clm_src_biogeophys.CanopyStateType import canopystate_type  # noqa: F401
 from clm_src_biogeophys.FrictionVelocityMod import frictionvel_type  # noqa: F401
 from clm_src_biogeophys.SoilStateType import soilstate_type  # noqa: F401
 from clm_src_biogeophys.TemperatureType import temperature_type  # noqa: F401
 from clm_src_biogeophys.WaterStateBulkType import waterstatebulk_type  # noqa: F401
-from clm_src_cpl.lnd_comp_nuopc import InitializeRealize, ModelAdvance, bounds_type  # noqa: F401
 from clm_src_main import clm_instMod  # noqa: F401
-from clm_src_main.abortutils import endrun  # noqa: F401
 
 # Type imports for function signatures
 from clm_src_main.atm2lndType import atm2lnd_type  # noqa: F401
-from clm_src_main.clm_instMod import (  # noqa: F401
-    atm2lnd_inst,
-    canopystate_inst,
-    frictionvel_inst,
-    mlcanopy_inst,
-    soilstate_inst,
-    temperature_inst,
-    wateratm2lndbulk_inst,
-    waterstatebulk_inst,
-)
 from clm_src_main.clm_varctl import iulog  # noqa: F401
-from clm_src_main.filterMod import filter, setFilters  # noqa: F401
 from clm_src_main.PatchType import patch  # noqa: F401
 from clm_src_main.wateratm2lndBulkType import wateratm2lndbulk_type  # noqa: F401
-from clm_src_utils import clm_time_manager  # noqa: F401
-from clm_src_utils.clm_time_manager import (  # noqa: F401
-    curr_date_tod,
-    dtstep,
-    get_curr_calday,
-    get_curr_date,
-    get_curr_time,
-    itim,
-    start_date_tod,
-    start_date_ymd,
-)
-from clm_src_utils.clm_varorb import eccen, lambm0, mvelpp, obliqr  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
-from multilayer_canopy.MLclm_varctl import flux_profile_type, met_type  # noqa: F401
-from offline_driver.controlMod import control  # noqa: F401
-from offline_driver.TowerDataMod import tower_id, tower_num  # noqa: F401
-from offline_driver.TowerMetMod import TowerMetCurr, TowerMetNext  # noqa: F401
+from offline_driver.TowerMetMod import TowerMet, TowerMetCurr, TowerMetNext  # noqa: F401
 
 # ---------------------------------------------------------------------------
-# Public entry point
+# Driver routines
 # ---------------------------------------------------------------------------
-
-
-def CLMml_drv(bounds: bounds_type) -> None:
-    """
-    Top-level model driver: process one tower site and year.
-
-    Mirrors Fortran subroutine ``CLMml_drv`` (lines 30-185).
-
-    Execution sequence
-    ------------------
-    1. Parse namelist run control variables via :func:`controlMod.control`.
-    2. Extract year/month/day from ``start_date_ymd`` and log the
-       tower site being processed.
-    3. Initialize CLM via :func:`InitializeRealize` and build filters.
-    4. Compute orbital parameters for the current year.
-    5. Read tower meteorology once to derive the acclimation temperature
-       (:func:`init_acclim`).
-    6. Initialize tower vegetation (:func:`TowerVeg`).
-    7. Compute the correct CLM history file time slice index and
-       initialize soil temperature and moisture (:func:`SoilInit`).
-    8. Open six ASCII output files (flux, auxiliary, profile, sun/shade
-       flux, vertical flux profile, soil temperature) and optionally
-       an ASCII profile input file.
-    9. Run the main time-stepping loop (``itim = 1, ntim``):
-       - Update date/time bookkeeping.
-       - Recalculate CLM history file slice index.
-       - Read current-step tower meteorology (:func:`TowerMetCurr`).
-       - Optionally read next-step meteorology for 3-point interpolation
-         (:func:`TowerMetNext`, active when ``met_type == 3``).
-       - Optionally read canopy T/Q/U profile data.
-       - Advance the model (:func:`ModelAdvance`).
-       - Write output (:func:`output`).
-    10. Close and release all file handles.
-
-    Args:
-        bounds: Decomposition bounds supplying ``begp``, ``endp``,
-            ``begc``, ``endc`` for the local task.
-    """
-    # ------------------------------------------------------------------
-    # Initialize namelist run control variables — Fortran line 55
-    # ------------------------------------------------------------------
-    ntim, clm_start_ymd, clm_start_tod, fin_tower, fin_clm, fin_soil_adjust, dirout = control()
-
-    # ------------------------------------------------------------------
-    # Get current date from start_date_ymd — Fortran lines 63-65
-    # ------------------------------------------------------------------
-    clm_time_manager.itim = 1
-    yr, mon, day, _ = get_curr_date()
-
-    print(f"{iulog}: Processing: {tower_id[tower_num]} {yr} {mon}")
-
-    # ------------------------------------------------------------------
-    # Initialize CLM and build filters — Fortran lines 73-77
-    # ------------------------------------------------------------------
-    InitializeRealize(bounds)
-    setFilters(filter)
-
-    # ------------------------------------------------------------------
-    # Orbital parameters for this year — Fortran lines 80-81
-    # ------------------------------------------------------------------
-
-    obliq, mvelp = shr_orb_params(yr)  # obliq, mvelp are local (not used further)
-
-    # ------------------------------------------------------------------
-    # Acclimation temperature from full tower record — Fortran lines 84-87
-    # ------------------------------------------------------------------
-    init_acclim(
-        fin_tower,
-        tower_num,
-        ntim,
-        bounds.begp,
-        bounds.endp,
-        clm_instMod.atm2lnd_inst,
-        clm_instMod.wateratm2lndbulk_inst,
-        clm_instMod.temperature_inst,
-        clm_instMod.frictionvel_inst,
-        clm_instMod.mlcanopy_inst,
-    )
-
-    # ------------------------------------------------------------------
-    # Initialize tower vegetation — Fortran lines 91-92
-    # ------------------------------------------------------------------
-    TowerVeg(
-        tower_num,
-        bounds.begp,
-        bounds.endp,
-        clm_instMod.canopystate_inst,
-        clm_instMod.mlcanopy_inst,
-    )
-
-    # ------------------------------------------------------------------
-    # Compute CLM history file calendar day and time slice index
-    # Fortran lines 95-120
-    #
-    # NOTE: This is described as a "hack" in the Fortran source
-    # (lines 97-100). start_date_ymd/tod are temporarily overwritten
-    # with the CLM history file start date so that get_curr_calday
-    # returns the CLM file's calendar day rather than the run start.
-    # ------------------------------------------------------------------
-
-    # Save run start date/time — Fortran lines 103-104
-    run_start_date = clm_time_manager.start_date_ymd
-    run_start_tod = clm_time_manager.start_date_tod
-
-    # Temporarily set to CLM history start to compute start_calday_clm — Fortran lines 106-109
-    clm_time_manager.start_date_ymd = clm_start_ymd
-    clm_time_manager.start_date_tod = clm_start_tod
-    clm_time_manager.itim = 1
-    start_calday_clm = get_curr_calday(offset=0)
-
-    # Restore run start date/time — Fortran lines 111-112
-    clm_time_manager.start_date_ymd = run_start_date
-    clm_time_manager.start_date_tod = run_start_tod
-    clm_time_manager.itim = 1
-    curr_calday = get_curr_calday(offset=0)
-
-    # Time slice index into CLM history file — Fortran line 116
-    time_indx = round((curr_calday - start_calday_clm) * 86400.0 / float(dtstep)) + 1
-
-    # Initialize soil temperature and moisture — Fortran lines 118-120
-    SoilInit(
-        fin_clm,
-        time_indx,
-        bounds.begc,
-        bounds.endc,
-        clm_instMod.soilstate_inst,
-        clm_instMod.waterstatebulk_inst,
-        clm_instMod.temperature_inst,
-    )
-
-    # ------------------------------------------------------------------
-    # Open ASCII output files — Fortran lines 123-153
-    # Output file names follow the pattern:
-    #   {tower_id}_{yyyy}-{mm}_{tag}.out
-    # ------------------------------------------------------------------
-    tid = tower_id[tower_num]
-
-    def _outpath(tag: str) -> str:
-        """Build full output file path matching Fortran write/format."""
-        fname = f"{tid}_{yr:04d}-{mon:02d}_{tag}.out"
-        return os.path.join(dirout.strip(), fname)
-
-    fout1 = open(_outpath("flux"), "w")  # Fluxes
-    fout2 = open(_outpath("aux"), "w")  # Auxiliary data
-    fout3 = open(_outpath("profile"), "w")  # Profile data
-    fout4 = open(_outpath("fsun"), "w")  # Sun/shade fluxes
-    fout5 = open(_outpath("fluxprofile"), "w")  # Vertical flux profiles
-    fout6 = open(_outpath("soiltemp"), "w")  # Soil temperature
-
-    # ------------------------------------------------------------------
-    # Optionally open ASCII profile input file — Fortran lines 155-162
-    # ------------------------------------------------------------------
-    fin1: IO | None = None
-    if flux_profile_type == -1:
-        endrun(msg=" ERROR: flux_profile_type not supported")
-        # Lines below are unreachable; preserved from Fortran lines 157-161
-        fin1_path = "set_file_name"
-        fin1 = open(fin1_path, "r")
-
-    # ------------------------------------------------------------------
-    # Main time-stepping loop — Fortran lines 165-183
-    # ------------------------------------------------------------------
-    print(f"{iulog}: Starting time stepping loop .....")
-
-    for _itim in range(1, ntim + 1):  # Fortran: do itim = 1, ntim
-        clm_time_manager.itim = _itim
-
-        # Date, time, and calendar day — Fortran lines 171-173
-        yr, mon, day, _ = get_curr_date()
-        curr_time_day, curr_time_sec = get_curr_time()
-        curr_calday = get_curr_calday(offset=0)
-
-        # Time slice into CLM history file — Fortran line 176
-        time_indx = round((curr_calday - start_calday_clm) * 86400.0 / float(dtstep)) + 1
-
-        # Read tower meteorology for current time step — Fortran lines 178-180
-        (
-            clm_instMod.atm2lnd_inst,
-            clm_instMod.wateratm2lndbulk_inst,
-            clm_instMod.frictionvel_inst,
-        ) = TowerMetCurr(
-            fin_tower,
-            _itim,
-            tower_num,
-            bounds.begp,
-            bounds.endp,
-            clm_instMod.atm2lnd_inst,
-            clm_instMod.wateratm2lndbulk_inst,
-            clm_instMod.frictionvel_inst,
-        )
-
-        # Read next-step meteorology for 3-point interpolation — Fortran lines 182-185
-        if met_type == 3:
-            itim_next = min(_itim + 1, ntim)  # Fortran: itim_next = min(itim+1, ntim)
-            clm_instMod.mlcanopy_inst = TowerMetNext(
-                fin_tower,
-                itim_next,
-                bounds.begp,
-                bounds.endp,
-                clm_instMod.mlcanopy_inst,
-            )
-
-        # Read canopy profile data if required — Fortran line 188
-        if flux_profile_type == -1:
-            if fin1 is None:
-                endrun(msg=" ERROR: flux_profile_type -1 requires profile input file")
-            assert fin1 is not None  # Type narrowing for static analysis
-            clm_instMod.mlcanopy_inst = ReadCanopyProfiles(
-                _itim, curr_calday, fin1, clm_instMod.mlcanopy_inst
-            )
-
-        # Advance the model — Fortran lines 190-192
-        ModelAdvance(bounds, time_indx, fin_clm, fin_soil_adjust)
-        if _itim == 1:
-            print(f"{iulog}: Executing model .....")
-
-        # Write output — Fortran lines 194-196
-        output(
-            curr_calday,
-            tower_num,
-            fout1,
-            fout2,
-            fout3,
-            fout4,
-            fout5,
-            fout6,
-            clm_instMod.mlcanopy_inst,
-            clm_instMod.temperature_inst,
-        )
-
-    # ------------------------------------------------------------------
-    # Close output and input files — Fortran lines 198-209
-    # ------------------------------------------------------------------
-    for fh in (fout1, fout2, fout3, fout4, fout5, fout6):
-        fh.close()
-
-    if flux_profile_type == -1 and fin1 is not None:
-        fin1.close()
-
-    print(f"{iulog}: Successfully finished simulation")
 
 
 def init_acclim(
-    fin: str,
+    mets: Sequence[TowerMet],
     tower_num: int,
     ntim: int,
     begp: int,
@@ -339,7 +69,8 @@ def init_acclim(
     profiles from an external dataset.
 
     Args:
-        fin: Path to the tower meteorology netCDF file.
+        mets: Derived tower forcing for every time step (read once, before
+            the time loop; see ``TowerMetMod.read_tower_met_series``).
         tower_num: Tower site index into ``TowerDataMod`` arrays.
         ntim: Total number of time slices to process.
         begp: First patch index.
@@ -377,8 +108,7 @@ def init_acclim(
 
         # Read temperature for this time slice — Fortran lines: call TowerMetCurr(...)
         atm2lnd_inst, wateratm2lndbulk_inst, frictionvel_inst = TowerMetCurr(
-            fin,
-            _itim,
+            mets[_itim - 1],
             tower_num,
             begp,
             endp,

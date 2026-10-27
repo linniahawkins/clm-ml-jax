@@ -1,17 +1,18 @@
 """
 JAX translation of clmDataMod Fortran module.
 
-Read CLM forcing data for tower sites. Provides routines to load leaf
-and stem area indices, volumetric soil moisture, and optional soil
-moisture adjustment factors from CLM netCDF history files, then derive
-liquid water and ice content for each soil layer.
+Read CLM forcing data for tower sites: leaf and stem area indices,
+volumetric soil moisture, and optional soil moisture adjustment factors
+from CLM netCDF history files. The records a run needs are read once
+before the time loop (:func:`read_clm_history_series`); :func:`clmData`
+installs one record and derives liquid water and ice content for each
+soil layer.
 
 Original Fortran module: clmDataMod
 Fortran lines 1-250
 """
 
-import atexit
-from typing import Dict
+from typing import Dict, Iterable, NamedTuple, Optional
 
 import jax.numpy as jnp
 import netCDF4 as nc  # noqa: F401
@@ -27,33 +28,40 @@ from clm_src_main.clm_varpar import nlevgrnd, nlevsoi  # noqa: F401
 from clm_src_main.ColumnType import col  # noqa: F401
 from offline_driver.clmSoilOptionMod import clm_phys, nlev_soil_adjust  # noqa: F401
 
-# ---------------------------------------------------------------------------
-# NetCDF dataset cache
-# ---------------------------------------------------------------------------
 
-_NC_DATASET_CACHE: Dict[str, nc.Dataset] = {}
+class ClmHistoryRecord(NamedTuple):
+    """One time slice of the CLM history (and soil adjustment) files, as read."""
 
-
-def _get_cached_dataset(ncfilename: str) -> nc.Dataset:
-    """Return an open netCDF dataset handle, opening it once per file path."""
-    ds = _NC_DATASET_CACHE.get(ncfilename)
-    if ds is None:
-        ds = nc.Dataset(ncfilename, "r")
-        _NC_DATASET_CACHE[ncfilename] = ds
-    return ds
+    elai: float  # Leaf area index (m2/m2)
+    esai: float  # Stem area index (m2/m2)
+    h2osoi_clm45: Array  # (nlevgrnd,) volumetric soil water; spval unless clm_phys == CLM4_5
+    h2osoi_clm50: Array  # (nlevsoi,) volumetric soil water; spval unless clm_phys == CLM5_0
+    h2osoi_factor: Optional[float]  # soil moisture adjustment factor (None if not used)
 
 
-def close_cached_datasets() -> None:
-    """Close and clear all cached netCDF datasets for this module."""
-    for ds in _NC_DATASET_CACHE.values():
-        try:
-            ds.close()
-        except Exception:
-            pass
-    _NC_DATASET_CACHE.clear()
+def read_clm_history_series(
+    fin_clm: str, fin_soil_adjust: str, strts: Iterable[int]
+) -> Dict[int, ClmHistoryRecord]:
+    """
+    Read the CLM history records for the given 1-based time slices.
 
-
-atexit.register(close_cached_datasets)
+    Same variables and conversions as the per-step readers (Fortran
+    ``readCLMveg``, ``readCLMsoil``, ``readSoilWatFactor``), read once for the
+    whole run so that no file is opened inside the time loop.
+    """
+    records = {}
+    adjust = nc.Dataset(fin_soil_adjust, "r") if nlev_soil_adjust > 0 else None
+    try:
+        with nc.Dataset(fin_clm, "r") as ds:
+            for strt in sorted(set(strts)):
+                elai, esai = readCLMveg(ds, strt)
+                h2osoi_clm45, h2osoi_clm50 = readCLMsoil(ds, strt)
+                factor = readSoilWatFactor(adjust, strt) if adjust is not None else None
+                records[strt] = ClmHistoryRecord(elai, esai, h2osoi_clm45, h2osoi_clm50, factor)
+    finally:
+        if adjust is not None:
+            adjust.close()
+    return records
 
 
 # ---------------------------------------------------------------------------
@@ -62,9 +70,7 @@ atexit.register(close_cached_datasets)
 
 
 def clmData(
-    fin_clm: str,
-    fin_soil_adjust: str,
-    strt: int,
+    record: ClmHistoryRecord,
     begp: int,
     endp: int,
     begc: int,
@@ -94,10 +100,9 @@ def clmData(
     - ``h2osoi_ice_col``: set to zero for all layers.
 
     Args:
-        fin_clm: Path to the CLM netCDF history file.
-        fin_soil_adjust: Path to the soil moisture adjustment netCDF
-            file (ignored when ``nlev_soil_adjust == 0``).
-        strt: 1-based time slice index into the netCDF file.
+        record: CLM history values for this time step (from
+            :func:`read_clm_history_series`); its soil moisture adjustment
+            factor is used only when ``nlev_soil_adjust > 0``.
         begp: First patch index.
         endp: Last patch index.
         begc: First column index.
@@ -129,7 +134,7 @@ def clmData(
     # ------------------------------------------------------------------
     # Read CLM LAI and SAI for current time step — Fortran lines 87-91
     # ------------------------------------------------------------------
-    elai_loc, esai_loc = readCLMveg(fin_clm, strt)
+    elai_loc, esai_loc = record.elai, record.esai
 
     # Broadcast single gridcell value to all patches — Fortran lines 89-91
     for p in range(begp, endp + 1):  # Fortran: do p = begp, endp
@@ -139,7 +144,7 @@ def clmData(
     # ------------------------------------------------------------------
     # Read volumetric soil water for current time step — Fortran lines 93-94
     # ------------------------------------------------------------------
-    h2osoi_clm45, h2osoi_clm50 = readCLMsoil(fin_clm, strt)
+    h2osoi_clm45, h2osoi_clm50 = record.h2osoi_clm45, record.h2osoi_clm50
 
     # ------------------------------------------------------------------
     # Distribute soil water to all columns — Fortran lines 96-113
@@ -162,7 +167,7 @@ def clmData(
 
         # Overwrite CLM soil moisture with adjustment factor — Fortran lines 110-115
         if nlev_soil_adjust > 0:
-            h2osoi_factor = readSoilWatFactor(fin_soil_adjust, strt)
+            h2osoi_factor = record.h2osoi_factor
             for j in range(1, nlev_soil_adjust + 1):
                 h2osoi_vol = h2osoi_vol.at[ci, j].set(float(h2osoi_vol[ci, j]) * h2osoi_factor)
 
@@ -201,7 +206,7 @@ def clmData(
 
 
 def readCLMveg(
-    ncfilename: str,
+    ds: nc.Dataset,
     strt: int,
 ) -> tuple[float, float]:
     """
@@ -219,7 +224,7 @@ def readCLMveg(
     C row-major ``(time, lat, lon)``; indexing is adjusted accordingly.
 
     Args:
-        ncfilename: Path to the CLM netCDF history file.
+        ds: Open CLM netCDF history file.
         strt: 1-based time slice index.
 
     Returns:
@@ -227,8 +232,6 @@ def readCLMveg(
     """
     # Fortran: start2=(1, strt), count2=(1,1) — lon=1 gridcell, 1 timestep
     t = strt - 1  # Convert 1-based Fortran index to 0-based Python
-
-    ds = _get_cached_dataset(ncfilename)
 
     # ELAI(nlndgrid, ntime) — Fortran lines 142-146
     elai_mod = float(ds.variables["ELAI"][t, 0])
@@ -245,7 +248,7 @@ def readCLMveg(
 
 
 def readCLMsoil(
-    ncfilename: str,
+    ds: nc.Dataset,
     strt: int,
 ) -> tuple[Array, Array]:
     """
@@ -266,7 +269,7 @@ def readCLMsoil(
     (Fortran lines 181-182).
 
     Args:
-        ncfilename: Path to the CLM netCDF history file.
+        ds: Open CLM netCDF history file.
         strt: 1-based time slice index.
 
     Returns:
@@ -279,7 +282,6 @@ def readCLMsoil(
 
     t = strt - 1  # Convert 1-based Fortran index to 0-based Python
 
-    ds = _get_cached_dataset(ncfilename)
     if clm_phys == "CLM4_5":
         # H2OSOI(nlndgrid, nlevgrnd, ntime) — Fortran lines 195-201
         # Fortran start3=(1,1,strt), count3=(1,nlevgrnd,1)
@@ -301,7 +303,7 @@ def readCLMsoil(
 
 
 def readSoilWatFactor(
-    ncfilename: str,
+    ds: nc.Dataset,
     strt: int,
 ) -> float:
     """
@@ -313,7 +315,7 @@ def readSoilWatFactor(
     from a one-dimensional time series variable.
 
     Args:
-        ncfilename: Path to the soil moisture adjustment netCDF file.
+        ds: Open soil moisture adjustment netCDF file.
         strt: 1-based time slice index.
 
     Returns:
@@ -322,7 +324,6 @@ def readSoilWatFactor(
     t = strt - 1  # Convert 1-based Fortran index to 0-based Python
 
     # factor(ntime) — Fortran lines 240-244
-    ds = _get_cached_dataset(ncfilename)
     h2osoi_factor_loc = float(ds.variables["FACTOR"][t])
 
     return h2osoi_factor_loc

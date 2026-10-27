@@ -106,6 +106,7 @@ def _build_initialized_model():
 
     _clm_driver_mod.filter = _new_filter
 
+    from clm_ml.legacy.forcing import clm_record_at, load_forcing, tower_met_at
     from clm_share.shr_orb_mod import shr_orb_params
     from clm_src_utils import clm_varorb
     from offline_driver.CLMml_driver import SoilInit, TowerVeg, init_acclim
@@ -117,6 +118,35 @@ def _build_initialized_model():
     clm_varorb.lambm0 = _lambm0
     clm_varorb.mvelpp = _mvelpp
 
+    clm_start_ymd = int(params.get("clm_start_ymd", start_ymd))
+    clm_start_tod = int(params.get("clm_start_tod", 0))
+    run_start_ymd = clm_time_manager.start_date_ymd
+    run_start_tod = clm_time_manager.start_date_tod
+    clm_time_manager.start_date_ymd = clm_start_ymd
+    clm_time_manager.start_date_tod = clm_start_tod
+    clm_time_manager.itim = 1
+    start_calday_clm = get_curr_calday(offset=0)
+    clm_time_manager.start_date_ymd = run_start_ymd
+    clm_time_manager.start_date_tod = run_start_tod
+    clm_time_manager.itim = 1
+    curr_calday = get_curr_calday(offset=0)
+    soil_init_time_indx = round((curr_calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
+
+    history_index = []
+    for _itim in range(1, ntimes + 1):
+        clm_time_manager.itim = _itim
+        calday = get_curr_calday(offset=0)
+        history_index.append(round((calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1)
+    clm_time_manager.itim = 1
+    forcing = load_forcing(
+        fin_tower,
+        fin_clm,
+        fin_soil_adjust,
+        ntimes,
+        history_index,
+        float(TowerDataMod.tower_ht[tower_num]),
+    )
+
     (
         clm_instMod.atm2lnd_inst,
         clm_instMod.wateratm2lndbulk_inst,
@@ -124,7 +154,7 @@ def _build_initialized_model():
         clm_instMod.frictionvel_inst,
         clm_instMod.mlcanopy_inst,
     ) = init_acclim(
-        fin_tower,
+        [tower_met_at(forcing, t) for t in range(ntimes)],
         tower_num,
         ntimes,
         bounds.begp,
@@ -144,20 +174,6 @@ def _build_initialized_model():
         clm_instMod.mlcanopy_inst,
     )
 
-    clm_start_ymd = int(params.get("clm_start_ymd", start_ymd))
-    clm_start_tod = int(params.get("clm_start_tod", 0))
-    run_start_ymd = clm_time_manager.start_date_ymd
-    run_start_tod = clm_time_manager.start_date_tod
-    clm_time_manager.start_date_ymd = clm_start_ymd
-    clm_time_manager.start_date_tod = clm_start_tod
-    clm_time_manager.itim = 1
-    start_calday_clm = get_curr_calday(offset=0)
-    clm_time_manager.start_date_ymd = run_start_ymd
-    clm_time_manager.start_date_tod = run_start_tod
-    clm_time_manager.itim = 1
-    curr_calday = get_curr_calday(offset=0)
-    soil_init_time_indx = round((curr_calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
-
     clm_instMod.waterstatebulk_inst, clm_instMod.temperature_inst = SoilInit(
         fin_clm,
         soil_init_time_indx,
@@ -173,13 +189,10 @@ def _build_initialized_model():
     from clm_src_utils.clm_time_manager import get_curr_date
 
     clm_time_manager.itim = 1
-    curr_calday_ts1 = get_curr_calday(offset=0)
-    time_indx = round((curr_calday_ts1 - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
 
     clm_instMod.atm2lnd_inst, clm_instMod.wateratm2lndbulk_inst, clm_instMod.frictionvel_inst = (
         TowerMetCurr(
-            fin_tower,
-            1,
+            tower_met_at(forcing, 0),
             tower_num,
             bounds.begp,
             bounds.endp,
@@ -191,15 +204,14 @@ def _build_initialized_model():
 
     if MLclm_varctl.met_type == 3:
         clm_instMod.mlcanopy_inst = TowerMetNext(
-            fin_tower,
-            min(2, ntimes),
+            tower_met_at(forcing, min(1, ntimes - 1)),
             bounds.begp,
             bounds.endp,
             clm_instMod.mlcanopy_inst,
         )
 
     # Run 1 warm-up timestep
-    ModelAdvance(bounds, time_indx, fin_tower, fin_clm)
+    ModelAdvance(bounds, clm_record_at(forcing, 0))
 
     mlcanopy_inst = clm_instMod.mlcanopy_inst
     filt = _clm_driver_mod.filter

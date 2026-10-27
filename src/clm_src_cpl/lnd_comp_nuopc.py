@@ -39,9 +39,7 @@ def InitializeRealize(bounds: bounds_type) -> None:
 
 def ModelAdvance(
     bounds: bounds_type,
-    time_indx: int,
-    fin1: str,
-    fin2: str,
+    clm_record,
 ) -> None:
     """
     Advance the CLM model by one time step.
@@ -53,19 +51,11 @@ def ModelAdvance(
 
     Args:
         bounds: Decomposition bounds for the local MPI task.
-        time_indx: Time index measured from the reference date
-            (0Z January 1 of the current year, where ``calday == 1.000``).
-            Corresponds to Fortran ``integer, intent(in) :: time_indx``.
-        fin1: Path to the first required input file (<=256 characters,
-            matching Fortran ``character(len=256) :: fin1``).
-        fin2: Path to the second required input file (<=256 characters,
-            matching Fortran ``character(len=256) :: fin2``).
-
-    Note:
-        ``time_indx`` is a Python ``int`` (or scalar JAX integer array).
-        File path strings are passed through unchanged and are not traced
-        by JAX; they must not be used inside JIT-compiled kernels.
+        clm_record: CLM history values for this time step
+            (``clmDataMod.ClmHistoryRecord``). Replaces the Fortran
+            arguments ``time_indx``, ``fin1`` and ``fin2``: input files are
+            read once before the time loop.
     """
     from clm_src_main.clm_driver import clm_drv  # noqa: F401
 
-    clm_drv(bounds, time_indx, fin1, fin2)
+    clm_drv(bounds, clm_record)

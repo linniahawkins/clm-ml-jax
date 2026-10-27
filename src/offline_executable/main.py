@@ -237,7 +237,7 @@ def main():
     # ------------------------------------------------------------------
     # 6. Pre-loop setup  (mirrors CLMml_drv lines 84-120)
     # ------------------------------------------------------------------
-    from offline_driver.clmDataMod import close_cached_datasets as _close_clmdata_cache
+    from clm_ml.legacy.forcing import clm_record_at, load_forcing, tower_met_at
     from offline_driver.CLMml_driver import (
         SoilInit,
         TowerVeg,
@@ -248,11 +248,45 @@ def main():
         TowerMetCurr,
         TowerMetNext,
     )
-    from offline_driver.TowerMetMod import (
-        close_cached_datasets as _close_towermet_cache,
+
+    # 6-pre. Time slice index into the CLM history file for every step
+    #     (mirrors CLMml_drv "hack" at lines 97-116 and the per-step index at line 176)
+    clm_start_ymd = int(params.get("clm_start_ymd", start_ymd))
+    clm_start_tod = int(params.get("clm_start_tod", 0))
+
+    run_start_ymd = clm_time_manager.start_date_ymd
+    run_start_tod = clm_time_manager.start_date_tod
+
+    clm_time_manager.start_date_ymd = clm_start_ymd
+    clm_time_manager.start_date_tod = clm_start_tod
+    clm_time_manager.itim = 1
+    start_calday_clm = get_curr_calday(offset=0)
+
+    clm_time_manager.start_date_ymd = run_start_ymd
+    clm_time_manager.start_date_tod = run_start_tod
+    clm_time_manager.itim = 1
+    curr_calday = get_curr_calday(offset=0)
+
+    soil_init_time_indx = round((curr_calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
+
+    history_index = []
+    for _itim in range(1, ntimes + 1):
+        clm_time_manager.itim = _itim
+        calday = get_curr_calday(offset=0)
+        history_index.append(round((calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1)
+    clm_time_manager.itim = 1
+
+    # 6-load. All forcing for the run, read before the time loop (no file reads in the loop)
+    forcing = load_forcing(
+        fin1,
+        fin2,
+        fin_soil_adjust,
+        ntimes,
+        history_index,
+        float(TowerDataMod.tower_ht[tower_num]),
     )
 
-    # 6a. Acclimation temperature (reads full tower record once)
+    # 6a. Acclimation temperature (mean over the full tower record)
     (
         clm_instMod.atm2lnd_inst,
         clm_instMod.wateratm2lndbulk_inst,
@@ -260,7 +294,7 @@ def main():
         clm_instMod.frictionvel_inst,
         clm_instMod.mlcanopy_inst,
     ) = init_acclim(
-        fin1,
+        [tower_met_at(forcing, t) for t in range(ntimes)],
         tower_num,
         ntimes,
         bounds.begp,
@@ -290,26 +324,6 @@ def main():
         clm_instMod.canopystate_inst,
         clm_instMod.mlcanopy_inst,
     )
-
-    # 6c. Compute time slice index into CLM history file for SoilInit
-    #     (mirrors CLMml_drv "hack" at lines 97-116)
-    clm_start_ymd = int(params.get("clm_start_ymd", start_ymd))
-    clm_start_tod = int(params.get("clm_start_tod", 0))
-
-    run_start_ymd = clm_time_manager.start_date_ymd
-    run_start_tod = clm_time_manager.start_date_tod
-
-    clm_time_manager.start_date_ymd = clm_start_ymd
-    clm_time_manager.start_date_tod = clm_start_tod
-    clm_time_manager.itim = 1
-    start_calday_clm = get_curr_calday(offset=0)
-
-    clm_time_manager.start_date_ymd = run_start_ymd
-    clm_time_manager.start_date_tod = run_start_tod
-    clm_time_manager.itim = 1
-    curr_calday = get_curr_calday(offset=0)
-
-    soil_init_time_indx = round((curr_calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
 
     # 6d. Soil temperature and moisture initialisation
     clm_instMod.waterstatebulk_inst, clm_instMod.temperature_inst = SoilInit(
@@ -365,19 +379,16 @@ def main():
 
             yr, mon, day, _ = get_curr_date()
             curr_calday = get_curr_calday(offset=0)
+            t_prev, t_curr, t_next = forcing.window_indices(_itim - 1)
 
-            # Time slice index into CLM history file
-            time_indx = round((curr_calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
-
-            # Read current-step tower meteorology
+            # Install current-step tower meteorology
             t_met0 = time.perf_counter()
             (
                 clm_instMod.atm2lnd_inst,
                 clm_instMod.wateratm2lndbulk_inst,
                 clm_instMod.frictionvel_inst,
             ) = TowerMetCurr(
-                fin1,
-                _itim,
+                tower_met_at(forcing, t_curr),
                 tower_num,
                 bounds.begp,
                 bounds.endp,
@@ -386,12 +397,10 @@ def main():
                 clm_instMod.frictionvel_inst,
             )
 
-            # Read next-step meteorology for 3-point interpolation
+            # Install next-step meteorology for 3-point interpolation
             if met_type == 3:
-                itim_next = min(_itim + 1, ntimes)
                 clm_instMod.mlcanopy_inst = TowerMetNext(
-                    fin1,
-                    itim_next,
+                    tower_met_at(forcing, t_next),
                     bounds.begp,
                     bounds.endp,
                     clm_instMod.mlcanopy_inst,
@@ -400,7 +409,7 @@ def main():
 
             # Advance physics
             t_adv0 = time.perf_counter()
-            ModelAdvance(bounds, time_indx, fin1, fin2)
+            ModelAdvance(bounds, clm_record_at(forcing, t_curr))
             t_adv = time.perf_counter() - t_adv0
 
             # Write output
@@ -431,14 +440,11 @@ def main():
                     flush=True,
                 )
     finally:
-        # Keep all file descriptor lifetimes explicit when using netCDF caches.
         for fh in (fout1, fout2, fout3, fout4, fout5, fout6):
             try:
                 fh.close()
             except Exception:
                 pass
-        _close_towermet_cache()
-        _close_clmdata_cache()
 
     print("Run complete.", flush=True)
 

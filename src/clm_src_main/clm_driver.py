@@ -14,7 +14,6 @@ import jax.numpy as jnp
 from jax import Array
 
 import clm_src_main.clm_instMod as clm_instMod  # noqa: F401
-import offline_driver.clmSoilOptionMod as _clmSoilOpt  # noqa: F401
 from clm_src_biogeophys.SoilWaterMovementMod import SoilWater  # noqa: F401
 from clm_src_biogeophys.SurfaceAlbedoMod import SoilAlbedo  # noqa: F401
 from clm_src_biogeophys.SurfaceResistanceMod import calc_soilevap_resis  # noqa: F401
@@ -25,7 +24,7 @@ from clm_src_main.decompMod import bounds_type  # noqa: F401
 from clm_src_main.filterMod import filter, setExposedvegpFilter  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesMod import MLCanopyFluxes  # noqa: F401
 from multilayer_canopy.MLSoilTemperatureMod import SoilTemperature, SoilThermProp  # noqa: F401
-from offline_driver.clmDataMod import clmData  # noqa: F401
+from offline_driver.clmDataMod import ClmHistoryRecord, clmData  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -34,9 +33,7 @@ from offline_driver.clmDataMod import clmData  # noqa: F401
 
 def clm_drv(
     bounds: bounds_type,
-    time_indx: int,
-    fin1: str,
-    fin2: str,
+    clm_record: ClmHistoryRecord,
 ) -> None:
     """
     Main CLM model driver to calculate surface fluxes.
@@ -69,13 +66,12 @@ def clm_drv(
     Args:
         bounds: CLM decomposition bounds for the local MPI task,
             supplying ``begp``, ``endp``, ``begc``, and ``endc``.
-        time_indx: Time index from the reference date (0Z January 1
+        clm_record: CLM history values for this time step (see
+            ``clmDataMod.read_clm_history_series``). Replaces the Fortran
+            arguments ``time_indx``, ``fin1`` and ``fin2``: the history
+            file is read once before the time loop. Fortran ``time_indx``
+            was the time index from the reference date (0Z January 1
             of the current year, where ``calday == 1.000``).
-            Fortran: ``integer, intent(in) :: time_indx``.
-        fin1: Path to the first required input file (≤256 characters).
-            Fortran: ``character(len=256) :: fin1``.
-        fin2: Path to the second required input file (≤256 characters).
-            Fortran: ``character(len=256) :: fin2``.
     """
     # ------------------------------------------------------------------
     # Read all state instances live from clm_instMod to avoid stale
@@ -123,14 +119,11 @@ def clm_drv(
     tk_h2osfc = jnp.zeros((n_col,), dtype=jnp.float64)  # Thermal conductivity of h2osfc (W/m/K)
 
     # ------------------------------------------------------------------
-    # 1. Read CLM data for current time slice — Fortran lines 57-59
-    # fin2 = CLM history file; fin_soil_adjust read from clmSoilOptionMod
+    # 1. CLM data for current time slice — Fortran lines 57-59
+    # (read before the time loop; installed here)
     # ------------------------------------------------------------------
-    _fin_soil_adjust = _clmSoilOpt.fin_soil_adjust
     waterstatebulk_inst, canopystate_inst, surfalb_inst = clmData(
-        fin2,
-        _fin_soil_adjust,
-        time_indx,
+        clm_record,
         bounds.begp,
         bounds.endp,
         bounds.begc,
