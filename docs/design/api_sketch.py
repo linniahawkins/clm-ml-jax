@@ -61,7 +61,7 @@ class RunSettings:
     start: str  # ISO datetime
     end: str
     output_directory: Path
-    output_format: Literal["netcdf", "legacy_ascii", "both"] = "netcdf"
+    output_format: Literal["netcdf", "legacy_ascii"] = "netcdf"  # legacy_ascii: transitional
     output_variables: Union[Literal["all"], tuple[str, ...]] = "all"
     output_frequency: Literal["step", "hourly", "daily"] = "step"
     source_files: Mapping[str, Path] = dataclasses.field(default_factory=dict)  # provenance
@@ -474,7 +474,8 @@ class Outputs:
         ...
 
     def write_legacy_ascii(self, directory: PathLike, sites: Sites, forcing: Forcing) -> list[Path]:
-        """Six Fortran-format ``.out`` files per site, byte-compatible with today's output."""
+        """Six Fortran-format ``.out`` files per site, byte-compatible with today's output.
+        Transitional: removed once the Fortran comparison test reads netCDF."""
         ...
 
 

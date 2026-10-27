@@ -31,6 +31,6 @@ initial_conditions:
 
 output:
   directory: ../../../src/output_files/   # was dirout
-  format: netcdf                   # netcdf | legacy_ascii | both
+  format: netcdf                   # netcdf (legacy_ascii only while validating against Fortran)
   variables: all                   # all, or a list such as [latent_heat_flux, gpp]
   frequency: step                  # step | hourly | daily

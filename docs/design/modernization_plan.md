@@ -23,7 +23,7 @@
 | 7 | Config framework | **Plain YAML plus our own validation** (dataclasses with clear error messages). No Hydra. |
 | 8 | Namelists | Kept as a **one-time converter**: `clm-ml convert nl.CHATS7.1day` writes the YAML files. |
 
-Still open: see §8.
+Smaller decisions: see §8.
 
 ---
 
@@ -150,7 +150,7 @@ initial_conditions:
   restart_file: null
 output:
   directory: output_files/
-  format: netcdf                  # netcdf | legacy_ascii | both
+  format: netcdf                  # netcdf (legacy_ascii only during validation; see §8)
   variables: all                  # or a list of names
   frequency: step                 # step | hourly | daily
 ```
@@ -449,7 +449,7 @@ at the end of every phase.**
 ### Phase 0: Safety net
 
 - **Add an end-to-end regression test against the current JAX output** at tight tolerance
-  (proposed `rtol=1e-10`). Use `nl.CHATS7.50steps` and commit the reference output as `.npz`. The
+  (`rtol=1e-6`). Use `nl.CHATS7.50steps` and commit the reference output as `.npz`. The
   Fortran comparison (2.5%) is too loose to catch refactoring mistakes.
 - Fix `requires-python` (current JAX needs ≥ 3.10). Add `pyyaml` and `xarray`, and move
   `netCDF4` to runtime dependencies.
@@ -590,21 +590,16 @@ Milestones for users:
 
 ---
 
-## 8. Still open (smaller decisions)
+## 8. Smaller decisions
 
-1. **Minimum Python version.** 3.10 is proposed (current JAX needs it). jax-gcm uses 3.11.
-2. **Default `max_layers`.** It must cover the tallest canopy you expect. CHATS7's layer count is
-   computed in Phase 1, and the default will be set with headroom. Should global runs use a
-   different value?
-3. **Regression tolerance.** `rtol=1e-10` against current JAX output is proposed. XLA may reorder
-   floating-point operations when whole-run compilation arrives (Phase 4), so that phase may need
-   `1e-8`, with the Fortran comparison still passing.
-4. **Legacy lifetime.** Proposed: keep `clm-ml-offline` until Phase 7, and keep the namelist
-   converter permanently.
-5. **Soil model scope.** Should `SoilTemperature` and the CLM soil routines be first-class,
-   swappable processes (as proposed), or a fixed lower boundary?
-6. **Output format.** netCDF via xarray is the default. Is the legacy `.out` format needed after
-   validation is done?
+| # | Question | Answer |
+|---|---|---|
+| 1 | Minimum Python version | **3.10** |
+| 2 | Default `max_layers` | **10 requested; needs a follow-up.** With the default spacing (`dz_tall: 0.5`), CHATS7 needs 46 layers: a 10 m canopy gives 20 layers inside it, plus 26 above it up to the 23 m reference height. The Fortran upper limit is `nlevmlcan = 100`. Options: (a) a larger default such as 50–60, (b) keep 10 and give each site an explicit `n_layers_within` + `n_layers_above` (this changes CHATS7 results relative to the Fortran reference), or (c) coarser default spacing. To be resolved before Phase 1. |
+| 3 | Regression tolerance | **`rtol=1e-6`** against the current JAX output |
+| 4 | Legacy lifetime | Undecided. Default: keep `clm-ml-offline` until Phase 7, and keep the namelist converter permanently. Revisit at Phase 7. |
+| 5 | Soil model scope | Undecided. Default: soil routines go behind the same process interface, migrated last in Phase 5. Making them swappable is not a goal yet. Revisit at Phase 5. |
+| 6 | Legacy `.out` format | **Not needed after validation.** It is kept only as long as the Fortran comparison test needs it, and is replaced by netCDF output once that test reads netCDF. `output.format` options become `netcdf` only. |
 
 ---
 
