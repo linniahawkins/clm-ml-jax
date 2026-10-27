@@ -6,14 +6,17 @@ build-backend = "setuptools.build_meta"
 name = "clm-ml-jax"
 version = "0.1.0"
 description = "JAX translation of CLM-ML (Community Land Model with Multi-Layer Canopy)"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "BSD-3-Clause"
 dependencies = [
-    "jax>=0.4.0",
-    "jaxlib>=0.4.0",
-    "numpy>=1.20.0",
+    "jax>=0.4.30",
+    "jaxlib>=0.4.30",
+    "numpy>=1.22",
     "matplotlib>=3.7.0",
     "f90nml>=1.4.0",
+    "netCDF4>=1.6.0",
+    "pyyaml>=6.0",
+    "xarray>=2023.1",
 ]
 
 [project.optional-dependencies]
@@ -22,21 +25,19 @@ dev = [
     "pytest-cov>=4.0.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
-    "netCDF4>=1.6.0",
 ]
 
 [project.scripts]
 clm-ml-offline = "offline_executable.main:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = [
     "clm_share*",
     "clm_src_biogeophys*",
     "clm_src_cpl*",
     "clm_src_main*",
     "clm_src_utils*",
-    "clubb_core*",
     "multilayer_canopy*",
     "offline_driver*",
     "offline_executable*",
@@ -45,11 +46,11 @@ include = [
 
 [tool.black]
 line-length = 100
-target-version = ["py39"]
+target-version = ["py310"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]

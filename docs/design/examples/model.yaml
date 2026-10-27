@@ -24,7 +24,7 @@ numerics:
   checkpoint_steps: true                  # trade compute for memory when taking gradients
 
 canopy_layers:
-  max_layers: 60                          # fixed array size for every site (default TBD in Phase 1)
+  max_layers: 50                          # fixed array size for every site (CHATS7 uses 46)
   dz_tall: 0.5                            # m
   dz_short: 0.1                           # m
   tall_canopy_threshold: 2.0              # m                                  (dz_param)

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/AyaLahlou/clm-ml-jax/actions/workflows/ci.yml/badge.svg)](https://github.com/AyaLahlou/clm-ml-jax/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/AyaLahlou/clm-ml-jax/branch/main/graph/badge.svg)](https://codecov.io/gh/AyaLahlou/clm-ml-jax)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![JAX](https://img.shields.io/badge/JAX-latest-orange.svg)](https://github.com/google/jax)
 [![License: BSD-3](https://img.shields.io/badge/License-BSD--3-green.svg)](LICENSE)
 
@@ -68,6 +68,29 @@ We compare every JAX routine against golden reference values of the Fortran buil
 ```
 
 Golden JSON files live in `tests/fortran_validation/golden_IO/`.
+
+### End-to-end regression test
+
+A 50-step CHATS7 run (one full diurnal cycle) is compared, field by field and at full
+precision, against a committed reference (`rtol=1e-6`). Any change that alters model results
+fails this test:
+
+```bash
+python -m pytest tests/regression/ -m regression -q     # ~5 min on CPU
+```
+
+If results change **on purpose** (a science change or bug fix), regenerate the reference
+and note it in the PR:
+
+```bash
+python tests/regression/record_run.py --update-reference
+```
+
+### Timing test
+
+```bash
+python timing/time_offline.py     # wall-clock time of a 50-step run; appends to timing/results.jsonl
+```
 
 ---
 

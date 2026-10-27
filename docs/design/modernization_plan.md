@@ -178,7 +178,7 @@ numerics:
   integrator: rk4                         # euler | rk2_* | rk3_* | rk4
   checkpoint_steps: true                  # less memory when taking gradients
 canopy_layers:
-  max_layers: 60                          # fixed array size for every site
+  max_layers: 50                          # fixed array size for every site
   dz_tall: 0.5
   dz_short: 0.1
   tall_canopy_threshold: 2.0
@@ -453,9 +453,10 @@ at the end of every phase.**
   Fortran comparison (2.5%) is too loose to catch refactoring mistakes.
 - Fix `requires-python` (current JAX needs ≥ 3.10). Add `pyyaml` and `xarray`, and move
   `netCDF4` to runtime dependencies.
-- Record a baseline benchmark: compile time and wall time per simulated day on CPU and GPU.
+- Record a baseline timing test (`timing/time_offline.py`): compile time and wall time per
+  simulated day on CPU and GPU. Results go in `docs/design/timing.md`.
 
-**Done when:** the regression test passes on `main`, and benchmark numbers are recorded.
+**Done when:** the regression test passes on `main`, and timing-test numbers are recorded.
 
 ### Phase 1: Configuration files and the new API as a wrapper (no physics changes)
 
@@ -510,10 +511,10 @@ test passes, and no `global` statement remains in the run path.
   hourly/daily happens inside the scan, so long runs don't store every step.
 - Chunked runs and restart files (`initial_conditions.source: restart`).
 - `vmap` over a **parameter ensemble** at one site.
-- Benchmark against Phase 0. Watch compile time in particular (`main.py` notes ~290 s today).
+- Timing test against Phase 0. Watch compile time in particular (`main.py` notes ~290 s today).
 
 **Done when:** 1-day and 31-day runs are each one compiled call, a 32-member ensemble works, and
-benchmark results are recorded.
+timing-test results are recorded.
 
 ### Phase 5: Mask-aware, one-column processes
 
@@ -540,7 +541,7 @@ tests pass.
 - Load forcing for several towers (the `{site}` placeholders in file paths).
 - Multi-site test: running CHATS7 and US-UMB together must match running each alone.
 - Device sharding over the site axis (`jax.sharding`) so large site counts spread across GPUs.
-  Benchmark sites per second on one GPU.
+  Timing test: sites per second on one GPU.
 - Document how a gridded/global run will plug in (a `domain.type: grid` loader that builds
   `Sites` and `Forcing` from gridded datasets). Implementing it is the follow-on project.
 
@@ -577,7 +578,7 @@ machine (or on CPU with simulated devices in CI).
 | 1 | Medium | YAML schema, loaders, CLI, converter. No physics changes. |
 | 2 | Medium | The 3-point interpolation needs care |
 | 3 | Large | Untangling `mlcanopy_type` state from scratch fields |
-| 4 | Small to medium | Mostly benchmarking and compile-time tuning |
+| 4 | Small to medium | Mostly timing tests and compile-time tuning |
 | 5 | Large | The biggest phase. Many small PRs, which can be parallelized. |
 | 6 | Medium | Small if Phase 5 is done well |
 | 7 | Medium | Mechanical |
@@ -595,7 +596,7 @@ Milestones for users:
 | # | Question | Answer |
 |---|---|---|
 | 1 | Minimum Python version | **3.10** |
-| 2 | Default `max_layers` | **10 requested; needs a follow-up.** With the default spacing (`dz_tall: 0.5`), CHATS7 needs 46 layers: a 10 m canopy gives 20 layers inside it, plus 26 above it up to the 23 m reference height. The Fortran upper limit is `nlevmlcan = 100`. Options: (a) a larger default such as 50–60, (b) keep 10 and give each site an explicit `n_layers_within` + `n_layers_above` (this changes CHATS7 results relative to the Fortran reference), or (c) coarser default spacing. To be resolved before Phase 1. |
+| 2 | Default `max_layers` | **50.** CHATS7 needs 46 layers with the default spacing: a 10 m canopy at 0.5 m gives 20 layers inside it, plus 26 above it up to the 23 m reference height. Sites needing more fail at load time with a message naming the site, and can raise `max_layers` in `model.yaml` (the Fortran limit was `nlevmlcan = 100`). **Follow-up needed:** with default spacing, 9 of the 15 built-in towers need more than 50 (US-Ha1 60, US-Me2 64, US-UMB 92, US-MMS 96; US-ARM 300, beyond even the Fortran limit). Bonan et al. (2021) found 5–10 within-canopy layers reproduce the 50 cm benchmark, so explicit `n_layers_within`/`n_layers_above`, or coarser above-canopy spacing, may be the better default for multi-site runs. To confirm before Phase 1. |
 | 3 | Regression tolerance | **`rtol=1e-6`** against the current JAX output |
 | 4 | Legacy lifetime | Undecided. Default: keep `clm-ml-offline` until Phase 7, and keep the namelist converter permanently. Revisit at Phase 7. |
 | 5 | Soil model scope | Undecided. Default: soil routines go behind the same process interface, migrated last in Phase 5. Making them swappable is not a goal yet. Revisit at Phase 5. |
@@ -611,7 +612,7 @@ Milestones for users:
 | Padding changes results (for example, padded layers leaking into solvers or sums) | Padding test in every Phase 5 PR. Identity rows in the tridiagonal solves. Masks in every reduction. |
 | `mlcanopy_type` mixes state and scratch fields in non-obvious ways | Derive `State` by recording which fields are read before being written in a step |
 | YAML files drift from the code (keys renamed, defaults changed) | The schema is generated from the dataclasses. `clm-ml check` runs in CI on every example. The key reference docs are generated from the same source. |
-| Whole-run compilation is slow to compile (already ~290 s) | Keep the persistent compilation cache. Use `scan`, not unrolled loops. Benchmark. Fall back to per-step `jit` if needed. |
+| Whole-run compilation is slow to compile (already ~290 s) | Keep the persistent compilation cache. Use `scan`, not unrolled loops. Run the timing test. Fall back to per-step `jit` if needed. |
 | Gradient memory for long or many-site runs | `jax.checkpoint` on the step, chunked runs, output selection and averaging inside the scan |
 | Wasted compute on padded layers in global runs | Measure in Phase 6. Group sites by layer count if needed. |
 | Value-dependent Python `if`s inside physics break tracing | Move them to initialization, or use `jnp.where`/`lax.cond`. Most were already handled for the diff-mode path. |

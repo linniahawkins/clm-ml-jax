@@ -124,7 +124,7 @@ class NumericsOptions:
 
 @dataclasses.dataclass(frozen=True)
 class CanopyLayerOptions:
-    max_layers: int = 60  # fixed array size for every site; default set in Phase 1
+    max_layers: int = 50  # fixed array size for every site (CHATS7 uses 46)
     dz_tall: float = 0.5
     dz_short: float = 0.1
     tall_canopy_threshold: float = 2.0

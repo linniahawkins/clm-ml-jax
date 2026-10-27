@@ -11,6 +11,8 @@ dependencies:
       - matplotlib>=3.7.0
       - f90nml>=1.4.0
       - netCDF4             # needed for reading tower/CLM input files
+      - pyyaml>=6.0         # YAML configuration files
+      - xarray              # labelled output
       - scipy
       - pytest>=7.0.0
       - pytest-cov>=4.0.0
