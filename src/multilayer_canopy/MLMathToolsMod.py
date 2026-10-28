@@ -13,6 +13,7 @@ Fortran lines 1-330
 
 from __future__ import annotations
 
+import functools
 import math
 from typing import Callable, Tuple
 
@@ -550,6 +551,69 @@ def bisection_scalar(
 # ---------------------------------------------------------------------------
 # Public: quadratic solver
 # ---------------------------------------------------------------------------
+
+
+def is_concrete(*values) -> bool:
+    """True if none of ``values`` is a JAX tracer.
+
+    Runtime checks that stop the model (Fortran ``endrun`` on conservation or
+    convergence errors) can only run on concrete values. Under ``jit``/``grad``
+    tracing they are skipped; plan Phase 4 replaces them with ``checkify``.
+    """
+    return not any(isinstance(v, jax.core.Tracer) for v in values)
+
+
+@functools.partial(jax.jit, static_argnames=("func", "tol", "itmax"))
+def bisection_traceable(func, xa, xb, tol: float, itmax: int, c_init=None, args=()):
+    """
+    JAX-traceable bisection with the Fortran stopping rule.
+
+    Same iterations and result as Fortran ``bisection`` (MLMathToolsMod.F90,
+    lines 249-310) and :func:`bisection_scalar`: halve while ``|b - a| > tol``
+    (at most ``itmax`` times), keeping the half where ``f(a) * f(c) < 0``
+    puts the root in ``[a, c]``, and return the **last midpoint** ``c``.
+
+    ``lax.while_loop`` cannot be reverse-differentiated, so this is a
+    ``fori_loop`` of ``itmax`` iterations whose updates stop once the
+    tolerance is met. The caller checks that the root is bracketed (Fortran
+    stops with an error otherwise).
+
+    Compiled once per ``func``: pass a module-level function and its
+    parameters through ``args`` (a closure would be a new function at every
+    call and recompile every time).
+
+    Args:
+        func: Traceable function ``func(x, *args)`` of one scalar ``x``;
+            a module-level function (static argument of ``jax.jit``).
+        xa, xb: Ends of the bracket.
+        tol: Stop when the bracket is no wider than this.
+        itmax: Maximum number of halvings.
+        c_init: Value returned if no halving is done (Fortran leaves ``c``
+            undefined; defaults to ``xa`` as in :func:`bisection_scalar`).
+        args: Further arguments of ``func`` (traced).
+
+    Returns:
+        The last midpoint.
+    """
+    a = jnp.asarray(xa)
+    b = jnp.asarray(xb)
+    fa = func(a, *args)
+    c0 = a if c_init is None else jnp.asarray(c_init, dtype=a.dtype)
+
+    def body(_, carry):
+        a, b, fa, c, done = carry
+        active = jnp.logical_and(jnp.logical_not(done), jnp.abs(b - a) > tol)
+        c_new = (a + b) / 2.0
+        fc = func(c_new, *args)
+        root_in_left = fa * fc < 0.0  # Fortran: if (fa * fc < 0) then b = c else a = c
+        b = jnp.where(active & root_in_left, c_new, b)
+        a = jnp.where(active & ~root_in_left, c_new, a)
+        fa = jnp.where(active & ~root_in_left, fc, fa)
+        c = jnp.where(active, c_new, c)
+        return a, b, fa, c, jnp.logical_not(active)
+
+    _, _, _, c, _ = jax.lax.fori_loop(0, itmax, body, (a, b, fa, c0, jnp.asarray(False)))
+    return c
 
 
 def quadratic(a: float, b: float, c: float) -> Tuple[float, float]:

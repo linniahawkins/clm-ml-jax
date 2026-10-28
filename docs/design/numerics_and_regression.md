@@ -6,16 +6,22 @@ Fortran references are to CLM-ml v2 (`gbonan/CLM-ml_v2.CHATS`).
 
 ---
 
-## 1. One implementation per process, using the Fortran algorithm
+## 1. One implementation per process, matching the running model
 
 **Context.** Before Phase 3, several physics routines existed twice: a "normal" version
 (Python floats and loops, used for runs) and a traceable `_jax` / `grid`-branch version (used
 only by `make_clm_ml_forward` for gradients). The normal versions were validated against
 Fortran; the traceable ones were not, and some had drifted.
 
-**Decision.** Each process gets **one implementation**: the Fortran algorithm, written so JAX can
-trace it. A traceable copy is accepted only when it agrees with the Fortran-matching version
-**on identical input** to round-off (about 1e-15 relative). Then the duplicate is deleted.
+**Decision.** Each process gets **one implementation**, written so JAX can trace it. That
+implementation computes **what the running (validated) model computes today**. A traceable copy
+is accepted only when it reproduces the running model's routine **on identical input** to
+round-off (about 1e-15 relative). Then the duplicate is deleted.
+
+Where the running model itself differs from Fortran, the merge keeps the running model's
+behavior and the difference is recorded in §4. Changing it is a fidelity change: separate,
+validated, with a regenerated reference. Using Fortran directly in a refactor would change
+results in a step that is meant not to.
 
 **How it is checked.** `tests/regression/process_io.py --record` captures the real inputs and
 outputs of each such routine at dusk, night and midday of the CHATS7 reference day, from the
@@ -28,7 +34,35 @@ scratch harness also called both versions on the same captured inputs. As of Pha
 `LeafPhotosynthesis`, `FluxProfileSolution`, `RungeKuttaUpdate`) agrees to within 7e-16 on every
 captured call of a 2-step run, after the two fixes in §2 and §3.
 
-## 2. Root solvers: the forward value is the solver's answer; gradients use the implicit function theorem
+**Result (Phase 3c).** The duplicates are deleted. Each routine takes a `GridInfo` (patch index
+and canopy layer indices as Python ints), which `MLCanopyFluxes` builds once per CLM step (or
+receives from `make_clm_ml_forward` when the state is traced). Checks that need concrete numbers
+(energy conservation, the PAI check, the HF2008 `eta` warning) run only when the values are
+concrete (`MLMathToolsMod.is_concrete`), so they still run in a normal run but do not break
+tracing. Flux averaging, canopy diagnostics and the sun/shade merge now also run when
+differentiating; before, the traceable path skipped them.
+
+**Sub-step driver.** One function, `_substep` (physics, then flux accumulation), is the
+sub-step. A normal run drives it with a Python loop. When the state is traced (`jax.grad`), it is
+driven by `lax.scan` with `jax.checkpoint`, so that backward memory does not grow with the number
+of sub-steps. A `lax.scan` in a normal run would recompile at every CLM step (the forcing it
+closes over changes); compiling the whole run once is plan Phase 4. The two drivers run the same
+code; they can differ only in round-off (XLA may fuse operations differently).
+
+**Speed: compile the turbulence routine.** The deleted "normal" turbulence code used Python
+`math` on floats. Run operation by operation, the traceable version dispatches thousands of tiny
+JAX operations per call (`_GetPsiRSL` about 90 times per call, in per-layer loops), and one CLM
+step went from 4.5 s to 25 s. Two fixes restore the speed (5.7 s per step under the profiler):
+- `_HF2008` is compiled with `jax.jit`, the `GridInfo` layer indices being static. Its warning
+  (`eta ≥ eta_max`) is checked from the outputs in `CanopyTurbulence`, because compiled code
+  cannot print.
+- `bisection_traceable` is compiled once per residual function. The residual is a module-level
+  function with explicit parameters (a closure would be a new function at every call and
+  recompile every time).
+
+Compiling changes round-off only: the per-routine replay agrees to 3e-14.
+
+## 2. Root solvers: forward values and implicit-function gradients
 
 **Context.** Three quantities are found by iterative root solvers: the Obukhov length
 (`_GetObu`), leaf intercellular CO₂ (`_ci_solver_scan_ift`) and stomatal conductance under
@@ -43,17 +77,27 @@ forward value** whenever the solver is not fully converged (`F(x0) ≠ 0`). The 
 therefore computed slightly different physics from the model that runs (Obukhov length, CO₂,
 stomatal conductance), and gradients described that slightly different model.
 
-**Decision.** Apply the correction to the gradient only:
+**Decision, applied to the Obukhov length.** The running model uses the solver's value with no
+Newton step. Only the traceable copy added one, so the traceable copy is fixed to apply the
+correction to the gradient only:
 
 ```python
 step = F(x0) / stop_gradient(F'(x0))          # zero where the IFT is ill-conditioned
 x = x0 - (step - stop_gradient(step))         # forward: exactly x0; gradient: the IFT
 ```
 
-The forward value is exactly the solver's root, as in the normal path and Fortran. The
-gradient is unchanged.
+The forward value is exactly the solver's root, as in the running model. The gradient is
+unchanged.
+
+**Not applied (yet) to stomatal conductance and intercellular CO₂.** For these two, the running
+model itself uses the IFT helpers (`_bisect_gs_ift` in the WUE kernel; `_ci_solver_scan_ift` in
+the Medlyn/Ball–Berry kernels). So the Newton-shifted forward value *is* the validated
+behavior. Removing the shift changes results (about 1e-5 relative in stomatal conductance), so
+it is listed in §4 as a deviation from Fortran to fix in a fidelity step.
 
 ## 3. Roughness length: the Fortran bisection stopping rule
+
+(Here the running model already matched Fortran; only the traceable copy differed.)
 
 **Problem found.** Fortran `RoughnessLength` finds `z0m` by bisection on `[0, h_top]`, stopping
 when the bracket is narrower than `err = 0.001 m` (at most `nmax = 20` iterations), and returns
@@ -61,13 +105,21 @@ the last midpoint. The normal Python version matches this. The traceable version
 iterations and returned the midpoint of the final bracket. That is more refined, but it is not
 what CLM-ml v2 computes: `z0m` differed by up to 4e-4 relative.
 
-**Decision.** The traceable version uses the same stopping rule. `lax.while_loop` cannot be
-reverse-differentiated, so it is written as a fixed 20-iteration `fori_loop` whose updates stop
-once `|b − a| ≤ err`. The iterations and result are identical to Fortran's, and it remains
+**Decision.** The traceable version uses the same stopping rule, through a shared helper,
+`MLMathToolsMod.bisection_traceable`. That helper mirrors Fortran `bisection`: halve while
+`|b − a| > tol`, keep `[a, c]` when `f(a)·f(c) < 0`, and return the last midpoint.
+`lax.while_loop` cannot be reverse-differentiated, so it is written as a fixed-length
+`fori_loop` whose updates stop once the tolerance is met. The iterations and result are identical to Fortran's, and it remains
 differentiable. (The derivative of a bisection result is zero almost everywhere. This is the
 Fortran algorithm's property, not something introduced here.)
 
-## 4. Known deviation from Fortran: Obukhov-length solver (not changed in Phase 3)
+## 4. Known deviations of the running model from Fortran (not changed in Phase 3)
+
+Each is pre-existing behavior of the validated translation (CHATS7 May 2007 within 2.5% of
+Fortran per output column). Each would change results, so each is a fidelity change for a later,
+validated step (plan Phase 4b or later).
+
+### 4.1 Obukhov-length solver
 
 Fortran `GetObu` (MLCanopyTurbulenceMod.F90, lines 217–260) calls the hybrid solver
 `MLMathToolsMod::hybrid`:
@@ -84,12 +136,30 @@ steps** from a single start (`_obu_fixed_iter`) and then recomputes the derived 
 that value. This predates the modernization. It is within the validated agreement with Fortran
 (CHATS7 May 2007: ≤ 2.5% per output column, r ≥ 0.9999), but it is not the Fortran algorithm.
 
-**Status:** recorded, not changed. Matching Fortran here would change results, so it is a
-deliberate fidelity change with its own validation (plan Phase 4b or later), not part of a
-refactor.
-
 **Bug fixed (Phase 3).** The fixed-step secant iteration took a huge step when two consecutive
-residuals were exactly equal after convergence; it now takes no step (§5).
+residuals were exactly equal after convergence; it now takes no step (§5). The same fix is in
+the intercellular-CO₂ solver (§4.3).
+
+### 4.2 Stomatal conductance (WUE optimization, the default `gs_type = 2`)
+
+Fortran `StomataOptimization` (MLLeafPhotosynthesisMod.F90, lines 798–850) finds gs with
+`bisection` between `gsmin` and 2 mol m⁻² s⁻¹, stopping when the bracket is narrower than
+`tol = 0.001` mol m⁻² s⁻¹. It returns the last midpoint.
+
+The running JAX model (`_make_leaf_photo_kernel_wue` → `_bisect_gs_ift`) instead:
+- does **20 halvings** and takes the final bracket's midpoint;
+- then applies one **Newton step** (part of its implicit-function gradient).
+
+So the result is closer to the exact root than Fortran's. Switching to Fortran's rule changed
+gs by up to 1e-2 relative in a test at dusk and midday (the size of the tolerance).
+
+The tolerance-based `_StomataOptimization` / `bisection_scalar` code in the same module matches
+Fortran, but **no run uses it**.
+
+### 4.3 Intercellular CO₂ (Medlyn and Ball–Berry, `gs_type = 0, 1`; not the CHATS default)
+
+Fortran uses `hybrid` with `tol = 0.1` (mol/mol scaled). The running JAX model uses
+`_ci_solver_scan_ift`: 40 fixed secant steps followed by a Newton step.
 
 ## 5. The apparent evening-transition sensitivity was a solver bug (fixed)
 

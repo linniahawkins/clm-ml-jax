@@ -747,7 +747,9 @@ Planned scope:
   calls the existing physics sequence, and packs the results back. **No module globals are read
   or written.**
 - Delete the `clm_instMod` globals, `global filter`, `DIFFERENTIABLE_MODE`, and the
-  non-diff/diff branching in `MLCanopyFluxes`. Keep one path based on `lax.scan`.
+  non-diff/diff branching in `MLCanopyFluxes`. Keep one physics path; its sub-step loop is a
+  Python loop in normal runs and `lax.scan` when traced, until Phase 4 compiles whole chunks
+  ([`numerics_and_regression.md`](numerics_and_regression.md) §1).
 - Move first-step initialization (`ml_vert_init`, RK coefficient globals) into `Model` and
   `initial_state`.
 - Pass `Params` everywhere, replacing the `vcmaxpft_jax`/`g1_MED_jax` threading.
@@ -756,6 +758,20 @@ Planned scope:
 
 **Done when:** `jax.grad` works with respect to `Params`, `Forcing` and `State`, the regression
 test passes, and no `global` statement remains in the run path.
+
+Progress:
+- 3a ✅ model state carried explicitly through the time step (`ClmInstances`).
+- 3b ✅ explicit first-step initialization; no Runge–Kutta or flag globals.
+- 3c ✅ one implementation per process (normal/traceable duplicates and `DIFFERENTIABLE_MODE`
+  deleted; round-off-only change, checked routine by routine and with the noise twin).
+- 3d: `Params` passed explicitly (replaces global `MLpftcon`/`pftcon` reads and
+  `vcmaxpft_jax`/`g1_MED_jax`).
+- 3e: `State` and `Model.step` in `clm_ml`; acclimation temperature in `State`; gradients with
+  respect to `Params`, `Forcing` and `State`. Starting point: `tests/test_differentiability.py`
+  (one CLM step) runs out of memory on a 16 GB machine. After 3c the traced forward pass works
+  but `jax.grad` is killed; before 3c the traced forward pass itself peaked at 87 GB. Likely
+  cause: per-layer Python loops unrolled into a very large traced program; the fix is
+  vectorizing those loops over layers (plan Phase 5 work, pulled forward as needed).
 
 ### Phase 4: Chunked, compiled runs (one patch)
 

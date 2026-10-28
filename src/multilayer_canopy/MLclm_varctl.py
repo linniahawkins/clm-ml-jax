@@ -35,12 +35,6 @@ class GridInfo(NamedTuple):
     nbot: int  # bottom foliage layer
 
 
-DIFFERENTIABLE_MODE: bool = False
-"""When *True*, skip ``endrun`` error checks, diagnostic file I/O, and
-any operations that break the JAX gradient tape.  Set to *True* inside
-the ``make_clm_ml_forward`` factory before calling physics routines."""
-
-
 # ---------------------------------------------------------------------------
 # Stomatal conductance and photosynthesis — Fortran lines 16-21
 # ---------------------------------------------------------------------------

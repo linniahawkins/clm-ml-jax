@@ -136,7 +136,8 @@ def record() -> None:
 
 def replay(out_json: Path) -> None:
     """Re-run every recorded call with the current routines; report the largest relative
-    difference per routine and call."""
+    difference per routine and call. The recording (made before Phase 3c) passed
+    ``grid=None``; the merged routines require a ``GridInfo``, built from the recorded state."""
     report = {}
 
     def hook(F):
@@ -152,12 +153,36 @@ def replay(out_json: Path) -> None:
     for name, calls in records.items():
         results = []
         for call in calls:
-            out = getattr(F, name)(*_to_jax(call["args"]), **_to_jax(call["kwargs"]))
+            kwargs = dict(call["kwargs"])
+            if kwargs.get("grid", "absent") is None:
+                kwargs.update(_grid_kwargs(name, call["args"]))
+            out = getattr(F, name)(*_to_jax(call["args"]), **_to_jax(kwargs))
             results.append(
                 {"step": call["step"], "max_rel_diff": _max_rel_diff(call["output"], out)}
             )
         report[name] = results
     Path(out_json).write_text(json.dumps(report, indent=1))
+
+
+def _grid_kwargs(name: str, args) -> dict:
+    """``GridInfo`` (and the O2 value LeafPhotosynthesis needs with it) from the recorded
+    multilayer canopy state among ``args`` (single-patch runs)."""
+    from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type
+    from multilayer_canopy.MLclm_varctl import GridInfo
+
+    inst = next(a for a in args if isinstance(a, mlcanopy_type))
+    p = 0
+    kwargs = {
+        "grid": GridInfo(
+            p=p,
+            ncan=int(inst.ncan_canopy[p]),
+            ntop=int(inst.ntop_canopy[p]),
+            nbot=int(inst.nbot_canopy[p]),
+        )
+    }
+    if name == "LeafPhotosynthesis":
+        kwargs["_o2ref_py"] = float(inst.o2ref_forcing[p])
+    return kwargs
 
 
 def _max_rel_diff(expected, actual) -> dict:

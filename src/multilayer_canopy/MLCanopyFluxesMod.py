@@ -74,6 +74,7 @@ from multilayer_canopy.MLLeafBoundaryLayerMod import (
 from multilayer_canopy.MLLeafHeatCapacityMod import LeafHeatCapacity  # noqa: F401
 from multilayer_canopy.MLLeafPhotosynthesisMod import LeafPhotosynthesis  # noqa: F401
 from multilayer_canopy.MLLongwaveRadiationMod import LongwaveRadiation  # noqa: F401
+from multilayer_canopy.MLMathToolsMod import is_concrete
 from multilayer_canopy.MLPlantHydraulicsMod import (  # noqa: F401
     LeafWaterPotential,
     PlantResistance,
@@ -262,14 +263,17 @@ def MLCanopyFluxes(
             detected this from an unset ``zref`` (``zref == spval``); the
             caller now says so explicitly (False when continuing from a
             restart or in differentiable mode).
+        grid: Patch index and canopy layer indices as Python ints. Built from
+            ``mlcanopy_inst`` when omitted; pass it when the state is traced
+            (e.g. under ``jax.grad``), where the indices cannot be read.
+        _o2ref_py: Atmospheric O2 as a Python float; read from
+            ``mlcanopy_inst`` when omitted (pass it when the state is traced).
 
     Returns:
         Updated :class:`mlcanopy_type` holding end-of-timestep state
         and CLM-timestep-mean fluxes.
     """
     import multilayer_canopy.MLclm_varctl as _ml_ctl
-
-    _diff_mode = grid is not None
 
     # ------------------------------------------------------------------
     # CLM time information — Fortran lines 155-165
@@ -365,6 +369,26 @@ def MLCanopyFluxes(
     forcing_window = AtmForcingWindow(bef=forcing_bef, cur=forcing_cur, next=forcing_next)
 
     # ------------------------------------------------------------------
+    # Patch and canopy layer indices as Python ints (static under jax tracing).
+    # The patch is the unit of computation; several patches are batched with
+    # vmap (plan Phase 4), not looped over here.
+    # ------------------------------------------------------------------
+    if num_mlcan != 1:
+        endrun(msg=" ERROR: MLCanopyFluxes: one patch per call (batch patches with vmap)")
+    if grid is None:
+        _p0 = filter_mlcan[0]
+        grid = GridInfo(
+            p=_p0,
+            ncan=int(mlcanopy_inst.ncan_canopy[_p0]),
+            ntop=int(mlcanopy_inst.ntop_canopy[_p0]),
+            nbot=int(mlcanopy_inst.nbot_canopy[_p0]),
+        )
+    # O2 (constant in a run) as a Python float: LeafPhotosynthesis uses it to select
+    # its cached kernel, and it must be concrete when the state is traced.
+    if _o2ref_py is None:
+        _o2ref_py = float(mlcanopy_inst.o2ref_forcing[grid.p])
+
+    # ------------------------------------------------------------------
     # Update leaf/stem area profiles for current LAI/SAI — Fortran lines 220-243
     # ------------------------------------------------------------------
     lai = mlcanopy_inst.lai_canopy
@@ -379,7 +403,7 @@ def MLCanopyFluxes(
         lai = lai.at[p].set(lai_val)
         sai = sai.at[p].set(sai_val)
 
-        _ncan = grid.ncan if _diff_mode else int(mlcanopy_inst.ncan_canopy[p])
+        _ncan = grid.ncan
         # Vectorized slice assignment replaces a per-layer Python for-loop.
         # 3 slice scatter ops instead of 3×ncan scalar scatters → smaller
         # XLA trace and better kernel fusion inside lax.scan.
@@ -391,7 +415,7 @@ def MLCanopyFluxes(
         dpai = dpai.at[p, _sl_lai].set(_dlai_sl + _dsai_sl)
 
         # PAI conservation check — Fortran lines 239-242
-        if not _diff_mode:
+        if is_concrete(dpai, lai_val, sai_val):
             totpai = sum(float(dpai[p, ic]) for ic in range(1, _ncan + 1))
             if abs(totpai - float(lai_val + sai_val)) > 1.0e-6:
                 endrun(msg=" ERROR: MLCanopyFluxes: plant area index not updated correctly")
@@ -428,16 +452,16 @@ def MLCanopyFluxes(
 
     # ------------------------------------------------------------------
     # Flux accumulators — Fortran lines 57-64 (local arrays)
-    # Skipped in differentiable mode (diagnostics only).
     # ------------------------------------------------------------------
-    if not _diff_mode:
-        nvar1d = 23
-        nvar2d = 14
-        nvar3d = 12
-        endp = bounds.endp
-        flux_accumulator = jnp.zeros((endp + 1, nvar1d))
-        flux_accumulator_profile = jnp.zeros((endp + 1, nlevmlcan + 2, nvar2d))
-        flux_accumulator_leaf = jnp.zeros((endp + 1, nlevmlcan + 1, nleaf + 1, nvar3d))
+    nvar1d = 23
+    nvar2d = 14
+    nvar3d = 12
+    endp = bounds.endp
+    flux_accumulators = (
+        jnp.zeros((endp + 1, nvar1d)),
+        jnp.zeros((endp + 1, nlevmlcan + 2, nvar2d)),
+        jnp.zeros((endp + 1, nlevmlcan + 1, nleaf + 1, nvar3d)),
+    )
 
     # ------------------------------------------------------------------
     # Runge-Kutta configuration — Fortran lines 265-271
@@ -461,64 +485,28 @@ def MLCanopyFluxes(
     # Keep heartbeat output bounded while still proving forward progress.
     progress_stride = max(1, num_ml_steps // 10)
 
-    # Pre-compute ncan for each active patch once — avoids int() device-to-host
-    # sync inside the hot ML sub-step loop.  ncan is constant for a fixed site
-    # so this tuple is computed only once per CLM timestep.
-    if _diff_mode:
-        ncan_vals: tuple = tuple(grid.ncan for _ in filter_mlcan)
-    else:
-        ncan_vals: tuple = tuple(int(mlcanopy_inst.ncan_canopy[p]) for p in filter_mlcan)
-
-    # Pre-extract o2ref_p as a Python float before jax.checkpoint tracing.
-    # o2ref_forcing is atmospheric O2 — constant for the entire simulation.
-    # Used by LeafPhotosynthesis as a lru_cache key (must be a Python float).
-    # In diff mode, mlcanopy_inst may be abstract under jax.grad tracing,
-    # so we accept it as a pre-extracted parameter (_o2ref_py) from make_clm_ml_forward.
-    if _diff_mode:
-        if _o2ref_py is not None:
-            _o2ref_py_val: float = _o2ref_py
-        else:
-            # Fallback for callers that don't pass _o2ref_py (eager/non-grad context).
-            _o2ref_py_val = float(mlcanopy_inst.o2ref_forcing[grid.p])
-    else:
-        _o2ref_py_val = None  # non-diff mode: LeafPhotosynthesis reads it directly
+    ncan_vals: tuple = (grid.ncan,)
 
     # ==================================================================
     # Multilayer canopy time-stepping loop — Fortran lines 261-330
     # ==================================================================
-    # DIFF MODE: uses jax.lax.scan over a pre-computed calday array.
-    #   - Single Python→XLA dispatch (vs num_ml_steps separate traces).
-    #   - XLA sees the loop body once; can fuse/optimize across sub-steps.
-    #   - jax.checkpoint on the scan body gives O(step_mem) backward memory.
-    #   - Works because all physics functions are JAX-traceable when grid
-    #     is not None (no int()/float() device-host syncs in that path).
-    #   - TimeInterpolation3 already uses jnp.where for traced calday_ml.
-    #
-    # NON-DIFF MODE: Python for loop.
-    #   - Physics functions with grid=None perform int(arr[p])/float(arr[p])
-    #     device-host syncs that prevent XLA tracing via lax.fori_loop.
-    #   - Future path to lax.fori_loop: add grid-like static caching to
-    #     each physics module so all paths are XLA-traceable.
+    # One sub-step is one function, _substep (physics + flux accumulation). It is
+    # driven by a Python loop in a normal run, and by lax.scan (with
+    # jax.checkpoint, so backward memory does not grow with the number of
+    # sub-steps) when the state is being traced, e.g. under jax.grad. A lax.scan in
+    # a normal run would recompile at every CLM step (the forcing it closes over
+    # changes); compiling a whole run is plan Phase 4.
     # ==================================================================
 
-    # nstep_ml = 0 before _physics_step_fn is defined so the closure is
-    # valid in diff mode (lax.scan path has no Python for-loop to set it).
-    # In non-diff mode the for-loop below updates this variable each iteration;
-    # the closure in _physics_step_fn always sees the current value.
+    # Current sub-step, for warning messages only (0 inside lax.scan)
     nstep_ml = 0
 
-    # ------------------------------------------------------------------
-    # Per-step physics function.
-    # Closes over nstep_ml: 0 in diff mode (ignored by _HF2008_diff),
-    # current loop value in non-diff mode (used only for HF2008 warning).
-    # calday_ml may be a Python float (non-diff) or JAX traced array (diff).
-    # ------------------------------------------------------------------
     def _physics_step_fn(inst, calday_ml):
         """Pure (inst, calday_ml) → inst for one ML sub-step."""
         # Save previous-step state — Fortran lines 272-285
         inst = _copy_bef_state(filter_mlcan, ncan_vals, inst)
         # Atmospheric forcing — Fortran line 287
-        # calday_ml may be a JAX traced array in lax.scan diff mode;
+        # calday_ml is a JAX traced scalar inside lax.scan;
         # TimeInterpolation3 uses jnp.where so this is safe.
         inst = GetAtmForcing(
             calday_interp_bef,
@@ -545,8 +533,6 @@ def MLCanopyFluxes(
                 ),
                 rnsoi_soil=(inst.swsoi_soil[:, ivis] + inst.swsoi_soil[:, inir] + inst.lwsoi_soil),
             )
-            # nstep_ml is 0 in diff mode; _HF2008_diff ignores it entirely.
-            # In non-diff mode it carries the current sub-step index (warning only).
             inst = CanopyTurbulence(nstep_ml, num_mlcan, filter_mlcan, inst, grid=grid, nstep=nstep)
             # Both sun and shade in one fused GPU dispatch (2× fewer round-trips)
             inst = LeafBoundaryLayerBoth(num_mlcan, filter_mlcan, inst)
@@ -556,7 +542,7 @@ def MLCanopyFluxes(
                 isun,
                 inst,
                 grid=grid,
-                _o2ref_py=_o2ref_py_val,
+                _o2ref_py=_o2ref_py,
                 g1_MED_jax=g1_MED_jax,
             )
             inst = LeafPhotosynthesis(
@@ -565,7 +551,7 @@ def MLCanopyFluxes(
                 isha,
                 inst,
                 grid=grid,
-                _o2ref_py=_o2ref_py_val,
+                _o2ref_py=_o2ref_py,
                 g1_MED_jax=g1_MED_jax,
             )
             inst = FluxProfileSolution(num_mlcan, filter_mlcan, inst, grid=grid)
@@ -586,94 +572,47 @@ def MLCanopyFluxes(
                 )
         return inst
 
-    # Pre-compute dtime_ml once (used by both mode branches below)
+    def _substep(carry, calday_ml):
+        """One ML sub-step: physics, then accumulate fluxes — Fortran line 372."""
+        inst, accumulators = carry
+        inst = _physics_step_fn(inst, calday_ml)
+        accumulators = _MLAccumulateFluxes(num_mlcan, filter_mlcan, ncan_vals, *accumulators, inst)
+        return (inst, accumulators), None
+
+    # Calendar day of each ML sub-step — Fortran lines 263-270
     _dtime_ml = _ml_ctl.dtime_ml
+    _offset = 0.0 if met_type in (0, 2) else 0.5  # met_type 3: mid-sub-step
+    caldays_ml = [
+        curr_calday_beg + (float(k) - _offset) * (_dtime_ml / 86400.0)
+        for k in range(1, num_ml_steps + 1)
+    ]
 
-    if _diff_mode:
-        # ------------------------------------------------------------------
-        # DIFF MODE: lax.scan over pre-computed calday array
-        # ------------------------------------------------------------------
-        # Build a small (num_ml_steps,) array of calendar days — one per
-        # sub-step.  These are Python floats at construction time; inside
-        # lax.scan each element is a JAX traced scalar.
-        if met_type in (0, 2):
-            _calday_arr = jnp.array(
-                [
-                    curr_calday_beg + float(k + 1) * (_dtime_ml / 86400.0)
-                    for k in range(num_ml_steps)
-                ],
-                dtype=jnp.float64,
-            )
-        else:  # met_type == 3
-            _calday_arr = jnp.array(
-                [
-                    curr_calday_beg + (float(k + 1) - 0.5) * (_dtime_ml / 86400.0)
-                    for k in range(num_ml_steps)
-                ],
-                dtype=jnp.float64,
-            )
-
+    carry = (mlcanopy_inst, flux_accumulators)
+    _traced = not is_concrete(
+        *jax.tree_util.tree_leaves((mlcanopy_inst, forcing_bef, forcing_cur, forcing_next))
+    )
+    if _traced:
         import os as _os
 
-        _use_checkpoint = _os.environ.get("CLM_ML_NO_CHECKPOINT", "0") != "1"
-
-        def _scan_body(inst, calday_ml_x):
-            """lax.scan body: one ML sub-step. Returns (inst, None)."""
-            return _physics_step_fn(inst, calday_ml_x), None
-
-        # jax.checkpoint on the scan body: recomputes activations during
-        # backward instead of storing them — O(step_mem) not O(N*step_mem).
-        _scan_body_fn = jax.checkpoint(_scan_body) if _use_checkpoint else _scan_body
-
-        mlcanopy_inst, _ = jax.lax.scan(_scan_body_fn, mlcanopy_inst, _calday_arr)
-
+        _scan_body = _substep
+        if _os.environ.get("CLM_ML_NO_CHECKPOINT", "0") != "1":
+            _scan_body = jax.checkpoint(_substep)
+        carry, _ = jax.lax.scan(_scan_body, carry, jnp.array(caldays_ml, dtype=jnp.float64))
     else:
-        # ------------------------------------------------------------------
-        # NON-DIFF MODE: Python for loop
-        # ------------------------------------------------------------------
-        for nstep_ml in range(1, num_ml_steps + 1):
+        for nstep_ml, calday_ml in enumerate(caldays_ml, start=1):
             if (
                 masterproc
                 and nstep == 1
                 and (nstep_ml == 1 or nstep_ml == num_ml_steps or (nstep_ml % progress_stride == 0))
             ):
-                print(
-                    f"MLCanopyFluxes: sub-step {nstep_ml}/{num_ml_steps}",
-                    flush=True,
-                )
+                print(f"MLCanopyFluxes: sub-step {nstep_ml}/{num_ml_steps}", flush=True)
+            carry, _ = _substep(carry, calday_ml)
+    mlcanopy_inst, flux_accumulators = carry
 
-            # Calendar day for this ML sub-step — Fortran lines 263-270
-            if met_type in (0, 2):
-                calday_interp_ml = curr_calday_beg + float(nstep_ml) * (_dtime_ml / 86400.0)
-            else:  # met_type == 3
-                calday_interp_ml = curr_calday_beg + (float(nstep_ml) - 0.5) * (_dtime_ml / 86400.0)
-
-            mlcanopy_inst = _physics_step_fn(mlcanopy_inst, calday_interp_ml)
-
-            # Accumulate fluxes over ML sub-steps — Fortran line 372
-            flux_accumulator, flux_accumulator_profile, flux_accumulator_leaf = _MLAccumulateFluxes(
-                num_mlcan,
-                filter_mlcan,
-                ncan_vals,
-                flux_accumulator,
-                flux_accumulator_profile,
-                flux_accumulator_leaf,
-                mlcanopy_inst,
-            )
-
-        # Scale accumulated sums by 1/num_ml_steps and write back to inst
-        flux_accumulator, flux_accumulator_profile, flux_accumulator_leaf, mlcanopy_inst = (
-            _MLScaleAndWriteBack(
-                num_ml_steps,
-                num_mlcan,
-                filter_mlcan,
-                ncan_vals,
-                flux_accumulator,
-                flux_accumulator_profile,
-                flux_accumulator_leaf,
-                mlcanopy_inst,
-            )
-        )
+    # Scale accumulated sums by 1/num_ml_steps and write back to inst
+    *_, mlcanopy_inst = _MLScaleAndWriteBack(
+        num_ml_steps, num_mlcan, filter_mlcan, ncan_vals, *flux_accumulators, mlcanopy_inst
+    )
 
     # End multilayer time-stepping loop
     # ------------------------------------------------------------------
@@ -681,18 +620,13 @@ def MLCanopyFluxes(
     # ------------------------------------------------------------------
     # Canopy-level diagnostics — Fortran line 346
     # ------------------------------------------------------------------
-    if not _diff_mode:
-        mlcanopy_inst = _CanopyFluxesDiagnostics(num_mlcan, filter_mlcan, mlcanopy_inst)
+    mlcanopy_inst = _CanopyFluxesDiagnostics(num_mlcan, filter_mlcan, mlcanopy_inst, grid)
 
     # ------------------------------------------------------------------
     # Merge sun/shade leaf temperature and water potential — Fortran lines 355-375
     # State is prognostic; sun/shade fraction changes between CLM steps,
     # so merge to a layer-mean before the next timestep.
-    # Skipped in differentiable mode (not needed for loss computation).
     # ------------------------------------------------------------------
-    if _diff_mode:
-        return mlcanopy_inst
-
     tleaf = mlcanopy_inst.tleaf_leaf
     tleaf_hist = mlcanopy_inst.tleaf_hist_leaf
     lwp = mlcanopy_inst.lwp_leaf
@@ -1449,6 +1383,7 @@ def _CanopyFluxesDiagnostics(
     num_filter: int,
     filter: List[int],
     mlcanopy_inst: mlcanopy_type,
+    grid: GridInfo,
 ) -> mlcanopy_type:
     """
     Compute canopy-integrated fluxes, diagnostics, and energy balance checks.
@@ -1599,8 +1534,8 @@ def _CanopyFluxesDiagnostics(
     # ==================================================================
     for fp in range(1, num_filter + 1):
         p = int(filter[fp - 1])
-        _ncan = int(mlcanopy_inst.ncan_canopy[p])
-        _ntop = int(mlcanopy_inst.ntop_canopy[p])
+        _ncan = grid.ncan
+        _ntop = grid.ntop
         _sl = slice(1, _ncan + 1)
 
         # ----------------------------------------------------------------
@@ -1743,7 +1678,7 @@ def _CanopyFluxesDiagnostics(
 
         # --- 3. Vegetation energy balance check ---
         err = swveg_vis + swveg_nir + lwveg_p - shveg_p - lhveg_p - stflx_veg_p
-        if abs(err) >= 1.0e-3:
+        if is_concrete(err) and abs(err) >= 1.0e-3:
             endrun(msg=" ERROR: CanopyFluxesDiagnostics: energy conservation error (1)")
 
         # --- 4. Albedo ---
@@ -1762,7 +1697,7 @@ def _CanopyFluxesDiagnostics(
         elif flux_profile_type == 1:
             shflx_val = mlcanopy_inst.shair_profile[p, _ncan]
             etflx_val = mlcanopy_inst.etair_profile[p, _ncan]
-            lhflx_val = etflx_val * LatVap(float(mlcanopy_inst.tref_forcing[p]))
+            lhflx_val = etflx_val * LatVap(mlcanopy_inst.tref_forcing[p])
         else:
             endrun(msg=" ERROR: CanopyFluxesDiagnostics: turbulence type not valid")
             shflx_val = etflx_val = lhflx_val = 0.0  # Unreachable
@@ -1786,13 +1721,13 @@ def _CanopyFluxesDiagnostics(
         )
 
         err = rnet_p - (radin - radout)
-        if abs(err) > 0.001:
+        if is_concrete(err) and abs(err) > 0.001:
             endrun(msg=" ERROR: CanopyFluxesDiagnostics: energy conservation error (2)")
 
         avail = radin - radout - _gsoi_p
         flux_p = shflx_val + lhflx_val + stflx_air_p + stflx_veg_p
         err = avail - flux_p
-        if abs(err) > 0.01:
+        if is_concrete(err) and abs(err) > 0.01:
             endrun(msg=" ERROR: CanopyFluxesDiagnostics: energy conservation error (3)")
 
         radin_top = (
@@ -1804,7 +1739,7 @@ def _CanopyFluxesDiagnostics(
         )
         radout_top = _swupw_ntop[ivis] + _swupw_ntop[inir] + _lwupw_ntop
         err = (radin_top - radout_top) - rnet_p
-        if abs(err) > 0.001:
+        if is_concrete(err) and abs(err) > 0.001:
             endrun(msg=" ERROR: CanopyFluxesDiagnostics: energy conservation error (4)")
 
         # --- 8. Sun/shade canopy totals ---

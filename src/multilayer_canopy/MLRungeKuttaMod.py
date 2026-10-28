@@ -35,7 +35,7 @@ def RungeKuttaUpdate(
     num_filter: int,
     filter: Array,
     mlcanopy_inst: mlcanopy_type,
-    grid: "GridInfo | None" = None,  # noqa: F821
+    grid: "GridInfo",  # noqa: F821
 ) -> mlcanopy_type:
     """
     Runge-Kutta state update: update states for the next Runge-Kutta step.
@@ -95,15 +95,8 @@ def RungeKuttaUpdate(
     # ------------------------------------------------------------------
     # Per-patch loop — Fortran lines 95-136
     # ------------------------------------------------------------------
-    _diff_mode = grid is not None
-
     for fp in range(num_filter):
-        if _diff_mode:
-            p = grid.p
-            n = grid.ncan
-        else:
-            p = int(filter[fp])
-            n = int(mlcanopy_inst.ncan_canopy[p])
+        p, n = grid.p, grid.ncan
 
         # Always use JAX slices — no np.asarray() D→H syncs
         _tair_cur = tair_arr[p, :n]

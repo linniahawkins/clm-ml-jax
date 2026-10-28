@@ -178,7 +178,7 @@ def GetAtmForcing(
     filter: Array,
     mlcanopy_inst: mlcanopy_type,
     window: AtmForcingWindow,
-    grid: "GridInfo | None" = None,
+    grid: GridInfo,
 ) -> mlcanopy_type:
     """
     Interpolate and derive atmospheric forcing for the current multilayer
@@ -275,14 +275,10 @@ def GetAtmForcing(
     # Per-patch loop — Fortran lines 156-167
     # ------------------------------------------------------------------
     for fp in range(num_filter):
-        if grid is not None:
-            p = grid.p
-        else:
-            p = int(filter[fp])
+        p = grid.p
 
         # --------------------------------------------------------------
-        # Atmospheric forcing interpolation — values stay as JAX scalars
-        # when grid is provided (differentiable mode).
+        # Atmospheric forcing interpolation (values stay as JAX scalars)
         # --------------------------------------------------------------
         if met_type == 0:
             # No interpolation: use current CLM timestep values

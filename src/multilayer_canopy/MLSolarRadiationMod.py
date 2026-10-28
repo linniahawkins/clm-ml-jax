@@ -45,7 +45,7 @@ from multilayer_canopy.MLclm_varctl import (  # noqa: F401
     light_type,
 )
 from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: F401
-from multilayer_canopy.MLMathToolsMod import tridiag  # noqa: F401
+from multilayer_canopy.MLMathToolsMod import is_concrete, tridiag  # noqa: F401
 from multilayer_canopy.MLpftconMod import MLpftcon  # noqa: F401
 
 # ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ def SolarRadiation(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
-    grid: "GridInfo | None" = None,
+    grid: GridInfo,
 ) -> mlcanopy_type:
     """
     Solar radiation transfer through the multilayer canopy.
@@ -118,9 +118,6 @@ def SolarRadiation(
     clump_fac = MLpftcon.clump_fac
 
     solar_zen = mlcanopy_inst.solar_zen_forcing
-    ncan = mlcanopy_inst.ncan_canopy
-    ntop = mlcanopy_inst.ntop_canopy
-    nbot = mlcanopy_inst.nbot_canopy
     dlai = mlcanopy_inst.dlai_profile
     dsai = mlcanopy_inst.dsai_profile
     dpai = mlcanopy_inst.dpai_profile
@@ -149,24 +146,16 @@ def SolarRadiation(
     # ------------------------------------------------------------------
     # Calculate canopy layer optical properties — Fortran lines 100-182
     # ------------------------------------------------------------------
-    # Pre-materialise index arrays as numpy so int() calls below are
-    # always concrete, even when this function is traced by jax.grad/jit.
-    # When grid is provided (diff mode), ncan/ntop/nbot are already
-    # concrete Python ints from GridInfo — no np.asarray() needed.
-    if grid is None:
-        _ncan_np = np.asarray(ncan)
-        _ntop_np = np.asarray(ntop)
-        _nbot_np = np.asarray(nbot)
     _itype_np = np.asarray(patch.itype)
 
     for fp in range(1, num_filter + 1):
-        p = int(filter_patch[fp - 1]) if grid is None else grid.p
+        p = grid.p
         pft = int(_itype_np[p])
         zen = solar_zen[p]
         cos_zen = jnp.cos(zen)
-        _ncan = int(_ncan_np[p]) if grid is None else grid.ncan
-        _ntop = int(_ntop_np[p]) if grid is None else grid.ntop
-        _nbot = int(_nbot_np[p]) if grid is None else grid.nbot
+        _ncan = grid.ncan
+        _ntop = grid.ntop
+        _nbot = grid.nbot
 
         # Per-patch output arrays (JAX)
         _kb_p = jnp.zeros(_ncan + 2)
@@ -257,9 +246,9 @@ def SolarRadiation(
             # When kb*dpai=0, the exp term also =0 so fracsun_ic=0 regardless of denom.
             kb_ic_safe = jnp.maximum(kb_ic * dpai_ic, 1.0e-30)
             fracsun_ic = tbi_ic / kb_ic_safe * (1.0 - jnp.exp(-kb_ic * cf * dpai_ic))
-            if grid is None and jnp.any(fracsun_ic <= 0.0):
+            if is_concrete(fracsun_ic) and jnp.any(fracsun_ic <= 0.0):
                 endrun(msg=" ERROR: SolarRadiation: fracsun is too small")
-            if grid is None and jnp.any((1.0 - fracsun_ic) <= 0.0):
+            if is_concrete(fracsun_ic) and jnp.any((1.0 - fracsun_ic) <= 0.0):
                 endrun(msg=" ERROR: SolarRadiation: fracsha is too small")
             _fracsun_p = _fracsun_p.at[ic].set(fracsun_ic)
 
@@ -351,8 +340,8 @@ def SolarRadiation(
     swleaf = mlcanopy_inst.swleaf_leaf
     apar = mlcanopy_inst.apar_leaf
     for fp in range(1, num_filter + 1):
-        p = int(filter_patch[fp - 1]) if grid is None else grid.p
-        _ncan = int(_ncan_np[p]) if grid is None else grid.ncan
+        p = grid.p
+        _ncan = grid.ncan
         _sl = slice(1, _ncan + 1)
         apar = apar.at[p, _sl, :].set(swleaf[p, _sl, :, ivis] * J_to_umol)
 
@@ -373,7 +362,7 @@ def _Norman(
     tau: Array,
     omega: Array,
     mlcanopy_inst: mlcanopy_type,
-    grid: "GridInfo | None" = None,
+    grid: GridInfo,
 ) -> mlcanopy_type:
     """
     Norman (1979) tridiagonal radiative transfer through the canopy.
@@ -409,9 +398,6 @@ def _Norman(
 
     swskyb = mlcanopy_inst.swskyb_forcing
     swskyd = mlcanopy_inst.swskyd_forcing
-    ncan = mlcanopy_inst.ncan_canopy
-    ntop = mlcanopy_inst.ntop_canopy
-    nbot = mlcanopy_inst.nbot_canopy
     albsoib = mlcanopy_inst.albsoib_soil
     albsoid = mlcanopy_inst.albsoid_soil
     dpai = mlcanopy_inst.dpai_profile
@@ -430,20 +416,12 @@ def _Norman(
     swdwn = mlcanopy_inst.swdwn_profile
     swbeam = mlcanopy_inst.swbeam_profile
 
-    # Pre-materialise ncan/ntop/nbot as numpy so int() calls below are
-    # always concrete inside jax.grad/jit tracing.
-    # When grid is provided (diff mode), use pre-extracted concrete ints.
-    if grid is None:
-        _ncan_np = np.asarray(ncan)
-        _ntop_np = np.asarray(ntop)
-        _nbot_np = np.asarray(nbot)
-
     for ib in range(1, numrad + 1):  # Fortran: do ib = 1, numrad
         for fp in range(1, num_filter + 1):
-            p = int(filter_patch[fp - 1]) if grid is None else grid.p
-            _ncan = int(_ncan_np[p]) if grid is None else grid.ncan
-            _ntop = int(_ntop_np[p]) if grid is None else grid.ntop
-            _nbot = int(_nbot_np[p]) if grid is None else grid.nbot
+            p = grid.p
+            _ncan = grid.ncan
+            _ntop = grid.ntop
+            _nbot = grid.nbot
 
             # Scalar inputs — JAX scalars directly
             _swskyb_ib = swskyb[p, ib]
@@ -612,10 +590,10 @@ def _Norman(
             _sumref = _albcan_ib * _suminc
             _sumabs = _suminc - _sumref
             _err = _sumabs - (_swveg_acc + _swsoi_ib)
-            if grid is None and jnp.abs(_err) > 1.0e-3:
+            if is_concrete(_err) and jnp.abs(_err) > 1.0e-3:
                 endrun(msg="ERROR: Norman: total solar conservation error")
             _err2 = (_swvegsun_acc + _swvegsha_acc) - _swveg_acc
-            if grid is None and jnp.abs(_err2) > 1.0e-3:
+            if is_concrete(_err2) and jnp.abs(_err2) > 1.0e-3:
                 endrun(msg="ERROR: Norman: sunlit/shade solar conservation error")
 
             # Bulk JAX write-back
@@ -663,7 +641,7 @@ def _TwoStream(
     betab: Array,
     clump_fac_ic: Array,
     mlcanopy_inst: mlcanopy_type,
-    grid: "GridInfo | None" = None,
+    grid: GridInfo,
 ) -> mlcanopy_type:
     """
     Two-stream radiative transfer integrated over each canopy layer.
@@ -707,9 +685,6 @@ def _TwoStream(
     """
     swskyb = mlcanopy_inst.swskyb_forcing
     swskyd = mlcanopy_inst.swskyd_forcing
-    ncan = mlcanopy_inst.ncan_canopy
-    ntop = mlcanopy_inst.ntop_canopy
-    nbot = mlcanopy_inst.nbot_canopy
     albsoib = mlcanopy_inst.albsoib_soil
     albsoid = mlcanopy_inst.albsoid_soil
     dpai = mlcanopy_inst.dpai_profile
@@ -731,19 +706,11 @@ def _TwoStream(
     n_rad = numrad + 1
     nleaf_p1 = 3  # nleaf + 1 = 3
 
-    # Pre-materialise ncan/ntop/nbot as numpy so int() calls below are
-    # always concrete inside jax.grad/jit tracing.
-    # When grid is provided (diff mode), use pre-extracted concrete ints.
-    if grid is None:
-        _ncan_np = np.asarray(ncan)
-        _ntop_np = np.asarray(ntop)
-        _nbot_np = np.asarray(nbot)
-
     for fp in range(1, num_filter + 1):
-        p = int(filter_patch[fp - 1]) if grid is None else grid.p
-        _ncan = int(_ncan_np[p]) if grid is None else grid.ncan
-        _ntop = int(_ntop_np[p]) if grid is None else grid.ntop
-        _nbot = int(_nbot_np[p]) if grid is None else grid.nbot
+        p = grid.p
+        _ncan = grid.ncan
+        _ntop = grid.ntop
+        _nbot = grid.nbot
 
         # Per-patch output JAX arrays
         _swleaf_p = jnp.zeros((n_lev, nleaf_p1, n_rad))
@@ -933,7 +900,10 @@ def _TwoStream(
 
             # Conservation check
             sumabs = swveg_ib + _swsoi_p[ib]
-            if grid is None and jnp.abs(suminc - (sumabs + _albcan_p[ib] * suminc)) >= 1.0e-6:
+            if (
+                is_concrete(suminc)
+                and jnp.abs(suminc - (sumabs + _albcan_p[ib] * suminc)) >= 1.0e-6
+            ):
                 endrun(msg="ERROR: TwoStream: total solar radiation conservation error")
 
         # Bulk JAX write-back for this patch

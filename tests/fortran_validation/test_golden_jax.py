@@ -251,13 +251,13 @@ def _adapt_get_prsc(inp: dict) -> dict:
 
 
 def _adapt_get_psi_rsl(inp: dict) -> dict:
-    """_GetPsiRSL_scalar uses RSL lookup tables (initialized in conftest)."""
+    """_GetPsiRSL uses RSL lookup tables (initialized in conftest)."""
     from tests.fortran_validation.conftest import RSL_AVAILABLE
 
     if not RSL_AVAILABLE:
         pytest.skip("RSL psihat lookup tables unavailable (netCDF4 load failed)")
     turb = _get("multilayer_canopy.MLCanopyTurbulenceMod")
-    psim, psic, psim2, psim_hat2 = turb._GetPsiRSL_scalar(
+    psim, psic, psim2, psim_hat2 = turb._GetPsiRSL(
         inp["za"], inp["hc"], inp["disp"], inp["obu"], inp["beta"], inp["PrSc"]
     )
     return {

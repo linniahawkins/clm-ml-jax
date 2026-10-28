@@ -43,7 +43,7 @@ def FluxProfileSolution(
     num_filter: int,
     filter: Array,
     mlcanopy_inst: mlcanopy_type,
-    grid=None,
+    grid,
 ) -> mlcanopy_type:
     """
     Source/sink fluxes for leaves and soil, and concentration profiles.
@@ -68,7 +68,6 @@ def FluxProfileSolution(
             legacy path, not supported) or unrecognised.
     """
     co2ref = mlcanopy_inst.co2ref_forcing  # Atmospheric CO2 at ref height (umol/mol)
-    ncan = mlcanopy_inst.ncan_canopy  # Number of aboveground layers
     cair = mlcanopy_inst.cair_profile  # Canopy layer atmospheric CO2 (umol/mol)
 
     if flux_profile_type in (0, -1):
@@ -79,12 +78,7 @@ def FluxProfileSolution(
     elif flux_profile_type == 1:
         # Implicit flux-profile solution — Fortran lines 62-74
         for fp in range(num_filter):
-            if grid is not None:
-                p = grid.p
-                n = grid.ncan
-            else:
-                p = int(filter[fp])
-                n = int(ncan[p])
+            p, n = grid.p, grid.ncan
             mlcanopy_inst = ImplicitFluxProfileSolution(p, mlcanopy_inst, n=n)
 
             # No profile for CO2: set every layer to reference value

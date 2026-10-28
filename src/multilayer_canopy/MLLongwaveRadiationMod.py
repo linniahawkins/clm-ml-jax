@@ -66,7 +66,7 @@ def LongwaveRadiation(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
-    grid: GridInfo = None,
+    grid: GridInfo,
 ) -> mlcanopy_type:
     """
     Longwave radiation transfer through the multilayer canopy.
@@ -266,7 +266,7 @@ def _Norman(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
-    grid: GridInfo = None,
+    grid: GridInfo,
 ) -> mlcanopy_type:
     """
     Norman (1979) tridiagonal longwave radiative transfer.
@@ -332,8 +332,6 @@ def _Norman(
     bounds and ``jnp.arange(nbot, ntop+1)`` inside the kernel.
     """
     for fp in range(num_filter):
-        p = grid.p if grid is not None else filter_patch[fp]
-        ntop = grid.ntop if grid is not None else int(mlcanopy_inst.ntop_canopy[p])
-        nbot = grid.nbot if grid is not None else int(mlcanopy_inst.nbot_canopy[p])
+        p, ntop, nbot = grid.p, grid.ntop, grid.nbot
         mlcanopy_inst = _Norman_patch(p, ntop, nbot, mlcanopy_inst)
     return mlcanopy_inst
