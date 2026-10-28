@@ -55,7 +55,9 @@ MLCANOPY_FIELDS = (
 TEMPERATURE_FIELDS = ("t_soisno_col",)
 
 
-def run_spec(spec: dict, out_file: Path) -> None:
+def prepare_process(spec: dict) -> None:
+    """Steps 1-4 above: configure this (fresh) process for ``spec``. The legacy modules keep
+    options and tables in module globals, so a process can be prepared for one run only."""
     import jax
 
     jax.config.update("jax_enable_x64", True)
@@ -95,6 +97,19 @@ def run_spec(spec: dict, out_file: Path) -> None:
     # 4. Tower table.
     _install_tower(spec["tower_name"], spec["tower"])
 
+
+def setup_legacy_run(spec: dict):
+    """``offline_executable.main.setup_run`` for ``spec`` (after :func:`prepare_process`)."""
+    import offline_executable.main as main_mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        namelist = _write_namelist(spec["namelist"], Path(tmp), None)
+        return main_mod.setup_run(main_mod.read_namelist(str(namelist)))
+
+
+def run_spec(spec: dict, out_file: Path) -> None:
+    prepare_process(spec)
+
     # 5. Run.
     import offline_executable.main as main_mod
 
@@ -105,8 +120,7 @@ def run_spec(spec: dict, out_file: Path) -> None:
             sys.argv = ["clm-ml-offline", str(namelist)]
             main_mod.main()
             return
-        namelist = _write_namelist(spec["namelist"], Path(tmp), None)
-        run = main_mod.setup_run(main_mod.read_namelist(str(namelist)))
+    run = setup_legacy_run(spec)
 
     import datetime as dt
 

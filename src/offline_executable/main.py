@@ -530,6 +530,12 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers
     return jax.jit(run_chunk)
 
 
+#: jax.checkpoint on the step of compiled chunks (make_stream_runner), as in jax-gcm; a
+#: switch for experiments. (Gradients over a chunk need XLA's older CPU runtime with JAX
+#: 0.6.2: see clm_ml.model.)
+CHECKPOINT_STEP = True
+
+
 def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int):
     """A compiled function ``(state, xs, slots, buffers[, params]) -> (state, buffers)``
     advancing a chunk as one ``jax.lax.scan`` and accumulating output streams inside it
@@ -587,10 +593,10 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
         )
         return (state_from_instances(insts), buffers), None
 
-    # As in jax-gcm: jax.checkpoint on the step, so a gradient over a chunk stores only the
-    # carry (state and stream buffers) at each step and recomputes the step's intermediate
-    # values in the backward pass. No effect on forward results.
-    checkpointed_step = jax.checkpoint(step)
+    # As in jax-gcm: jax.checkpoint on the step (if CHECKPOINT_STEP), so a gradient over a
+    # chunk stores only the carry (state and stream buffers) at each step and recomputes the
+    # step's intermediate values in the backward pass. No effect on forward results.
+    checkpointed_step = jax.checkpoint(step) if CHECKPOINT_STEP else step
 
     def run_chunk(state, xs, slots, buffers, params=default_params):
         n = jax.tree.leaves(xs)[0].shape[0]

@@ -883,8 +883,19 @@ Progress:
   meteorology, daily or monthly LAI/SAI/soil water with interpolation to the model step,
   decision 13–14) implement the same interface (Phase 4b). The next chunk is read on a
   background thread while the current one runs.
-- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`); GPU timing (done-when 3,
-  GPU part);
+- ✅ **`clm_ml.model.Model`** (in this process, for notebooks and calibration):
+  `Model.from_run(run)`, `initial_state()`, `default_params()` (from params.yaml),
+  `chunks()`, `forcing(first, n)`, and `run_chunk(state, forcing, first, params, streams)`
+  → `(state, {stream: records})`, differentiable with respect to state, parameters and
+  forcing (test: d(mean latent heat over 8 steps)/d(vcmax25) agrees with a finite
+  difference). One model per process (legacy globals); a second run is refused.
+  **XLA runtime bug:** with JAX 0.6.2, gradients over a chunk of ≥ 2 steps crash
+  (segmentation fault) in XLA's default CPU ("thunk") runtime; the older runtime
+  (`XLA_FLAGS=--xla_cpu_use_thunk_runtime=false`) computes them, with `jax.checkpoint` on the
+  step. `clm_ml.model` selects it on import (warning if JAX has already started); normal
+  runs keep the default runtime. Cost: an 8-step chunk gradient takes ~7 min and ~13 GB
+  (mostly compilation). Re-test with newer JAX.
+- Remaining: GPU timing (done-when 3, GPU part);
   the resident-memory check on a long run.
 
 - `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one
