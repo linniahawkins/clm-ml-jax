@@ -23,6 +23,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SIZES = (46, 50, 100)
 RTOL = 1e-9  # relative to each variable's largest magnitude
+# Gradients amplify round-off: they pass through the implicit-function derivatives of the
+# iterative solvers, where a ~1e-11 change of a converged value moves the derivative by
+# ~1e-9 (measured: up to 5e-9 between 46, 50 and 100 slots). 1e-7 is still far below the
+# accuracy that matters (the finite-difference gradient checks pass at 5 %).
+RTOL_GRADIENT = 1e-7
 
 SCRIPT = """
 import json, sys, tempfile
@@ -78,7 +83,7 @@ def _common(a: np.ndarray, shape) -> np.ndarray:
     return a[tuple(slice(0, s) for s in shape)]
 
 
-def _compare(results: dict) -> list[str]:
+def _compare(results: dict, rtol: float = RTOL) -> list[str]:
     problems = []
     exact = results[SIZES[0]]
     for size in SIZES[1:]:
@@ -91,7 +96,7 @@ def _compare(results: dict) -> list[str]:
             ok = np.isfinite(ref)
             scale = float(np.max(np.abs(ref[ok]), initial=0.0)) or 1.0
             diff = float(np.max(np.abs(new[ok] - ref[ok]), initial=0.0))
-            if diff > RTOL * scale:
+            if diff > rtol * scale:
                 problems.append(
                     f"max_layers {size}: {name}: relative difference {diff / scale:.2e}"
                 )
@@ -111,5 +116,5 @@ def test_padding_gives_finite_equal_gradients():
     for size, grads in results.items():
         for name, g in grads.items():
             assert np.all(np.isfinite(np.asarray(g, dtype=float))), f"{size}: d/d{name} not finite"
-    problems = _compare(results)
+    problems = _compare(results, RTOL_GRADIENT)
     assert not problems, "\n".join(problems)

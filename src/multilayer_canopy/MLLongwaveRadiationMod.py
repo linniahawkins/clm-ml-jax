@@ -58,6 +58,7 @@ from multilayer_canopy.MLCanopyParamsMod import CanopyParams  # noqa: E402
 from multilayer_canopy.MLclm_varcon import emg  # noqa: E402, F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions  # noqa: E402
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: E402, F401
+from multilayer_canopy.MLLayersMod import layers  # noqa: E402
 from multilayer_canopy.MLMathToolsMod import tridiag  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
@@ -105,23 +106,24 @@ def LongwaveRadiation(
 # ---------------------------------------------------------------------------
 
 
-@partial(jax.jit, static_argnums=(0, 1, 2))
+@partial(jax.jit, static_argnums=(0,))
 def _Norman_patch(
     p: int,
-    ntop: int,
-    nbot: int,
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
 ) -> mlcanopy_type:
-    """JIT-compiled Norman longwave solver for a single patch.
+    """Norman longwave solver for one patch, for any layer counts (plan Phase 5b).
 
-    p, ntop, nbot are static Python ints — they are used as Python loop
-    bounds and slice indices (e.g. ``jnp.arange(nbot, ntop+1)``) which
-    must be concrete under ``jax.jit``.  Recompilation only happens when
-    the canopy structure changes (rare for a fixed site).
+    The leafy layers ``nbot..ntop`` are data (``MLLayersMod``). The tridiagonal system always
+    has ``2 * max_layers + 2`` rows: the real rows first, in Fortran order (soil, then two
+    rows per leafy layer), the sky row right after them, then identity rows (x = 0) for the
+    unused leafy-layer slots. The sky row has no upper coupling, so the identity rows do not
+    change the real solution (each real row is computed as before).
     """
     nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
-    neq: int = (nlevmlcan + 1) * 2
+    lay = layers(mlcanopy_inst, p)
+    ntop, nbot = lay.ntop, lay.nbot
+    n_leafy = ntop - nbot + 1  # leafy layers (data)
     em_leaf = params.leaf_emissivity
     rho = 1.0 - em_leaf
     tau = 0.0
@@ -134,109 +136,73 @@ def _Norman_patch(
     _lwsky_p = mlcanopy_inst.lwsky_forcing[p]
     _tg_p = mlcanopy_inst.tg_soil[p]
 
+    # Leafy-layer slot j = 0..max_layers-1 is layer ic = nbot + j (valid for j < n_leafy);
+    # unused slots repeat layer ntop's values (finite), and their results are discarded.
+    j = jnp.arange(nlevmlcan)
+    valid = j < n_leafy
+    ics = jnp.minimum(nbot + j, ntop)
+
     # Layer emission — JAX vectorised
-    ics = jnp.arange(nbot, ntop + 1)  # static size: ntop-nbot+1
-    lw_source = jnp.zeros(nlevmlcan + 2)
     lw_sun = em_leaf * sb * _tleaf_sun[ics] ** 4
     lw_sha = em_leaf * sb * _tleaf_sha[ics] ** 4
     fs_arr = _fracsun[ics]
-    lw_source = lw_source.at[ics].set(
-        (lw_sun * fs_arr + lw_sha * (1.0 - fs_arr)) * (1.0 - _td[ics])
-    )
+    src = (lw_sun * fs_arr + lw_sha * (1.0 - fs_arr)) * (1.0 - _td[ics])  # lw_source(ic)
 
-    atri = [jnp.zeros(())] * (neq + 1)
-    btri = [jnp.zeros(())] * (neq + 1)
-    ctri = [jnp.zeros(())] * (neq + 1)
-    dtri = [jnp.zeros(())] * (neq + 1)
-
-    m = 0
-
-    m += 1
-    atri[m] = jnp.zeros(())
-    btri[m] = jnp.ones(())
-    ctri[m] = -(1.0 - emg)
-    dtri[m] = emg * sb * _tg_p**4
-
-    td_nb = _td[nbot]
-    refld = (1.0 - td_nb) * rho
-    trand = (1.0 - td_nb) * tau + td_nb
+    # Row coefficients per leafy layer: "a" rows (-aic, 1, -bic) and "f" rows (-eic, 1, -fic)
+    td = _td[ics]
+    refld = (1.0 - td) * rho
+    trand = (1.0 - td) * tau + td
     aic = refld - trand * trand / refld
     bic = trand / refld
-    m += 1
-    atri[m] = -aic
-    btri[m] = jnp.ones(())
-    ctri[m] = -bic
-    dtri[m] = (1.0 - bic) * lw_source[nbot]
-
-    for ic in range(nbot, ntop):  # static loop — unrolled at trace time
-        td_ic = _td[ic]
-        refld = (1.0 - td_ic) * rho
-        trand = (1.0 - td_ic) * tau + td_ic
-        fic = refld - trand * trand / refld
-        eic = trand / refld
-        m += 1
-        atri[m] = -eic
-        btri[m] = jnp.ones(())
-        ctri[m] = -fic
-        dtri[m] = (1.0 - eic) * lw_source[ic]
-
-        ic1 = ic + 1
-        td_ic1 = _td[ic1]
-        refld = (1.0 - td_ic1) * rho
-        trand = (1.0 - td_ic1) * tau + td_ic1
-        aic = refld - trand * trand / refld
-        bic = trand / refld
-        m += 1
-        atri[m] = -aic
-        btri[m] = jnp.ones(())
-        ctri[m] = -bic
-        dtri[m] = (1.0 - bic) * lw_source[ic1]
-
-    ic = ntop
-    td_ic = _td[ic]
-    refld = (1.0 - td_ic) * rho
-    trand = (1.0 - td_ic) * tau + td_ic
     fic = refld - trand * trand / refld
     eic = trand / refld
-    m += 1
-    atri[m] = -eic
-    btri[m] = jnp.ones(())
-    ctri[m] = -fic
-    dtri[m] = (1.0 - eic) * lw_source[ic]
 
-    m += 1
-    atri[m] = jnp.zeros(())
-    btri[m] = jnp.ones(())
-    ctri[m] = jnp.zeros(())
-    dtri[m] = _lwsky_p
+    m_max = 2 * nlevmlcan + 2
+    sky_row = 2 * n_leafy + 2  # 1-based
+    zero, one = jnp.zeros(()), jnp.ones(())
+    atri = [zero] * (m_max + 1)
+    btri = [one] * (m_max + 1)
+    ctri = [zero] * (m_max + 1)
+    dtri = [zero] * (m_max + 1)
 
-    utri = _tridiag_py(atri, btri, ctri, dtri, m)
+    # Soil row (m = 1)
+    ctri[1] = -(1.0 - emg) * one
+    dtri[1] = emg * sb * _tg_p**4
+    # Layer rows: layer j's "a" row at m = 2 + 2j, its "f" row at m = 3 + 2j
+    for jj in range(nlevmlcan):
+        ma, mf = 2 + 2 * jj, 3 + 2 * jj
+        v = valid[jj]
+        atri[ma] = jnp.where(v, -aic[jj], 0.0)
+        ctri[ma] = jnp.where(v, -bic[jj], 0.0)
+        dtri[ma] = jnp.where(v, (1.0 - bic[jj]) * src[jj], 0.0)
+        atri[mf] = jnp.where(v, -eic[jj], 0.0)
+        ctri[mf] = jnp.where(v, -fic[jj], 0.0)
+        dtri[mf] = jnp.where(v, (1.0 - eic[jj]) * src[jj], 0.0)
+    # Sky row right after the last real row (overrides that slot's identity row)
+    for m in range(4, m_max + 1, 2):
+        is_sky = m == sky_row
+        atri[m] = jnp.where(is_sky, 0.0, atri[m])
+        ctri[m] = jnp.where(is_sky, 0.0, ctri[m])
+        dtri[m] = jnp.where(is_sky, _lwsky_p, dtri[m])
 
-    lwupw_new = jnp.zeros(nlevmlcan + 2)
-    lwdwn_new = jnp.zeros(nlevmlcan + 2)
-    k = 0
-    k += 1
-    lwupw_new = lwupw_new.at[0].set(utri[k])
-    k += 1
-    lwdwn_new = lwdwn_new.at[0].set(utri[k])
-    for ic in range(nbot, ntop + 1):  # static loop
-        k += 1
-        lwupw_new = lwupw_new.at[ic].set(utri[k])
-        k += 1
-        lwdwn_new = lwdwn_new.at[ic].set(utri[k])
+    utri = _tridiag_py(atri, btri, ctri, dtri, m_max)
+    u = jnp.stack(utri[1:])  # rows 1..m_max
+
+    # Unknowns: up(0), dn(0), then up(ic_j), dn(ic_j) for each leafy layer
+    ics_out = jnp.where(valid, ics, nlevmlcan + 1)  # unused slots write a dropped entry
+    lwupw_new = jnp.zeros(nlevmlcan + 2).at[0].set(u[0]).at[ics_out].set(u[2::2][:nlevmlcan])
+    lwdwn_new = jnp.zeros(nlevmlcan + 2).at[0].set(u[1]).at[ics_out].set(u[3::2][:nlevmlcan])
 
     _lwsoi_p = lwdwn_new[0] - lwupw_new[0]
 
     icm1s = jnp.where(ics == nbot, 0, ics - 1)
-    lwabs_arr = (
-        em_leaf * (lwdwn_new[ics] + lwupw_new[icm1s]) * (1.0 - _td[ics]) - 2.0 * lw_source[ics]
-    )
-    dpai_ics = _dpai[ics]
+    lwabs_arr = em_leaf * (lwdwn_new[ics] + lwupw_new[icm1s]) * (1.0 - _td[ics]) - 2.0 * src
+    lwabs_arr = jnp.where(valid, lwabs_arr, 0.0)
+    dpai_ics = jnp.where(valid, _dpai[ics], 1.0)
     lwleaf_arr = lwabs_arr / dpai_ics
     _lwveg_p = jnp.sum(lwabs_arr)
 
-    lwleaf_new = jnp.zeros(nlevmlcan + 2)
-    lwleaf_new = lwleaf_new.at[ics].set(lwleaf_arr)
+    lwleaf_new = jnp.zeros(nlevmlcan + 2).at[ics_out].set(lwleaf_arr)
 
     _lwup_p = lwupw_new[ntop]
 
@@ -244,19 +210,23 @@ def _Norman_patch(
     err = (_lwsky_p - _lwup_p) - (_lwveg_p + _lwsoi_p)
     mlcanopy_inst = record_balance_error(mlcanopy_inst, p, LONGWAVE, err)
 
-    _sl = slice(0, ntop + 1)
+    # Levels 0..ntop are written (Fortran: lwupw(0:ntop) etc.); the rest is kept
+    upto_top = jnp.arange(nlevmlcan + 1) <= ntop
+
+    def _set(arr, new):
+        return arr.at[p].set(jnp.where(upto_top, new[: nlevmlcan + 1], arr[p]))
+
+    lwleaf = mlcanopy_inst.lwleaf_leaf
     return mlcanopy_inst._replace(
         lwup_canopy=mlcanopy_inst.lwup_canopy.at[p].set(_lwup_p),
         lwveg_canopy=mlcanopy_inst.lwveg_canopy.at[p].set(_lwveg_p),
         lwsoi_soil=mlcanopy_inst.lwsoi_soil.at[p].set(_lwsoi_p),
-        lwleaf_leaf=(
-            mlcanopy_inst.lwleaf_leaf.at[p, _sl, isun]
-            .set(lwleaf_new[_sl])
-            .at[p, _sl, isha]
-            .set(lwleaf_new[_sl])
-        ),
-        lwupw_profile=mlcanopy_inst.lwupw_profile.at[p, _sl].set(lwupw_new[_sl]),
-        lwdwn_profile=mlcanopy_inst.lwdwn_profile.at[p, _sl].set(lwdwn_new[_sl]),
+        lwleaf_leaf=lwleaf.at[p, :, isun]
+        .set(jnp.where(upto_top, lwleaf_new[: nlevmlcan + 1], lwleaf[p, :, isun]))
+        .at[p, :, isha]
+        .set(jnp.where(upto_top, lwleaf_new[: nlevmlcan + 1], lwleaf[p, :, isha])),
+        lwupw_profile=_set(mlcanopy_inst.lwupw_profile, lwupw_new),
+        lwdwn_profile=_set(mlcanopy_inst.lwdwn_profile, lwdwn_new),
     )
 
 
@@ -332,6 +302,5 @@ def _Norman(
     bounds and ``jnp.arange(nbot, ntop+1)`` inside the kernel.
     """
     for fp in range(num_filter):
-        p, ntop, nbot = grid.p, grid.ntop, grid.nbot
-        mlcanopy_inst = _Norman_patch(p, ntop, nbot, mlcanopy_inst, params)
+        mlcanopy_inst = _Norman_patch(grid.p, mlcanopy_inst, params)
     return mlcanopy_inst

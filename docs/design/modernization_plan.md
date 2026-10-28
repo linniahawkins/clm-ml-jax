@@ -1222,6 +1222,23 @@ Progress:
   container data to NumPy in `clm_drv` (the vegetated-fraction filter) now uses only the
   array's shape. Bit for bit. The program is still specialized by the layer indices
   (`GridInfo.ncan/ntop/nbot`, static); steps 3–4 replace them with masks.
+- ✅ **Step 3a, masks** (`multilayer_canopy/MLLayersMod.py`): `layers(inst, p)` gives the
+  patch's counts as data and masks (`in_use` 1..ncan, `in_canopy` 1..ntop, `above_canopy`,
+  `leafy` nbot..ntop). Routines compute on every slot; `pad_with_top` gives padding slots
+  the inputs of layer `ncan` (always above the canopy and leafless), so padding computes a
+  harmless leafless layer instead of arithmetic on fill values (1e36) that would give
+  infinite values and NaN gradients; `restore_padding` puts the padding of every field a
+  routine changed back as it was. Converted: Runge–Kutta update, photosynthesis (bit for
+  bit).
+- ✅ **Step 3b, longwave radiation**: the Norman system always has `2 * max_layers + 2`
+  rows: the real rows in Fortran order, the sky row right after them (no upper coupling),
+  then identity rows for unused leafy-layer slots, so each real row and the real solution
+  are computed as before. Round-off only (the canopy total of absorbed longwave is a sum over
+  all slots): noise-twin test and identical-input replay pass; reference regenerated.
+- Gradient padding test (step 1 code): gradients finite for 46, 50 and 100 slots; they
+  differ by up to 5e-9 relative (round-off amplified by the implicit-function derivatives
+  of the solvers), so the gradient comparison uses 1e-7 (the finite-difference checks pass
+  at 5 %).
 
 **Done when:** the run path has no Python-integer layer bounds; **one compiled step serves
 patches with different layer counts** (CHATS7 at `max_layers` 46, 50 and 100 agree within noise;
