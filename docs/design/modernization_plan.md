@@ -711,11 +711,17 @@ Not done here, by design: the time manager still holds the static start date and
 length (read by the legacy output writer), and the driver still runs in `main.py` until
 Phase 3 moves it into `clm_ml`.
 
-**Follow-up 2d (small, before Phase 3).** As built, `load_forcing` reads the whole run, and the
-tower reader starts at the file's first record. Change the loader to read a time window,
-`(start record, n_steps)` plus one record either side, and document `Forcing` as a chunk.
-Tower runs keep reading a single window, so results are unchanged; the regression tests
-apply. The stream interface, time interpolation and the chunk loop follow in Phase 4.
+**Follow-up 2d ✅: forcing read as a chunk.** `Forcing` is one chunk of `n_steps` steps
+plus a halo record at each end (`n_steps + 2` records). Interior halos are the neighbouring
+records; at the run's first and last steps the halo repeats the edge record, as in Fortran
+(`clm_ml.forcing.chunk_run_steps`). `load_forcing(first_record, run_n_steps, first_step,
+n_steps, history_index, …)` reads only the records a chunk needs. `TowerMetMod.tower_first_record`
+finds the run's start in the tower file from its time axis, instead of assuming the file
+starts at the run start. The CLM history index and step times are computed per step rather
+than as whole-run lists. Tower runs still load one chunk covering the run, so results are
+unchanged (bit-for-bit). `tests/clm_ml/test_forcing_chunks.py` checks that three chunks,
+including halos, equal the matching slices of one whole-run read. The stream interface,
+time interpolation and the chunk loop follow in Phase 4.
 
 Planned scope:
 

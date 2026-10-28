@@ -18,6 +18,7 @@ run skips them:
 
 from __future__ import annotations
 
+import datetime
 import os
 import sys
 from pathlib import Path
@@ -116,7 +117,7 @@ def _build_initialized_model():
     from clm_share.shr_orb_mod import shr_orb_params
     from clm_src_utils import clm_varorb
     from offline_driver.CLMml_driver import SoilInit, TowerVeg, init_acclim
-    from offline_driver.TowerMetMod import TowerMetCurr
+    from offline_driver.TowerMetMod import TowerMetCurr, tower_first_record
 
     _eccen, _obliq, _mvelp, _obliqr, _lambm0, _mvelpp = shr_orb_params(iyear)
     clm_varorb.eccen = _eccen
@@ -130,19 +131,26 @@ def _build_initialized_model():
     times = [step_time(start_ymd, run_start_tod, dtstep_sec, n) for n in range(1, ntimes + 1)]
     start_calday_clm = step_time(clm_start_ymd, clm_start_tod, dtstep_sec, 1).calday
 
-    def _history_index(calday):
+    def _history_index(run_step):
+        calday = times[run_step].calday
         return round((calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
 
-    soil_init_time_indx = _history_index(times[0].calday)
-    history_index = [_history_index(t.calday) for t in times]
+    soil_init_time_indx = _history_index(0)
+    run_start = datetime.datetime.strptime(str(start_ymd), "%Y%m%d") + datetime.timedelta(
+        seconds=run_start_tod
+    )
     forcing = load_forcing(
         fin_tower,
         fin_clm,
         fin_soil_adjust,
-        ntimes,
-        history_index,
-        float(TowerDataMod.tower_ht[tower_num]),
+        first_record=tower_first_record(fin_tower, run_start, dtstep_sec),
+        run_n_steps=ntimes,
+        first_step=0,
+        n_steps=ntimes,
+        history_index=_history_index,
+        tower_height=float(TowerDataMod.tower_ht[tower_num]),
     )
+    t_prev, t_curr, t_next = forcing.window_indices(0)
 
     (
         clm_instMod.atm2lnd_inst,
@@ -151,7 +159,7 @@ def _build_initialized_model():
         clm_instMod.frictionvel_inst,
         clm_instMod.mlcanopy_inst,
     ) = init_acclim(
-        [tower_met_at(forcing, t) for t in range(ntimes)],
+        [tower_met_at(forcing, t + 1) for t in range(ntimes)],
         tower_num,
         ntimes,
         bounds.begp,
@@ -185,7 +193,7 @@ def _build_initialized_model():
 
     clm_instMod.atm2lnd_inst, clm_instMod.wateratm2lndbulk_inst, clm_instMod.frictionvel_inst = (
         TowerMetCurr(
-            tower_met_at(forcing, 0),
+            tower_met_at(forcing, t_curr),
             tower_num,
             bounds.begp,
             bounds.endp,
@@ -197,11 +205,11 @@ def _build_initialized_model():
 
     # Forcing window ends for the first step: previous = current at the first step
     n_patch = bounds.endp + 1
-    forcing_bef = atm_record_current(forcing, 0, n_patch)
-    forcing_next = atm_record_next(forcing, min(1, ntimes - 1), n_patch)
+    forcing_bef = atm_record_current(forcing, t_prev, n_patch)
+    forcing_next = atm_record_next(forcing, t_next, n_patch)
 
     # Run 1 warm-up timestep
-    ModelAdvance(bounds, clm_record_at(forcing, 0), times[0], forcing_bef, forcing_next)
+    ModelAdvance(bounds, clm_record_at(forcing, t_curr), times[0], forcing_bef, forcing_next)
 
     mlcanopy_inst = clm_instMod.mlcanopy_inst
     filt = _clm_driver_mod.filter

@@ -10,6 +10,7 @@ Mirrors the Fortran entry point in offline_driver/CLMml.F90 and
 the namelist reader in offline_driver/controlMod.F90.
 """
 
+import datetime
 import os
 import sys
 import time
@@ -250,7 +251,7 @@ def main():
         init_acclim,
         output,
     )
-    from offline_driver.TowerMetMod import TowerMetCurr
+    from offline_driver.TowerMetMod import TowerMetCurr, tower_first_record
 
     # 6-pre. Time axis of the run, and the matching time slice of the CLM history file
     #     for every step. Fortran CLMml_drv computed the history file's first calendar day
@@ -260,26 +261,39 @@ def main():
     clm_start_ymd = int(params.get("clm_start_ymd", start_ymd))
     clm_start_tod = int(params.get("clm_start_tod", 0))
 
-    times = [step_time(start_ymd, run_start_tod, dtstep_sec, n) for n in range(1, ntimes + 1)]
+    def _time(run_step: int):
+        """StepTime of a 0-based run step."""
+        return step_time(start_ymd, run_start_tod, dtstep_sec, run_step + 1)
+
     start_calday_clm = step_time(clm_start_ymd, clm_start_tod, dtstep_sec, 1).calday
 
-    def _history_index(calday: float) -> int:
+    def _history_index(run_step: int) -> int:
+        """1-based CLM history time slice of a 0-based run step."""
+        calday = _time(run_step).calday
         return round((calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
 
-    soil_init_time_indx = _history_index(times[0].calday)
-    history_index = [_history_index(t.calday) for t in times]
+    soil_init_time_indx = _history_index(0)
 
-    # 6-load. All forcing for the run, read before the time loop (no file reads in the loop)
+    # 6-load. Forcing for the run, read before the time loop (no file reads in the loop).
+    #     The run is one chunk here; the chunk loop of plan §6.9 comes in Phase 4.
+    run_start = datetime.datetime.strptime(str(start_ymd), "%Y%m%d") + datetime.timedelta(
+        seconds=run_start_tod
+    )
     forcing = load_forcing(
         fin1,
         fin2,
         fin_soil_adjust,
-        ntimes,
-        history_index,
-        float(TowerDataMod.tower_ht[tower_num]),
+        first_record=tower_first_record(fin1, run_start, dtstep_sec),
+        run_n_steps=ntimes,
+        first_step=0,
+        n_steps=ntimes,
+        history_index=_history_index,
+        tower_height=float(TowerDataMod.tower_ht[tower_num]),
     )
 
-    # 6a. Acclimation temperature (mean over the full tower record)
+    # 6a. Acclimation temperature: mean over the whole run (Fortran CLM-ml v2 definition,
+    #     which needs every step's forcing up front; plan Phase 4b replaces it with a
+    #     10-day running mean). Array index t + 1 skips the chunk's leading halo record.
     (
         clm_instMod.atm2lnd_inst,
         clm_instMod.wateratm2lndbulk_inst,
@@ -287,7 +301,7 @@ def main():
         clm_instMod.frictionvel_inst,
         clm_instMod.mlcanopy_inst,
     ) = init_acclim(
-        [tower_met_at(forcing, t) for t in range(ntimes)],
+        [tower_met_at(forcing, t + 1) for t in range(ntimes)],
         tower_num,
         ntimes,
         bounds.begp,
@@ -367,7 +381,7 @@ def main():
     try:
         for _itim in range(1, ntimes + 1):
             step_t0 = time.perf_counter()
-            now = times[_itim - 1]
+            now = _time(_itim - 1)
             curr_calday = now.calday
             t_prev, t_curr, t_next = forcing.window_indices(_itim - 1)
 

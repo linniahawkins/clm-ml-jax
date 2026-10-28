@@ -3,8 +3,8 @@ JAX translation of TowerMetMod Fortran module.
 
 Read tower meteorology forcing for offline CLM simulations.
 
-The whole tower record needed by a run is read once before the time loop
-(:func:`read_tower_met_series`); :func:`derive_tower_met` derives missing
+The tower records a run (or a chunk of it) needs are read before its time
+loop (:func:`read_tower_met_series`); :func:`derive_tower_met` derives missing
 quantities (specific humidity, longwave radiation) and partitions solar
 radiation into direct and diffuse components per waveband;
 :func:`TowerMetCurr` installs one derived record into the CLM forcing
@@ -16,7 +16,8 @@ Original Fortran module: TowerMetMod
 Fortran lines 1-290
 """
 
-from typing import List, NamedTuple, Tuple
+import datetime
+from typing import List, NamedTuple, Sequence, Tuple
 
 import jax.numpy as jnp
 import netCDF4 as nc  # noqa: F401
@@ -184,39 +185,68 @@ class TowerMet(NamedTuple):
     po2: float  # O2 partial pressure (Pa)
 
 
-def read_tower_met_series(ncfilename: str, nsteps: int) -> List[TowerMetRaw]:
+def read_tower_met_series(ncfilename: str, records: Sequence[int]) -> List[TowerMetRaw]:
     """
-    Read the first ``nsteps`` records of a tower netCDF file.
+    Read the given 0-based records of a tower netCDF file.
 
     Same variables, defaults and value conversion as the per-step
-    ``readTowerMet`` (Fortran lines 218-280), read once for the whole run so
-    that no file is opened inside the time loop.
+    ``readTowerMet`` (Fortran lines 218-280). Only the span of records
+    requested is read, so a run can read its forcing a chunk at a time and
+    no file is opened inside the time loop.
     """
+    if not records:
+        return []
+    lo, hi = min(records), max(records) + 1
     with nc.Dataset(ncfilename, "r") as ds:
         for name in ("FSDS", "PRECTmms", "TBOT", "WIND"):
             if name not in ds.variables:
                 handle_err(-1, name)
+        n_file = ds.dimensions["time"].size
+        if lo < 0 or hi > n_file:
+            endrun(
+                msg=f" TowerMet error: records {lo}..{hi - 1} outside {ncfilename} (0..{n_file - 1})"
+            )
 
-        def series(name: str) -> list:
+        def span(name: str):
             if name not in ds.variables:
-                return [-999.0] * nsteps
-            values = ds.variables[name][:nsteps, 0, 0]
-            if len(values) < nsteps:
-                endrun(msg=f" TowerMet error: {ncfilename} has fewer than {nsteps} records")
-            return [float(values[t]) for t in range(nsteps)]
+                return None
+            return ds.variables[name][lo:hi, 0, 0]
 
         columns = {
-            "zbot": series("ZBOT"),
-            "tbot": series("TBOT"),
-            "rhbot": series("RH"),
-            "qbot": series("QBOT"),
-            "ubot": series("WIND"),
-            "fsdsbot": series("FSDS"),
-            "fldsbot": series("FLDS"),
-            "pbot": series("PSRF"),
-            "prect": series("PRECTmms"),
+            "zbot": span("ZBOT"),
+            "tbot": span("TBOT"),
+            "rhbot": span("RH"),
+            "qbot": span("QBOT"),
+            "ubot": span("WIND"),
+            "fsdsbot": span("FSDS"),
+            "fldsbot": span("FLDS"),
+            "pbot": span("PSRF"),
+            "prect": span("PRECTmms"),
         }
-    return [TowerMetRaw(**{k: v[t] for k, v in columns.items()}) for t in range(nsteps)]
+
+    def value(values, r: int) -> float:
+        return -999.0 if values is None else float(values[r - lo])
+
+    return [TowerMetRaw(**{k: value(v, r) for k, v in columns.items()}) for r in records]
+
+
+def tower_first_record(ncfilename: str, start: datetime.datetime, step_seconds: int) -> int:
+    """
+    0-based record of a tower file at date-time ``start``, from its time axis.
+
+    The time variable must have units "days since <date>" and a constant
+    interval of ``step_seconds``.
+    """
+    with nc.Dataset(ncfilename, "r") as ds:
+        time = ds.variables["time"]
+        origin = datetime.datetime.fromisoformat(time.units.split("since")[1].strip())
+        first_day = float(time[0])
+        n_file = ds.dimensions["time"].size
+    days = (start - origin).total_seconds() / 86400.0 - first_day
+    record = round(days * 86400.0 / step_seconds)
+    if abs(record * step_seconds - days * 86400.0) > 1.0 or not 0 <= record < n_file:
+        endrun(msg=f" TowerMet error: {start} is not a record time in {ncfilename}")
+    return record
 
 
 def derive_tower_met(raw: TowerMetRaw, tower_height: float) -> TowerMet:

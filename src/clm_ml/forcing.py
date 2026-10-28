@@ -1,11 +1,19 @@
 """
-Forcing: everything prescribed from outside the model, loaded before the run.
+Forcing: one chunk of everything prescribed from outside the model.
+
+A run reads its forcing a chunk at a time (modernization plan §6.9), so memory depends on
+the chunk length, not the run length. A chunk of ``n_steps`` model steps holds
+``n_steps + 2`` records along its time axis: one **halo** record before the first step, the
+steps themselves, and one halo record after the last step. The halos are the neighbouring
+records the three-point time interpolation needs at the chunk edges. At the very start and
+end of a run there is no neighbour, so the halo repeats the edge record, as the Fortran
+driver does (``*_bef`` seeded with the current forcing; ``itim_next = min(itim+1, ntim)``).
 
 Meteorology is per gridcell, shape ``(time, gridcell)``; CLM history data (leaf/stem area
 and soil water) is per patch/column, shape ``(time, patch)`` / ``(time, column, layer)``.
 Wavebands are ``(vis, nir)``.
 
-``Forcing`` holds arrays only: no files are opened during a run. It is built by
+``Forcing`` holds arrays only: no files are opened while a chunk runs. It is built by
 :func:`clm_ml.legacy.forcing.load_forcing`, which applies the same derivations as the
 Fortran ``TowerMetMod`` (humidity from relative humidity, longwave from emissivity, solar
 partitioning).
@@ -21,7 +29,7 @@ import numpy as np
 
 @dataclasses.dataclass(frozen=True)
 class TowerForcing:
-    """Meteorology at the forcing height, per gridcell. Shape ``(time, gridcell)``."""
+    """Meteorology at the forcing height, per gridcell. Shape ``(n_steps + 2, gridcell)``."""
 
     wind_speed: np.ndarray  # m s-1
     air_temperature: np.ndarray  # K
@@ -41,7 +49,7 @@ class TowerForcing:
 class ClmHistoryForcing:
     """Prescribed land state from the CLM history file, per patch / soil column."""
 
-    history_index: np.ndarray  # (time,) int, 1-based time slice in the CLM history file
+    history_index: np.ndarray  # (n_steps + 2,) int, 1-based time slice in the CLM history file
     leaf_area_index: np.ndarray  # (time, patch) m2 m-2
     stem_area_index: np.ndarray  # (time, patch) m2 m-2
     soil_water_clm45: np.ndarray  # (time, column, nlevgrnd) m3 m-3 (spval unless CLM4.5)
@@ -51,17 +59,36 @@ class ClmHistoryForcing:
 
 @dataclasses.dataclass(frozen=True)
 class Forcing:
+    """One chunk: ``n_steps`` model steps plus a halo record at each end."""
+
     tower: TowerForcing
     clm_history: ClmHistoryForcing
+    first_step: int  # 0-based run step of the chunk's first step
 
     @property
     def n_steps(self) -> int:
-        return self.tower.air_temperature.shape[0]
+        """Model steps in the chunk (the two halo records excluded)."""
+        return self.tower.air_temperature.shape[0] - 2
 
     def window_indices(self, t: int) -> tuple[int, int, int]:
-        """0-based (previous, current, next) record indices around step ``t``.
+        """Array indices of the (previous, current, next) records for chunk step ``t``
+        (0-based). The halos make these simply ``t``, ``t + 1``, ``t + 2``."""
+        if not 0 <= t < self.n_steps:
+            raise IndexError(f"chunk step {t} outside 0..{self.n_steps - 1}")
+        return t, t + 1, t + 2
 
-        At the first step "previous" is the current record, and at the last step "next" is
-        the current record, as in the Fortran driver (``itim_next = min(itim+1, ntim)``).
-        """
-        return max(t - 1, 0), t, min(t + 1, self.n_steps - 1)
+
+def chunk_run_steps(run_n_steps: int, first_step: int, n_steps: int) -> list[int]:
+    """0-based run steps of a chunk's records: ``[halo before, steps..., halo after]``.
+
+    Inside a run the halos are the neighbouring steps. At the run's first and last steps
+    there is no neighbour, so the halo repeats the edge step (Fortran: ``*_bef`` seeded
+    with the current forcing; ``itim_next = min(itim+1, ntim)``).
+    """
+    if n_steps < 1 or first_step < 0 or first_step + n_steps > run_n_steps:
+        raise ValueError(
+            f"chunk of {n_steps} steps from step {first_step} is outside a run of "
+            f"{run_n_steps} steps"
+        )
+    steps = list(range(first_step, first_step + n_steps))
+    return [max(first_step - 1, 0), *steps, min(first_step + n_steps, run_n_steps - 1)]
