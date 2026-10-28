@@ -802,9 +802,15 @@ Progress:
   short last chunk is padded to reuse the compiled scan. Two chunks of 4 equal one chunk of 8
   bit for bit (done-when 1). Compiled vs step by step: ≤ 6.6e-11 relative (round-off, within
   the noise twins); reference regenerated in compiled mode.
-- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`), forcing streams and the chunk
-  loop reading forcing per chunk, restarts, output streams, `run.yaml` stream form, parameter
-  ensembles with `vmap`, memory flat with run length, GPU timing.
+- ✅ Forcing is read per chunk (with halo records), and the whole-run acclimation mean is summed
+  over the forcing read chunk by chunk (same order, bit for bit). Peak memory footprint is flat
+  with run length: 4.3 GB for 2 days, 4.2 GB for 20 days of CHATS7 (one month of forcing
+  available). The resident set grew from 2.2 to 3.5 GB over the 20 days: to check on a longer
+  run (possible slow leak). Per step, writing the legacy text output (~80 ms) now dominates
+  the compiled physics (~15 ms); output streams will replace it.
+- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`), the `ForcingSource` streams
+  interface, restarts, output streams, `run.yaml` stream form, parameter ensembles with `vmap`,
+  GPU timing.
 
 - `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one
   chunk, with `jax.checkpoint` on the step.

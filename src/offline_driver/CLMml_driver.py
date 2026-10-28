@@ -14,7 +14,7 @@ Fortran lines 1-200
 from __future__ import annotations
 
 import math
-from typing import IO, Sequence
+from typing import IO, Iterable
 
 import jax.numpy as jnp
 
@@ -39,7 +39,7 @@ from offline_driver.TowerMetMod import TowerMet, TowerMetCurr  # noqa: F401
 
 
 def init_acclim(
-    mets: Sequence[TowerMet],
+    mets: Iterable[TowerMet],
     tower_num: int,
     ntim: int,
     begp: int,
@@ -104,11 +104,13 @@ def init_acclim(
     # ------------------------------------------------------------------
     # Loop over all time slices — Fortran: do itim = 1, ntim
     # ------------------------------------------------------------------
-    for _itim in range(1, ntim + 1):
+    n_met = 0
+    for _itim, met in enumerate(mets, start=1):  # any iterable (e.g. read chunk by chunk)
+        n_met += 1
 
         # Read temperature for this time slice — Fortran lines: call TowerMetCurr(...)
         atm2lnd_inst, wateratm2lndbulk_inst, frictionvel_inst = TowerMetCurr(
-            mets[_itim - 1],
+            met,
             tower_num,
             begp,
             endp,
@@ -134,6 +136,8 @@ def init_acclim(
     # ------------------------------------------------------------------
     # Average over all time slices — Fortran: t10(p) = t10(p) / float(ntim)
     # ------------------------------------------------------------------
+    if n_met != ntim:
+        raise ValueError(f"init_acclim: {n_met} meteorology records for {ntim} steps")
     for p in range(begp, endp + 1):
         t10 = t10.at[p].set(float(t10[p]) / float(ntim))
 

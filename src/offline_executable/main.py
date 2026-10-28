@@ -133,13 +133,21 @@ class LegacyRun:
     bounds: bounds_type
     filt: object  # filterMod.clumpfilter
     insts: object  # clm_instMod.ClmInstances, initial conditions installed
-    forcing: object  # clm_ml.forcing.Forcing for the run (one chunk)
+    load_chunk: object  # (first_step, n_steps) -> ForcingChunk (reads the input files)
     ntimes: int
     tower_num: int
     iyear: int
     imonth: int
     dirout: str
     time_of: object  # 0-based run step -> StepTime
+
+
+@dataclasses.dataclass
+class ForcingChunk:
+    """Forcing for run steps ``first_step ... first_step + forcing.n_steps - 1``."""
+
+    first_step: int
+    forcing: object  # clm_ml.forcing.Forcing (with one halo record at each end)
 
 
 @dataclasses.dataclass
@@ -294,31 +302,44 @@ def setup_run(nml: dict) -> LegacyRun:
 
     soil_init_time_indx = _history_index(0)
 
-    # 6-load. Forcing for the run, read before the time loop (no file reads in the loop).
-    #     The run is one chunk here; the chunk loop of plan §6.9 comes in Phase 4.
+    # 6-load. Forcing is read one chunk at a time (with one halo record at each end), so
+    #     memory does not depend on run length (plan §6.9).
     run_start = datetime.datetime.strptime(str(start_ymd), "%Y%m%d") + datetime.timedelta(
         seconds=run_start_tod
     )
-    forcing = load_forcing(
-        fin1,
-        fin2,
-        fin_soil_adjust,
-        first_record=tower_first_record(fin1, run_start, dtstep_sec),
-        run_n_steps=ntimes,
-        first_step=0,
-        n_steps=ntimes,
-        history_index=_history_index,
-        tower_height=float(TowerDataMod.tower_ht[tower_num]),
-    )
+    first_record = tower_first_record(fin1, run_start, dtstep_sec)
+    tower_height = float(TowerDataMod.tower_ht[tower_num])
 
-    # 6a. Acclimation temperature: mean over the whole run (Fortran CLM-ml v2 definition,
-    #     which needs every step's forcing up front; plan Phase 4b replaces it with a
-    #     10-day running mean). Array index t + 1 skips the chunk's leading halo record.
+    def load_chunk(first_step: int, n_steps: int) -> ForcingChunk:
+        forcing = load_forcing(
+            fin1,
+            fin2,
+            fin_soil_adjust,
+            first_record=first_record,
+            run_n_steps=ntimes,
+            first_step=first_step,
+            n_steps=n_steps,
+            history_index=_history_index,
+            tower_height=tower_height,
+        )
+        return ForcingChunk(first_step=first_step, forcing=forcing)
+
+    def run_tower_met(chunk_steps: int = 1000):
+        """Each step's tower meteorology, read chunk by chunk (index t + 1 skips the
+        chunk's leading halo record)."""
+        for first in range(0, ntimes, chunk_steps):
+            chunk = load_chunk(first, min(chunk_steps, ntimes - first))
+            for t in range(chunk.forcing.n_steps):
+                yield tower_met_at(chunk.forcing, t + 1)
+
+    # 6a. Acclimation temperature: mean over the whole run (Fortran CLM-ml v2 definition;
+    #     plan Phase 4b replaces it with a 10-day running mean), summed over the run's
+    #     forcing read chunk by chunk.
     from offline_driver.TowerMetMod import set_tower_location
 
     set_tower_location(tower_num, bounds.begp, bounds.endp)
     atm2lnd, wateratm2lndbulk, temperature, frictionvel, mlcanopy = init_acclim(
-        [tower_met_at(forcing, t + 1) for t in range(ntimes)],
+        run_tower_met(),
         tower_num,
         ntimes,
         bounds.begp,
@@ -374,7 +395,7 @@ def setup_run(nml: dict) -> LegacyRun:
         bounds=bounds,
         filt=filt,
         insts=st,
-        forcing=forcing,
+        load_chunk=load_chunk,
         ntimes=ntimes,
         tower_num=tower_num,
         iyear=iyear,
@@ -384,10 +405,10 @@ def setup_run(nml: dict) -> LegacyRun:
     )
 
 
-def step_inputs(run: LegacyRun, run_step: int) -> StepInputs:
-    """Time and forcing of a 0-based run step, including the previous and next forcing
-    records for the multilayer canopy's 3-point time interpolation (Fortran
-    *_bef/_next_forcing; TowerMetNext)."""
+def step_inputs(run: LegacyRun, chunk: ForcingChunk, run_step: int) -> StepInputs:
+    """Time and forcing of a 0-based run step (inside ``chunk``), including the previous
+    and next forcing records for the multilayer canopy's 3-point time interpolation
+    (Fortran *_bef/_next_forcing; TowerMetNext)."""
     from clm_ml.legacy.forcing import (
         atm_record_current,
         atm_record_next,
@@ -395,14 +416,15 @@ def step_inputs(run: LegacyRun, run_step: int) -> StepInputs:
         tower_met_at,
     )
 
-    t_prev, t_curr, t_next = run.forcing.window_indices(run_step)
+    forcing = chunk.forcing
+    t_prev, t_curr, t_next = forcing.window_indices(run_step - chunk.first_step)
     n_patch = run.bounds.endp + 1
     return StepInputs(
         now=run.time_of(run_step),
-        met=tower_met_at(run.forcing, t_curr),
-        clm_record=clm_record_at(run.forcing, t_curr),
-        forcing_bef=atm_record_current(run.forcing, t_prev, n_patch),
-        forcing_next=atm_record_next(run.forcing, t_next, n_patch),
+        met=tower_met_at(forcing, t_curr),
+        clm_record=clm_record_at(forcing, t_curr),
+        forcing_bef=atm_record_current(forcing, t_prev, n_patch),
+        forcing_next=atm_record_next(forcing, t_next, n_patch),
     )
 
 
@@ -542,7 +564,7 @@ def main():
         # after it are the template every later step is rebuilt from, with the carried
         # prognostic state (clm_ml.state.State).
         step_t0 = time.perf_counter()
-        inputs = step_inputs(run, 0)
+        inputs = step_inputs(run, run.load_chunk(0, 1), 0)
         st, filt = advance(run, st, filt, inputs, initialize=True)
         template, state = st, state_from_instances(st)
         write_output(inputs.now.calday, st.mlcanopy, st.temperature)
@@ -554,7 +576,8 @@ def main():
             while itim < ntimes:
                 n = min(chunk_steps, ntimes - itim)
                 chunk_t0 = time.perf_counter()
-                inputs = [step_inputs(run, k) for k in range(itim, itim + n)]
+                chunk = run.load_chunk(itim, n)
+                inputs = [step_inputs(run, chunk, k) for k in range(itim, itim + n)]
                 # A short last chunk is padded (repeating its last input) to the chunk
                 # length, so it reuses the compiled scan; the extra steps are discarded.
                 padded = inputs + [inputs[-1]] * (chunk_steps - n)
@@ -572,7 +595,7 @@ def main():
         else:
             for _itim in range(2, ntimes + 1):
                 step_t0 = time.perf_counter()
-                inputs = step_inputs(run, _itim - 1)
+                inputs = step_inputs(run, run.load_chunk(_itim - 1, 1), _itim - 1)
                 st = instances_with_state(template, state)
                 st, filt = advance(run, st, filt, inputs, initialize=False)
                 state = state_from_instances(st)
