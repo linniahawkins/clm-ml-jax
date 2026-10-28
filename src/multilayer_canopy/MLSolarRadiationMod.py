@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
+import jax
 import jax.numpy as jnp
 from jax import Array
 
@@ -138,149 +139,126 @@ def SolarRadiation(
     # ------------------------------------------------------------------
     # Calculate canopy layer optical properties — Fortran lines 100-182
     # ------------------------------------------------------------------
-    for fp in range(1, num_filter + 1):
-        p = grid.p
-        zen = solar_zen[p]
-        cos_zen = jnp.cos(zen)
-        _ncan = grid.ncan
-        _ntop = grid.ntop
-        _nbot = grid.nbot
+    # Vectorized over the foliage layers nbot..ntop (top-down recurrence for tbi only).
+    p = grid.p
+    _ncan, _ntop, _nbot = grid.ncan, grid.ntop, grid.nbot
+    ls = slice(_nbot, _ntop + 1)
+    rb = slice(1, numrad + 1)
+    zen = solar_zen[p]
+    cos_zen = jnp.cos(zen)
 
-        # Per-patch output arrays (JAX)
-        _kb_p = jnp.zeros(_ncan + 2)
-        _fracsun_p = jnp.zeros(_ncan + 2)
-        _tb_p = jnp.zeros(_ncan + 2)
-        _td_p = jnp.zeros(_ncan + 2)
-        _tbi_p = jnp.zeros(_ncan + 2)  # index 0 = ground, 1.._ncan = canopy
+    if leaf_optics_type == 0:
+        _xl_pft = params.leaf_angle_index
+        _cf_pft = params.clumping_index
+        _rhol, _taul = params.leaf_reflectance[rb], params.leaf_transmittance[rb]
+        _rhos, _taus = params.stem_reflectance[rb], params.stem_transmittance[rb]
+    else:
+        endrun(msg=" ERROR: SolarRadiation: need to specify vertical profile for rho & tau")
+        _xl_pft = 0.01
+        _cf_pft = 1.0
+        _rhol = _taul = _rhos = _taus = jnp.full(numrad, 1.0e-6)
 
-        # Extract scalar PFT values once
-        if leaf_optics_type == 0:
-            _xl_pft = params.leaf_angle_index
-            _cf_pft = params.clumping_index
-            _rhol_ib = [params.leaf_reflectance[ib] for ib in range(n_rad)]
-            _taul_ib = [params.leaf_transmittance[ib] for ib in range(n_rad)]
-            _rhos_ib = [params.stem_reflectance[ib] for ib in range(n_rad)]
-            _taus_ib = [params.stem_transmittance[ib] for ib in range(n_rad)]
-        else:
-            endrun(msg=" ERROR: SolarRadiation: need to specify vertical profile for rho & tau")
-            _xl_pft = 0.01
-            _cf_pft = 1.0
-            _rhol_ib = _taul_ib = _rhos_ib = _taus_ib = [1.0e-6] * n_rad
+    dpai_v = dpai[p, ls]
+    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+    dpai_safe = jnp.maximum(dpai_v, 1.0e-30)
+    wl = (dlai[p, ls] / dpai_safe)[:, None]
+    ws = (dsai[p, ls] / dpai_safe)[:, None]
 
-        # Layer-by-layer optical properties — Fortran: do ic = ntop, nbot, -1
-        for ic in range(_ntop, _nbot - 1, -1):
+    # Reflectance, transmittance, scattering — Fortran lines 121-132 (layer, band)
+    r_v = jnp.maximum(_rhol * wl + _rhos * ws, 1.0e-6)
+    t_v = jnp.maximum(_taul * wl + _taus * ws, 1.0e-6)
+    om_v = r_v + t_v
+    _rho_arr = _rho_arr.at[p, ls, rb].set(r_v)
+    _tau_arr = _tau_arr.at[p, ls, rb].set(t_v)
+    _om_arr = _om_arr.at[p, ls, rb].set(om_v)
 
-            dpai_ic = dpai[p, ic]
-            dlai_ic = dlai[p, ic]
-            dsai_ic = dsai[p, ic]
-            # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-            dpai_safe = jnp.maximum(dpai_ic, 1.0e-30)
-            wl = dlai_ic / dpai_safe
-            ws = dsai_ic / dpai_safe
+    # Leaf angle distribution — Fortran lines 134-141 (one PFT: same in every layer)
+    chil = jnp.clip(_xl_pft, chil_min, chil_max)
+    chil = jnp.where(jnp.abs(chil) <= 0.01, 0.01, chil)
 
-            # Reflectance, transmittance, scattering — Fortran lines 121-132
-            for ib in range(1, numrad + 1):
-                r = jnp.maximum(_rhol_ib[ib] * wl + _rhos_ib[ib] * ws, 1.0e-6)
-                t = jnp.maximum(_taul_ib[ib] * wl + _taus_ib[ib] * ws, 1.0e-6)
-                _rho_arr = _rho_arr.at[p, ic, ib].set(r)
-                _tau_arr = _tau_arr.at[p, ic, ib].set(t)
-                _om_arr = _om_arr.at[p, ic, ib].set(r + t)
+    # Ross-Goudriaan phi1, phi2, gdir — Fortran lines 143-148
+    p1 = 0.5 - 0.633 * chil - 0.330 * chil * chil
+    p2 = 0.877 * (1.0 - 2.0 * p1)
+    gd = p1 + p2 * cos_zen
 
-            # Leaf angle distribution — Fortran lines 134-141
-            chil_ic = jnp.clip(_xl_pft, chil_min, chil_max)
-            chil_ic = jnp.where(jnp.abs(chil_ic) <= 0.01, 0.01, chil_ic)
+    # Direct beam extinction coefficient — Fortran lines 150-152
+    # jnp.maximum avoids NaN grad: cos_zen=0 at horizon gives gd/0=inf
+    # in the True branch of jnp.minimum, producing 0*inf=NaN in backward.
+    cos_zen_safe = jnp.maximum(cos_zen, 1.0e-10)
+    kb_s = jnp.minimum(gd / cos_zen_safe, kb_max)
+    kb_v = jnp.broadcast_to(kb_s, dpai_v.shape)
 
-            # Ross-Goudriaan phi1, phi2, gdir — Fortran lines 143-148
-            p1 = 0.5 - 0.633 * chil_ic - 0.330 * chil_ic * chil_ic
-            p2 = 0.877 * (1.0 - 2.0 * p1)
-            gd = p1 + p2 * cos_zen
+    # Clumping factor — Fortran lines 154-159
+    cf = _cf_pft
+    _cf_ic = _cf_ic.at[p, ls].set(cf)
 
-            # Direct beam extinction coefficient — Fortran lines 150-152
-            # jnp.maximum avoids NaN grad: cos_zen=0 at horizon gives gd/0=inf
-            # in the True branch of jnp.minimum, producing 0*inf=NaN in backward.
-            cos_zen_safe = jnp.maximum(cos_zen, 1.0e-10)
-            kb_ic = jnp.minimum(gd / cos_zen_safe, kb_max)
-            _kb_p = _kb_p.at[ic].set(kb_ic)
+    # Direct beam single-layer transmittance — Fortran line 161
+    tb_v = jnp.exp(-kb_v * dpai_v * cf)
 
-            # Clumping factor — Fortran lines 154-159
-            cf = _cf_pft
-            _cf_ic = _cf_ic.at[p, ic].set(cf)
-
-            # Direct beam single-layer transmittance — Fortran line 161
-            _tb_p = _tb_p.at[ic].set(jnp.exp(-kb_ic * dpai_ic * cf))
-
-            # Diffuse transmittance (9-angle integration) — Fortran lines 163-170
-            td_ic = jnp.zeros(())
-            for j in range(1, 10):
-                angle = (5.0 + (j - 1) * 10.0) * pi / 180.0
-                gdirj = p1 + p2 * jnp.cos(jnp.asarray(angle))
-                td_ic = td_ic + (
-                    jnp.exp(-gdirj / jnp.cos(jnp.asarray(angle)) * dpai_ic * cf)
-                    * jnp.sin(jnp.asarray(angle))
-                    * jnp.cos(jnp.asarray(angle))
-                )
-            _td_p = _td_p.at[ic].set(td_ic * 2.0 * (10.0 * pi / 180.0))
-
-            # Cumulative direct beam transmittance tbi — Fortran lines 172-177
-            if ic == _ntop:
-                _tbi_p = _tbi_p.at[ic].set(1.0)
-            else:
-                _tbi_p = _tbi_p.at[ic].set(
-                    _tbi_p[ic + 1] * jnp.exp(-_kb_p[ic + 1] * dpai[p, ic + 1] * _cf_ic[p, ic + 1])
-                )
-
-            # Sunlit fraction — Fortran lines 179-188
-            tbi_ic = _tbi_p[ic]
-            # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-            # When kb*dpai=0, the exp term also =0 so fracsun_ic=0 regardless of denom.
-            kb_ic_safe = jnp.maximum(kb_ic * dpai_ic, 1.0e-30)
-            fracsun_ic = tbi_ic / kb_ic_safe * (1.0 - jnp.exp(-kb_ic * cf * dpai_ic))
-            if is_concrete(fracsun_ic) and jnp.any(fracsun_ic <= 0.0):
-                endrun(msg=" ERROR: SolarRadiation: fracsun is too small")
-            if is_concrete(fracsun_ic) and jnp.any((1.0 - fracsun_ic) <= 0.0):
-                endrun(msg=" ERROR: SolarRadiation: fracsha is too small")
-            _fracsun_p = _fracsun_p.at[ic].set(fracsun_ic)
-
-            # Two-stream avmu — Fortran lines 190-194
-            # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-            p1_safe = jnp.maximum(p1, 1.0e-10)
-            p2_safe = jnp.maximum(p2, 1.0e-10)
-            avmu_ic = (1.0 - p1_safe / p2_safe * jnp.log((p1_safe + p2_safe) / p1_safe)) / p2_safe
-            _avmu = _avmu.at[p, ic].set(avmu_ic)
-
-            # betad, betab — Fortran lines 196-209
-            for ib in range(1, numrad + 1):
-                om = _om_arr[p, ic, ib]
-                r_ic = _rho_arr[p, ic, ib]
-                t_ic = _tau_arr[p, ic, ib]
-                _betad = _betad.at[p, ic, ib].set(
-                    0.5 / om * (r_ic + t_ic + (r_ic - t_ic) * ((1.0 + chil_ic) / 2.0) ** 2)
-                )
-                tmp0 = gd + p2 * cos_zen
-                tmp1 = p1 * cos_zen
-                # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-                # tmp0 = gd + p2*cos_zen, tmp1 = p1*cos_zen — both non-negative physically
-                tmp0_safe = jnp.maximum(tmp0, 1.0e-10)
-                tmp1_safe = jnp.maximum(tmp1, 1.0e-10)
-                tmp2 = 1.0 - tmp1_safe / tmp0_safe * jnp.log((tmp1_safe + tmp0_safe) / tmp1_safe)
-                asu = 0.5 * om * gd / tmp0_safe * tmp2
-                _betab = _betab.at[p, ic, ib].set(
-                    (1.0 + avmu_ic * kb_ic) / (om * avmu_ic * kb_ic) * asu
-                )
-
-        # tbi onto ground — Fortran lines 211-213
-        _tbi_p = _tbi_p.at[0].set(
-            _tbi_p[_nbot] * jnp.exp(-_kb_p[_nbot] * dpai[p, _nbot] * _cf_ic[p, _nbot])
+    # Diffuse transmittance (9-angle integration) — Fortran lines 163-170
+    td_v = jnp.zeros_like(dpai_v)
+    for j in range(1, 10):
+        angle = (5.0 + (j - 1) * 10.0) * pi / 180.0
+        gdirj = p1 + p2 * jnp.cos(jnp.asarray(angle))
+        td_v = td_v + (
+            jnp.exp(-gdirj / jnp.cos(jnp.asarray(angle)) * dpai_v * cf)
+            * jnp.sin(jnp.asarray(angle))
+            * jnp.cos(jnp.asarray(angle))
         )
+    td_v = td_v * 2.0 * (10.0 * pi / 180.0)
 
-        # Write-back — already JAX arrays, no conversion needed
-        _sl = slice(1, _ncan + 1)
-        _sl0 = slice(0, _ncan + 1)
-        kb = kb.at[p, _sl].set(_kb_p[1 : _ncan + 1])
-        fracsun = fracsun.at[p, _sl].set(_fracsun_p[1 : _ncan + 1])
-        tb = tb.at[p, _sl].set(_tb_p[1 : _ncan + 1])
-        td = td.at[p, _sl].set(_td_p[1 : _ncan + 1])
-        tbi = tbi.at[p, _sl0].set(_tbi_p[0 : _ncan + 1])
+    # Cumulative direct beam transmittance tbi — Fortran lines 172-177 (top down;
+    # tbi(ic) = tbi(ic+1) * exp(-kb dpai cf) of the layer above, which is tb_v)
+    nf = _ntop - _nbot + 1
+    _tbi_list = [jnp.ones(())]
+    for k in range(nf - 2, -1, -1):  # layer index k <-> ic = nbot + k
+        _tbi_list.append(_tbi_list[-1] * tb_v[k + 1])
+    tbi_v = jnp.stack(_tbi_list[::-1])
+
+    # Sunlit fraction — Fortran lines 179-188
+    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+    # When kb*dpai=0, the exp term also =0 so fracsun=0 regardless of denom.
+    kb_dp_safe = jnp.maximum(kb_v * dpai_v, 1.0e-30)
+    fracsun_v = tbi_v / kb_dp_safe * (1.0 - jnp.exp(-kb_v * cf * dpai_v))
+    if is_concrete(fracsun_v) and jnp.any(fracsun_v <= 0.0):
+        endrun(msg=" ERROR: SolarRadiation: fracsun is too small")
+    if is_concrete(fracsun_v) and jnp.any((1.0 - fracsun_v) <= 0.0):
+        endrun(msg=" ERROR: SolarRadiation: fracsha is too small")
+
+    # Two-stream avmu — Fortran lines 190-194
+    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+    p1_safe = jnp.maximum(p1, 1.0e-10)
+    p2_safe = jnp.maximum(p2, 1.0e-10)
+    avmu_s = (1.0 - p1_safe / p2_safe * jnp.log((p1_safe + p2_safe) / p1_safe)) / p2_safe
+    _avmu = _avmu.at[p, ls].set(avmu_s)
+
+    # betad, betab — Fortran lines 196-209 (layer, band)
+    _betad = _betad.at[p, ls, rb].set(
+        0.5 / om_v * (r_v + t_v + (r_v - t_v) * ((1.0 + chil) / 2.0) ** 2)
+    )
+    tmp0 = gd + p2 * cos_zen
+    tmp1 = p1 * cos_zen
+    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+    # tmp0 = gd + p2*cos_zen, tmp1 = p1*cos_zen — both non-negative physically
+    tmp0_safe = jnp.maximum(tmp0, 1.0e-10)
+    tmp1_safe = jnp.maximum(tmp1, 1.0e-10)
+    tmp2 = 1.0 - tmp1_safe / tmp0_safe * jnp.log((tmp1_safe + tmp0_safe) / tmp1_safe)
+    asu = 0.5 * om_v * gd / tmp0_safe * tmp2
+    _betab = _betab.at[p, ls, rb].set((1.0 + avmu_s * kb_s) / (om_v * avmu_s * kb_s) * asu)
+
+    # Write-back: foliage layers; other canopy layers 0; tbi(0) is onto the ground
+    # (Fortran lines 211-213)
+    def _profile(v):
+        return jnp.zeros(_ncan + 2).at[ls].set(v)
+
+    _tbi_p = _profile(tbi_v).at[0].set(tbi_v[0] * tb_v[0])
+    _sl = slice(1, _ncan + 1)
+    _sl0 = slice(0, _ncan + 1)
+    kb = kb.at[p, _sl].set(_profile(kb_v)[_sl])
+    fracsun = fracsun.at[p, _sl].set(_profile(fracsun_v)[_sl])
+    tb = tb.at[p, _sl].set(_profile(tb_v)[_sl])
+    td = td.at[p, _sl].set(_profile(td_v)[_sl])
+    tbi = tbi.at[p, _sl0].set(_tbi_p[_sl0])
 
     # ------------------------------------------------------------------
     # Commit optical properties before radiative transfer
@@ -691,224 +669,196 @@ def _TwoStream(
     swdwn = mlcanopy_inst.swdwn_profile
     swbeam = mlcanopy_inst.swbeam_profile
 
-    n_lev = nlevmlcan + 1
-    n_rad = numrad + 1
-    nleaf_p1 = 3  # nleaf + 1 = 3
+    # Both wavebands at once; the two sweeps over the foliage layers are lax.scan loops
+    # (one traced layer, outputs stacked) with the same arithmetic per layer as Fortran.
+    p = grid.p
+    _ncan, _ntop, _nbot = grid.ncan, grid.ntop, grid.nbot
+    ls = slice(_nbot, _ntop + 1)
+    rb = slice(1, numrad + 1)
+    albsoib_p, albsoid_p = albsoib[p, rb], albsoid[p, rb]
+    swskyb_p, swskyd_p = swskyb[p, rb], swskyd[p, rb]
 
-    for fp in range(1, num_filter + 1):
-        p = grid.p
-        _ncan = grid.ncan
-        _ntop = grid.ntop
-        _nbot = grid.nbot
+    # ----------------------------------------------------------
+    # Bottom-to-top sweep — Fortran lines 444-540
+    # ----------------------------------------------------------
+    def _upward(carry, x):
+        albb, albd = carry
+        om_ic, av_ic, kb_ic, cf_ic, dp_ic, bd_ic, bb_ic, tbi_ic = x
 
-        # Per-patch output JAX arrays
-        _swleaf_p = jnp.zeros((n_lev, nleaf_p1, n_rad))
-        _swveg_p = jnp.zeros(n_rad)
-        _swvegsun_p = jnp.zeros(n_rad)
-        _swvegsha_p = jnp.zeros(n_rad)
-        _albcan_p = jnp.zeros(n_rad)
-        _swsoi_p = jnp.zeros(n_rad)
-        _swupw_p = jnp.zeros((n_lev, n_rad))
-        _swdwn_p = jnp.zeros((n_lev, n_rad))
-        _swbeam_p = jnp.zeros((n_lev, n_rad))
+        b = (1.0 - (1.0 - bd_ic) * om_ic) / av_ic
+        c = bd_ic * om_ic / av_ic
+        # jnp.maximum guards sqrt(0) and /0 in backward pass (NaN-safe grads)
+        h = jnp.sqrt(jnp.maximum(b * b - c * c, 1.0e-30))
+        u = (h - b - c) / (2.0 * h)
+        v = (h + b + c) / (2.0 * h)
+        # Guard h²−kb² denominator for NaN-safe grads when h ≈ kb
+        _h2_kb2 = h * h - kb_ic * kb_ic
+        _h2_kb2_sign = jnp.where(_h2_kb2 < 0.0, jnp.asarray(-1.0), jnp.asarray(1.0))
+        _h2_kb2_safe = _h2_kb2_sign * jnp.maximum(jnp.abs(_h2_kb2), 1.0e-30)
+        d = om_ic * kb_ic / _h2_kb2_safe  # unitb=1
+        g1 = (bb_ic * kb_ic - b * bb_ic - c * (1.0 - bb_ic)) * d
+        g2 = ((1.0 - bb_ic) * kb_ic + c * bb_ic + b * (1.0 - bb_ic)) * d
+        s1 = jnp.exp(-h * cf_ic * dp_ic)
+        s2 = jnp.exp(-kb_ic * cf_ic * dp_ic)
 
-        for ib in range(1, numrad + 1):
+        # Direct beam terms (unitb = 1)
+        num1 = v * (g1 + g2 * albd + albb) * s2
+        num2 = g2 * (u + v * albd) * s1
+        den1 = v * (v + u * albd) / s1
+        den2 = u * (u + v * albd) * s1
+        # Guard Wronskian-like denominator for NaN-safe backward pass
+        _d1d2 = den1 - den2
+        _d1d2_sgn = jnp.where(_d1d2 < 0.0, jnp.asarray(-1.0), jnp.asarray(1.0))
+        _d1d2_saf = _d1d2_sgn * jnp.maximum(jnp.abs(_d1d2), 1.0e-30)
+        n2b = (num1 - num2) / _d1d2_saf
+        n1b = (g2 - n2b * u) / v
 
-            albb = albsoib[p, ib]
-            albd = albsoid[p, ib]
+        # Guard kb±h denominators — degenerate when kb≈h (already h≠0 from sqrt guard)
+        _kbph = kb_ic + h  # always > 0
+        _kbmh = kb_ic - h
+        _kbmh_sgn = jnp.where(_kbmh < 0.0, jnp.asarray(-1.0), jnp.asarray(1.0))
+        _kbmh_saf = _kbmh_sgn * jnp.maximum(jnp.abs(_kbmh), 1.0e-30)
+        _2kb_saf = jnp.maximum(2.0 * kb_ic, 1.0e-30)
+        a1b = (
+            -g1 * (1.0 - s2 * s2) / _2kb_saf
+            + n1b * u * (1.0 - s2 * s1) / _kbph
+            + n2b * v * (1.0 - s2 / s1) / _kbmh_saf
+        ) * tbi_ic
+        a2b = (
+            g2 * (1.0 - s2 * s2) / _2kb_saf
+            - n1b * v * (1.0 - s2 * s1) / _kbph
+            - n2b * u * (1.0 - s2 / s1) / _kbmh_saf
+        ) * tbi_ic
 
-            # Per-layer work arrays (JAX)
-            n = _ncan + 2
-            _iupwb0 = jnp.zeros(n)
-            _iupwb = jnp.zeros(n)
-            _idwnb = jnp.zeros(n)
-            _iabsb_sun = jnp.zeros(n)
-            _iabsb_sha = jnp.zeros(n)
-            _iupwd0 = jnp.zeros(n)
-            _iupwd = jnp.zeros(n)
-            _idwnd = jnp.zeros(n)
-            _iabsd_sun = jnp.zeros(n)
-            _iabsd_sha = jnp.zeros(n)
+        iupwb0_ic = -g1 + n1b * u + n2b * v
+        iupwb_ic = -g1 * s2 + n1b * u * s1 + n2b * v / s1
+        idwnb_ic = g2 * s2 - n1b * v * s1 - n2b * u / s1
+        abs_b = (1.0 - s2) - iupwb0_ic + iupwb_ic - idwnb_ic
+        abs_b_sun = (1.0 - om_ic) * ((1.0 - s2) + cf_ic / av_ic * (a1b + a2b))
 
-            # ----------------------------------------------------------
-            # Bottom-to-top sweep — Fortran lines 444-540
-            # ----------------------------------------------------------
-            for ic in range(_nbot, _ntop + 1):
-                om_ic = omega[p, ic, ib]
-                av_ic = avmu[p, ic]
-                kb_ic = kb[p, ic]
-                cf_ic = clump_fac_ic[p, ic]
-                dp_ic = dpai[p, ic]
-                bd_ic = betad[p, ic, ib]
-                bb_ic = betab[p, ic, ib]
-                tbi_ic = tbi[p, ic]
+        # Diffuse terms (unitd = 1) — reuse guards from direct-beam block
+        num1 = (u + v * albd) * s1
+        n2d = num1 / _d1d2_saf
+        n1d = -(1.0 + n2d * u) / v
 
-                b = (1.0 - (1.0 - bd_ic) * om_ic) / av_ic
-                c = bd_ic * om_ic / av_ic
-                # jnp.maximum guards sqrt(0) and /0 in backward pass (NaN-safe grads)
-                h = jnp.sqrt(jnp.maximum(b * b - c * c, 1.0e-30))
-                u = (h - b - c) / (2.0 * h)
-                v = (h + b + c) / (2.0 * h)
-                # Guard h²−kb² denominator for NaN-safe grads when h ≈ kb
-                _h2_kb2 = h * h - kb_ic * kb_ic
-                _h2_kb2_sign = jnp.where(_h2_kb2 < 0.0, jnp.asarray(-1.0), jnp.asarray(1.0))
-                _h2_kb2_safe = _h2_kb2_sign * jnp.maximum(jnp.abs(_h2_kb2), 1.0e-30)
-                d = om_ic * kb_ic / _h2_kb2_safe  # unitb=1
-                g1 = (bb_ic * kb_ic - b * bb_ic - c * (1.0 - bb_ic)) * d
-                g2 = ((1.0 - bb_ic) * kb_ic + c * bb_ic + b * (1.0 - bb_ic)) * d
-                s1 = jnp.exp(-h * cf_ic * dp_ic)
-                s2 = jnp.exp(-kb_ic * cf_ic * dp_ic)
+        a1d = (n1d * u * (1.0 - s2 * s1) / _kbph + n2d * v * (1.0 - s2 / s1) / _kbmh_saf) * tbi_ic
+        a2d = (-n1d * v * (1.0 - s2 * s1) / _kbph - n2d * u * (1.0 - s2 / s1) / _kbmh_saf) * tbi_ic
 
-                # Direct beam terms (unitb = 1)
-                num1 = v * (g1 + g2 * albd + albb) * s2
-                num2 = g2 * (u + v * albd) * s1
-                den1 = v * (v + u * albd) / s1
-                den2 = u * (u + v * albd) * s1
-                # Guard Wronskian-like denominator for NaN-safe backward pass
-                _d1d2 = den1 - den2
-                _d1d2_sgn = jnp.where(_d1d2 < 0.0, jnp.asarray(-1.0), jnp.asarray(1.0))
-                _d1d2_saf = _d1d2_sgn * jnp.maximum(jnp.abs(_d1d2), 1.0e-30)
-                n2b = (num1 - num2) / _d1d2_saf
-                n1b = (g2 - n2b * u) / v
+        iupwd0_ic = n1d * u + n2d * v
+        iupwd_ic = n1d * u * s1 + n2d * v / s1
+        idwnd_ic = -n1d * v * s1 - n2d * u / s1
+        abs_d = 1.0 - iupwd0_ic + iupwd_ic - idwnd_ic
+        abs_d_sun = (1.0 - om_ic) * cf_ic / av_ic * (a1d + a2d)
 
-                # Guard kb±h denominators — degenerate when kb≈h (already h≠0 from sqrt guard)
-                _kbph = kb_ic + h  # always > 0
-                _kbmh = kb_ic - h
-                _kbmh_sgn = jnp.where(_kbmh < 0.0, jnp.asarray(-1.0), jnp.asarray(1.0))
-                _kbmh_saf = _kbmh_sgn * jnp.maximum(jnp.abs(_kbmh), 1.0e-30)
-                _2kb_saf = jnp.maximum(2.0 * kb_ic, 1.0e-30)
-                a1b = (
-                    -g1 * (1.0 - s2 * s2) / _2kb_saf
-                    + n1b * u * (1.0 - s2 * s1) / _kbph
-                    + n2b * v * (1.0 - s2 / s1) / _kbmh_saf
-                ) * tbi_ic
-                a2b = (
-                    g2 * (1.0 - s2 * s2) / _2kb_saf
-                    - n1b * v * (1.0 - s2 * s1) / _kbph
-                    - n2b * u * (1.0 - s2 / s1) / _kbmh_saf
-                ) * tbi_ic
+        # Albedos seen by the next layer up
+        out = (
+            iupwb0_ic,
+            idwnb_ic,
+            abs_b_sun,
+            abs_b - abs_b_sun,
+            iupwd0_ic,
+            idwnd_ic,
+            abs_d_sun,
+            abs_d - abs_d_sun,
+        )
+        return (iupwb0_ic, iupwd0_ic), out
 
-                iupwb0_ic = -g1 + n1b * u + n2b * v
-                iupwb_ic = -g1 * s2 + n1b * u * s1 + n2b * v / s1
-                idwnb_ic = g2 * s2 - n1b * v * s1 - n2b * u / s1
-                abs_b = (1.0 - s2) - iupwb0_ic + iupwb_ic - idwnb_ic
-                abs_b_sun = (1.0 - om_ic) * ((1.0 - s2) + cf_ic / av_ic * (a1b + a2b))
-                _iupwb0 = _iupwb0.at[ic].set(iupwb0_ic)
-                _iupwb = _iupwb.at[ic].set(iupwb_ic)
-                _idwnb = _idwnb.at[ic].set(idwnb_ic)
-                _iabsb_sun = _iabsb_sun.at[ic].set(abs_b_sun)
-                _iabsb_sha = _iabsb_sha.at[ic].set(abs_b - abs_b_sun)
+    col = lambda a: a[:, None]  # noqa: E731  (layer value shared by both bands)
+    xs_up = (
+        omega[p, ls, rb],
+        col(avmu[p, ls]),
+        col(kb[p, ls]),
+        col(clump_fac_ic[p, ls]),
+        col(dpai[p, ls]),
+        betad[p, ls, rb],
+        betab[p, ls, rb],
+        col(tbi[p, ls]),
+    )
+    _, (iupwb0, idwnb, iabsb_sun, iabsb_sha, iupwd0, idwnd, iabsd_sun, iabsd_sha) = jax.lax.scan(
+        _upward, (albsoib_p, albsoid_p), xs_up
+    )
 
-                # Diffuse terms (unitd = 1) — reuse guards from direct-beam block
-                num1 = (u + v * albd) * s1
-                n2d = num1 / _d1d2_saf
-                n1d = -(1.0 + n2d * u) / v
+    # ----------------------------------------------------------
+    # Top-to-bottom sweep — Fortran lines 536-570
+    # ----------------------------------------------------------
+    def _downward(carry, x):
+        dir_, dif = carry
+        iu_d0, iu_b0, ab_sun, ab_sha, ad_sun, ad_sha, id_b, id_d, fs, dp_ic, kb_ic, cf_ic = x
+        swupw_ic = iu_d0 * dif + iu_b0 * dir_
+        # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+        fs_safe = jnp.maximum(fs, 1.0e-30)
+        fsha_safe = jnp.maximum(1.0 - fs, 1.0e-30)
+        dpai_safe = jnp.maximum(dp_ic, 1.0e-30)
+        sun = (ab_sun * dir_ + ad_sun * dif) / (fs_safe * dpai_safe)
+        sha = (ab_sha * dir_ + ad_sha * dif) / (fsha_safe * dpai_safe)
+        dif_new = dir_ * id_b + dif * id_d
+        dir_new = dir_ * jnp.exp(-kb_ic * cf_ic * dp_ic)
+        return (dir_new, dif_new), (dir_, dif, swupw_ic, sun, sha)
 
-                a1d = (
-                    n1d * u * (1.0 - s2 * s1) / _kbph + n2d * v * (1.0 - s2 / s1) / _kbmh_saf
-                ) * tbi_ic
-                a2d = (
-                    -n1d * v * (1.0 - s2 * s1) / _kbph - n2d * u * (1.0 - s2 / s1) / _kbmh_saf
-                ) * tbi_ic
+    xs_down = (
+        iupwd0,
+        iupwb0,
+        iabsb_sun,
+        iabsb_sha,
+        iabsd_sun,
+        iabsd_sha,
+        idwnb,
+        idwnd,
+        col(fracsun[p, ls]),
+        col(dpai[p, ls]),
+        col(kb[p, ls]),
+        col(clump_fac_ic[p, ls]),
+    )
+    (dir_, dif), (beam_v, dwn_v, upw_v, sun_v, sha_v) = jax.lax.scan(
+        _downward, (swskyb_p, swskyd_p), xs_down, reverse=True
+    )
 
-                iupwd0_ic = n1d * u + n2d * v
-                iupwd_ic = n1d * u * s1 + n2d * v / s1
-                idwnd_ic = -n1d * v * s1 - n2d * u / s1
-                abs_d = 1.0 - iupwd0_ic + iupwd_ic - idwnd_ic
-                abs_d_sun = (1.0 - om_ic) * cf_ic / av_ic * (a1d + a2d)
-                _iupwd0 = _iupwd0.at[ic].set(iupwd0_ic)
-                _iupwd = _iupwd.at[ic].set(iupwd_ic)
-                _idwnd = _idwnd.at[ic].set(idwnd_ic)
-                _iabsd_sun = _iabsd_sun.at[ic].set(abs_d_sun)
-                _iabsd_sha = _iabsd_sha.at[ic].set(abs_d - abs_d_sun)
+    # Ground fluxes
+    swsoi_p = dir_ * (1.0 - albsoib_p) + dif * (1.0 - albsoid_p)
 
-                # Update albedos for next layer
-                albb = iupwb0_ic
-                albd = iupwd0_ic
+    # Canopy albedo
+    suminc = swskyb_p + swskyd_p
+    sumref = iupwb0[-1] * swskyb_p + iupwd0[-1] * swskyd_p
+    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+    suminc_safe = jnp.maximum(suminc, 1.0e-30)
+    albcan_p = jnp.where(suminc > 0.0, sumref / suminc_safe, 0.0)
 
-            # ----------------------------------------------------------
-            # Top-to-bottom sweep — Fortran lines 536-570
-            # ----------------------------------------------------------
-            dir_ = swskyb[p, ib]
-            dif = swskyd[p, ib]
+    # Sum vegetation absorption, bottom to top as in Fortran
+    fs_v = fracsun[p, ls][:, None]
+    dp_v = dpai[p, ls][:, None]
+    sun_abs = sun_v * fs_v * dp_v
+    sha_abs = sha_v * (1.0 - fs_v) * dp_v
+    swveg_p = svs_p = svsh_p = jnp.zeros(numrad)
+    for k in range(_ntop - _nbot + 1):
+        swveg_p = swveg_p + sun_abs[k] + sha_abs[k]
+        svs_p = svs_p + sun_abs[k]
+        svsh_p = svsh_p + sha_abs[k]
 
-            for ic in range(_ntop, _nbot - 1, -1):
-                _swbeam_p = _swbeam_p.at[ic, ib].set(dir_)
-                _swdwn_p = _swdwn_p.at[ic, ib].set(dif)
-                _swupw_p = _swupw_p.at[ic, ib].set(_iupwd0[ic] * dif + _iupwb0[ic] * dir_)
+    # Conservation check
+    sumabs = swveg_p + swsoi_p
+    if is_concrete(suminc) and jnp.any(jnp.abs(suminc - (sumabs + albcan_p * suminc)) >= 1.0e-6):
+        endrun(msg="ERROR: TwoStream: total solar radiation conservation error")
 
-                fs = fracsun[p, ic]
-                dp_ic = dpai[p, ic]
-                # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-                fs_safe = jnp.maximum(fs, 1.0e-30)
-                fsha_safe = jnp.maximum(1.0 - fs, 1.0e-30)
-                dpai_safe = jnp.maximum(dp_ic, 1.0e-30)
-                _swleaf_p = _swleaf_p.at[ic, isun, ib].set(
-                    (_iabsb_sun[ic] * dir_ + _iabsd_sun[ic] * dif) / (fs_safe * dpai_safe)
-                )
-                _swleaf_p = _swleaf_p.at[ic, isha, ib].set(
-                    (_iabsb_sha[ic] * dir_ + _iabsd_sha[ic] * dif) / (fsha_safe * dpai_safe)
-                )
+    # Write-back: levels 0 (ground) and the foliage layers; other levels 0
+    _sl_lev = slice(0, _ncan + 1)
+    _sl_canopy = slice(1, _ncan + 1)
 
-                kb_ic = kb[p, ic]
-                cf_ic = clump_fac_ic[p, ic]
-                dif_new = dir_ * _idwnb[ic] + dif * _idwnd[ic]
-                dir_ = dir_ * jnp.exp(-kb_ic * cf_ic * dp_ic)
-                dif = dif_new
+    def _levels(v, ground):
+        return jnp.zeros((_ncan + 2, numrad)).at[ls].set(v).at[0].set(ground)
 
-            # Ground fluxes
-            _swbeam_p = _swbeam_p.at[0, ib].set(dir_)
-            _swdwn_p = _swdwn_p.at[0, ib].set(dif)
-            _swupw_p = _swupw_p.at[0, ib].set(albsoid[p, ib] * dif + albsoib[p, ib] * dir_)
-            _swsoi_p = _swsoi_p.at[ib].set(
-                dir_ * (1.0 - albsoib[p, ib]) + dif * (1.0 - albsoid[p, ib])
-            )
-
-            # Canopy albedo
-            suminc = swskyb[p, ib] + swskyd[p, ib]
-            sumref = _iupwb0[_ntop] * swskyb[p, ib] + _iupwd0[_ntop] * swskyd[p, ib]
-            # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-            suminc_safe = jnp.maximum(suminc, 1.0e-30)
-            _albcan_p = _albcan_p.at[ib].set(jnp.where(suminc > 0.0, sumref / suminc_safe, 0.0))
-
-            # Sum vegetation absorption
-            swveg_ib = jnp.zeros(())
-            svs_ib = jnp.zeros(())
-            svsh_ib = jnp.zeros(())
-            for ic in range(_nbot, _ntop + 1):
-                fs = fracsun[p, ic]
-                dp_ic = dpai[p, ic]
-                sun = _swleaf_p[ic, isun, ib] * fs * dp_ic
-                sha = _swleaf_p[ic, isha, ib] * (1.0 - fs) * dp_ic
-                swveg_ib = swveg_ib + sun + sha
-                svs_ib = svs_ib + sun
-                svsh_ib = svsh_ib + sha
-            _swveg_p = _swveg_p.at[ib].set(swveg_ib)
-            _swvegsun_p = _swvegsun_p.at[ib].set(svs_ib)
-            _swvegsha_p = _swvegsha_p.at[ib].set(svsh_ib)
-
-            # Conservation check
-            sumabs = swveg_ib + _swsoi_p[ib]
-            if (
-                is_concrete(suminc)
-                and jnp.abs(suminc - (sumabs + _albcan_p[ib] * suminc)) >= 1.0e-6
-            ):
-                endrun(msg="ERROR: TwoStream: total solar radiation conservation error")
-
-        # Bulk JAX write-back for this patch
-        _sl_lev = slice(0, _ncan + 1)
-        _sl_canopy = slice(1, _ncan + 1)
-        _sl_rad = slice(1, numrad + 1)
-        swbeam = swbeam.at[p, _sl_lev, _sl_rad].set(_swbeam_p[_sl_lev, _sl_rad])
-        swdwn = swdwn.at[p, _sl_lev, _sl_rad].set(_swdwn_p[_sl_lev, _sl_rad])
-        swupw = swupw.at[p, _sl_lev, _sl_rad].set(_swupw_p[_sl_lev, _sl_rad])
-        swsoi = swsoi.at[p, _sl_rad].set(_swsoi_p[_sl_rad])
-        albcan = albcan.at[p, _sl_rad].set(_albcan_p[_sl_rad])
-        swveg = swveg.at[p, _sl_rad].set(_swveg_p[_sl_rad])
-        swvegsun = swvegsun.at[p, _sl_rad].set(_swvegsun_p[_sl_rad])
-        swvegsha = swvegsha.at[p, _sl_rad].set(_swvegsha_p[_sl_rad])
-        swleaf = swleaf.at[p, _sl_canopy, isun, _sl_rad].set(_swleaf_p[_sl_canopy, isun, _sl_rad])
-        swleaf = swleaf.at[p, _sl_canopy, isha, _sl_rad].set(_swleaf_p[_sl_canopy, isha, _sl_rad])
+    swbeam = swbeam.at[p, _sl_lev, rb].set(_levels(beam_v, dir_)[_sl_lev])
+    swdwn = swdwn.at[p, _sl_lev, rb].set(_levels(dwn_v, dif)[_sl_lev])
+    swupw = swupw.at[p, _sl_lev, rb].set(
+        _levels(upw_v, albsoid_p * dif + albsoib_p * dir_)[_sl_lev]
+    )
+    swsoi = swsoi.at[p, rb].set(swsoi_p)
+    albcan = albcan.at[p, rb].set(albcan_p)
+    swveg = swveg.at[p, rb].set(swveg_p)
+    swvegsun = swvegsun.at[p, rb].set(svs_p)
+    swvegsha = swvegsha.at[p, rb].set(svsh_p)
+    _zl = jnp.zeros((_ncan + 2, numrad))
+    swleaf = swleaf.at[p, _sl_canopy, isun, rb].set(_zl.at[ls].set(sun_v)[_sl_canopy])
+    swleaf = swleaf.at[p, _sl_canopy, isha, rb].set(_zl.at[ls].set(sha_v)[_sl_canopy])
 
     return mlcanopy_inst._replace(
         swveg_canopy=swveg,

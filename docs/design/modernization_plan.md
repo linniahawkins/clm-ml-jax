@@ -770,12 +770,11 @@ Progress:
   code path, so it is static, in `GridInfo`. `MLCanopyFluxes` builds both from the tables
   (`patch_setup`); 3e builds them from `clm_ml.Params`. Remaining table reads are in
   initialization only (`MLinitVerticalMod`, `SoilStateInitTimeConst`).
-- 3e: `State` and `Model.step` in `clm_ml`; acclimation temperature in `State`; gradients with
-  respect to `Params`, `Forcing` and `State`. Starting point: `tests/test_differentiability.py`
-  (one CLM step) runs out of memory on a 16 GB machine. After 3c the traced forward pass works
-  but `jax.grad` is killed; before 3c the traced forward pass itself peaked at 87 GB. Likely
-  cause: per-layer Python loops unrolled into a very large traced program; the fix is
-  vectorizing those loops over layers (plan Phase 5 work, pulled forward as needed).
+- 3e (in progress): gradients through a full CLM step work ✅ (vectorized per-layer loops and
+  Runge–Kutta stages as a scan; numerics doc §1; with respect to state and parameters, checked
+  against finite differences). Remaining: `State` and `Model.step` in `clm_ml`, `Params` from
+  `params.yaml` into `CanopyParams`, acclimation temperature in `State`, gradients with respect
+  to forcing.
 
 ### Phase 4: Chunked, compiled runs (one patch)
 

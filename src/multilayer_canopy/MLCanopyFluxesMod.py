@@ -345,8 +345,10 @@ def MLCanopyFluxes(
 
     # Runge-Kutta coefficients — Fortran line 197 (computed on the first step
     # and kept in module state; they depend only on runge_kutta_type, so they are
-    # computed here instead)
-    ark, brk, crk = RungeKuttaIni()
+    # computed here instead). Constants: evaluated eagerly even when this function is
+    # traced (RungeKuttaUpdate uses them as numpy values).
+    with jax.ensure_compile_time_eval():
+        ark, brk, crk = RungeKuttaIni()
 
     # ------------------------------------------------------------------
     # Copy CLM variables to mlcanopy container — Fortran line 201
@@ -523,8 +525,13 @@ def MLCanopyFluxes(
         inst = SolarRadiation(bounds, num_mlcan, filter_mlcan, inst, params, grid=grid)
         # Nitrogen profile — Fortran line 293
         inst = CanopyNitrogenProfile(num_mlcan, filter_mlcan, inst, params, grid)
-        # Runge-Kutta inner loop — Fortran lines 310-328
-        for _irk in range(1, nrk_steps + 2):
+
+        # Runge-Kutta stages — Fortran lines 310-328: nrk_steps stages, each followed by
+        # a state update, and a final physics pass. One function, _rk_stage, is a stage:
+        # a Python loop drives it in normal runs; lax.scan (one traced copy of the
+        # physics instead of nrk_steps + 1) when traced, which keeps the gradient small
+        # enough to compile.
+        def _rk_stage(inst, irk):
             inst = CanopyWettedFraction(num_mlcan, filter_mlcan, inst)
             inst = LongwaveRadiation(bounds, num_mlcan, filter_mlcan, inst, params, grid=grid)
             inst = inst._replace(
@@ -559,9 +566,9 @@ def MLCanopyFluxes(
             inst = LeafWaterPotential(num_mlcan, filter_mlcan, isha, inst, params)
             inst = CanopyInterception(num_mlcan, filter_mlcan, inst)
             inst = CanopyEvaporation(num_mlcan, filter_mlcan, inst)
-            if nrk_steps > 0 and _irk <= nrk_steps:
+            if nrk_steps > 0:  # no-op after the last stage (irk > nrk)
                 inst = RungeKuttaUpdate(
-                    _irk,
+                    irk,
                     ark,
                     brk,
                     crk,
@@ -570,6 +577,16 @@ def MLCanopyFluxes(
                     inst,
                     grid=grid,
                 )
+            return inst
+
+        stages = range(1, nrk_steps + 2)
+        if _traced:
+            inst, _ = jax.lax.scan(
+                lambda st, irk: (_rk_stage(st, irk), None), inst, jnp.arange(1, nrk_steps + 2)
+            )
+        else:
+            for irk in stages:
+                inst = _rk_stage(inst, irk)
         return inst
 
     def _substep(carry, calday_ml):

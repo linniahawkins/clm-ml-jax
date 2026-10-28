@@ -62,6 +62,27 @@ step went from 4.5 s to 25 s. Two fixes restore the speed (5.7 s per step under 
 
 Compiling changes round-off only: the per-routine replay agrees to 3e-14.
 
+**Gradients through a full step: program size.** `jax.grad` of one CLM step (6 sub-steps × 5
+Runge–Kutta stages of the full physics) could not compile on a 16 GB machine: XLA needed
+~87 GB (before 3c the traced forward pass alone peaked at 87 GB). Compile memory grows much
+faster than the size of the program, so the fix was to make the program small:
+- **Per-layer Python loops vectorized** (array slices or `vmap` over layers, same formula per
+  layer): turbulence (`_WindProfile`, `_AerodynamicConductance`, momentum flux; ψ functions
+  evaluated once per height), the flux–profile solution (leaf coefficients, tridiagonal
+  coefficients, leaf and source fluxes), solar radiation (optical properties; the two-stream
+  sweeps are `lax.scan` over layers with both wavebands at once). Element-by-element `.at[].set`
+  writes were the worst case: their gradients compiled very slowly (solar radiation alone:
+  233 s and 7.9 GB, now 1.9 s and 1.4 GB).
+- **Runge–Kutta stages as one function** (`_rk_stage`), driven by a Python loop in normal runs
+  and by `lax.scan` when traced, so the physics is traced once instead of five times.
+  `RungeKuttaUpdate` takes the stage number as data (masked sums instead of slices).
+
+Result: one step's traced program went from ~840k to ~150k operations; `jax.grad` of a step
+compiles in ~4 min with ~6.5 GB; gradients with respect to the state and to a parameter
+(`vcmax25`) agree with finite differences (`tests/test_differentiability.py`). Normal runs are
+also faster (2.7 s per step, from 4.5 s). All changes alter round-off only: per-routine replay
+≤ 3e-14, whole run ≤ 4.5e-11 (within the noise twins).
+
 ## 2. Root solvers: forward values and implicit-function gradients
 
 **Context.** Three quantities are found by iterative root solvers: the Obukhov length

@@ -199,160 +199,105 @@ def _implicit_fps_jit(
     beta = jnp.zeros((nlevmlcan + 1, nleaf + 1))
     delta = jnp.zeros((nlevmlcan + 1, nleaf + 1))
 
-    for ic in range(1, n + 1):
-        active_ic = _dpai_p[ic] > 0.0
-        for il in [isun, isha]:
-            _gs_il = _gs_p[ic, il]
-            _gbv_il = _gbv_p[ic, il]
-            gsh_raw = 2.0 * _gbh_p[ic, il]
-            # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-            gs_gbv_denom = jnp.maximum(_gs_il + _gbv_il, 1.0e-30)
-            get_raw = _gs_il * _gbv_il / gs_gbv_denom * _fdry_p[ic] + _gbv_il * _fwet_p[ic]
+    # Vectorized over layers 1..n (rows) and [sunlit, shaded] leaves (columns).
+    sl = slice(1, n + 1)
+    lf = slice(isun, isha + 1)  # isun, isha = 1, 2
+    active = (_dpai_p[sl] > 0.0)[:, None]
+    _gs_v = _gs_p[sl, lf]
+    _gbv_v = _gbv_p[sl, lf]
+    gsh_raw = 2.0 * _gbh_p[sl, lf]
+    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+    gs_gbv_denom = jnp.maximum(_gs_v + _gbv_v, 1.0e-30)
+    get_raw = _gs_v * _gbv_v / gs_gbv_denom * _fdry_p[sl, None] + _gbv_v * _fwet_p[sl, None]
 
-            esat_l, desat_l = SatVap(_tleaf_bef_p[ic, il])
-            qsat_l = esat_l / _pref_p
-            dqsat_l = desat_l / _pref_p
-            qsat_term_val = qsat_l - dqsat_l * _tleaf_bef_p[ic, il]
+    _tlb_v = _tleaf_bef_p[sl, lf]
+    esat_l, desat_l = SatVap(_tlb_v)
+    qsat_l = esat_l / _pref_p
+    dqsat_l = desat_l / _pref_p
+    qsat_term_val = qsat_l - dqsat_l * _tlb_v
 
-            hcap_raw = _cpleaf_p[ic]
-            avail_raw = _rnleaf_p[ic, il]
+    hcap_raw = _cpleaf_p[sl, None]
+    avail_raw = _rnleaf_p[sl, lf]
 
-            # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-            den_l = jnp.maximum(
-                hcap_raw / dtime + gsh_raw * _cpair_p + get_raw * lambda_ * dqsat_l,
-                1.0e-30,
-            )
-            alpha_val = gsh_raw * _cpair_p / den_l
-            beta_val = get_raw * lambda_ / den_l
-            delta_val = (
-                avail_raw / den_l
-                - lambda_ * get_raw * qsat_term_val / den_l
-                + hcap_raw / dtime * _tleaf_bef_p[ic, il] / den_l
-            )
+    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+    den_l = jnp.maximum(
+        hcap_raw / dtime + gsh_raw * _cpair_p + get_raw * lambda_ * dqsat_l,
+        1.0e-30,
+    )
+    alpha_val = gsh_raw * _cpair_p / den_l
+    beta_val = get_raw * lambda_ / den_l
+    delta_val = (
+        avail_raw / den_l
+        - lambda_ * get_raw * qsat_term_val / den_l
+        + hcap_raw / dtime * _tlb_v / den_l
+    )
 
-            pai = (
-                _dpai_p[ic] * _fracsun_p[ic] if il == isun else _dpai_p[ic] * (1.0 - _fracsun_p[ic])
-            )
-            gsh_ic = jnp.where(active_ic, gsh_raw * pai, 0.0)
-            get_ic = jnp.where(active_ic, get_raw * pai, 0.0)
-            hcap_ic = jnp.where(active_ic, hcap_raw * pai, 0.0)
-            avail_ic = jnp.where(active_ic, avail_raw * pai, 0.0)
-
-            gleaf_sh = gleaf_sh.at[ic, il].set(gsh_ic)
-            gleaf_et = gleaf_et.at[ic, il].set(get_ic)
-            heatcap = heatcap.at[ic, il].set(hcap_ic)
-            avail_energy = avail_energy.at[ic, il].set(avail_ic)
-            dqsat_arr = dqsat_arr.at[ic, il].set(jnp.where(active_ic, dqsat_l, 0.0))
-            qsat_term = qsat_term.at[ic, il].set(jnp.where(active_ic, qsat_term_val, 0.0))
-            alpha = alpha.at[ic, il].set(jnp.where(active_ic, alpha_val, 0.0))
-            beta = beta.at[ic, il].set(jnp.where(active_ic, beta_val, 0.0))
-            delta = delta.at[ic, il].set(jnp.where(active_ic, delta_val, 0.0))
+    # Plant area of sunlit and shaded leaves in each layer
+    pai = jnp.stack([_dpai_p[sl] * _fracsun_p[sl], _dpai_p[sl] * (1.0 - _fracsun_p[sl])], axis=1)
+    gleaf_sh = gleaf_sh.at[sl, lf].set(jnp.where(active, gsh_raw * pai, 0.0))
+    gleaf_et = gleaf_et.at[sl, lf].set(jnp.where(active, get_raw * pai, 0.0))
+    heatcap = heatcap.at[sl, lf].set(jnp.where(active, hcap_raw * pai, 0.0))
+    avail_energy = avail_energy.at[sl, lf].set(jnp.where(active, avail_raw * pai, 0.0))
+    dqsat_arr = dqsat_arr.at[sl, lf].set(jnp.where(active, dqsat_l, 0.0))
+    qsat_term = qsat_term.at[sl, lf].set(jnp.where(active, qsat_term_val, 0.0))
+    alpha = alpha.at[sl, lf].set(jnp.where(active, alpha_val, 0.0))
+    beta = beta.at[sl, lf].set(jnp.where(active, beta_val, 0.0))
+    delta = delta.at[sl, lf].set(jnp.where(active, delta_val, 0.0))
 
     # ------------------------------------------------------------------
     # Tridiagonal coefficients — JAX arrays
     # Bonan et al. (2018) eqs. (16)-(17), (S10)-(S31); Fortran lines 258-316
     # ------------------------------------------------------------------
-    rho_dz_over_dt = jnp.zeros(nlevmlcan + 1)
-    a1 = jnp.zeros(nlevmlcan + 1)
-    b11 = jnp.zeros(nlevmlcan + 1)
-    b12 = jnp.zeros(nlevmlcan + 1)
-    c1 = jnp.zeros(nlevmlcan + 1)
-    d1 = jnp.zeros(nlevmlcan + 1)
-    a2 = jnp.zeros(nlevmlcan + 1)
-    b21 = jnp.zeros(nlevmlcan + 1)
-    b22 = jnp.zeros(nlevmlcan + 1)
-    c2 = jnp.zeros(nlevmlcan + 1)
-    d2 = jnp.zeros(nlevmlcan + 1)
+    # Vectorized over layers 1..n; the bottom (ic = 1, soil below) and top (ic = n,
+    # reference height above) layers are then corrected as in Fortran.
+    rdt = _rhomol_p * _dz_p[sl] / dtime
+    rho_dz_over_dt = jnp.zeros(nlevmlcan + 1).at[sl].set(rdt)
+    gac_ic = _gac_p[sl]
+    gac_below_sh = jnp.concatenate([jnp.reshape(_gac0_p, (1,)), _gac_p[1:n]])
+    gac_below_et = jnp.concatenate([jnp.reshape(gs0, (1,)), _gac_p[1:n]])
+    gsh_s, gsh_h = gleaf_sh[sl, isun], gleaf_sh[sl, isha]
+    get_s, get_h = gleaf_et[sl, isun], gleaf_et[sl, isha]
+    al_s, al_h = alpha[sl, isun], alpha[sl, isha]
+    be_s, be_h = beta[sl, isun], beta[sl, isha]
+    de_s, de_h = delta[sl, isun], delta[sl, isha]
+    dq_s, dq_h = dqsat_arr[sl, isun], dqsat_arr[sl, isha]
+    qt_s, qt_h = qsat_term[sl, isun], qsat_term[sl, isha]
 
-    for ic in range(1, n + 1):
-        rdt_ic = _rhomol_p * _dz_p[ic] / dtime
-        rho_dz_over_dt = rho_dz_over_dt.at[ic].set(rdt_ic)
+    a1 = -gac_below_sh
+    b11 = rdt + gac_below_sh + gac_ic + gsh_s * (1.0 - al_s) + gsh_h * (1.0 - al_h)
+    b12 = -gsh_s * be_s - gsh_h * be_h
+    c1 = -gac_ic
+    d1 = rdt * _tair_bef_p[sl] + gsh_s * de_s + gsh_h * de_h
 
-        # ic == 1 and ic == n are Python ints — static comparisons, fine in jit
-        gac_below_sh = _gac0_p if ic == 1 else _gac_p[ic - 1]
-        gac_below_et = gs0 if ic == 1 else _gac_p[ic - 1]
-        gac_ic = _gac_p[ic]
+    a2 = -gac_below_et
+    b21 = -get_s * dq_s * al_s - get_h * dq_h * al_h
+    b22 = rdt + gac_below_et + gac_ic + get_s * (1.0 - dq_s * be_s) + get_h * (1.0 - dq_h * be_h)
+    c2 = -gac_ic
+    d2 = (
+        rdt * (_eair_bef_p[sl] / _pref_p)
+        + get_s * (dq_s * de_s + qt_s)
+        + get_h * (dq_h * de_h + qt_h)
+    )
 
-        a1_ic = -gac_below_sh
-        b11_ic = (
-            rdt_ic
-            + gac_below_sh
-            + gac_ic
-            + gleaf_sh[ic, isun] * (1.0 - alpha[ic, isun])
-            + gleaf_sh[ic, isha] * (1.0 - alpha[ic, isha])
-        )
-        b12_ic = -gleaf_sh[ic, isun] * beta[ic, isun] - gleaf_sh[ic, isha] * beta[ic, isha]
-        c1_ic = -gac_ic
-        d1_ic = (
-            rdt_ic * _tair_bef_p[ic]
-            + gleaf_sh[ic, isun] * delta[ic, isun]
-            + gleaf_sh[ic, isha] * delta[ic, isha]
-        )
-
-        if ic == n:
-            c1_ic = jnp.zeros(())
-            d1_ic = d1_ic + gac_ic * _thref_p
-        if ic == 1:
-            a1_ic = jnp.zeros(())
-            b11_ic = b11_ic - _gac0_p * alpha0
-            b12_ic = b12_ic - _gac0_p * beta0
-            d1_ic = d1_ic + _gac0_p * delta0
-
-        a2_ic = -gac_below_et
-        b21_ic = (
-            -gleaf_et[ic, isun] * dqsat_arr[ic, isun] * alpha[ic, isun]
-            - gleaf_et[ic, isha] * dqsat_arr[ic, isha] * alpha[ic, isha]
-        )
-        b22_ic = (
-            rdt_ic
-            + gac_below_et
-            + gac_ic
-            + gleaf_et[ic, isun] * (1.0 - dqsat_arr[ic, isun] * beta[ic, isun])
-            + gleaf_et[ic, isha] * (1.0 - dqsat_arr[ic, isha] * beta[ic, isha])
-        )
-        c2_ic = -gac_ic
-        d2_ic = (
-            rdt_ic * (_eair_bef_p[ic] / _pref_p)
-            + gleaf_et[ic, isun] * (dqsat_arr[ic, isun] * delta[ic, isun] + qsat_term[ic, isun])
-            + gleaf_et[ic, isha] * (dqsat_arr[ic, isha] * delta[ic, isha] + qsat_term[ic, isha])
-        )
-
-        if ic == n:
-            c2_ic = jnp.zeros(())
-            d2_ic = d2_ic + gac_ic * (_eref_p / _pref_p)
-        if ic == 1:
-            a2_ic = jnp.zeros(())
-            b21_ic = b21_ic - gs0 * _rhg_p * dqsat0 * alpha0
-            b22_ic = b22_ic - gs0 * _rhg_p * dqsat0 * beta0
-            d2_ic = d2_ic + gs0 * _rhg_p * (qsat0 + dqsat0 * (delta0 - _tg_bef_p))
-
-        a1 = a1.at[ic].set(a1_ic)
-        b11 = b11.at[ic].set(b11_ic)
-        b12 = b12.at[ic].set(b12_ic)
-        c1 = c1.at[ic].set(c1_ic)
-        d1 = d1.at[ic].set(d1_ic)
-        a2 = a2.at[ic].set(a2_ic)
-        b21 = b21.at[ic].set(b21_ic)
-        b22 = b22.at[ic].set(b22_ic)
-        c2 = c2.at[ic].set(c2_ic)
-        d2 = d2.at[ic].set(d2_ic)
+    # Top layer (ic = n): exchange with the reference height
+    c1 = c1.at[n - 1].set(0.0)
+    d1 = d1.at[n - 1].set(d1[n - 1] + gac_ic[n - 1] * _thref_p)
+    c2 = c2.at[n - 1].set(0.0)
+    d2 = d2.at[n - 1].set(d2[n - 1] + gac_ic[n - 1] * (_eref_p / _pref_p))
+    # Bottom layer (ic = 1): exchange with the ground
+    a1 = a1.at[0].set(0.0)
+    b11 = b11.at[0].set(b11[0] - _gac0_p * alpha0)
+    b12 = b12.at[0].set(b12[0] - _gac0_p * beta0)
+    d1 = d1.at[0].set(d1[0] + _gac0_p * delta0)
+    a2 = a2.at[0].set(0.0)
+    b21 = b21.at[0].set(b21[0] - gs0 * _rhg_p * dqsat0 * alpha0)
+    b22 = b22.at[0].set(b22[0] - gs0 * _rhg_p * dqsat0 * beta0)
+    d2 = d2.at[0].set(d2[0] + gs0 * _rhg_p * (qsat0 + dqsat0 * (delta0 - _tg_bef_p)))
 
     # ------------------------------------------------------------------
     # Tridiagonal solve for tair and eair (mol/mol) — Fortran lines 327-329
     # ------------------------------------------------------------------
-    tair_p, eair_p = tridiag_2eq(
-        a1[1 : n + 1],
-        b11[1 : n + 1],
-        b12[1 : n + 1],
-        c1[1 : n + 1],
-        d1[1 : n + 1],
-        a2[1 : n + 1],
-        b21[1 : n + 1],
-        b22[1 : n + 1],
-        c2[1 : n + 1],
-        d2[1 : n + 1],
-        n,
-    )
+    tair_p, eair_p = tridiag_2eq(a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, n)
     tair = tair.at[p, 1 : n + 1].set(jnp.stack(tair_p))
     eair = eair.at[p, 1 : n + 1].set(jnp.stack(eair_p))
 
@@ -368,14 +313,15 @@ def _implicit_fps_jit(
     # ------------------------------------------------------------------
     # Leaf temperature from implicit solution — Fortran lines 336-340
     # ------------------------------------------------------------------
-    tleaf_implic = jnp.zeros((nlevmlcan + 1, nleaf + 1))
-    for ic in range(1, n + 1):
-        tleaf_implic = tleaf_implic.at[ic, isun].set(
-            alpha[ic, isun] * _tair_solved[ic] + beta[ic, isun] * _eair_solved[ic] + delta[ic, isun]
+    tleaf_implic = (
+        jnp.zeros((nlevmlcan + 1, nleaf + 1))
+        .at[sl, lf]
+        .set(
+            alpha[sl, lf] * _tair_solved[sl, None]
+            + beta[sl, lf] * _eair_solved[sl, None]
+            + delta[sl, lf]
         )
-        tleaf_implic = tleaf_implic.at[ic, isha].set(
-            alpha[ic, isha] * _tair_solved[ic] + beta[ic, isha] * _eair_solved[ic] + delta[ic, isha]
-        )
+    )
 
     # ------------------------------------------------------------------
     # Convert water vapor from mol/mol to Pa — Fortran lines 343-346
@@ -395,73 +341,64 @@ def _implicit_fps_jit(
     # eair in Pa
     _eair_lf_p = _eair_solved.at[1 : n + 1].set(_eair_solved[1 : n + 1] * _pref_p)
 
-    _tleaf_new = jnp.zeros((nlevmlcan + 1, nleaf + 1))
-    _stleaf_new = jnp.zeros((nlevmlcan + 1, nleaf + 1))
-    _shleaf_new = jnp.zeros((nlevmlcan + 1, nleaf + 1))
-    _lhleaf_new = jnp.zeros((nlevmlcan + 1, nleaf + 1))
-    _evleaf_new = jnp.zeros((nlevmlcan + 1, nleaf + 1))
-    _trleaf_new = jnp.zeros((nlevmlcan + 1, nleaf + 1))
+    tair_v = _tair_solved[sl, None]
+    eair_v = _eair_lf_p[sl, None]
+    cpleaf_v = _cpleaf_p[sl, None]
+    fwet_v = _fwet_p[sl, None]
+    fdry_v = _fdry_p[sl, None]
+    gbh_v = _gbh_p[sl, lf]
+    gbv_v = _gbv_p[sl, lf]
+    gs_v = _gs_p[sl, lf]
+    rnleaf_v = _rnleaf_p[sl, lf]
+    tleaf_bef_v = _tleaf_bef_p[sl, lf]
 
-    for ic in range(1, n + 1):
-        tair_ic = _tair_solved[ic]
-        eair_ic = _eair_lf_p[ic]
-        active_ic = _dpai_p[ic] > 0.0
-        for il in [isun, isha]:
-            cpleaf_ic = _cpleaf_p[ic]
-            fwet_ic = _fwet_p[ic]
-            fdry_ic = _fdry_p[ic]
-            gbh_ic = _gbh_p[ic, il]
-            gbv_ic = _gbv_p[ic, il]
-            gs_ic = _gs_p[ic, il]
-            rnleaf_ic = _rnleaf_p[ic, il]
-            tleaf_bef_ic = _tleaf_bef_p[ic, il]
+    esat_l, desat_l = SatVap(tleaf_bef_v)
+    qsat_lf = esat_l / _pref_p
+    dqsat_lf = desat_l / _pref_p
 
-            esat_l, desat_l = SatVap(tleaf_bef_ic)
-            qsat_lf = esat_l / _pref_p
-            dqsat_lf = desat_l / _pref_p
+    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+    gs_gbv_denom = jnp.maximum(gs_v + gbv_v, 1.0e-30)
+    gleaf = gs_v * gbv_v / gs_gbv_denom
+    gw = gleaf * fdry_v + gbv_v * fwet_v
 
-            # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-            gs_gbv_denom = jnp.maximum(gs_ic + gbv_ic, 1.0e-30)
-            gleaf = gs_ic * gbv_ic / gs_gbv_denom
-            gw = gleaf * fdry_ic + gbv_ic * fwet_ic
+    num1 = 2.0 * _cpair_p * gbh_v
+    num2 = lambda_ * gw
+    num3 = (
+        rnleaf_v
+        - lambda_ * gw * (qsat_lf - dqsat_lf * tleaf_bef_v)
+        + cpleaf_v / dtime * tleaf_bef_v
+    )
+    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
+    den_lf = jnp.maximum(cpleaf_v / dtime + num1 + num2 * dqsat_lf, 1.0e-30)
+    tleaf_active = (num1 * tair_v + num2 * (eair_v / _pref_p) + num3) / den_lf
+    tleaf_val = jnp.where(active, tleaf_active, tair_v)
 
-            num1 = 2.0 * _cpair_p * gbh_ic
-            num2 = lambda_ * gw
-            num3 = (
-                rnleaf_ic
-                - lambda_ * gw * (qsat_lf - dqsat_lf * tleaf_bef_ic)
-                + cpleaf_ic / dtime * tleaf_bef_ic
-            )
-            # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-            den_lf = jnp.maximum(cpleaf_ic / dtime + num1 + num2 * dqsat_lf, 1.0e-30)
-            tleaf_active = (num1 * tair_ic + num2 * (eair_ic / _pref_p) + num3) / den_lf
-            tleaf_val = jnp.where(active_ic, tleaf_active, tair_ic)
+    stleaf_val = jnp.where(active, (tleaf_val - tleaf_bef_v) * cpleaf_v / dtime, 0.0)
+    shleaf_val = jnp.where(active, 2.0 * _cpair_p * (tleaf_val - tair_v) * gbh_v, 0.0)
 
-            stleaf_val = jnp.where(active_ic, (tleaf_val - tleaf_bef_ic) * cpleaf_ic / dtime, 0.0)
-            shleaf_val = jnp.where(active_ic, 2.0 * _cpair_p * (tleaf_val - tair_ic) * gbh_ic, 0.0)
+    num1_flux = qsat_lf + dqsat_lf * (tleaf_val - tleaf_bef_v) - eair_v / _pref_p
+    trleaf_val = jnp.where(active, gleaf * fdry_v * num1_flux, 0.0)
+    evleaf_val = jnp.where(active, gbv_v * fwet_v * num1_flux, 0.0)
+    lhleaf_val = jnp.where(active, (trleaf_val + evleaf_val) * lambda_, 0.0)
 
-            num1_flux = qsat_lf + dqsat_lf * (tleaf_val - tleaf_bef_ic) - eair_ic / _pref_p
-            trleaf_val = jnp.where(active_ic, gleaf * fdry_ic * num1_flux, 0.0)
-            evleaf_val = jnp.where(active_ic, gbv_ic * fwet_ic * num1_flux, 0.0)
-            lhleaf_val = jnp.where(active_ic, (trleaf_val + evleaf_val) * lambda_, 0.0)
+    err = jnp.where(active, rnleaf_v - shleaf_val - lhleaf_val - stleaf_val, 0.0)
+    # JIT-compatible diagnostic — callback runs host-side with concrete values
+    jax.debug.callback(
+        lambda e: (
+            endrun(msg=" ERROR: LeafFluxes: energy balance error")
+            if float(np.max(np.abs(e))) > 1.0e-3
+            else None
+        ),
+        err,
+    )
 
-            err = jnp.where(active_ic, rnleaf_ic - shleaf_val - lhleaf_val - stleaf_val, 0.0)
-            # JIT-compatible diagnostic — callback runs host-side with concrete value
-            jax.debug.callback(
-                lambda e: (
-                    endrun(msg=" ERROR: LeafFluxes: energy balance error")
-                    if abs(float(e)) > 1.0e-3
-                    else None
-                ),
-                err,
-            )
-
-            _tleaf_new = _tleaf_new.at[ic, il].set(tleaf_val)
-            _stleaf_new = _stleaf_new.at[ic, il].set(stleaf_val)
-            _shleaf_new = _shleaf_new.at[ic, il].set(shleaf_val)
-            _lhleaf_new = _lhleaf_new.at[ic, il].set(lhleaf_val)
-            _evleaf_new = _evleaf_new.at[ic, il].set(evleaf_val)
-            _trleaf_new = _trleaf_new.at[ic, il].set(trleaf_val)
+    _z = jnp.zeros((nlevmlcan + 1, nleaf + 1))
+    _tleaf_new = _z.at[sl, lf].set(tleaf_val)
+    _stleaf_new = _z.at[sl, lf].set(stleaf_val)
+    _shleaf_new = _z.at[sl, lf].set(shleaf_val)
+    _lhleaf_new = _z.at[sl, lf].set(lhleaf_val)
+    _evleaf_new = _z.at[sl, lf].set(evleaf_val)
+    _trleaf_new = _z.at[sl, lf].set(trleaf_val)
 
     # Batch write-back: 6 bulk operations
     _sl_lf = slice(1, n + 1)
@@ -533,30 +470,20 @@ def _implicit_fps_jit(
     # ------------------------------------------------------------------
     # Source fluxes from implicit solution — Fortran lines 387-398
     # ------------------------------------------------------------------
-    shsrc = jnp.zeros(nlevmlcan + 1)
-    etsrc = jnp.zeros(nlevmlcan + 1)
-    stveg = jnp.zeros(nlevmlcan + 1)
-
-    for ic in range(1, n + 1):
-        active_ic = _dpai_p[ic] > 0.0
-        shsrc_ic = jnp.zeros(())
-        etsrc_ic = jnp.zeros(())
-        stveg_ic = jnp.zeros(())
-        for il in [isun, isha]:
-            esat_l, desat_l = SatVap(_tleaf_bef_p[ic, il])
-            sh_il = _cpair_p * (tleaf_implic[ic, il] - _tair_final[ic]) * gleaf_sh[ic, il]
-            et_il = (
-                (esat_l + desat_l * (tleaf_implic[ic, il] - _tleaf_bef_p[ic, il]) - _eair_final[ic])
-                / _pref_p
-                * gleaf_et[ic, il]
-            )
-            stv_il = heatcap[ic, il] * (tleaf_implic[ic, il] - _tleaf_bef_p[ic, il]) / dtime
-            shsrc_ic = shsrc_ic + jnp.where(active_ic, sh_il, 0.0)
-            etsrc_ic = etsrc_ic + jnp.where(active_ic, et_il, 0.0)
-            stveg_ic = stveg_ic + jnp.where(active_ic, stv_il, 0.0)
-        shsrc = shsrc.at[ic].set(shsrc_ic)
-        etsrc = etsrc.at[ic].set(etsrc_ic)
-        stveg = stveg.at[ic].set(stveg_ic)
+    esat_l, desat_l = SatVap(_tleaf_bef_p[sl, lf])
+    tli = tleaf_implic[sl, lf]
+    sh_l = _cpair_p * (tli - _tair_final[sl, None]) * gleaf_sh[sl, lf]
+    et_l = (
+        (esat_l + desat_l * (tli - _tleaf_bef_p[sl, lf]) - _eair_final[sl, None])
+        / _pref_p
+        * gleaf_et[sl, lf]
+    )
+    stv_l = heatcap[sl, lf] * (tli - _tleaf_bef_p[sl, lf]) / dtime
+    sh_l, et_l, stv_l = (jnp.where(active, x, 0.0) for x in (sh_l, et_l, stv_l))
+    # Sum over leaves in Fortran order (sunlit, then shaded)
+    shsrc = jnp.zeros(nlevmlcan + 1).at[sl].set(sh_l[:, 0] + sh_l[:, 1])
+    etsrc = jnp.zeros(nlevmlcan + 1).at[sl].set(et_l[:, 0] + et_l[:, 1])
+    stveg = jnp.zeros(nlevmlcan + 1).at[sl].set(stv_l[:, 0] + stv_l[:, 1])
 
     # Soil fluxes from implicit solution — Fortran lines 401-403
     sh0 = -_cpair_p * (_tair_final[1] - t0) * _gac0_p

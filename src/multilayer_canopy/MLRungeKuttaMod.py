@@ -12,7 +12,6 @@ Fortran lines 1-240
 from typing import Tuple
 
 import jax.numpy as jnp
-import numpy as np
 from jax import Array
 
 from clm_src_main.abortutils import endrun  # noqa: F401
@@ -71,169 +70,51 @@ def RungeKuttaUpdate(
         Updated :class:`mlcanopy_type` with state variables and
         accumulated Runge-Kutta increments written back.
     """
-    # irk is 1-based (matching Fortran); convert to 0-based where needed
-    irk0 = irk - 1
+    # irk is 1-based (matching Fortran). It may be a Python int or a traced integer
+    # (the Runge-Kutta stages run as a lax.scan when the model is traced), so the
+    # stage-dependent sums use masks instead of slices of variable length:
+    #   stage irk < nrk:  x = x_bef + sum_{j<irk} a(irk+1, j) dx_j   (next stage's state)
+    #   stage irk = nrk:  x = x_bef + sum_{j<=nrk} b(j) dx_j        (final update)
+    #   irk > nrk:        unchanged (physics-only pass after the last stage)
+    irk0 = jnp.asarray(irk) - 1
+    do_update = irk0 < nrk
+    k = jnp.minimum(irk0, nrk - 1)  # column written this stage (clamped when no update)
+    a = jnp.asarray(a)
+    b = jnp.asarray(b)
+    weights = jnp.where(irk0 < nrk - 1, a[jnp.minimum(irk0 + 1, nrk - 1)], b)
+    w_curr = weights[k]
 
-    # Pre-extract Butcher tableau as numpy once (small arrays, nrk×nrk)
-    _a = np.asarray(a)
-    _b = np.asarray(b)
+    def _advance(x_bef, x_cur, dx_prev):
+        """New state and this stage's increment; dx_prev has the stage axis last."""
+        dx_new = x_cur - x_bef
+        m = dx_prev.shape[-1]  # stage axis (may be longer than nrk)
+        j = jnp.arange(m)
+        # earlier stages j < k only (a's upper triangle is spval)
+        w_prev = jnp.zeros(m).at[:nrk].set(jnp.where(j[:nrk] < k, weights, 0.0))
+        x_new = x_bef + jnp.where(j < k, dx_prev * w_prev, 0.0).sum(axis=-1) + w_curr * dx_new
+        return jnp.where(do_update, x_new, x_cur), dx_new
 
-    # Working copies of the JAX arrays (we'll update via slice assignment)
-    dtair_arr = mlcanopy_inst.dtair_profile
-    deair_arr = mlcanopy_inst.deair_profile
-    dh2ocan_arr = mlcanopy_inst.dh2ocan_profile
-    dtleaf_arr = mlcanopy_inst.dtleaf_leaf
-    dlwp_arr = mlcanopy_inst.dlwp_leaf
-    dtg_arr = mlcanopy_inst.dtg_soil
-    tair_arr = mlcanopy_inst.tair_profile
-    eair_arr = mlcanopy_inst.eair_profile
-    h2ocan_arr = mlcanopy_inst.h2ocan_profile
-    tleaf_arr = mlcanopy_inst.tleaf_leaf
-    lwp_arr = mlcanopy_inst.lwp_leaf
-    tg_arr = mlcanopy_inst.tg_soil
-
-    # ------------------------------------------------------------------
-    # Per-patch loop — Fortran lines 95-136
-    # ------------------------------------------------------------------
-    for fp in range(num_filter):
-        p, n = grid.p, grid.ncan
-
-        # Always use JAX slices — no np.asarray() D→H syncs
-        _tair_cur = tair_arr[p, :n]
-        _eair_cur = eair_arr[p, :n]
-        _h2ocan_cur = h2ocan_arr[p, :n]
-        _tleaf_cur = tleaf_arr[p, :n, :]
-        _lwp_cur = lwp_arr[p, :n, :]
-
-        _tair_bef = mlcanopy_inst.tair_bef_profile[p, :n]
-        _eair_bef = mlcanopy_inst.eair_bef_profile[p, :n]
-        _h2ocan_bef = mlcanopy_inst.h2ocan_bef_profile[p, :n]
-        _tleaf_bef = mlcanopy_inst.tleaf_bef_leaf[p, :n, :]
-        _lwp_bef = mlcanopy_inst.lwp_bef_leaf[p, :n, :]
-
-        _dtair_prev = dtair_arr[p, :n, :]
-        _deair_prev = deair_arr[p, :n, :]
-        _dh2ocan_prev = dh2ocan_arr[p, :n, :]
-        _dtleaf_prev = dtleaf_arr[p, :n, :, :]
-        _dlwp_prev = dlwp_arr[p, :n, :, :]
-
-        _tg_cur = tg_arr[p]
-        _tg_bef_val = mlcanopy_inst.tg_bef_soil[p]
-        _dtg_prev = dtg_arr[p]
-
-        # ------------------------------------------------------------------
-        # Current step's deltas — pure numpy
-        # Fortran lines 99-105: dtX[irk0] = X_cur - X_bef
-        # ------------------------------------------------------------------
-        _dtair_new = _tair_cur - _tair_bef  # (n,)
-        _deair_new = _eair_cur - _eair_bef
-        _dh2ocan_new = _h2ocan_cur - _h2ocan_bef
-        _dtleaf_new = _tleaf_cur - _tleaf_bef  # (n, nleaf+1)
-        _dlwp_new = _lwp_cur - _lwp_bef
-        _dtg_new = _tg_cur - _tg_bef_val
-
-        # ------------------------------------------------------------------
-        # Compute updated state — pure numpy
-        # The j0 loop (range(irk)) uses dtX[j0] for j0=0..irk-1=irk0.
-        # j0=0..irk0-1 come from previous calls (_dtX_prev[:, :irk0]).
-        # j0=irk0 is the current step's delta (_dtX_new), just computed above.
-        # ------------------------------------------------------------------
-        if irk < nrk:
-            # Coefficients: a[irk0+1, 0..irk0]
-            _a_prev = _a[irk0 + 1, :irk0]  # (irk0,) — previous steps
-            _a_curr = _a[irk0 + 1, irk0]  # scalar  — current step
-
-            _tair_new = (
-                _tair_bef + (_dtair_prev[:, :irk0] * _a_prev).sum(axis=1) + _a_curr * _dtair_new
-            )
-            _eair_new = (
-                _eair_bef + (_deair_prev[:, :irk0] * _a_prev).sum(axis=1) + _a_curr * _deair_new
-            )
-            _h2ocan_new = (
-                _h2ocan_bef
-                + (_dh2ocan_prev[:, :irk0] * _a_prev).sum(axis=1)
-                + _a_curr * _dh2ocan_new
-            )
-            # tleaf/lwp: shape (n, nleaf+1); dt arrays shape (n, nleaf+1, nrk)
-            _tleaf_new = (
-                _tleaf_bef
-                + (_dtleaf_prev[:, :, :irk0] * _a_prev).sum(axis=2)
-                + _a_curr * _dtleaf_new
-            )
-            _lwp_new = (
-                _lwp_bef + (_dlwp_prev[:, :, :irk0] * _a_prev).sum(axis=2) + _a_curr * _dlwp_new
-            )
-            _tg_new = _tg_bef_val + (_dtg_prev[:irk0] * _a_prev).sum() + _a_curr * _dtg_new
-
-        elif irk == nrk:
-            # Final weighted update: j0 = 0..nrk-1
-            _b_prev = _b[:irk0]  # (irk0,) — previous steps
-            _b_curr = _b[irk0]  # scalar  — current step
-
-            _tair_new = (
-                _tair_bef + (_dtair_prev[:, :irk0] * _b_prev).sum(axis=1) + _b_curr * _dtair_new
-            )
-            _eair_new = (
-                _eair_bef + (_deair_prev[:, :irk0] * _b_prev).sum(axis=1) + _b_curr * _deair_new
-            )
-            _h2ocan_new = (
-                _h2ocan_bef
-                + (_dh2ocan_prev[:, :irk0] * _b_prev).sum(axis=1)
-                + _b_curr * _dh2ocan_new
-            )
-            _tleaf_new = (
-                _tleaf_bef
-                + (_dtleaf_prev[:, :, :irk0] * _b_prev).sum(axis=2)
-                + _b_curr * _dtleaf_new
-            )
-            _lwp_new = (
-                _lwp_bef + (_dlwp_prev[:, :, :irk0] * _b_prev).sum(axis=2) + _b_curr * _dlwp_new
-            )
-            _tg_new = _tg_bef_val + (_dtg_prev[:irk0] * _b_prev).sum() + _b_curr * _dtg_new
-        else:
-            # Should not occur; keep state unchanged
-            _tair_new = _tair_cur
-            _eair_new = _eair_cur
-            _h2ocan_new = _h2ocan_cur
-            _tleaf_new = _tleaf_cur
-            _lwp_new = _lwp_cur
-            _tg_new = _tg_cur
-
-        # ------------------------------------------------------------------
-        # Write back to JAX arrays — bulk slice updates (few JAX ops total)
-        # Data is always JAX so no jnp.array() conversion needed
-        # ------------------------------------------------------------------
-        dtair_arr = dtair_arr.at[p, :n, irk0].set(_dtair_new)
-        deair_arr = deair_arr.at[p, :n, irk0].set(_deair_new)
-        dh2ocan_arr = dh2ocan_arr.at[p, :n, irk0].set(_dh2ocan_new)
-        dtleaf_arr = dtleaf_arr.at[p, :n, :, irk0].set(_dtleaf_new)
-        dlwp_arr = dlwp_arr.at[p, :n, :, irk0].set(_dlwp_new)
-        dtg_arr = dtg_arr.at[p, irk0].set(_dtg_new)
-
-        tair_arr = tair_arr.at[p, :n].set(_tair_new)
-        eair_arr = eair_arr.at[p, :n].set(_eair_new)
-        h2ocan_arr = h2ocan_arr.at[p, :n].set(_h2ocan_new)
-        tleaf_arr = tleaf_arr.at[p, :n, :].set(_tleaf_new)
-        lwp_arr = lwp_arr.at[p, :n, :].set(_lwp_new)
-        tg_arr = tg_arr.at[p].set(_tg_new)
+    p, n = grid.p, grid.ncan
+    updates = {}
+    for state, delta, bef, sl in (
+        ("tair_profile", "dtair_profile", "tair_bef_profile", (p, slice(None, n))),
+        ("eair_profile", "deair_profile", "eair_bef_profile", (p, slice(None, n))),
+        ("h2ocan_profile", "dh2ocan_profile", "h2ocan_bef_profile", (p, slice(None, n))),
+        ("tleaf_leaf", "dtleaf_leaf", "tleaf_bef_leaf", (p, slice(None, n), slice(None))),
+        ("lwp_leaf", "dlwp_leaf", "lwp_bef_leaf", (p, slice(None, n), slice(None))),
+        ("tg_soil", "dtg_soil", "tg_bef_soil", (p,)),
+    ):
+        x_arr = getattr(mlcanopy_inst, state)
+        dx_arr = getattr(mlcanopy_inst, delta)
+        x_new, dx_new = _advance(getattr(mlcanopy_inst, bef)[sl], x_arr[sl], dx_arr[sl])
+        dx_col = dx_arr[sl + (k,)]
+        updates[state] = x_arr.at[sl].set(x_new)
+        updates[delta] = dx_arr.at[sl + (k,)].set(jnp.where(do_update, dx_new, dx_col))
 
     # ------------------------------------------------------------------
     # Write all updated arrays back into the immutable state container
     # ------------------------------------------------------------------
-    mlcanopy_inst = mlcanopy_inst._replace(
-        dtair_profile=dtair_arr,
-        deair_profile=deair_arr,
-        dh2ocan_profile=dh2ocan_arr,
-        dtleaf_leaf=dtleaf_arr,
-        dlwp_leaf=dlwp_arr,
-        dtg_soil=dtg_arr,
-        tair_profile=tair_arr,
-        eair_profile=eair_arr,
-        h2ocan_profile=h2ocan_arr,
-        tleaf_leaf=tleaf_arr,
-        lwp_leaf=lwp_arr,
-        tg_soil=tg_arr,
-    )
+    mlcanopy_inst = mlcanopy_inst._replace(**updates)
 
     return mlcanopy_inst
 

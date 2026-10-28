@@ -344,8 +344,9 @@ def test_finite_difference_gradient_check(initialized_model):
     forward_fn, mlcanopy_inst, info = initialized_model
     evp_list = info["evp_list"]
     p = evp_list[0]
-    ncan = int(mlcanopy_inst.ncan_canopy[p])
-    ic = max(1, ncan // 2)  # middle canopy layer
+    ntop = int(mlcanopy_inst.ntop_canopy[p])
+    nbot = int(mlcanopy_inst.nbot_canopy[p])
+    ic = (nbot + ntop) // 2  # a layer with leaves (layers above ntop have none)
 
     # Analytic gradient
     grad_fn = jax.grad(forward_fn, allow_int=True)
@@ -371,3 +372,28 @@ def test_finite_difference_gradient_check(initialized_model):
         f"Finite-difference check failed for tleaf_leaf[{p},{ic},{isun}]: "
         f"analytic={g_analytic:.6e}, fd={g_fd:.6e}, rel_err={rel_err:.3%}"
     )
+
+
+@pytest.mark.slow
+def test_parameter_gradient_matches_finite_difference(initialized_model):
+    """d(loss)/d(vcmax25) from jax.grad agrees with a centred finite difference.
+
+    Parameters are passed explicitly (CanopyParams, plan Phase 3d), so jax.grad can
+    differentiate with respect to them (argnums=1).
+    """
+    forward_fn, mlcanopy_inst, _ = initialized_model
+    params = forward_fn.__defaults__[0]  # the patch's CanopyParams
+
+    grads = jax.grad(forward_fn, argnums=1)(mlcanopy_inst, params)
+    g_analytic = float(grads.vcmax25)
+    assert g_analytic != 0.0, "loss does not depend on vcmax25"
+
+    eps = 1e-3 * float(params.vcmax25)
+    f_plus = float(forward_fn(mlcanopy_inst, params._replace(vcmax25=params.vcmax25 + eps)))
+    f_minus = float(forward_fn(mlcanopy_inst, params._replace(vcmax25=params.vcmax25 - eps)))
+    g_fd = (f_plus - f_minus) / (2.0 * eps)
+
+    rel_err = abs(g_analytic - g_fd) / abs(g_fd)
+    assert (
+        rel_err < 0.05
+    ), f"d(loss)/d(vcmax25): analytic={g_analytic:.6e}, fd={g_fd:.6e}, rel_err={rel_err:.3%}"
