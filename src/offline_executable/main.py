@@ -511,9 +511,12 @@ def step_inputs(run: LegacyRun, chunk: ForcingChunk, run_step: int) -> StepInput
     )
 
 
-def advance(run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, params=None):
+def advance(
+    run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, params=None, grid=None
+):
     """One time step: install the step's tower meteorology, then ModelAdvance.
-    Returns ``(insts, filt)``."""
+    ``grid``: the patch's layer indices (``patch_setup``); required when ``insts`` are traced
+    (a compiled chunk), found from ``insts`` otherwise. Returns ``(insts, filt)``."""
     from offline_driver.TowerMetMod import TowerMetCurr
 
     atm2lnd, wateratm2lndbulk, frictionvel = TowerMetCurr(
@@ -539,6 +542,7 @@ def advance(run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, p
         initialize=initialize,
         params=run.canopy_params if params is None else params,
         opts=run.opts,
+        grid=grid,
     )
     # Fortran's conservation checks (recorded in the step, plan §6.8): checked here when the
     # step runs on concrete values; after each chunk when steps are compiled.
@@ -602,6 +606,7 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers
     (default: from the PFT tables), so ``jax.vmap`` over it runs a parameter ensemble and
     ``jax.grad`` differentiates with respect to it."""
     dtime = run.time_of(0).dtime  # static: the model step
+    grid = _grid_of(template, filt)
 
     def body(state, x, params):
         now, met, clm_record, forcing_bef, forcing_next = x
@@ -620,6 +625,7 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers
             inputs,
             initialize=False,
             params=params,
+            grid=grid,
         )
         state = state_from_instances(insts, state)
         if outputs == "state":
@@ -657,6 +663,7 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
     dtime = run.time_of(0).dtime
     names = sorted({n for spec in streams for n in spec.variables})
     default_params = run.canopy_params
+    grid = _grid_of(template, filt)
 
     def variables(insts) -> dict:
         m = insts.mlcanopy
@@ -673,7 +680,7 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
                 out[n] = VARIABLES_BY_NAME[n].compute(r)[0]
         return out
 
-    def step(carry, x):
+    def step(template, carry, x):
         state, buffers, errors = carry
         (now, met, clm_record, forcing_bef, forcing_next), slots, params = x
         inputs = StepInputs(
@@ -691,6 +698,7 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
             inputs,
             initialize=False,
             params=params,
+            grid=grid,
         )
         values = variables(insts)
         buffers = tuple(
@@ -705,16 +713,30 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
     # step's intermediate values in the backward pass. No effect on forward results.
     checkpointed_step = jax.checkpoint(step) if CHECKPOINT_STEP else step
 
-    def run_chunk(state, xs, slots, buffers, params=default_params):
+    # The patch's structure and the containers' other fields (``template``) are an input of
+    # the compiled chunk, not constants baked into it (plan Phase 5b): another patch with the
+    # same layer indices reuses the program.
+    def run_chunk(state, xs, slots, buffers, params=default_params, template=template):
         n = jax.tree.leaves(xs)[0].shape[0]
         per_step_params = jax.tree.map(lambda p: jnp.broadcast_to(p, (n,) + p.shape), params)
         errors = jnp.zeros(len(BALANCE_CHECKS))
         (state, buffers, errors), _ = jax.lax.scan(
-            checkpointed_step, (state, buffers, errors), (xs, slots, per_step_params)
+            lambda c, x: checkpointed_step(template, c, x),
+            (state, buffers, errors),
+            (xs, slots, per_step_params),
         )
         return state, buffers, errors
 
     return jax.jit(run_chunk)
+
+
+def _grid_of(template, filt):
+    """The patch's layer indices and C3/C4 flag (``MLCanopyParamsMod.patch_setup``), found
+    once from the concrete template, outside the compiled chunk."""
+    from multilayer_canopy.MLCanopyParamsMod import patch_setup
+
+    grid, _ = patch_setup(int(np.asarray(filt.exposedvegp)[0]), template.mlcanopy)
+    return grid
 
 
 def output_shapes(run: LegacyRun, template, names, max_layers: int) -> dict:

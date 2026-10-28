@@ -46,6 +46,7 @@ def clm_drv(
     params=None,
     *,
     opts,
+    grid=None,
 ) -> tuple[ClmInstances, clumpfilter]:
     """
     Main CLM model driver to calculate surface fluxes.
@@ -159,8 +160,9 @@ def clm_drv(
     # ------------------------------------------------------------------
     # 2. Set frac_veg_nosno and exposedvegp filter — Fortran lines 61-64
     # ------------------------------------------------------------------
-    # Local and constant (1): a NumPy copy, so the filter stays static when the step is traced
-    frac_veg_nosno = np.array(frac_veg_nosno)
+    # Local and constant (1): a NumPy array of the same shape, so the filter stays static when
+    # the step is traced (the container's values are not needed; they may be traced)
+    frac_veg_nosno = np.zeros(np.shape(frac_veg_nosno), dtype=int)
     for p in range(bounds.begp, bounds.endp + 1):  # Fortran: do p = bounds%begp, bounds%endp
         frac_veg_nosno[p] = 1
 
@@ -267,6 +269,7 @@ def clm_drv(
         initialize,
         params=params,
         opts=opts,
+        grid=grid,
     )
 
     # ------------------------------------------------------------------

@@ -1214,6 +1214,14 @@ Progress:
     values in unused slots only for `lsc_profile` (computed for every slot, never read).
   - Restart format version 2 (layer arrays sized by `max_layers`); a restart whose arrays do
     not match the run (e.g. another `max_layers`) is refused with the field and shapes.
+- ✅ **Step 2a, the patch's structure is an input of the compiled chunk**: the stream runner
+  takes the template containers (layer heights, leaf area per layer, layer counts, soil
+  properties, ...) as an argument instead of baking them in as constants, and the layer
+  indices (`GridInfo`) are found once outside the compiled code and passed down
+  (`advance(..., grid=)` → `ModelAdvance` → `clm_drv` → `MLCanopyFluxes`). One conversion of
+  container data to NumPy in `clm_drv` (the vegetated-fraction filter) now uses only the
+  array's shape. Bit for bit. The program is still specialized by the layer indices
+  (`GridInfo.ncan/ntop/nbot`, static); steps 3–4 replace them with masks.
 
 **Done when:** the run path has no Python-integer layer bounds; **one compiled step serves
 patches with different layer counts** (CHATS7 at `max_layers` 46, 50 and 100 agree within noise;

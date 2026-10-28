@@ -49,6 +49,7 @@ def ModelAdvance(
     params=None,
     *,
     opts,
+    grid=None,
 ):
     """
     Advance the CLM model by one time step.
@@ -92,4 +93,5 @@ def ModelAdvance(
         initialize,
         params=params,
         opts=opts,
+        grid=grid,
     )
