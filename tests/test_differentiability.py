@@ -98,7 +98,7 @@ def _build_initialized_model():
     from clm_src_cpl.lnd_comp_nuopc import InitializeRealize, ModelAdvance
     from clm_src_main import filterMod as _filterMod
 
-    InitializeRealize(bounds)
+    InitializeRealize(bounds, OPTS.max_layers)
 
     from clm_src_main import clm_instMod
 

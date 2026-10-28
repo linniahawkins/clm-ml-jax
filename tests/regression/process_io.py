@@ -71,8 +71,8 @@ def _run_model(n_steps: int, hook) -> None:
 
     original_initialize = main_mod.InitializeRealize
 
-    def initialize(bounds):
-        original_initialize(bounds)
+    def initialize(bounds, *args):
+        original_initialize(bounds, *args)
         import multilayer_canopy.MLCanopyFluxesMod as F
 
         hook(F)

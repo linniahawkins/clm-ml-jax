@@ -164,6 +164,9 @@ class MLOptions(NamedTuple):
     mlcan_to_clm: int = 0
     met_type: int = 0
     dpai_min: float = 0.01
+    # Layer slots of every canopy profile array (model.yaml canopy_layers.max_layers; Fortran:
+    # the parameter nlevmlcan = 100). Patches use 1..ncan; the rest is padding.
+    max_layers: int = 50
 
     @property
     def nrk(self) -> int:

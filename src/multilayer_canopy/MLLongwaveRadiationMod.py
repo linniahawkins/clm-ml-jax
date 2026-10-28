@@ -57,7 +57,7 @@ from multilayer_canopy.MLCanopyFluxesType import (  # noqa: E402
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams  # noqa: E402
 from multilayer_canopy.MLclm_varcon import emg  # noqa: E402, F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions  # noqa: E402
-from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: E402, F401
+from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: E402, F401
 from multilayer_canopy.MLMathToolsMod import tridiag  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
@@ -120,6 +120,7 @@ def _Norman_patch(
     must be concrete under ``jax.jit``.  Recompilation only happens when
     the canopy structure changes (rare for a fixed site).
     """
+    nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
     neq: int = (nlevmlcan + 1) * 2
     em_leaf = params.leaf_emissivity
     rho = 1.0 - em_leaf

@@ -16,7 +16,7 @@ from clm_src_main.decompMod import bounds_type
 # ---------------------------------------------------------------------------
 
 
-def InitializeRealize(bounds: bounds_type) -> None:
+def InitializeRealize(bounds: bounds_type, max_layers: int) -> None:
     """
     Initialize the land surface model (CLM).
 
@@ -34,7 +34,7 @@ def InitializeRealize(bounds: bounds_type) -> None:
     from clm_src_main.clm_initializeMod import initialize1, initialize2  # noqa: F401
 
     initialize1()
-    initialize2(bounds)
+    initialize2(bounds, max_layers)
 
 
 def ModelAdvance(

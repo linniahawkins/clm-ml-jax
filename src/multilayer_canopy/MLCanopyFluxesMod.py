@@ -49,7 +49,7 @@ from multilayer_canopy.MLCanopyWaterMod import (  # noqa: F401
 )
 from multilayer_canopy.MLclm_varcon import mmh2o, rgas  # noqa: F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
-from multilayer_canopy.MLclm_varpar import isha, isun, nleaf, nlevmlcan  # noqa: F401
+from multilayer_canopy.MLclm_varpar import isha, isun, nleaf  # noqa: F401
 from multilayer_canopy.MLFluxProfileSolutionMod import FluxProfileSolution  # noqa: F401
 from multilayer_canopy.MLGetAtmForcingMod import (  # noqa: F401
     AtmForcingRecord,
@@ -273,6 +273,7 @@ def MLCanopyFluxes(
         Updated :class:`mlcanopy_type` holding end-of-timestep state
         and CLM-timestep-mean fluxes.
     """
+    nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
     met_type, mlcan_to_clm = opts.met_type, opts.mlcan_to_clm
 
     # ------------------------------------------------------------------

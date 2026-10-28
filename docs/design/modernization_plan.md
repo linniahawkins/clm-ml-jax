@@ -1192,6 +1192,29 @@ cache).
   ~7 min, ~13 GB, mostly compilation) are recorded at the start and end of Phase 5b; a slowdown
   of more than ~1.5× is discussed before going on.
 
+Progress:
+- ✅ **Step 0, baselines** (`timing/time_model.py`, `timing/results_model.jsonl`; CHATS7, CPU,
+  compile cache warm): compiled step 2.8 ms (47-step chunk); gradient over 8 steps 15.6 ms per
+  step, 5.9 GB peak; timing test (`time_offline.py`, legacy text output) 7.2 s per simulated
+  day (Phase 4: 39 s, before the compile cache).
+- ✅ **Step 1, array size = `max_layers`**: the canopy container is created with
+  `model.yaml` `canopy_layers.max_layers` slots (`MLOptions.max_layers`, passed through
+  `InitializeRealize` → `initialize2` → `clm_instInit` → `create_mlcanopy`) instead of the
+  Fortran parameter `nlevmlcan = 100`; routines take the slot count from their arrays. A
+  canopy that needs more layers stops with a message naming `max_layers`.
+  - The padding test found one read past the top layer (`_implicit_fps_jit` took
+    `tair[2:n+2]` and overwrote the extra element): fixed, same values.
+  - **Padding test** (`tests/regression/test_padding.py`): CHATS7 with 46 (no padding), 50
+    and 100 slots agree on every output variable within 1e-9 relative. A gradient version
+    (finite gradients, equal across sizes) is marked slow.
+  - Round-off only: on the shared slots the 50-slot run differs from the 100-slot reference by
+    at most 3.6e-11 relative (≤ 1.07 × the twin noise; sums over arrays of different length
+    group their additions differently); the identical-input routine replay passes. The
+    reference and twins were regenerated (with 50 slots). The 100-slot reference held real
+    values in unused slots only for `lsc_profile` (computed for every slot, never read).
+  - Restart format version 2 (layer arrays sized by `max_layers`); a restart whose arrays do
+    not match the run (e.g. another `max_layers`) is refused with the field and shapes.
+
 **Done when:** the run path has no Python-integer layer bounds; **one compiled step serves
 patches with different layer counts** (CHATS7 at `max_layers` 46, 50 and 100 agree within noise;
 CHATS7 with explicit `n_layers_within`/`n_layers_above` that differ from the default runs with the

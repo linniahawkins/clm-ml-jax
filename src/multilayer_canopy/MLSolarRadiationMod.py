@@ -39,7 +39,7 @@ from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import J_to_umol, chil_max, chil_min, kb_max  # noqa: F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
-from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: F401
+from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
 from multilayer_canopy.MLMathToolsMod import is_concrete, tridiag  # noqa: F401
 
 # ---------------------------------------------------------------------------
@@ -104,6 +104,7 @@ def SolarRadiation(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
+    nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
     # ------------------------------------------------------------------
     # Unpack inputs (Fortran associate block, lines 65-95)
     # ------------------------------------------------------------------
@@ -359,6 +360,7 @@ def _Norman(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
+    nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
     neq = (nlevmlcan + 1) * 2  # Fortran: parameter neq = (nlevmlcan+1)*2
 
     swskyb = mlcanopy_inst.swskyb_forcing

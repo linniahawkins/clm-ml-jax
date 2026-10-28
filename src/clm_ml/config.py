@@ -167,6 +167,7 @@ class ModelConfig:
             "nlayer_above": c.n_layers_above or 0,
             "nlayer_within": c.n_layers_within or 0,
             "dpai_min": float(c.min_plant_area_per_layer),
+            "max_layers": int(c.max_layers),
             "met_type": {"none": 0, "three_point": 3}[interpolation],
         }
 

@@ -49,7 +49,7 @@ def initialize1() -> None:
 # ---------------------------------------------------------------------------
 
 
-def initialize2(bounds: bounds_type) -> None:
+def initialize2(bounds: bounds_type, max_layers: int) -> None:
     """
     CLM initialization — second phase.
 
@@ -100,4 +100,4 @@ def initialize2(bounds: bounds_type) -> None:
 
     # Initialize instances of all derived types and time-constant variables
     # Fortran lines 70-72
-    clm_instInit(bounds)
+    clm_instInit(bounds, max_layers)

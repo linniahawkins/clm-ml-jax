@@ -33,7 +33,7 @@ from clm_src_main.wateratm2lndBulkType import wateratm2lndbulk_type  # noqa: F40
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLclm_varcon import mmdry, mmh2o  # noqa: F401
 from multilayer_canopy.MLclm_varctl import MLOptions
-from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: F401
+from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
 from multilayer_canopy.MLMathToolsMod import beta_distribution_cdf  # noqa: F401
 
 # ---------------------------------------------------------------------------
@@ -101,6 +101,7 @@ def initVerticalStructure(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
+    nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
     dz_tall, dz_short, dz_param = opts.dz_tall, opts.dz_short, opts.dz_param
     nlayer_within, nlayer_above, dpai_min = opts.nlayer_within, opts.nlayer_above, opts.dpai_min
     # Unpack output arrays (Fortran associate block, lines 46-63)
@@ -171,7 +172,11 @@ def initVerticalStructure(
             nabove = 1
 
         if _ncan > nlevmlcan:
-            endrun(msg=" ERROR: initVerticalStructure: ncan > nlevmlcan")
+            endrun(
+                msg=f" ERROR: initVerticalStructure: the canopy needs {_ncan} layers but "
+                f"model.yaml canopy_layers.max_layers is {nlevmlcan}: increase max_layers, or "
+                "give explicit layer counts (n_layers_within / n_layers_above)"
+            )
 
         ntop = ntop.at[p].set(_ntop)
         ncan = ncan.at[p].set(_ncan)

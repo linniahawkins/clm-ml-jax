@@ -41,7 +41,7 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     rd25_to_vcmax25_c4,
 )
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
-from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: F401
+from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
 
 
 @partial(jax.jit, static_argnums=(0, 1), static_argnames=("opts",))
@@ -137,6 +137,7 @@ def CanopyNitrogenProfile(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
+    nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
 
     vcmax25_leaf = mlcanopy_inst.vcmax25_leaf
     jmax25_leaf = mlcanopy_inst.jmax25_leaf

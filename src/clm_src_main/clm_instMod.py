@@ -163,7 +163,7 @@ def get_instances() -> ClmInstances:
 # ---------------------------------------------------------------------------
 
 
-def clm_instInit(bounds: bounds_type) -> None:
+def clm_instInit(bounds: bounds_type, max_layers: int) -> None:
     """
     Initialize all public CLM component-type instances.
 
@@ -219,7 +219,7 @@ def clm_instInit(bounds: bounds_type) -> None:
     surfalb_inst = _surfalb_Init(bounds)  # type: ignore[arg-type]
     solarabs_inst = _solarabs_Init(bounds)  # type: ignore[arg-type]
     SurfaceAlbedoInitTimeConst(bounds)
-    mlcanopy_inst = _mlcanopy_Init(bounds.begp, bounds.endp)  # CLMml
+    mlcanopy_inst = _mlcanopy_Init(bounds.begp, bounds.endp, max_layers)  # CLMml
 
 
 # ---------------------------------------------------------------------------

@@ -297,7 +297,7 @@ def setup_run(nml: dict, opts: Optional[MLOptions] = None) -> LegacyRun:
     # lazy import chain of clm_initializeMod.
     from clm_src_main import filterMod as _filterMod
 
-    InitializeRealize(bounds)
+    InitializeRealize(bounds, opts.max_layers)
     # The patch's parameters, read from the PFT tables now: later steps use these, not the
     # tables (which another model in this process may replace).
     from clm_src_main.PatchType import patch
@@ -836,14 +836,18 @@ def read_restart(path: Path) -> dict:
             with open(candidate, "rb") as fh:
                 content = pickle.load(fh)
             if content.get("version") != RESTART_VERSION:
-                raise ValueError(f"restart version {content.get('version')}")
+                raise ValueError(
+                    f"restart format version {content.get('version')}, this code reads "
+                    f"version {RESTART_VERSION} (write it again with the current code)"
+                )
             return content
         except Exception as exc:  # noqa: BLE001 - report every candidate
             errors.append(f"{candidate}: {exc}")
     raise RuntimeError("no readable restart: " + "; ".join(errors))
 
 
-RESTART_VERSION = 1
+# 2: layer arrays sized by model.yaml max_layers (Phase 5b; version 1 had 100 slots)
+RESTART_VERSION = 2
 
 
 def run_streams(
@@ -910,6 +914,14 @@ def run_streams(
                 f"({run_start} + {run.ntimes} steps of {step_seconds} s)"
             )
         state = jax.tree.map(jnp.asarray, restart["state"])
+        for (where, a), b in zip(
+            jax.tree_util.tree_leaves_with_path(state), jax.tree.leaves(template_state)
+        ):
+            if np.shape(a) != np.shape(b):
+                raise ValueError(
+                    f"restart state {jax.tree_util.keystr(where)} has shape {np.shape(a)}, "
+                    f"this run {np.shape(b)} (e.g. a different model.yaml max_layers)"
+                )
         if first > 0:  # continuing the same run: restore the output bookkeeping
             for collector, pending in zip(collectors, restart["collectors"]):
                 collector._pending = pending

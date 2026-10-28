@@ -23,7 +23,7 @@ from multilayer_canopy.MLCanopyFluxesType import (
     record_balance_error,
 )
 from multilayer_canopy.MLclm_varctl import MLOptions
-from multilayer_canopy.MLclm_varpar import isha, isun, nleaf, nlevmlcan  # noqa: F401
+from multilayer_canopy.MLclm_varpar import isha, isun, nleaf  # noqa: F401
 from multilayer_canopy.MLLeafFluxesMod import LeafFluxes  # noqa: F401
 from multilayer_canopy.MLMathToolsMod import tridiag_2eq  # noqa: F401
 from multilayer_canopy.MLSoilFluxesMod import SoilFluxes  # noqa: F401
@@ -123,6 +123,7 @@ def _implicit_fps_jit(
     Mirrors Fortran subroutine ``ImplicitFluxProfileSolution``
     (lines 86-310).  Reference: Bonan et al. (2018) GMD 11, 1467-1496.
     """
+    nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
     # ------------------------------------------------------------------
     # Unpack inputs from mlcanopy_inst  (Fortran associate block)
     # ------------------------------------------------------------------
@@ -426,11 +427,10 @@ def _implicit_fps_jit(
     # Vertical sensible heat and water vapor fluxes between layers
     # Fortran lines 363-370
     # ------------------------------------------------------------------
-    # tair[ic+1] for ic=1..n-1, then thref at ic=n
-    _tair_next_inner = _tair_final[2 : n + 2]  # length n
-    _tair_next_inner = _tair_next_inner.at[n - 1].set(_thref_p)
-    _eair_next_inner = _eair_final[2 : n + 2]
-    _eair_next_inner = _eair_next_inner.at[n - 1].set(_eref_p)
+    # tair[ic+1] for ic=1..n-1, then thref at ic=n (no slot above layer n is read, so this
+    # works without padding)
+    _tair_next_inner = jnp.concatenate([_tair_final[2 : n + 1], jnp.reshape(_thref_p, (1,))])
+    _eair_next_inner = jnp.concatenate([_eair_final[2 : n + 1], jnp.reshape(_eref_p, (1,))])
 
     _shair_new = jnp.zeros(nlevmlcan + 1)
     _etair_new = jnp.zeros(nlevmlcan + 1)

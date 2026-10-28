@@ -37,7 +37,7 @@ import jax.numpy as jnp
 
 from clm_src_main.clm_varcon import ispval, spval  # noqa: F401
 from clm_src_main.clm_varpar import nlevgrnd, numrad  # noqa: F401
-from multilayer_canopy.MLclm_varpar import isha, isun, nleaf, nlevmlcan  # noqa: F401
+from multilayer_canopy.MLclm_varpar import isha, isun, nleaf  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # NamedTuple definition
@@ -429,7 +429,7 @@ def check_balance(errors, where: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def create_mlcanopy(begp: int, endp: int) -> mlcanopy_type:
+def create_mlcanopy(begp: int, endp: int, max_layers: int) -> mlcanopy_type:
     """
     Allocate and initialise a :class:`mlcanopy_type` instance.
 
@@ -470,6 +470,7 @@ def create_mlcanopy(begp: int, endp: int) -> mlcanopy_type:
         ``spval`` (real) or ``ispval`` (integer).
     """
     np_ = endp + 1  # patch dimension
+    nlevmlcan = max_layers  # layer slots (model.yaml max_layers; Fortran: nlevmlcan = 100)
     nl = nlevmlcan + 1  # level dimension (0..nlevmlcan or 1..nlevmlcan)
     nf = nleaf + 1  # leaf dimension
     nr = numrad + 1  # spectral dimension
@@ -768,6 +769,7 @@ def init_cold(mlcanopy_inst: mlcanopy_type, begp: int, endp: int) -> mlcanopy_ty
     Returns:
         Updated :class:`mlcanopy_type`.
     """
+    nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
     lwp_leaf = mlcanopy_inst.lwp_leaf
     h2ocan = mlcanopy_inst.h2ocan_profile
 
