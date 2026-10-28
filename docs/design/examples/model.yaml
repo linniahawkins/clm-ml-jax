@@ -7,6 +7,8 @@ physics:
   wue_solver: bisection                   # brent | bisection                  (gs_solver 1/2)
   photosynthesis_colimitation: true       #                                    (colim_type)
   temperature_acclimation: true           #                                    (acclim_type)
+  acclimation_temperature: running_mean   # running_mean (10-day; decision 15) | run_mean (Fortran, validation)
+  acclimation_days: 10
   nitrogen_decay_kn: null                 # null = computed                    (kn_val)
   roughness_sublayer: harman_finnigan     #                                    (turb_type 1)
   sparse_canopy: true                     #                                    (sparse_canopy_type)
@@ -18,7 +20,8 @@ physics:
   longwave_radiation: norman              #                                    (longwave_type 1)
 
 numerics:
-  substep_seconds: 300                    # must divide the forcing step     (dtime_ml)
+  step_seconds: 1800                      # model time step; forcing is interpolated to it
+  substep_seconds: 300                    # must divide step_seconds          (dtime_ml)
   integrator: rk4                         # euler | rk2_trapezoid | rk2_midpoint | rk2_ralston |
                                           # rk3_heun | rk3_ralston | rk3_kutta | rk4   (runge_kutta_type)
   checkpoint_steps: true                  # trade compute for memory when taking gradients

@@ -1,0 +1,53 @@
+# HYPOTHETICAL global run, to show the target design for long runs (plan v4, §6.9).
+# It does not run yet: gridded readers (domain.type: grid) are a follow-on project.
+# 150 years of 6-hourly meteorology, monthly LAI/SAI and daily soil water.
+# Memory depends on execution.chunk, not on the 150-year run length.
+
+model: model_global.yaml           # e.g. numerics.step_seconds: 1800, explicit layer counts
+params: clm5_defaults
+
+time:
+  start: 1850-01-01T00:00
+  end: 2000-01-01T00:00
+
+domain:
+  type: grid
+  surface_dataset: data/surfdata_1deg.nc     # gridcells, PFT patches and their weights
+  min_patch_weight: 0.01
+
+execution:
+  chunk: 1 month                   # ~80 MB of meteorology per chunk at 1 degree
+  restart_every: 10 years
+
+forcing:
+  meteorology:
+    files: data/met/6hourly_{year}.nc
+    interpolation: linear          # 6-hourly -> 30-minute model step
+    shortwave: coszen              # diurnal cycle from the solar zenith angle; conserves means
+    precipitation: constant        # held over each 6-hour interval; conserves totals
+  vegetation:
+    files: data/lai/monthly_lai_sai.nc
+    interpolation: linear          # between monthly midpoints
+  soil_water:
+    files: data/soil/daily_h2osoi_{year}.nc
+    interpolation: linear          # between daily midpoints
+
+initial_conditions:
+  source: restart
+  restart_file: spinup/restart_1850-01-01.nc
+
+output:
+  directory: output/
+  streams:
+    - name: monthly
+      frequency: monthly
+      statistic: mean
+      variables: [latent_heat_flux, sensible_heat_flux, gpp, canopy_top_air_temperature]
+      level: [gridcell]
+      file_per: year
+    - name: daily_max_leaf_temperature
+      frequency: daily
+      statistic: max
+      variables: [mean_leaf_temperature]
+      level: [patch]
+      file_per: year

@@ -1,6 +1,7 @@
 # Experiment file: replaces offline_executable/nl.CHATS7.1day
 # Run with:  clm-ml run run_chats7_1day.yaml
-# Paths are relative to this file.
+# Paths are relative to this file. This is the target form (plan v4, §4.1); the Phase 1
+# implementation reads an earlier, simpler form until Phase 4.
 
 model: model.yaml
 params: params_chats.yaml
@@ -15,24 +16,37 @@ domain:
   towers_file: null                # optional: your own towers.yaml (see towers_example.yaml)
   min_patch_weight: 0.0            # drop patches covering less than this fraction of a gridcell
 
+execution:
+  chunk: 1 month                   # forcing read and output written per chunk (sets memory use)
+  restart_every: null              # one restart at the end of the run
+
 forcing:
-  # {tower} is replaced by each tower's name, so one entry serves many towers
-  meteorology: ../../../src/input_files/tower-forcing/{tower}/2007-05.nc   # was fin_tower
-  interpolation: three_point       # none | three_point   (was met_type 0 / 3)
-  clm_history:
-    file: ../../../src/input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc  # was fin_clm
-    start: 2007-04-01T00:00        # was clm_start_ymd / clm_start_tod
-  soil_moisture_adjustment:
-    file: ../../../src/input_files/clm5_0/{tower}/CHATS_soil_moisture_correction_29Jul25.nc       # was fin_soil_adjust
-    levels: 3                      # was nlev_soil_adjust
+  # {tower} is replaced by each tower's name, so one entry serves many towers.
+  # The CHATS7 data are already at the model step (30 min), so no time interpolation
+  # beyond CLM-ml v2's three-point rule is applied.
+  meteorology:
+    files: ../../../src/input_files/tower-forcing/{tower}/2007-05.nc   # was fin_tower
+    interpolation: three_point     # none | linear | three_point (was met_type 0 / 3)
+  vegetation:
+    source: clm_history            # LAI/SAI from the CLM history file (was fin_clm)
+    files: ../../../src/input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+  soil_water:
+    source: clm_history
+    files: ../../../src/input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    adjustment:
+      files: ../../../src/input_files/clm5_0/{tower}/CHATS_soil_moisture_correction_29Jul25.nc
+      levels: 3                    # was nlev_soil_adjust
 
 initial_conditions:
   source: clm_history              # clm_history | restart
   restart_file: null
 
-output:
+output:                            # independent of forcing interval, model step and chunk
   directory: ../../../src/output_files/   # was dirout
-  format: netcdf                   # netcdf (legacy_ascii only while validating against Fortran)
-  variables: all                   # all, or a list such as [latent_heat_flux, gpp]
-  frequency: step                  # step | hourly | daily
-  level: [patch, gridcell]         # per-patch output, area-weighted gridcell means, or both
+  streams:
+    - name: halfhourly
+      frequency: step              # step | hourly | daily | monthly | yearly
+      statistic: mean              # mean | instantaneous | min | max
+      variables: all               # all, or a list such as [latent_heat_flux, gpp]
+      level: [patch, gridcell]
+      file_per: run                # run | year | month

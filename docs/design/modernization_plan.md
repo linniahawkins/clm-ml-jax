@@ -1,12 +1,15 @@
 # CLM-ML-JAX Modernization Plan
 
-**Status:** v3. Phases 0–2 done (branches `phase0/safety-net`, `phase1/config-api`,
-`phase2/forcing-time`). v3 adds the gridcell/patch structure (§3.1).
+**Status:** v4. Phases 0–2 done (branches `phase0/safety-net`, `phase1/config-api`,
+`phase2/forcing-time`). v3 added the gridcell/patch structure (§3.1). v4 makes memory
+independent of run length (forcing streams, chunked runs, output streams; §6.9), makes the
+model time step configurable, and adopts a 10-day running-mean acclimation temperature.
 
 **Companion files:**
 - [`api_sketch.py`](api_sketch.py): the proposed Python API, as typed signatures with docstrings.
 - [`examples/`](examples/): example `run.yaml`, `model.yaml`, `params_chats.yaml` and
-  `towers.yaml` files, written as a user would write them.
+  `towers.yaml` files, written as a user would write them. `run_global_example.yaml` shows the
+  target form of a 150-year global run (hypothetical; it does not run yet).
 - [`timing.md`](timing.md): timing-test results.
 
 ---
@@ -26,6 +29,11 @@
 | 9 | Parameters | A **per-PFT table**. Each patch looks up its PFT's values, so gradients come out per PFT. |
 | 10 | Config framework | **Plain YAML plus our own validation** (dataclasses with clear error messages). No Hydra. |
 | 11 | Namelists | Kept as a **one-time converter**: `clm-ml convert nl.CHATS7.1day` writes the YAML files. |
+| 12 | Run length and memory | **Memory must not depend on run length.** The design target is a global run with 150 years of 6-hourly forcing. Forcing is read from **streams** in **chunks** of time (for example a month), each with one extra record at either end. A run is a loop over chunks with the state carried between them. The next chunk is read in the background, and output is written per chunk (§6.9). |
+| 13 | Model time step | **Configurable** (`numerics.step_seconds`, default 1800 s) and independent of how often forcing data are available. Every forcing stream is interpolated in time to the model step. When the step equals the forcing interval (CHATS7), results are unchanged. |
+| 14 | Prescribed land data | LAI, SAI and soil water come from **user-supplied daily or monthly streams**. The CLM history file at the forcing interval, as used for CHATS7, remains supported. |
+| 15 | Acclimation temperature | **10-day running mean** of air temperature, carried in the model state. This is a science change that alters CHATS7 results slightly, so the reference is regenerated when it is adopted (Phase 4b). The Fortran CLM-ml v2 definition (mean over the whole run, which needs all forcing before the run starts) stays available as an option, for validation against Fortran only. |
+| 16 | Output | **Configurable and independent of the forcing and model step.** Several output streams, each with its own variables, frequency, statistic (mean, instantaneous, min, max), level (patch, gridcell) and file split. Statistics are accumulated during the run, so per-step values are never all held in memory. |
 
 Smaller decisions: see §8.
 
@@ -48,7 +56,10 @@ Smaller decisions: see §8.
    both fast and differentiable.
 5. **Swappable process schemes**, chosen by name in `model.yaml`.
 6. **Keep scientific fidelity.** The refactored model must reproduce the current JAX output (to
-   `rtol=1e-6`) and therefore the Fortran output, at every phase.
+   `rtol=1e-6`) and therefore the Fortran output, at every phase. Deliberate science changes
+   (decision 15) are separate, documented steps with a regenerated reference.
+7. **Memory independent of run length.** A 150-year run needs the same memory as a one-month run
+   with the same domain.
 
 ### Non-goals (for this effort)
 
@@ -56,7 +67,9 @@ Smaller decisions: see §8.
   validated science change after Phase 6.)
 - **Loading gridded/global input data.** The architecture supports any number of gridcells and
   patches, and `run.yaml` reserves `domain.type: grid`. Reading gridded datasets (CLM surface
-  datasets for patch weights and PFTs, plus reanalysis forcing) is a follow-on project.
+  datasets for patch weights and PFTs, plus reanalysis forcing) is a follow-on project. The
+  forcing-stream interface it plugs into is part of this plan (§6.9), so gridded readers only
+  have to implement it.
 - Coupling to CESM/CTSM. The `clm_src_cpl` code stays as a reference only.
 - Rewriting the numerics of each routine, beyond what fixed layers and masks require (Phase 5).
 
@@ -77,6 +90,7 @@ Smaller decisions: see §8.
 | Subgrid hierarchy | CLM's gridcell → column → patch indices exist (`patch.gridcell`, `patch.column`), but the canopy loops over patches in Python with Fortran-style filters, and the standalone soil temperature assumes one patch per column (`MLSoilTemperatureMod`: "p == c"). Arrays are 1-based. | Patches can't be batched, and the patch/column relationship is implicit. |
 | Layers | The number of canopy layers (`ncan`, `ntop`, `nbot`) depends on canopy height, and is used as a Python loop bound. | Patches with different canopy heights have different array shapes, so they **cannot be batched together**. This is the main blocker for multi-patch and global runs. |
 | Output | Six fixed-format ASCII files (`flux.out`, `fsun.out`, …) | Not self-describing (no names, units or time coordinate). |
+| Run length (found after Phase 2) | Phase 2 reads all forcing for the whole run before it starts. The tower reader always starts at the file's first record. CLM history data are read for every model step. The acclimation temperature is the mean air temperature over the whole run. The model step equals the forcing interval. Outputs for every step are kept in memory. | Fine for a tower month (~10 MB of forcing), impossible for a 150-year global run (~140 GB of 6-hourly meteorology at 1°, terabytes of per-step soil water). Addressed by decisions 12–16 and §6.9. |
 | Validation | Strong: 160+ routine-level golden tests at `rtol=1e-9`, plus end-to-end Fortran comparison (2.5% / r ≥ 0.9999) and differentiability tests. Phase 0 added an end-to-end regression test at `rtol=1e-6`. | — |
 
 ---
@@ -116,9 +130,10 @@ Smaller decisions: see §8.
    | `Domain` | `run.yaml` → `towers.yaml` (built-in or user's own) | `Gridcells`, `Patches` (with gridcell/column indices) and `SoilColumns` | `(n_gridcell,)`, `(n_patch,)`, `(n_column,)` | Arrays. Counts and indices are static. |
    | `Layers` | Derived from `Patches` + `ModelConfig` | Per-patch layer heights and **masks** inside a fixed `max_layers` | `(n_patch, max_layers)` | `max_layers` is static. Heights and masks are arrays. |
    | `Params` | `params.yaml` | **Per-PFT table** of physical parameters | `(n_pft,)` | **Traced and differentiable** |
-   | `Forcing` | `run.yaml` → netCDF files | Meteorology per gridcell, plus prescribed CLM vegetation per patch and soil moisture per column | `(time, gridcell, …)`, `(time, patch, …)`, `(time, column, …)` | **Traced and differentiable**, loaded fully before the run |
-   | `State` | `run.yaml` → initial conditions | Prognostic variables only: canopy per patch, soil per column | `(patch, …)`, `(column, …)` | **Traced and differentiable**. It is the `lax.scan` carry. |
-   | `Outputs` | Produced by the run | Fluxes, profiles and diagnostics per patch. Gridcell means come from area weighting. | `(time, patch, …)` → `(time, gridcell, …)` | Returned and stacked by `scan` |
+   | `ForcingSource` | `run.yaml` → `forcing:` streams | Readers for each forcing stream (meteorology, vegetation, soil water), each with its own time axis | — | Not traced. Produces `Forcing` chunks. |
+   | `Forcing` | A `ForcingSource`, one chunk at a time | Meteorology per gridcell, plus prescribed vegetation per patch and soil water per column, **interpolated to the model step** for one chunk of time (plus one record either side) | `(time, gridcell, …)`, `(time, patch, …)`, `(time, column, …)` | **Traced and differentiable** |
+   | `State` | `run.yaml` → initial conditions or a restart file | Prognostic variables only: canopy per patch (including the running-mean acclimation temperature), soil per column | `(patch, …)`, `(column, …)` | **Traced and differentiable**. It is the `lax.scan` carry, and is carried from chunk to chunk. |
+   | `Outputs` | Produced by the run | Fluxes, profiles and diagnostics per patch, accumulated into each output stream's statistic. Gridcell means come from area weighting. | `(output time, patch, …)` → `(output time, gridcell, …)` | Accumulated inside `scan`, written per chunk |
 
 4. **Write physics for one patch, batch with `vmap`.** Each process is written as if there is one
    patch, with arrays of shape `(max_layers,)`. The model applies `jax.vmap` over the patch axis.
@@ -132,9 +147,11 @@ Smaller decisions: see §8.
    which layers are real air layers, and another says which contain leaves. Physics uses masks,
    never patch-specific loop bounds. Padded layers must have no effect: they are zero-weighted in
    sums and decoupled (identity rows) in the tridiagonal solves.
-7. **A run is one compiled function.**
-   `run = scan over time of (vmap over patches of step)`, where
-   `step(state, forcing_window, params) -> (state, outputs)` acts on one patch.
+7. **A chunk is one compiled function; a run is a loop over chunks.**
+   `run_chunk = scan over time of (vmap over patches of step)`, where
+   `step(state, forcing_window, params) -> (state, outputs)` acts on one patch. The Python
+   loop over chunks carries the state, reads the next chunk in the background, and writes
+   output. Memory depends on the chunk length, not the run length.
 8. **Adapters first, rewrites later.** Put the new interface around the existing translated code
    first. Then move internals across one process at a time, each step verified by tests.
 9. **Fortran traceability moves to docstrings.** Each refactored function keeps a
@@ -156,32 +173,55 @@ model: model.yaml                 # path, relative to this file
 params: params_chats.yaml
 time:
   start: 2007-05-01T00:00         # required
-  end:   2007-05-02T00:00         # or: days: 1
-  step_seconds: 1800              # forcing time step
+  end:   2007-05-02T00:00         # or: days: / steps:
 domain:
   type: towers                    # towers | grid (reserved for later)
   towers: [CHATS7]                # names from the built-in registry or towers_file
   towers_file: null               # optional: your own towers.yaml
   min_patch_weight: 0.0           # drop patches covering less than this fraction of a gridcell
-forcing:
-  meteorology: input_files/tower-forcing/{tower}/2007-05.nc    # {tower} is filled per tower
-  interpolation: three_point      # none | three_point (met_type 0 / 3)
-  clm_history:
-    file: input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
-    start: 2007-04-01T00:00       # was clm_start_ymd / clm_start_tod
-  soil_moisture_adjustment:
-    file: input_files/clm5_0/{tower}/CHATS_soil_moisture_correction_29Jul25.nc
-    levels: 3                     # was nlev_soil_adjust
+execution:
+  chunk: 1 month                  # forcing read and output written per chunk; sets memory use
+  restart_every: 1 year           # write a restart file at these boundaries (null: end only)
+forcing:                          # streams; each has its own time axis, interpolated to the model step
+  meteorology:
+    files: input_files/tower-forcing/{tower}/{year}-{month:02d}.nc   # may be split in time
+    interpolation: three_point    # none | linear | three_point (CLM-ml v2, centered)
+    shortwave: coszen             # spread within an interval: coszen | interpolate | constant
+    precipitation: constant       # fluxes held constant over the interval (conserves totals)
+  vegetation:                     # LAI, SAI per patch
+    source: clm_history           # clm_history | file
+    files: input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    interpolation: linear         # for daily/monthly data
+  soil_water:
+    source: clm_history
+    files: input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    interpolation: linear
+    adjustment:
+      files: input_files/clm5_0/{tower}/CHATS_soil_moisture_correction_29Jul25.nc
+      levels: 3                   # was nlev_soil_adjust
 initial_conditions:
   source: clm_history             # clm_history | restart
   restart_file: null
-output:
-  directory: output_files/
-  format: netcdf                  # netcdf (legacy_ascii only during validation; see §8)
-  variables: all                  # or a list of names
-  frequency: step                 # step | hourly | daily
-  level: [patch, gridcell]        # write patch output, gridcell means, or both
+output:                           # independent of forcing and model step
+  directory: output/
+  streams:
+    - name: halfhourly
+      frequency: step             # step | hourly | daily | monthly | yearly
+      statistic: mean             # mean | instantaneous | min | max
+      variables: all              # or a list of names
+      level: [patch, gridcell]
+      file_per: run               # run | year | month
+    - name: monthly
+      frequency: monthly
+      statistic: mean
+      variables: [latent_heat_flux, sensible_heat_flux, gpp]
+      level: [gridcell]
+      file_per: year
 ```
+
+Each stream's time axis comes from its files. Data at the model step (such as CHATS7's
+half-hourly tower and CLM history files) are used directly. Coarser data (6-hourly
+meteorology, daily soil water, monthly LAI) are interpolated as configured; see §6.9.
 
 ### 4.2 `model.yaml`: physics and numerics
 
@@ -192,6 +232,8 @@ physics:
   wue_solver: bisection                   # brent | bisection
   photosynthesis_colimitation: true
   temperature_acclimation: true
+  acclimation_temperature: running_mean   # running_mean | run_mean (Fortran CLM-ml v2; validation only)
+  acclimation_days: 10                    # averaging period of the running mean
   nitrogen_decay_kn: null                 # null = computed
   roughness_sublayer: harman_finnigan
   sparse_canopy: true
@@ -202,7 +244,8 @@ physics:
   leaf_optics_vary_with_height: false
   longwave_radiation: norman
 numerics:
-  substep_seconds: 300
+  step_seconds: 1800                      # model time step; forcing is interpolated to it
+  substep_seconds: 300                    # multilayer canopy substep; must divide step_seconds
   integrator: rk4                         # euler | rk2_* | rk3_* | rk4
   checkpoint_steps: true                  # less memory when taking gradients
 canopy_layers:
@@ -305,20 +348,34 @@ Full signatures are in [`api_sketch.py`](api_sketch.py).
 ```python
 import clm_ml
 
-run = clm_ml.load_run("run.yaml")      # reads and validates run + model + params + towers, loads forcing
-result = run.execute()                 # same as `clm-ml run run.yaml`
-ds = result.to_xarray()                # dims (time, patch, layer, ...), with units and gridcell index
-gc = result.gridcell_mean().to_xarray()  # area-weighted, dims (time, gridcell, ...)
+run = clm_ml.load_run("run.yaml")      # reads and validates run + model + params + towers
+run.execute()                          # same as `clm-ml run run.yaml`: loops over chunks, writes output
+
+# Or drive the chunk loop yourself (this is what execute() does):
+state = run.initial_state
+for chunk in run.forcing_source.chunks(run.start, run.end, run.chunk):   # next chunk read in background
+    state, out = run.model.run(state, chunk, run.params)                 # one compiled scan
+    run.writer.write(out)                                                # output streams, per chunk
 ```
 
-Gradients with respect to parameters, forcing and initial state:
+For a short run, a single chunk can be inspected directly:
 
 ```python
-model, params, forcing, state0 = run.model, run.params, run.forcing, run.initial_state
+chunk = run.forcing_source.chunk(run.start, days=31)
+state, out = run.model.run(run.initial_state, chunk, run.params)
+ds = out.to_xarray()                   # dims (time, patch, layer, ...), with units and gridcell index
+```
+
+Gradients with respect to parameters, forcing and initial state, over a time window (for long
+runs, windows start from saved restart states; see §6.9):
+
+```python
+model, params, state0 = run.model, run.params, run.initial_state
+forcing = run.forcing_source.chunk(run.start, days=31)
 
 def loss(params, forcing, state0):
-    out = model.run(state0, forcing, params).gridcell_mean()
-    return jnp.mean((out.latent_heat_flux - obs_lh) ** 2)
+    _, out = model.run(state0, forcing, params)
+    return jnp.mean((out.gridcell_mean().latent_heat_flux - obs_lh) ** 2)
 
 g_params, g_forcing, g_state = jax.grad(loss, argnums=(0, 1, 2))(params, forcing, state0)
 g_params.vcmax25          # shape (n_pft,): gradient per plant functional type
@@ -330,7 +387,7 @@ Ensembles:
 ```python
 batch = clm_ml.perturb(params, pft="broadleaf_deciduous_temperate_tree",
                        vcmax25=jnp.linspace(60, 140, 32))
-lh = jax.vmap(lambda p: model.run(state0, forcing, p).latent_heat_flux)(batch)  # (32, time, patch)
+lh = jax.vmap(lambda p: model.run(state0, forcing, p)[1].latent_heat_flux)(batch)  # (32, time, patch)
 ```
 
 Changing settings in Python without editing files:
@@ -403,16 +460,20 @@ step(state, forcing_window, params_for_this_patch, layers_for_this_patch)
 returns (new_state, outputs_t)
 ```
 
-`Model.run` wraps this as follows (option A):
+`Model.run` (one chunk) wraps this as follows (option A):
 
 ```
-scan over time:                                  # carry = State
+scan over the chunk's time steps:                # carry = (State, output accumulators)
     forcing_p = forcing_window[gridcell_index]   # gather gridcell forcing to patches
     params_p  = params.for_patches(pft)          # gather PFT parameters to patches
     vmap over patches:
         step(state[p], forcing_p[p], params_p[p], layers[p])
+    accumulate outputs into each output stream's statistic (mean, min, max, ...)
 gridcell output = segment_sum(weight * patch output, gridcell_index)
+returns (final State, completed output records)
 ```
+
+The run loop around it (§6.9) carries the `State` from chunk to chunk.
 
 `forcing_window` holds the previous, current and next records. That removes the
 `*_bef/_cur/_next` forcing copies from model state.
@@ -502,6 +563,81 @@ one column).
 - Energy- and water-balance errors are included in `Outputs` by default, per patch and per
   gridcell.
 
+### 6.9 Forcing streams, chunked runs and output streams
+
+**Why.** The design target is a global run with 150 years of 6-hourly forcing: 219,000
+records. At about 1° there are roughly 20,000 land gridcells:
+
+| Data | Whole run | One month |
+|---|---|---|
+| Meteorology, about 8 variables, float32 | ~140 GB | ~80 MB |
+| Soil water, daily, 20 layers × ~3 patches per gridcell, float32 | ~260 GB | ~150 MB |
+| LAI/SAI, monthly | small | small |
+
+So forcing is read in chunks, and memory is set by the chunk length.
+
+**Forcing streams.** Each kind of forcing is a stream with its own files and time axis:
+meteorology (per gridcell), vegetation (LAI/SAI per patch) and soil water (per column). A
+`ForcingSource` combines the streams and has one job: `chunk(start, n_steps) -> Forcing`, with
+the data interpolated to the model time step. It also returns one record before the chunk's
+first step and one after its last, which the three-point interpolation needs at chunk
+boundaries. Readers open only the files covering the requested time (files may be split by
+month or year) and only the gridcells assigned to this process (see sharding below).
+
+**Time interpolation to the model step** (decision 13). The defaults follow CLM's data
+atmosphere and reproduce CLM-ml v2 when data are at the model step:
+
+| Variable | Default rule |
+|---|---|
+| Temperature, humidity, wind, pressure, longwave | Linear between records; `three_point` (CLM-ml v2's centered rule) when data are at the model step |
+| Shortwave | Scaled by the cosine of the solar zenith angle within each interval (`coszen`), so the diurnal cycle survives 6-hourly data and the interval mean is conserved |
+| Precipitation | Held constant over the interval, which conserves totals |
+| LAI, SAI (monthly or daily) | Linear between record midpoints |
+| Soil water (daily or monthly) | Linear between record midpoints |
+| CO₂ | Constant (as now), or a stream if supplied |
+
+Each rule is a named option in `run.yaml`, so these are choices, not hard-coded behavior.
+
+**The run loop.**
+
+```
+state = initial state (or restart file)
+prefetch chunk 1 on a background thread
+for each chunk:
+    forcing = wait for the prefetched chunk; start reading the next one
+    state, outputs = model.run(state, forcing, params)     # one compiled scan
+    write completed output records (per stream, per file split)
+    at restart boundaries: write state to a restart file
+```
+
+- **Chunk length** is a run setting (`execution.chunk`). The compiled scan is reused for every
+  chunk of the same length. Calendar months have different lengths, so either compile one
+  scan per distinct length (at most four) or pad the last steps with masked steps; this is
+  decided in Phase 4.
+- **Reading overlaps computing.** The next chunk is read while the current one runs. jax-gcm
+  does the same (its design note `chunked_run_io_overlap.md`).
+- **Storage precision.** Forcing is stored and transferred as float32 and computed in float64.
+- **Restarts** are written at chunk boundaries (`execution.restart_every`). A run can resume
+  from any restart.
+- **Acclimation temperature.** The 10-day running mean (decision 15) is part of the `State`,
+  updated every step, so it needs no look-ahead over the forcing. The legacy whole-run mean
+  needs a pre-pass over all forcing, so it is only allowed for short runs (validation against
+  Fortran).
+- **Sharding for global runs.** Patches are split across devices (Phase 6). Each process reads
+  only the gridcells its patches belong to, so no single process holds global forcing.
+
+**Output streams** (decision 16). Each stream accumulates its statistic during the scan
+(running sums for means, running min/max, or the instantaneous value at the output time). Only
+completed output records leave the device. They are written per chunk to files split as
+configured. Output frequency is independent of the forcing interval, model step and chunk
+length. An output interval that spans chunks carries its partial accumulators to the next
+chunk. Per-step output (`frequency: step`) is allowed for short runs and validation.
+
+**Gradients on long runs.** Back-propagating through 219,000 steps is not feasible, even with
+`jax.checkpoint`. Calibration therefore differentiates over windows (one chunk, or a few),
+starting from restart states saved by a forward run. The model's own API (`Model.run` on a
+chunk) supports this directly.
+
 ---
 
 ## 7. Migration plan
@@ -575,6 +711,12 @@ Not done here, by design: the time manager still holds the static start date and
 length (read by the legacy output writer), and the driver still runs in `main.py` until
 Phase 3 moves it into `clm_ml`.
 
+**Follow-up 2d (small, before Phase 3).** As built, `load_forcing` reads the whole run, and the
+tower reader starts at the file's first record. Change the loader to read a time window,
+`(start record, n_steps)` plus one record either side, and document `Forcing` as a chunk.
+Tower runs keep reading a single window, so results are unchanged; the regression tests
+apply. The stream interface, time interpolation and the chunk loop follow in Phase 4.
+
 Planned scope:
 
 
@@ -601,22 +743,52 @@ Planned scope:
 - Move first-step initialization (`ml_vert_init`, RK coefficient globals) into `Model` and
   `initial_state`.
 - Pass `Params` everywhere, replacing the `vcmaxpft_jax`/`g1_MED_jax` threading.
+- Make the acclimation temperature part of `State` (still initialized from the whole-run mean in
+  this phase, so results are unchanged; Phase 4b switches to the 10-day running mean).
 
 **Done when:** `jax.grad` works with respect to `Params`, `Forcing` and `State`, the regression
 test passes, and no `global` statement remains in the run path.
 
-### Phase 4: Whole-run compilation (one patch)
+### Phase 4: Chunked, compiled runs (one patch)
 
-- `Model.run` = `jit(scan(step))` over all time steps, with `jax.checkpoint` on the step.
-- Output selection and output frequency (`output.variables`, `output.frequency`). Averaging to
-  hourly/daily happens inside the scan, so long runs don't store every step.
-- Chunked runs and restart files (`initial_conditions.source: restart`).
+- `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one
+  chunk, with `jax.checkpoint` on the step.
+- **Forcing streams** (§6.9): the `ForcingSource` interface, with readers for tower files and
+  CLM history files, files split in time, and one-record halos at chunk boundaries.
+- **The run loop:** chunks with background reading of the next chunk, restart files at chunk
+  boundaries (`initial_conditions.source: restart`).
+- **Output streams:** variables, frequency, statistic, level and file split, accumulated inside
+  the scan and written per chunk.
+- **`run.yaml` moves to the stream form of §4.1** (`execution`, `forcing` streams, `output.streams`).
+  The Phase 1 keys (`time.step_seconds`, `forcing.meteorology` as a single file, a single
+  `output` section) are rejected with a message naming their replacements, and
+  `clm-ml convert` writes the new form.
 - `vmap` over a **parameter ensemble** for one patch.
 - Timing test against Phase 0, now including GPU. Watch compile time in particular (`main.py`
   notes ~290 s today).
 
-**Done when:** 1-day and 31-day runs are each one compiled call, a 32-member ensemble works, and
-timing-test results (CPU and GPU) are recorded.
+**Done when:**
+- A chunked run (for example 1-day chunks) is bit-for-bit identical to the same run in one
+  chunk.
+- Peak memory is flat with run length: a 1-year tower run uses about the same memory as a
+  1-month run.
+- A 32-member ensemble works, and timing-test results (CPU and GPU) are recorded.
+
+### Phase 4b: Science changes for long runs
+
+Separate commits, each documented, each with a regenerated regression reference and a recorded
+comparison against the Fortran output:
+
+- **10-day running-mean acclimation temperature** (decision 15), as the default.
+  `acclimation_temperature: run_mean` keeps the Fortran definition for validation.
+- **Configurable model step with time interpolation** (decision 13): `numerics.step_seconds`,
+  and the interpolation rules of §6.9 (linear, `coszen` shortwave, constant precipitation,
+  midpoint interpolation of daily/monthly LAI, SAI and soil water). With CHATS7 (data at the
+  model step) results are unchanged. New tests: 6-hourly forcing derived from the CHATS7
+  half-hourly data, interpolated back to 30 minutes, conserves daily totals; monthly LAI is
+  interpolated as specified.
+- **Daily/monthly prescribed land data** (decision 14): readers for user-supplied LAI, SAI and
+  soil water files.
 
 ### Phase 5: Mask-aware, one-patch processes
 
@@ -648,7 +820,8 @@ tests pass.
     equal to the weighted sum.
   - **Weights:** gradients with respect to patch weights work.
 - Device sharding over the patch axis (`jax.sharding`) so large patch counts spread across GPUs.
-  Timing test: patches per second on one GPU.
+  Each process reads only the forcing for its own gridcells (§6.9). Timing test: patches per
+  second on one GPU.
 - Document how a gridded/global run will plug in: a `domain.type: grid` loader that builds the
   `Domain` (gridcells, PFT patches and weights from a CLM surface dataset) and `Forcing` from
   gridded data. Implementing it is the follow-on project.
@@ -693,7 +866,8 @@ mixed vegetation before it becomes available for global runs.
 | 1 | Medium | YAML schema, loaders, CLI, converter. No physics changes. |
 | 2 | Medium | The 3-point interpolation needs care |
 | 3 | Large | Untangling `mlcanopy_type` state from scratch fields |
-| 4 | Small to medium | Mostly timing tests and compile-time tuning |
+| 4 | Medium | Chunk loop, forcing streams, output streams, restarts |
+| 4b | Medium | Science changes with new references and validation |
 | 5 | Large | The biggest phase. Many small PRs, which can be parallelized. |
 | 6 | Medium | Small if Phase 5 is done well |
 | 7 | Medium | Mechanical |
@@ -701,7 +875,8 @@ mixed vegetation before it becomes available for global runs.
 
 Milestones for users:
 - After **Phase 1**: YAML configuration and the new CLI.
-- After **Phase 4**: fast, differentiable single-patch runs and ensembles.
+- After **Phase 4**: fast, differentiable single-patch runs and ensembles, of any length.
+- After **Phase 4b**: configurable model step, 10-day acclimation, daily/monthly land data.
 - After **Phase 6**: many towers, mixed-vegetation gridcells, ready for global work.
 
 ---
@@ -736,6 +911,10 @@ Milestones for users:
 | Wasted compute on padded layers in global runs | Measure in Phase 6. Group patches by layer count if needed. |
 | Value-dependent Python `if`s inside physics break tracing | Move them to initialization, or use `jnp.where`/`lax.cond`. Most were already handled for the diff-mode path. |
 | Long-lived branch drifts from `main` | Every phase is merged on its own |
+| Errors at chunk boundaries (halo records, carried state, partial output intervals) | Phase 4 test: chunked run is bit-for-bit identical to the unchunked run, with output intervals spanning chunks |
+| Reading forcing becomes the bottleneck for global runs | Background reading of the next chunk, float32 storage, reading only local gridcells; measured in the timing test |
+| Interpolation choices change results | Defaults reproduce CLM-ml v2 when data are at the model step; every rule is a named option; conservation tests (daily totals) |
+| Gradients over very long runs | Windowed gradients from restart states (§6.9) |
 
 ---
 
@@ -755,6 +934,9 @@ Milestones for users:
 - **Gather / `segment_sum`:** a gather looks up a value for each patch from a smaller table (its
   gridcell's forcing, its PFT's parameters). A `segment_sum` adds patch values back into their
   gridcells (here, weighted by area). Both are differentiable.
+- **Forcing stream / chunk / halo:** a stream is one kind of forcing data with its own files and
+  time axis. A chunk is the part of a run held in memory at once. The halo is the one extra
+  record at each end of a chunk, needed by the time interpolation.
 - **Mask:** a true/false array saying which entries are real. Padded layers are false and are
   ignored by the physics.
 - **Sharding:** splitting an array's patch axis across several GPUs so each one computes a share

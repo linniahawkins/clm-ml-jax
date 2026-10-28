@@ -1,5 +1,5 @@
 """
-Proposed public API for ``clm_ml`` (design sketch v3: signatures only, no implementation).
+Proposed public API for ``clm_ml`` (design sketch v4: signatures only, no implementation).
 
 Read alongside ``modernization_plan.md`` (vocabulary in §3.1) and the YAML files in
 ``examples/``.
@@ -11,10 +11,11 @@ How the pieces fit
       ├─ params.yaml  ──► Params        (per-PFT table; differentiable)
       ├─ towers       ──► Domain        (gridcells, patches, soil columns + index maps)
       │                     └─► Layers  (per patch: fixed max_layers + masks)
-      ├─ forcing      ──► Forcing       (time, gridcell | patch | column, ...); differentiable
-      └─ initial cond ──► State         (patch | column, ...);                  differentiable
+      ├─ forcing      ──► ForcingSource ──► Forcing chunks (time, gridcell | patch | column, ...)
+      └─ initial cond ──► State         (patch | column, ...); differentiable, carried across chunks
 
-    Run.execute() == Model.run(state, forcing, params) + write outputs
+    Run.execute() == for each chunk: state, out = Model.run(state, chunk, params); write out
+    Memory depends on the chunk length, not the run length (plan §6.9).
 
 Vocabulary
 ----------
@@ -39,7 +40,7 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import Any, Literal, Mapping, Optional, Sequence, Union
+from typing import Any, Iterator, Literal, Mapping, Optional, Sequence, Union
 
 import jax
 
@@ -66,31 +67,46 @@ def load_run(path: PathLike, overrides: Sequence[str] = ()) -> "Run":
 
 
 @dataclasses.dataclass(frozen=True)
+class OutputStream:
+    """One output file series (run.yaml ``output.streams``). Independent of the forcing
+    interval, model step and chunk length."""
+
+    name: str
+    frequency: Literal["step", "hourly", "daily", "monthly", "yearly"] = "daily"
+    statistic: Literal["mean", "instantaneous", "min", "max"] = "mean"
+    variables: Union[Literal["all"], tuple[str, ...]] = "all"
+    level: tuple[Literal["patch", "gridcell"], ...] = ("gridcell",)
+    file_per: Literal["run", "year", "month"] = "year"
+
+
+@dataclasses.dataclass(frozen=True)
 class RunSettings:
     """The experiment-level parts of run.yaml that are not model inputs."""
 
     start: str  # ISO datetime
     end: str
-    output_directory: Path
-    output_format: Literal["netcdf", "legacy_ascii"] = "netcdf"  # legacy_ascii: transitional
-    output_variables: Union[Literal["all"], tuple[str, ...]] = "all"
-    output_frequency: Literal["step", "hourly", "daily"] = "step"
-    output_level: tuple[Literal["patch", "gridcell"], ...] = ("patch", "gridcell")
+    chunk: str = "1 month"  # execution.chunk: forcing read / output written per chunk
+    restart_every: Optional[str] = "1 year"  # execution.restart_every (None: end of run only)
+    output_directory: Path = Path("output")
+    output_streams: tuple[OutputStream, ...] = (OutputStream(name="daily"),)
     source_files: Mapping[str, Path] = dataclasses.field(default_factory=dict)  # provenance
 
 
 @dataclasses.dataclass(frozen=True)
 class Run:
-    """Everything needed for one experiment, already loaded into memory."""
+    """Everything needed for one experiment. Forcing is not loaded here: ``forcing_source``
+    reads it a chunk at a time."""
 
     model: "Model"
     params: "Params"
-    forcing: "Forcing"
+    forcing_source: "ForcingSource"
     initial_state: "State"
     settings: RunSettings
 
-    def execute(self) -> "Outputs":
-        """Run the model and write outputs as configured. Same as ``clm-ml run run.yaml``."""
+    def execute(self) -> None:
+        """Run the whole experiment: loop over chunks (reading the next chunk in the
+        background), carry the state, write output streams per chunk and restart files at
+        ``restart_every``. Same as ``clm-ml run run.yaml``."""
         ...
 
     def summary(self) -> str:
@@ -116,6 +132,10 @@ class PhysicsOptions:
     wue_solver: Literal["brent", "bisection"] = "bisection"
     photosynthesis_colimitation: bool = True
     temperature_acclimation: bool = True
+    # running_mean: 10-day (acclimation_days) running mean carried in State (decision 15).
+    # run_mean: Fortran CLM-ml v2 (mean over the whole run); for validation against Fortran.
+    acclimation_temperature: Literal["running_mean", "run_mean"] = "running_mean"
+    acclimation_days: float = 10.0
     nitrogen_decay_kn: Optional[float] = None
     roughness_sublayer: Literal["harman_finnigan"] = "harman_finnigan"
     sparse_canopy: bool = True
@@ -129,7 +149,8 @@ class PhysicsOptions:
 
 @dataclasses.dataclass(frozen=True)
 class NumericsOptions:
-    substep_seconds: float = 300.0
+    step_seconds: float = 1800.0  # model time step; forcing streams are interpolated to it
+    substep_seconds: float = 300.0  # must divide step_seconds
     integrator: Literal["euler", "rk2_trapezoid", "rk2_midpoint", "rk2_ralston",
                         "rk3_heun", "rk3_ralston", "rk3_kutta", "rk4"] = "rk4"
     checkpoint_steps: bool = True
@@ -365,51 +386,89 @@ class Layers:
 
 
 # =============================================================================
-# Forcing                            (replaces TowerMetMod / clmDataMod per-step reads)
+# Forcing streams and chunks         (replaces TowerMetMod / clmDataMod per-step reads)
 # =============================================================================
 
 
 @dataclasses.dataclass(frozen=True)
-class Forcing:
-    """Everything prescribed from outside the model. All float fields are differentiable.
-    Meteorology is per gridcell; prescribed vegetation per patch; soil moisture per column."""
+class StreamSpec:
+    """One forcing stream from run.yaml ``forcing:`` (meteorology, vegetation, soil_water)."""
 
-    # Time (shared)
-    time: Array  # (nt,) seconds since run start, end of each step
-    calendar_day: Array  # (nt,) fractional day of year
-    step_seconds: float  # static
-    interpolation: Literal["none", "three_point"]  # static
+    files: str  # path pattern; {tower}, {year}, {month} are filled in
+    source: Literal["file", "clm_history"] = "file"
+    # How values between records are obtained (plan §6.9). Defaults reproduce CLM-ml v2 when
+    # the data are already at the model step.
+    interpolation: Literal["none", "linear", "three_point"] = "linear"
+    shortwave: Literal["coszen", "interpolate", "constant"] = "coszen"  # meteorology only
+    precipitation: Literal["constant", "interpolate"] = "constant"  # meteorology only
 
-    # Meteorology at measurement height, per gridcell
-    air_temperature: Array  # (nt, ng) K
-    specific_humidity: Array  # (nt, ng) kg kg-1
-    wind_speed: Array  # (nt, ng) m s-1
-    air_pressure: Array  # (nt, ng) Pa
-    co2: Array  # (nt, ng) umol mol-1
-    o2: Array  # (nt, ng) mmol mol-1
-    shortwave_direct: Array  # (nt, ng, 2) W m-2
-    shortwave_diffuse: Array  # (nt, ng, 2) W m-2
-    longwave_down: Array  # (nt, ng) W m-2
-    rainfall: Array  # (nt, ng) kg m-2 s-1
-    snowfall: Array  # (nt, ng) kg m-2 s-1
-    solar_zenith: Array  # (nt, ng) rad, precomputed
 
-    # Prescribed vegetation from CLM history, per patch
-    lai: Array  # (nt, np)
-    sai: Array  # (nt, np)
+class ForcingSource:
+    """Reads forcing streams and produces ``Forcing`` chunks interpolated to the model step.
 
-    # Prescribed soil state from CLM history, per soil column
-    soil_liquid_water: Array  # (nt, nc, nsoil) kg m-2, after adjustment
-    soil_ice: Array  # (nt, nc, nsoil) kg m-2
-    ground_albedo: Array  # (nt, nc, 2)
+    Each stream has its own time axis (half-hourly or 6-hourly meteorology, daily or monthly
+    LAI/SAI and soil water). Only the files covering the requested time, and only the
+    gridcells/patches of this process, are opened. Nothing is held between chunks except
+    open file handles.
+    """
 
-    acclimation_temperature: Array  # (ng,) K, mean over the record (was init_acclim)
-
-    def window(self, t: int) -> "ForcingWindow":
-        """Previous/current/next records around step ``t``, used by ``Model.step``."""
+    def __init__(self, streams: Mapping[str, StreamSpec], domain: "Domain",
+                 config: ModelConfig) -> None:
         ...
 
-    def slice_time(self, start: int, stop: int) -> "Forcing":
+    def chunk(self, start: str, n_steps: Optional[int] = None, days: Optional[float] = None
+              ) -> "Forcing":
+        """Forcing for ``n_steps`` model steps from ``start``, plus one record before and
+        after (needed by the three-point time interpolation at chunk boundaries)."""
+        ...
+
+    def chunks(self, start: str, end: str, length: str) -> Iterator[Forcing]:
+        """Consecutive chunks covering ``start``..``end``; the next chunk is read on a
+        background thread while the caller runs the current one."""
+        ...
+
+
+@dataclasses.dataclass(frozen=True)
+class Forcing:
+    """One chunk of forcing, interpolated to the model step. All float fields are
+    differentiable. Shapes lead with ``nt + 2`` (the chunk's steps plus one halo record at
+    each end). Meteorology is per gridcell; vegetation per patch; soil water per column."""
+
+    # Time (shared)
+    time: Array  # (nt+2,) model-step end times, seconds since the run start
+    calendar_day: Array  # (nt+2,) fractional day of year
+    step_seconds: float  # static: the model step
+
+    # Meteorology at measurement height, per gridcell
+    air_temperature: Array  # (nt+2, ng) K
+    specific_humidity: Array  # (nt+2, ng) kg kg-1
+    wind_speed: Array  # (nt+2, ng) m s-1
+    air_pressure: Array  # (nt+2, ng) Pa
+    co2: Array  # (nt+2, ng) umol mol-1
+    o2: Array  # (nt+2, ng) mmol mol-1
+    shortwave_direct: Array  # (nt+2, ng, 2) W m-2
+    shortwave_diffuse: Array  # (nt+2, ng, 2) W m-2
+    longwave_down: Array  # (nt+2, ng) W m-2
+    rainfall: Array  # (nt+2, ng) kg m-2 s-1
+    snowfall: Array  # (nt+2, ng) kg m-2 s-1
+    solar_zenith: Array  # (nt+2, ng) rad, precomputed
+
+    # Prescribed vegetation, per patch (from daily/monthly or CLM history streams)
+    lai: Array  # (nt+2, np)
+    sai: Array  # (nt+2, np)
+
+    # Prescribed soil water, per soil column
+    soil_liquid_water: Array  # (nt+2, nc, nsoil) kg m-2, after adjustment
+    soil_ice: Array  # (nt+2, nc, nsoil) kg m-2
+
+    @property
+    def n_steps(self) -> int:
+        """Model steps in the chunk (excluding the two halo records)."""
+        ...
+
+    def window(self, t: int) -> "ForcingWindow":
+        """Previous/current/next records around chunk step ``t`` (uses the halo records at
+        the chunk edges)."""
         ...
 
 
@@ -418,13 +477,6 @@ class ForcingWindow:
     previous: Forcing  # time axis removed
     current: Forcing
     next: Forcing
-
-
-def load_forcing(forcing_section: Mapping[str, Any], domain: Domain, settings: RunSettings,
-                 config: ModelConfig) -> Forcing:
-    """Read every file named in run.yaml's ``forcing:`` section (filling ``{tower}``)
-    into memory. All netCDF I/O and unit conversion happens here, once."""
-    ...
 
 
 # =============================================================================
@@ -443,6 +495,7 @@ class CanopyState:
     leaf_water_potential: Array  # (np, nl, 2) MPa
     intercepted_water: Array  # (np, nl) kg m-2
     ground_temperature: Array  # (np,) K  (option B will need a rule relating this to the column)
+    acclimation_temperature: Array  # (np,) K, running mean of air temperature (decision 15)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -475,8 +528,9 @@ class State:
 
 @dataclasses.dataclass(frozen=True)
 class Outputs:
-    """Per-patch output. Leading axes ``(nt, np)`` from ``Model.run`` (``(np,)`` from
-    ``Model.step``). Unselected variables (``output.variables``) are ``None``.
+    """Per-patch output records of one output stream: leading axes ``(n_records, np)``,
+    where records are at the stream's frequency (``(np,)`` from ``Model.step``). Statistics
+    are accumulated inside the scan; partial intervals are carried to the next chunk.
     ``gridcell_mean()`` returns the same structure with ``np`` replaced by ``ng``."""
 
     # Canopy-scale fluxes (flux.out)
@@ -560,9 +614,10 @@ class Model:
     def __init__(self, config: ModelConfig, domain: Domain) -> None:
         ...
 
-    def initial_state(self, forcing: Forcing, *, source: Literal["clm_history"] = "clm_history"
-                      ) -> State:
-        """Cold-start canopy; soil from CLM history at forcing's first step."""
+    def initial_state(self, forcing: Forcing, *,
+                      source: Literal["clm_history", "restart"] = "clm_history",
+                      restart_file: Optional[PathLike] = None) -> State:
+        """Cold-start canopy and soil from CLM history at the first step, or a restart file."""
         ...
 
     def step(self, state: State, forcing: ForcingWindow, params: Params) -> tuple[State, Outputs]:
@@ -571,19 +626,18 @@ class Model:
         ...
 
     def run(self, state: State, forcing: Forcing, params: Params, *,
-            outputs: Union[Literal["all"], Sequence[str]] = "all",
-            frequency: Literal["step", "hourly", "daily"] = "step",
-            check: bool = False) -> Outputs:
-        """Whole run as one compiled call: ``scan`` over time of ``vmap`` over patches.
+            output_streams: Sequence[OutputStream] = (OutputStream(name="step",
+                                                                    frequency="step"),),
+            accumulators: Optional[Any] = None,
+            check: bool = False) -> tuple[State, Outputs]:
+        """One chunk as one compiled call: ``scan`` over the chunk's steps of ``vmap`` over
+        patches. Returns the final state (for the next chunk) and completed output records.
+        ``accumulators`` carries partial output intervals across chunks.
 
         Differentiable w.r.t. ``state``, ``forcing`` and ``params`` (and patch weights via
-        ``Outputs.gridcell_mean``).
+        ``Outputs.gridcell_mean``). For long runs, take gradients over a window of chunks
+        starting from a saved state (plan §6.9).
         """
-        ...
-
-    def run_with_final_state(self, state: State, forcing: Forcing, params: Params, **kwargs
-                             ) -> tuple[State, Outputs]:
-        """Like ``run`` but also returns the final state (chunked runs, restarts)."""
         ...
 
 
