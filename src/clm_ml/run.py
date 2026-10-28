@@ -64,11 +64,23 @@ class SoilMoistureAdjustmentSection:
 
 
 @dataclasses.dataclass(frozen=True)
+class LandDataSection:
+    """Prescribed land data (decision 14): from the CLM history file, or from a user file
+    with daily or monthly records interpolated linearly between interval midpoints."""
+
+    source: Literal["clm_history", "file"] = "clm_history"
+    file: Optional[str] = None  # netCDF: time ("days since ..."); LAI, SAI or H2OSOI
+    interpolation: Literal["linear"] = "linear"
+
+
+@dataclasses.dataclass(frozen=True)
 class ForcingSection:
     meteorology: str  # tower forcing netCDF; {tower} is replaced by the tower name
     clm_history: ClmHistorySection
     soil_moisture_adjustment: Optional[SoilMoistureAdjustmentSection] = None
     interpolation: Literal["none", "three_point"] = "three_point"  # met_type 0 / 3
+    vegetation: LandDataSection = LandDataSection()  # LAI, SAI
+    soil_water: LandDataSection = LandDataSection()  # volumetric soil water
 
 
 @dataclasses.dataclass(frozen=True)
@@ -264,6 +276,16 @@ class Run:
             "fin_clm": str(self.path(f.clm_history.file, tower_name)),
             "clm_phys": {"clm5_0": "CLM5_0", "clm4_5": "CLM4_5"}[self.config.soil.layer_structure],
             "fin_soil_adjust": str(self.path(adjust.file, tower_name)) if adjust else " ",
+            "fin_vegetation": (
+                str(self.path(f.vegetation.file, tower_name))
+                if f.vegetation.source == "file"
+                else " "
+            ),
+            "fin_soil_water": (
+                str(self.path(f.soil_water.file, tower_name))
+                if f.soil_water.source == "file"
+                else " "
+            ),
             "nlev_soil_adjust": adjust.levels if adjust else 0,
             "met_type": 3 if f.interpolation == "three_point" else 0,
             "dpai_min": self.config.canopy_layers.min_plant_area_per_layer,
@@ -395,6 +417,12 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
     tower = domain.gridcells.names[0]
     files = {"forcing.meteorology": run_file.forcing.meteorology,
              "forcing.clm_history.file": run_file.forcing.clm_history.file}  # fmt: skip
+    for key in ("vegetation", "soil_water"):
+        section = getattr(run_file.forcing, key)
+        if section.source == "file":
+            if not section.file:
+                raise ConfigError(f"{path.name}: forcing.{key}.file: required with source file")
+            files[f"forcing.{key}.file"] = section.file
     if run_file.forcing.soil_moisture_adjustment:
         files["forcing.soil_moisture_adjustment.file"] = (
             run_file.forcing.soil_moisture_adjustment.file

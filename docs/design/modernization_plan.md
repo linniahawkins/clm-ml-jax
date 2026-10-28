@@ -986,6 +986,29 @@ comparison against the Fortran output:
   Daily or monthly LAI, SAI and soil water: next item.
 - **Daily/monthly prescribed land data** (decision 14): readers for user-supplied LAI, SAI and
   soil water files.
+  ✅ Done. `run.yaml`:
+
+  ```yaml
+  forcing:
+    vegetation: {source: file, file: lai_monthly.nc}   # LAI, SAI (m2 m-2)
+    soil_water: {source: file, file: h2osoi_daily.nc}  # H2OSOI (m3 m-3), (time, level)
+  ```
+
+  `source: clm_history` (the default) keeps the CLM history file, so CHATS7 is unchanged.
+  The file has `time` in `days since <date>`, each record stamped at the start of its
+  interval (intervals may be irregular: months); extra axes of size 1 (one gridcell) are
+  dropped. Values are linear between interval midpoints, evaluated at each model step's
+  midpoint, held beyond the first and last record (`forcing_interpolation.linear_between_
+  midpoints`). Only the records bracketing a chunk are read, so memory does not depend on the
+  file's length. `H2OSOI` replaces the CLM history soil water layer for layer (at least the
+  model's `nlevsoi` = 20 levels); the CHATS soil-moisture adjustment factor still multiplies
+  it. The leaf-area profile is rebuilt from the step's LAI and SAI, as with the CLM history.
+  Tests (`tests/clm_ml/test_land_data.py`, `tests/regression/test_land_data_files.py`):
+  midpoint interpolation with monthly and daily records, the windowed reader; end to end, the
+  CHATS7 CLM-history LAI, SAI and soil water written as user files reproduce the default run
+  (inputs to 1e-12, fluxes within 1e-6), and a monthly LAI file (April 1, May 2, June 3)
+  gives the expected leaf area index at every step (to 1e-6: the output is the layers' sum,
+  and the beta-distribution fractions sum to 1 only to ~1e-7).
 
 ### Phase 5: Mask-aware, one-patch processes
 

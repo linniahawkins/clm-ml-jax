@@ -107,8 +107,18 @@ class TowerForcingSource:
     run_start: Optional[dt.datetime] = None  # needed when interpolating
     lat: float = 0.0  # degrees, for the solar zenith angle (coszen interpolation)
     lon: float = 0.0
+    # Prescribed land data from user files (decision 14) instead of the CLM history file:
+    # daily or monthly records, linear between interval midpoints. None: CLM history.
+    vegetation_file: Optional[str] = None  # LAI, SAI (m2 m-2)
+    soil_water_file: Optional[str] = None  # H2OSOI (m3 m-3), the model's soil layers
 
     def chunk(self, first_step: int, n_steps: int) -> Forcing:
+        forcing = self._chunk(first_step, n_steps)
+        if self.vegetation_file or self.soil_water_file:
+            forcing = _with_land_data(self, forcing, first_step, n_steps)
+        return forcing
+
+    def _chunk(self, first_step: int, n_steps: int) -> Forcing:
         if self.step_seconds != self.record_seconds:
             return _interpolated_chunk(self, first_step, n_steps)
         return load_forcing(
@@ -170,6 +180,44 @@ def _interpolated_chunk(self: TowerForcingSource, first_step: int, n_steps: int)
     ]
     slices = [self.history_index(k) for k in run_steps]
     return _forcing(mets, slices, self.clm_history_file, self.soil_adjust_file, first_step)
+
+
+def _with_land_data(
+    self: TowerForcingSource, forcing: Forcing, first_step: int, n_steps: int
+) -> Forcing:
+    """Replace the CLM-history leaf/stem area and/or soil water of a chunk with values
+    interpolated from the user's land-data files (the CHATS soil-moisture adjustment
+    factor, if any, still multiplies the soil water)."""
+    from clm_ml.forcing_interpolation import linear_between_midpoints, read_land_data
+
+    run_steps = chunk_run_steps(self.n_steps, first_step, n_steps)
+    step = dt.timedelta(seconds=self.step_seconds)
+    starts = [self.run_start + k * step for k in run_steps]
+    clm = forcing.clm_history
+
+    def at_steps(path, names):
+        rec_starts, values, end = read_land_data(path, names, starts[0], starts[-1] + step)
+        return {n: linear_between_midpoints(rec_starts, values[n], starts, self.step_seconds, end)
+                for n in names}  # fmt: skip
+
+    changes = {}
+    if self.vegetation_file:
+        v = at_steps(self.vegetation_file, ("LAI", "SAI"))
+        changes["leaf_area_index"] = v["LAI"].reshape(clm.leaf_area_index.shape)
+        changes["stem_area_index"] = v["SAI"].reshape(clm.stem_area_index.shape)
+    if self.soil_water_file:
+        h2osoi = at_steps(self.soil_water_file, ("H2OSOI",))["H2OSOI"]
+        # the active soil-water field is the one the CLM history reader filled (the other
+        # is spval): CLM5.0 -> nlevsoi layers, CLM4.5 -> nlevgrnd
+        key = "soil_water_clm50" if np.all(clm.soil_water_clm45 > 1e30) else "soil_water_clm45"
+        nlev = getattr(clm, key).shape[-1]
+        if h2osoi.ndim != 2 or h2osoi.shape[1] < nlev:
+            raise ValueError(
+                f"{self.soil_water_file}: H2OSOI needs (time, level) with at least {nlev} "
+                f"levels; got {h2osoi.shape}"
+            )
+        changes[key] = h2osoi[:, None, :nlev]
+    return dataclasses.replace(forcing, clm_history=dataclasses.replace(clm, **changes))
 
 
 def tower_met_at(forcing: Forcing, t: int, g: int = 0) -> TowerMet:

@@ -80,6 +80,15 @@ def test_overrides(chats_run_dir):
         (lambda d: d.update(execution={"restart_every": "weekly"}), "expected e.g."),
         (lambda d: d.update(colour="blue"), "unknown key(s) ['colour']"),
         (lambda d: d["time"].update(start="May 1"), "is not a date-time"),
+        (
+            lambda d: d["forcing"].update(vegetation={"source": "file"}),
+            "forcing.vegetation.file: required",
+        ),
+        (
+            lambda d: d["forcing"].update(soil_water={"source": "file", "file": "nope.nc"}),
+            "file not found",
+        ),
+        (lambda d: d["forcing"].update(vegetation={"source": "monthly"}), "monthly"),
     ],
 )
 def test_invalid_run_files(chats_run_dir, change, message):

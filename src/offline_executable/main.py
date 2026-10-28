@@ -182,6 +182,8 @@ def setup_run(nml: dict) -> LegacyRun:
     fin_tower = _resolve_path(str(params.get("fin_tower", "")))
     fin_clm = _resolve_path(str(params.get("fin_clm", "")))
     fin_soil_adjust = _resolve_path(str(params.get("fin_soil_adjust", "")))
+    fin_vegetation = str(params.get("fin_vegetation", "")).strip()
+    fin_soil_water = str(params.get("fin_soil_water", "")).strip()
     dirout_raw = str(params.get("dirout", "")).strip()
     dirout = _resolve_path(dirout_raw) if dirout_raw else ""
 
@@ -350,6 +352,8 @@ def setup_run(nml: dict) -> LegacyRun:
         run_start=run_start,
         lat=float(TowerDataMod.tower_lat[tower_num]),
         lon=float(TowerDataMod.tower_lon[tower_num]),
+        vegetation_file=_resolve_path(fin_vegetation) if fin_vegetation else None,
+        soil_water_file=_resolve_path(fin_soil_water) if fin_soil_water else None,
     )
 
     def load_chunk(first_step: int, n_steps: int) -> ForcingChunk:

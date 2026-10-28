@@ -23,7 +23,7 @@ module, so results are unchanged).
 from __future__ import annotations
 
 import datetime as dt
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -130,3 +130,57 @@ def mean_cosz_function(lat: float, lon: float, year: int, samples: int = 10):
         return total / samples
 
     return mean_cosz
+
+
+def linear_between_midpoints(
+    record_starts: Sequence[dt.datetime],
+    values: np.ndarray,
+    step_starts: Sequence[dt.datetime],
+    step_seconds: int,
+    last_end: Optional[dt.datetime] = None,
+) -> np.ndarray:
+    """Records stamped at the start of possibly irregular intervals (daily, monthly) ->
+    values at the model steps' midpoints, linear between interval midpoints (held beyond
+    the first and last). The last record's interval ends at ``last_end`` (default: as long
+    as the one before). ``values`` has the record axis first; any further axes (e.g. soil
+    layers) are kept."""
+    t0 = record_starts[0]
+    starts = np.array([(t - t0).total_seconds() for t in record_starts])
+    if len(starts) > 1 and np.any(np.diff(starts) <= 0):
+        raise ValueError("record times must increase")
+    if last_end is not None:
+        end = (last_end - t0).total_seconds()
+    else:
+        end = starts[-1] + (starts[-1] - starts[-2] if len(starts) > 1 else 0)
+    mids = starts + np.diff(starts, append=end) / 2.0
+    at = np.array([(t - t0).total_seconds() + step_seconds / 2.0 for t in step_starts])
+    v = np.asarray(values, dtype=float)
+    flat = v.reshape(v.shape[0], -1)
+    out = np.stack([np.interp(at, mids, flat[:, i]) for i in range(flat.shape[1])], axis=-1)
+    return out.reshape((len(at),) + v.shape[1:])
+
+
+def read_land_data(
+    path: str, names: Sequence[str], first: dt.datetime, last: dt.datetime
+) -> tuple[list, dict, Optional[dt.datetime]]:
+    """``(record_starts, {name: values}, last_end)`` from a daily/monthly land-data file, for the
+    records whose midpoints bracket ``[first, last]`` (one record beyond each end, so
+    memory does not depend on the file's length). The file has a ``time`` variable in
+    ``days since <date>`` (each record starts its interval) and the named variables with
+    time first (extra axes of size 1, e.g. a single gridcell, are dropped). ``last_end``
+    is the start of the record after the window (None at the end of the file)."""
+    import netCDF4 as nc
+
+    with nc.Dataset(path) as ds:
+        time = ds.variables["time"]
+        origin = dt.datetime.fromisoformat(time.units.split("since")[1].strip())
+        starts = [origin + dt.timedelta(days=float(d)) for d in np.asarray(time[:])]
+        lo = max(sum(1 for t in starts if t <= first) - 2, 0)
+        hi = min(sum(1 for t in starts if t <= last) + 1, len(starts))
+        out = {}
+        for name in names:
+            if name not in ds.variables:
+                raise ValueError(f"{path}: variable {name} not found")
+            v = np.asarray(ds.variables[name][lo:hi], dtype=float)
+            out[name] = v.reshape((v.shape[0],) + tuple(n for n in v.shape[1:] if n != 1))
+    return starts[lo:hi], out, (starts[hi] if hi < len(starts) else None)
