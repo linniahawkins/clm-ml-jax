@@ -529,6 +529,85 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers
     return jax.jit(run_chunk)
 
 
+def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int):
+    """A compiled function ``(state, xs, slots, buffers[, params]) -> (state, buffers)``
+    advancing a chunk as one ``jax.lax.scan`` and accumulating output streams inside it
+    (plan §6.9): each step's output variables (``clm_ml.outputs``, computed with jax.numpy)
+    are added into the slot of the stream record the step belongs to. ``streams`` are
+    ``clm_ml.output_streams.StreamSpec``; ``slots[i]`` is the per-step record index of
+    stream ``i`` (``chunk_records``), ``buffers[i]`` its ``init_buffers``. No per-step
+    values leave the device."""
+    from clm_ml import output_streams as S
+    from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
+    from clm_src_main.clm_varpar import nlevgrnd
+    from multilayer_canopy.MLCanopyParamsMod import patch_setup
+
+    dtime = run.time_of(0).dtime
+    names = sorted({n for spec in streams for n in spec.variables})
+    _, default_params = patch_setup(int(np.asarray(filt.exposedvegp)[0]), template.mlcanopy)
+
+    def variables(insts) -> dict:
+        m = insts.mlcanopy
+        raw = {f"mlcanopy.{f}": getattr(m, f)[None] for f in m._fields}
+        r = _Raw(raw, max_layers, xp=jnp)
+        out = {}
+        for n in names:
+            if n == "soil_temperature":  # (patch == column) soil layers 1..nlevgrnd
+                out[n] = insts.temperature.t_soisno_col[:, 1 : nlevgrnd + 1]
+            else:
+                out[n] = VARIABLES_BY_NAME[n].compute(r)[0]
+        return out
+
+    def step(carry, x):
+        state, buffers = carry
+        (now, met, clm_record, forcing_bef, forcing_next), slots, params = x
+        inputs = StepInputs(
+            now=now._replace(dtime=dtime),
+            met=met,
+            clm_record=clm_record,
+            forcing_bef=forcing_bef,
+            forcing_next=forcing_next,
+        )
+        insts, _ = advance(
+            run,
+            instances_with_state(template, state),
+            filt,
+            inputs,
+            initialize=False,
+            params=params,
+        )
+        values = variables(insts)
+        buffers = tuple(
+            S.accumulate(spec.statistic, b, slot, {n: values[n] for n in spec.variables})
+            for spec, b, slot in zip(streams, buffers, slots)
+        )
+        return (state_from_instances(insts), buffers), None
+
+    def run_chunk(state, xs, slots, buffers, params=default_params):
+        n = jax.tree.leaves(xs)[0].shape[0]
+        per_step_params = jax.tree.map(lambda p: jnp.broadcast_to(p, (n,) + p.shape), params)
+        (state, buffers), _ = jax.lax.scan(step, (state, buffers), (xs, slots, per_step_params))
+        return state, buffers
+
+    return jax.jit(run_chunk)
+
+
+def output_shapes(run: LegacyRun, template, names, max_layers: int) -> dict:
+    """Per-step shape of each output variable (for ``init_buffers``)."""
+    from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
+    from clm_src_main.clm_varpar import nlevgrnd
+
+    m = template.mlcanopy
+    r = _Raw({f"mlcanopy.{f}": np.asarray(getattr(m, f))[None] for f in m._fields}, max_layers)
+    shapes = {}
+    for n in names:
+        if n == "soil_temperature":
+            shapes[n] = np.asarray(template.temperature.t_soisno_col)[:, 1 : nlevgrnd + 1].shape
+        else:
+            shapes[n] = np.shape(VARIABLES_BY_NAME[n].compute(r))[1:]
+    return shapes
+
+
 def main():
     source = sys.argv[1] if len(sys.argv) > 1 else None
     run = setup_run(read_namelist(source))
