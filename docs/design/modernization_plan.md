@@ -38,6 +38,11 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 16 | Output | **Configurable and independent of the forcing and model step.** Several output streams, each with its own variables, frequency, statistic (mean, instantaneous, min, max), level (patch, gridcell) and file split. Statistics are accumulated during the run, so per-step values are never all held in memory. |
 | 17 | Chunk length | **Calendar months**, aligned to month starts (a chunk is the steps whose start time falls in one month); a run shorter than a month is one chunk. Chunks therefore have up to four full-month lengths plus partial first/last months; each distinct length compiles once (§6.9). As in jax-gcm, output is accumulated inside the compiled chunk, and the chunk length only sets forcing memory, restart and file frequency, and health checks. |
 
+| 18 | Phase 5 approach | **Masks in place**: the existing modules keep their files, 1-based arrays and golden tests while becoming mask-aware. Moving processes to `clm_ml/physics/`, 0-based indexing and Fortran-filter removal move to Phase 7 (decided after Phase 4b). |
+| 19 | Different layer counts | **Masks**, so one compiled program serves every patch (simpler batching and sharding, gradients across mixed patches). Not grouping patches by layer structure. Cost: compute on padded layers (e.g. a 20-layer grass in 50 slots). |
+| 20 | Configuration in the code | **Passed explicitly** (Phase 5a), not module globals: options static, tunable numbers in the differentiable parameters. Allows several models per process and in-process tests. |
+| 21 | Process interface (§6.6) | **Deferred to Phase 7** (not needed for batching). |
+
 Smaller decisions: see §8.
 
 ---
@@ -74,7 +79,7 @@ Smaller decisions: see §8.
   forcing-stream interface it plugs into is part of this plan (§6.9), so gridded readers only
   have to implement it.
 - Coupling to CESM/CTSM. The `clm_src_cpl` code stays as a reference only.
-- Rewriting the numerics of each routine, beyond what fixed layers and masks require (Phase 5).
+- Rewriting the numerics of each routine, beyond what fixed layers and masks require (Phase 5b).
 
 ---
 
@@ -438,7 +443,8 @@ src/clm_ml/
 
 The existing packages (`clm_src_*`, `multilayer_canopy`, `offline_driver`, …) stay in place during
 the transition, and the new API calls into them through adapters. Each process moves into
-`clm_ml/physics/` as it is refactored, and old modules are deleted only when nothing imports them.
+`clm_ml/physics/` as it is refactored (Phase 7, decision 18), and old modules are deleted only
+when nothing imports them.
 
 ### 6.2 One time step (for one patch)
 
@@ -527,6 +533,8 @@ This replaces today's `DIFFERENTIABLE_MODE` flag and `GridInfo` workaround with 
   through a netCDF override file. The `for_patches` gather is the single place that would change.
 
 ### 6.6 Process interface
+
+*Implemented in Phase 7a (decision 21); Phase 5 keeps the legacy container.*
 
 Each process is a plain function on one patch:
 
@@ -1042,26 +1050,91 @@ comparison against the Fortran output:
   gives the expected leaf area index at every step (to 1e-6: the output is the layers' sum,
   and the beta-distribution fractions sum to 1 only to ~1e-7).
 
-### Phase 5: Mask-aware, one-patch processes
+### Phase 5: Explicit configuration and mask-aware layers (revised after Phase 4)
 
-This phase is what enables batching patches. The old internals use `ncan`/`ntop`/`nbot` as Python
-loop bounds, so patches with different layer counts cannot be batched until each process is
-rewritten to use masks.
+**Why Phase 5 exists.** Phase 6 runs many patches with `jax.vmap`, which needs every patch to use
+the *same* compiled program. Today each patch's layer counts (`ncan`, `ntop`, `nbot`) are Python
+integers inside the physics (`GridInfo`), so a patch with a different layer count compiles its own
+program and cannot be batched with others. Phase 5 turns layer counts into data and every
+layer loop into masked array operations. It also removes the module-global options, which are
+the reason each model run needs a fresh Python process.
 
-- Move each process from `multilayer_canopy/ML*Mod.py` into `clm_ml/physics/`, one PR per process.
-  Each one is rewritten to work on one patch with `(max_layers,)` arrays and masks, 0-based
-  indexing, and no Fortran-style filters.
-- Suggested order, simplest first: math utilities (make the tridiagonal solver padding-safe) →
-  water vapor → leaf heat capacity → canopy water → longwave → solar radiation → leaf boundary
-  layer → plant hydraulics → photosynthesis/stomata → turbulence/flux-profile → soil.
-- Each PR passes three tests: the golden tests for that routine (with the JSON files unchanged),
-  the end-to-end regression test, and a **padding test** (the same patch run with `max_layers` at
-  its exact layer count and at 2×; results must agree).
+**Revised scope** (decisions 18–21, after Phase 4b): the original plan moved every process into
+`clm_ml/physics/`, rewrote it with 0-based indexing and a new process interface, one PR per
+process. Only the masks are needed for batching. Phase 5 therefore converts the code **in
+place**: same files, same 1-based arrays, same Fortran golden tests. Moving files, 0-based
+indexing and the §6.6 process interface move to Phase 7 (decision 18, 21). Reasons: jax-gcm's
+"wrap, don't rewrite"; a renumbering of ~14,000 lines invites exactly the layer-range bugs
+found in Phase 4 (the Runge–Kutta update skipped the top layer); the golden tests are 1-based.
 
-**Done when:** `multilayer_canopy/` is no longer imported by the run path, and all three kinds of
-tests pass.
+#### Phase 5a: Explicit configuration (no module-global options)
+
+Options and tables are copied into ~20 modules when they are imported
+(`from multilayer_canopy.MLclm_varctl import gs_type`), so `clm_ml.legacy.worker` must set them in a
+fresh process before the physics is imported; a process holds one model (`clm_ml.model.Model`
+refuses a second), and every end-to-end test pays ~40–60 s of process start-up and compilation.
+
+- **Inventory first:** every module-level option, table and size read at import (`MLclm_varctl`,
+  `clm_varctl`, `MLpftconMod`/`pftconMod` tables and their `Init` functions, `TowerDataMod`,
+  `clm_varpar` sizes such as `nlevgrnd`, `clm_instMod` instances still read as globals). Record it
+  here with what replaces each.
+- **Options** (scheme choices, numerics) become one frozen, hashable object built from
+  `ModelConfig`, passed down as an argument and treated as *static* by `jit` (changing an option
+  recompiles, as decided for `model.yaml`).
+- **Numbers** in the PFT and tower tables that are tunable become part of the parameters
+  (differentiable, per PFT: `Params`/`CanopyParams`), never static. Structural values (sizes, PFT
+  indices) are static.
+- Adapters first: modules keep their names and Fortran-reference docstrings; functions gain an
+  argument instead of reading a global. `Run.execute()` may keep its worker process (isolation for
+  the command line), but nothing requires it.
+- **Tests:** pure refactor, so **bit for bit**. New: two models with different options (e.g. WUE
+  and Medlyn stomatal conductance) in one process each reproduce their separate-process runs.
+  The regression tests then run the model **in-process** and share compiled chunks through
+  session fixtures; record the new suite time (numerics doc §6.1).
+
+**Done when:** no physics module reads an option or table from a module global; several models
+run in one process; the regression suite runs in-process.
+
+#### Phase 5b: Mask-aware layers, in place
+
+- **Step 0, audit:** list every remaining use of `ncan`/`ntop`/`nbot` as a loop bound, slice or
+  branch (~37 loops, ~250 references), and every `is_concrete` guard. Several processes were
+  already vectorized over layers in Phases 3–4 to cut gradient memory (solar radiation,
+  turbulence, the flux–profile solution); order the work from the audit, simplest first, with the
+  tridiagonal solver made padding-safe early (identity rows in padded layers).
+- **Array size = `max_layers`:** the legacy containers are sized `nlevmlcan = 100`; outputs are cut
+  to `max_layers` (50). Size every layer array by `max_layers` (CHATS7: 46 used of 50), which
+  about halves the layer work.
+- **Layer counts become data** of each patch's layer structure (with masks: within canopy, above
+  canopy, in use); loops over a Python range become masked array operations or a `lax.scan` over
+  `max_layers`. Padded layers hold neutral values (zero leaf and stem area) and are excluded from
+  every sum; outputs are NaN there (as today).
+- **Guards:** checks that need concrete numbers (`is_concrete`) are skipped under `vmap`; their
+  physical content moves to the between-chunk health checks (plan §6.8) or a debug mode.
+- **Gradient hygiene:** a masked `jnp.where` differentiates both branches, so an expression
+  that divides by an empty layer's zero leaf area gives NaN gradients even when the forward value
+  is right. Use the safe-`where` pattern (make the unused branch's inputs harmless).
+- **Tests for each PR** (testing tiers, numerics doc §6.1):
+  - the routine's Fortran golden tests, JSON unchanged;
+  - bit-for-bit and noise-twin tests. Masked sums may change the order of additions; then the
+    noise-twin test plus the identical-input routine check (§1 of the numerics doc) must pass,
+    and the reference is regenerated, saying so in the commit;
+  - a **padding test**: the same patch at its exact layer count and at 2× agrees (within noise);
+  - a **gradient-with-padding test**: gradients are finite and agree with the unpadded ones.
+- **Performance:** the CHATS7 timing test and the memory of a gradient over 8 steps (Phase 4:
+  ~7 min, ~13 GB, mostly compilation) are recorded at the start and end of Phase 5b; a slowdown
+  of more than ~1.5× is discussed before going on.
+
+**Done when:** the run path has no Python-integer layer bounds; **one compiled step serves
+patches with different layer counts** (CHATS7 at `max_layers` 46, 50 and 100 agree within noise;
+CHATS7 with explicit `n_layers_within`/`n_layers_above` that differ from the default runs with the
+same compiled program and matches its own separate run); gradients are finite with padding; the
+timing results are recorded.
 
 ### Phase 6: Many patches and gridcells
+
+**Before Phase 6:** get access to a GPU. Whether the padding cost of masks and the gradient
+memory are acceptable is mostly a GPU question, and the Phase 4 GPU timing is still deferred.
 
 - Turn on `vmap` over the patch axis, with forcing gathered from gridcells and outputs
   aggregated back (`segment_sum`). Remove the one-patch restriction from Phase 1.
@@ -1081,7 +1154,20 @@ tests pass.
 **Done when:** multi-tower and multi-patch runs match single-patch runs, and sharding works on a
 multi-GPU machine (or on CPU with simulated devices in CI).
 
-### Phase 7: Cleanup
+### Phase 7: Restructure and cleanup
+
+**7a. Restructure by process** (moved here from Phase 5; decisions 18, 21):
+- Move each process from `multilayer_canopy/ML*Mod.py` into `clm_ml/physics/`, organized by
+  physical process and scheme name (jax-gcm), one PR per process, keeping the `Fortran reference:`
+  docstrings.
+- The process interface of §6.6: a per-step state/diagnostics structure in place of the legacy
+  `mlcanopy_type` container, variants registered by name, and each process declaring what it reads
+  and writes (with a test).
+- 0-based indexing and removal of Fortran-style filters: decide at the start of Phase 7 whether
+  the benefit is worth the risk; if done, the golden tests get an index adapter (their JSON files
+  stay unchanged). These are arithmetic-preserving changes, so each PR passes the bit-for-bit test.
+
+**7b. Cleanup:**
 
 - Delete unused Fortran-mirroring modules: `clm_src_cpl`, `decompMod`, `spmdMod`, `ncdio_pio`,
   `histFileMod`, `restUtilMod`, duplicated `cime_src_share_util`/`clm_share`, the CLM subgrid
@@ -1097,7 +1183,8 @@ multi-GPU machine (or on CPU with simulated devices in CI).
   fields with their dimensions and units; the bookkeeping as additional variables/groups), keep
   the `.prev` rotation and fallback, and keep the resume test bit for bit.
 
-**Done when:** `src/` contains only `clm_ml/`, restarts are netCDF, and all tests pass.
+**Done when:** `multilayer_canopy/` is no longer imported by the run path, `src/` contains only
+`clm_ml/`, restarts are netCDF, and all tests pass.
 
 ### Phase 8: Documentation and release
 
@@ -1125,15 +1212,17 @@ mixed vegetation before it becomes available for global runs.
 | 3 | Large | Untangling `mlcanopy_type` state from scratch fields |
 | 4 | Medium | Chunk loop, forcing streams, output streams, restarts |
 | 4b | Medium | Science changes with new references and validation |
-| 5 | Large | The biggest phase. Many small PRs, which can be parallelized. |
-| 6 | Medium | Small if Phase 5 is done well |
-| 7 | Medium | Mechanical |
+| 5a | Medium | Explicit configuration; pure refactor (bit for bit); makes tests faster |
+| 5b | Large | Masks in place, from the audit; many small PRs |
+| 6 | Medium | Small if Phase 5 is done well; needs a GPU for timing |
+| 7 | Large | 7a restructure by process (moved from Phase 5) + 7b mechanical cleanup |
 | 8 | Small to medium | |
 
 Milestones for users:
 - After **Phase 1**: YAML configuration and the new CLI.
 - After **Phase 4**: fast, differentiable single-patch runs and ensembles, of any length.
 - After **Phase 4b**: configurable model step, 10-day acclimation, daily/monthly land data.
+- After **Phase 5a**: several models (e.g. scheme comparisons) in one Python session.
 - After **Phase 6**: many towers, mixed-vegetation gridcells, ready for global work.
 
 ---
@@ -1146,7 +1235,7 @@ Milestones for users:
 | 2 | Default `max_layers` | **50.** CHATS7 needs 46 layers with the default spacing: a 10 m canopy at 0.5 m gives 20 layers inside it, plus 26 above it up to the 23 m measurement height. Patches needing more fail at load time with a message naming them, and can raise `max_layers` in `model.yaml` (the Fortran limit was `nlevmlcan = 100`). **Resolved by row 9:** only CHATS7 is built in. (For reference: with default spacing, 9 of the 15 legacy towers need more than 50 (US-Ha1 60, US-Me2 64, US-UMB 92, US-MMS 96; US-ARM 300, beyond even the Fortran limit). Bonan et al. (2021) found 5–10 within-canopy layers reproduce the 50 cm benchmark, so explicit `n_layers_within`/`n_layers_above`, or coarser above-canopy spacing, may be the better default for multi-tower and global runs.) |
 | 3 | Regression tolerance | **Revised in Phase 3:** bit-for-bit for refactors that should not change the arithmetic, and a **noise-twin** test for changes that alter round-off. The twins differ by ≤ 4e-11, so the noise-twin test is tight; an apparent evening-transition sensitivity (up to 4.5%) turned out to be a solver bug, now fixed. See [`numerics_and_regression.md`](numerics_and_regression.md) §5–6. |
 | 4 | Legacy lifetime | Undecided. Default: keep `clm-ml-offline` until Phase 7, and keep the namelist converter permanently. Revisit at Phase 7. |
-| 5 | Soil model scope | Undecided. Default: soil routines go behind the same process interface, migrated last in Phase 5. Making them swappable is not a goal yet. Revisit at Phase 5. (Soil column sharing is decided separately: option A now, option B later; see §6.7.) |
+| 5 | Soil model scope | Undecided. Default: soil routines go behind the same process interface, migrated last in Phase 7 (decision 18). Making them swappable is not a goal yet. Revisit at Phase 7. (Soil column sharing is decided separately: option A now, option B later; see §6.7.) |
 | 6 | Legacy `.out` format | **Not needed after validation.** It is kept only as long as the Fortran comparison test needs it, and is replaced by netCDF output once that test reads netCDF. `output.format` options become `netcdf` only. |
 | 7 | GPU timing | **Deferred until after Phase 4.** GPU doesn't change the design. Note that the model runs in float64: data-center GPUs (A100/H100) handle this well, but consumer GPUs run float64 30–60× slower. A `precision` option could be considered in Phase 4, with its own validation. |
 | 8 | Minimum patch weight | Default `0.0` (keep all patches). For global runs, dropping patches below, for example, 1% of a gridcell is a science choice left to `run.yaml` (`domain.min_patch_weight`). Remaining weights are renormalized to sum to 1. |
@@ -1159,7 +1248,7 @@ Milestones for users:
 | Risk | Mitigation |
 |---|---|
 | Refactoring silently changes results | Tight regression test (Phase 0) on every PR, plus the golden tests and the Fortran comparison |
-| Padding changes results (for example, padded layers leaking into solvers or sums) | Padding test in every Phase 5 PR. Identity rows in the tridiagonal solves. Masks in every reduction. |
+| Padding changes results (for example, padded layers leaking into solvers or sums) | Padding test in every Phase 5b PR. Identity rows in the tridiagonal solves. Masks in every reduction. |
 | Patch/gridcell aggregation errors (wrong weights, wrong index) | Phase 6 multi-patch test: a two-patch run equals the weighted sum of single-patch runs. Validation that weights sum to 1. |
 | `mlcanopy_type` mixes state and scratch fields in non-obvious ways | Derive `State` by recording which fields are read before being written in a step |
 | YAML files drift from the code (keys renamed, defaults changed) | The schema is generated from the dataclasses. `clm-ml check` runs in CI on every example. The key reference docs are generated from the same source. |
