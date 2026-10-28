@@ -17,8 +17,13 @@ Fortran; the traceable ones were not, and some had drifted.
 trace it. A traceable copy is accepted only when it agrees with the Fortran-matching version
 **on identical input** to round-off (about 1e-15 relative). Then the duplicate is deleted.
 
-**How it is checked.** A harness captures the real inputs of each routine during a run and
-calls both versions on them. As of Phase 3c, every routine with a `grid` branch
+**How it is checked.** `tests/regression/process_io.py --record` captures the real inputs and
+outputs of each such routine at dusk, night and midday of the CHATS7 reference day, from the
+code before the merge (`reference/process_io.pkl.gz`, 2.4 MB). `test_process_io.py` replays
+the inputs through the current routines and requires every output field to match within 1e-12
+relative. (The recording must be loaded *after* the model is initialized: unpickling imports
+model modules, which copy run options such as `met_type` at import.) During the merge, a
+scratch harness also called both versions on the same captured inputs. As of Phase 3c, every routine with a `grid` branch
 (`GetAtmForcing`, `SolarRadiation`, `LongwaveRadiation`, `CanopyTurbulence`,
 `LeafPhotosynthesis`, `FluxProfileSolution`, `RungeKuttaUpdate`) agrees to within 7e-16 on every
 captured call of a 2-step run, after the two fixes in §2 and §3.
