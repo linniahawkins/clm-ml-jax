@@ -395,8 +395,10 @@ BALANCE_CHECKS = (
     ("total longwave conservation (Norman), W m-2", 1.0e-3),
     ("canopy nitrogen integration (CanopyNitrogenProfile)", 1.0e-6),
     ("soil energy balance (SoilFluxes), W m-2", 1.0e-3),
+    ("total solar radiation conservation (TwoStream), W m-2", 1.0e-6),
+    ("solar radiation conservation (Norman), W m-2", 1.0e-3),
 )
-LEAF_ENERGY, LONGWAVE, NITROGEN, SOIL_ENERGY = range(len(BALANCE_CHECKS))
+LEAF_ENERGY, LONGWAVE, NITROGEN, SOIL_ENERGY, SOLAR, NORMAN_SOLAR = range(len(BALANCE_CHECKS))
 
 #: Runge-Kutta stage axis of the increment arrays: room for the largest method (4 stages,
 #: runge_kutta_type 41) plus one, whatever the run's method (the update uses its own count).

@@ -1235,6 +1235,18 @@ Progress:
   then identity rows for unused leafy-layer slots, so each real row and the real solution
   are computed as before. Round-off only (the canopy total of absorbed longwave is a sum over
   all slots): noise-twin test and identical-input replay pass; reference regenerated.
+- ✅ **Step 3c, solar radiation**: optical properties computed on every slot and kept in the
+  leafy layers; the downward product of beam transmittance is a scan from the top with
+  layers above the canopy multiplying by 1 (exact). Two-stream: both sweeps scan every slot,
+  leafy layers computed as before and other slots passing the sweep's values through.
+  Norman (solar): the same fixed-size system as longwave. The solar conservation checks
+  (two-stream 1e-6, Norman 1e-3) are recorded like the other Fortran checks (they used to
+  run only on concrete values). Round-off only (noise-twin and identical-input replay pass);
+  reference regenerated.
+  **Known issue, not from 5b:** the Norman solar option (`solar_radiation: norman`, not the
+  CHATS default, never validated against Fortran in the JAX translation) stops at the first
+  CHATS7 step with a conservation error, with the code before and after this step; to be
+  investigated separately.
 - Gradient padding test (step 1 code): gradients finite for 46, 50 and 100 slots; they
   differ by up to 5e-9 relative (round-off amplified by the implicit-function derivatives
   of the solvers), so the gradient comparison uses 1e-7 (the finite-difference checks pass
