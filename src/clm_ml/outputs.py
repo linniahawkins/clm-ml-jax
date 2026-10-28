@@ -36,11 +36,16 @@ class VariableSpec:
 
 
 class _Raw:
-    """Recorded legacy fields, with helpers for slicing profiles to the layer axis."""
+    """Recorded legacy fields, with helpers for slicing profiles to the layer axis.
 
-    def __init__(self, raw: Mapping[str, np.ndarray], max_layers: int):
+    ``xp`` is the array module: ``numpy`` for recorded runs, or ``jax.numpy`` inside a
+    compiled chunk (output streams accumulate the variables during the scan). The variable
+    definitions below use ``r.xp``, so each is written once for both."""
+
+    def __init__(self, raw: Mapping[str, np.ndarray], max_layers: int, xp=np):
         self.raw = raw
         self.max_layers = max_layers
+        self.xp = xp
         self.ncan = raw["mlcanopy.ncan_canopy"].astype(int)  # (nt, np)
         self.ntop = raw["mlcanopy.ntop_canopy"].astype(int)
 
@@ -50,29 +55,41 @@ class _Raw:
     def layer(self, values: np.ndarray, *, within_canopy_only: bool = False) -> np.ndarray:
         """Legacy 1-based profile (nt, np, nlevmlcan+1, ...) -> (nt, np, max_layers, ...),
         NaN above the top layer (or above the canopy, if ``within_canopy_only``)."""
-        out = np.array(values[:, :, 1 : self.max_layers + 1], dtype=float)
+        xp = self.xp
+        out = xp.asarray(values[:, :, 1 : self.max_layers + 1], dtype=float)
         top = self.ntop if within_canopy_only else self.ncan
-        k = np.arange(1, self.max_layers + 1)
+        k = xp.arange(1, self.max_layers + 1)
         invalid = k[None, None, :] > top[:, :, None]
-        out[invalid] = np.nan
-        return out
+        invalid = invalid.reshape(invalid.shape + (1,) * (out.ndim - 3))
+        return xp.where(invalid, xp.nan, out)
 
     def leaf(self, values: np.ndarray) -> np.ndarray:
         """Legacy leaf profile (nt, np, nlev+1, nleaf+1) -> (nt, np, max_layers, 2),
         NaN in layers without leaves. Legacy leaf index 1 = sunlit, 2 = shaded."""
+        xp = self.xp
         out = self.layer(values, within_canopy_only=True)[..., 1:3]
-        has_leaf = self.layer(self["dpai_profile"], within_canopy_only=True) > 0
-        out[~np.nan_to_num(has_leaf, nan=0).astype(bool)] = np.nan
-        return out
+        has_leaf = self.layer(self["dpai_profile"], within_canopy_only=True) > 0  # NaN -> False
+        return xp.where(has_leaf[..., None], out, xp.nan)
 
     def by_group(self, total: str, sun: str, sha: str, band: int | None = None) -> np.ndarray:
         parts = [self[total], self[sun], self[sha]]
         if band is not None:
             parts = [p[..., band] for p in parts]
-        return np.stack(parts, axis=-1)
+        return self.xp.stack(parts, axis=-1)
 
     def at_layer(self, values: np.ndarray, index: np.ndarray) -> np.ndarray:
-        return np.take_along_axis(values, index[:, :, None], axis=2)[:, :, 0]
+        return self.xp.take_along_axis(values, index[:, :, None], axis=2)[:, :, 0]
+
+    def latvap_tref(self) -> np.ndarray:
+        """Molar latent heat of vaporization at the reference air temperature (J/mol),
+        MLWaterVaporMod.LatVap (recorded by the legacy worker as derived.latvap_tref)."""
+        if "derived.latvap_tref" in self.raw:
+            return self.raw["derived.latvap_tref"]
+        from clm_src_main.clm_varcon import hsub, hvap, tfrz
+        from multilayer_canopy.MLclm_varcon import mmh2o
+
+        t = self["tref_forcing"]
+        return self.xp.where(t > tfrz, hvap, hsub) * mmh2o
 
 
 def _shortwave_up(r: _Raw) -> np.ndarray:
@@ -82,7 +99,7 @@ def _shortwave_up(r: _Raw) -> np.ndarray:
 
 def _mid_layer(r: _Raw) -> np.ndarray:
     nbot, ntop = r["nbot_canopy"].astype(int), r.ntop
-    return np.maximum(1, nbot + (ntop - nbot + 1) // 2 - 1)
+    return r.xp.maximum(1, nbot + (ntop - nbot + 1) // 2 - 1)
 
 
 def _specific_humidity(r: _Raw) -> np.ndarray:
@@ -122,17 +139,17 @@ VARIABLES: tuple[VariableSpec, ...] = (
     V("soil_latent_heat_flux", "W m-2", "Latent heat flux from the soil", (), "flux.out col 14",
       lambda r: r["lhsoi_soil"]),
     V("transpiration_latent_heat_flux", "W m-2", "Latent heat flux from transpiration", (),
-      "flux.out col 15", lambda r: r["trveg_canopy"] * r.raw["derived.latvap_tref"]),
+      "flux.out col 15", lambda r: r["trveg_canopy"] * r.latvap_tref()),
     V("canopy_evaporation_latent_heat_flux", "W m-2",
       "Latent heat flux from evaporation of intercepted water", (), "flux.out col 16",
-      lambda r: r["evveg_canopy"] * r.raw["derived.latvap_tref"]),
+      lambda r: r["evveg_canopy"] * r.latvap_tref()),
     V("rsl_beta", "1", "Roughness-sublayer beta: friction velocity / wind speed at canopy top",
       (), "flux.out col 17", lambda r: r["beta_canopy"]),
     V("vegetation_storage_flux", "W m-2", "Heat storage in vegetation", (), "flux.out col 18",
       lambda r: r["stflx_veg_canopy"]),
     # --- sunlit/shaded canopy totals (fsun.out) ---------------------------------------
     V("solar_zenith_angle", "degree", "Solar zenith angle", (), "fsun.out col 1",
-      lambda r: np.degrees(r["solar_zen_forcing"])),
+      lambda r: r.xp.degrees(r["solar_zen_forcing"])),
     V("incident_visible_radiation", "W m-2", "Incident visible solar radiation", (),
       "fsun.out col 2", lambda r: r["swskyb_forcing"][..., 1] + r["swskyd_forcing"][..., 1]),
     V("leaf_area_index", "m2 m-2", "Leaf area index", (), "fsun.out col 3 (with sai)",
@@ -141,7 +158,7 @@ VARIABLES: tuple[VariableSpec, ...] = (
       lambda r: r["sai_canopy"]),
     V("leaf_area_index_by_leaf_class", "m2 m-2", "Sunlit and shaded leaf area index",
       ("leaf_class",), "fsun.out cols 4-5",
-      lambda r: np.stack([r["laisun_canopy"], r["laisha_canopy"]], axis=-1)),
+      lambda r: r.xp.stack([r["laisun_canopy"], r["laisha_canopy"]], axis=-1)),
     V("absorbed_visible_radiation", "W m-2", "Visible radiation absorbed by vegetation",
       ("leaf_group",), "fsun.out cols 6-8",
       lambda r: r.by_group("swveg_canopy", "swvegsun_canopy", "swvegsha_canopy", band=1)),
@@ -209,7 +226,7 @@ VARIABLES: tuple[VariableSpec, ...] = (
       "fluxprofile.out col 3", lambda r: r.layer(r["shair_profile"])),
     V("latent_heat_flux_profile", "W m-2", "Latent heat flux at layer top", ("layer",),
       "fluxprofile.out col 4",
-      lambda r: r.layer(r["etair_profile"]) * r.raw["derived.latvap_tref"][:, :, None]),
+      lambda r: r.layer(r["etair_profile"]) * r.latvap_tref()[:, :, None]),
     V("momentum_flux_profile", "m2 s-2", "Momentum flux at layer top", ("layer",),
       "fluxprofile.out col 5", lambda r: r.layer(r["mflx_profile"])),
     V("direct_shortwave_down_profile", "W m-2", "Direct beam solar radiation", ("layer", "band"),
