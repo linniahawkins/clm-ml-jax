@@ -27,21 +27,32 @@ SOIL_FIELDS = {
 }
 
 
-def state_from_instances(insts) -> State:
-    """The prognostic variables in ``insts`` (a ``ClmInstances``)."""
+def state_from_instances(insts, previous: State | None = None) -> State:
+    """The prognostic variables in ``insts`` (a ``ClmInstances``). State-only fields (not in
+    the containers: ``acclimation_steps``) are carried from ``previous``; without one (the
+    first step) the running mean holds one step."""
+    import jax.numpy as jnp
 
     def get(fields):
         return {
             name: getattr(getattr(insts, inst), field) for name, (inst, field) in fields.items()
         }
 
-    return State(canopy=CanopyState(**get(CANOPY_FIELDS)), soil=SoilState(**get(SOIL_FIELDS)))
+    canopy = get(CANOPY_FIELDS)
+    if previous is not None:
+        canopy["acclimation_steps"] = previous.canopy.acclimation_steps
+    else:
+        canopy["acclimation_steps"] = jnp.ones_like(canopy["acclimation_temperature"])
+    return State(canopy=CanopyState(**canopy), soil=SoilState(**get(SOIL_FIELDS)))
 
 
 def instances_with_state(template, state: State):
     """``template`` (a ``ClmInstances``) with its prognostic variables taken from ``state``."""
     changes: dict[str, dict] = {}
-    for part, fields in ((state.canopy, CANOPY_FIELDS), (state.soil, SOIL_FIELDS)):
+    for part, fields in (
+        (state.canopy, CANOPY_FIELDS),
+        (state.soil, SOIL_FIELDS),
+    ):  # not state-only
         for name, (inst, field) in fields.items():
             changes.setdefault(inst, {})[field] = getattr(part, name)
     return template._replace(

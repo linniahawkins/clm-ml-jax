@@ -25,6 +25,7 @@ def _state(tair=300.0, tleaf=(0.0, 295.0)):
         intercepted_water=np.array([[0.0, 0.0, 0.0]]),
         ground_temperature=np.array([290.0]),
         acclimation_temperature=np.array([288.0]),
+        acclimation_steps=np.array([5.0]),
     )
     return State(canopy=canopy, soil=SoilState(temperature=np.array([[0.0, 285.0, 284.0]])))
 

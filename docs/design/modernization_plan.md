@@ -940,6 +940,25 @@ comparison against the Fortran output:
 
 - **10-day running-mean acclimation temperature** (decision 15), as the default.
   `acclimation_temperature: run_mean` keeps the Fortran definition for validation.
+  ✅ Done. `model.yaml` `physics.acclimation_temperature: running_mean` (default) |
+  `run_mean`, `physics.acclimation_days` (10). The running mean follows CLM's `runmean`
+  accumulation: `mean += (T - mean) / min(n, N)` with `n` the steps so far and `N` the steps
+  in `acclimation_days` (the plain mean of all steps for the first 10 days, then a running mean
+  with a 10-day time scale). `T` is the tower air temperature (as in Fortran's whole-run mean);
+  the first step starts the mean; it is updated before each later step. The mean and its step
+  count (`State.canopy.acclimation_steps`) are in the state, so restarts continue it exactly.
+  `run_mean` reproduces the previous reference bit for bit. Fortran comparison, May 2007
+  (112 columns; the fraction-at-minimum-leaf-water-potential column is excluded: Fortran is 0
+  at every step and the running mean touches the floor at one step, which the relative-error
+  metric, scaled by the Fortran maximum, turns into 3763%):
+
+  | Acclimation | Max relative error | Mean relative error | Columns with r < 0.9999 |
+  |---|---|---|---|
+  | `run_mean` (Fortran definition) | 0.16 % | 0.012 % | 7 |
+  | `running_mean` (new default) | 0.95 % | 0.080 % | 22 |
+
+  All columns stay within the 2.5 % tolerance; the Fortran comparison test should be run with
+  `acclimation = 'run_mean'`. Reference and twins regenerated (science change).
 - **Configurable model step with time interpolation** (decision 13): `numerics.step_seconds`,
   and the interpolation rules of §6.9 (linear, `coszen` shortwave, constant precipitation,
   midpoint interpolation of daily/monthly LAI, SAI and soil water). With CHATS7 (data at the

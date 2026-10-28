@@ -263,6 +263,8 @@ class Run:
             "met_type": 3 if f.interpolation == "three_point" else 0,
             "dpai_min": self.config.canopy_layers.min_plant_area_per_layer,
             "pftcon_val": 0,
+            "acclimation": self.config.physics.acclimation_temperature,
+            "acclimation_days": self.config.physics.acclimation_days,
         }
         return {
             "namelist": namelist,

@@ -27,6 +27,10 @@ class PhysicsOptions:
     wue_solver: Literal["brent", "bisection"] = "bisection"  # gs_solver 1/2
     photosynthesis_colimitation: bool = True  # colim_type 1/0
     temperature_acclimation: bool = True  # acclim_type 1/0
+    # Air temperature photosynthesis acclimates to (decision 15): a running mean over
+    # acclimation_days, or the whole-run mean (Fortran CLM-ml v2; validation only).
+    acclimation_temperature: Literal["running_mean", "run_mean"] = "running_mean"
+    acclimation_days: float = 10.0
     nitrogen_decay_kn: Optional[float] = None  # kn_val (None = computed; was -999)
     roughness_sublayer: Literal["harman_finnigan"] = "harman_finnigan"  # turb_type 1
     sparse_canopy: bool = True  # sparse_canopy_type 1/0
@@ -90,6 +94,8 @@ class ModelConfig:
                 "model.yaml: soil.columns: 'shared' (option B) is planned but not implemented; "
                 "use 'per_patch'"
             )
+        if self.physics.acclimation_days <= 0:
+            raise ConfigError("model.yaml: physics.acclimation_days must be positive")
         if self.numerics.substep_seconds <= 0:
             raise ConfigError("model.yaml: numerics.substep_seconds must be positive")
         if self.canopy_layers.max_layers < 2:

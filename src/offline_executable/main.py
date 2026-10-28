@@ -142,6 +142,8 @@ class LegacyRun:
     imonth: int
     dirout: str
     time_of: object  # 0-based run step -> StepTime
+    acclimation: str = "running_mean"  # running_mean (decision 15) | run_mean (Fortran)
+    acclimation_days: float = 10.0
 
 
 @dataclasses.dataclass
@@ -334,16 +336,22 @@ def setup_run(nml: dict) -> LegacyRun:
             for t in range(chunk.forcing.n_steps):
                 yield tower_met_at(chunk.forcing, t + 1)
 
-    # 6a. Acclimation temperature: mean over the whole run (Fortran CLM-ml v2 definition;
-    #     plan Phase 4b replaces it with a 10-day running mean), summed over the run's
-    #     forcing read chunk by chunk.
+    # 6a. Acclimation temperature. running_mean (default, decision 15): starts at the first
+    #     step's air temperature and is updated every step (advance_acclimation). run_mean
+    #     (Fortran CLM-ml v2, validation only): the mean over the whole run, summed over the
+    #     run's forcing read chunk by chunk. (init_acclim also sets the reference pressure
+    #     from the first record.)
+    acclimation = str(params.get("acclimation", "running_mean")).strip()
+    acclimation_days = float(params.get("acclimation_days", 10.0))
+    if acclimation not in ("running_mean", "run_mean"):
+        raise ValueError(f"acclimation must be running_mean or run_mean, got {acclimation!r}")
     from offline_driver.TowerMetMod import set_tower_location
 
     set_tower_location(tower_num, bounds.begp, bounds.endp)
     atm2lnd, wateratm2lndbulk, temperature, frictionvel, mlcanopy = init_acclim(
-        run_tower_met(),
+        run_tower_met() if acclimation == "run_mean" else iter([next(run_tower_met(1))]),
         tower_num,
-        ntimes,
+        ntimes if acclimation == "run_mean" else 1,
         bounds.begp,
         bounds.endp,
         st.atm2lnd,
@@ -398,6 +406,8 @@ def setup_run(nml: dict) -> LegacyRun:
         filt=filt,
         insts=st,
         load_chunk=load_chunk,
+        acclimation=acclimation,
+        acclimation_days=acclimation_days,
         ntimes=ntimes,
         tower_num=tower_num,
         iyear=iyear,
@@ -477,6 +487,23 @@ def month_chunks(run: LegacyRun, first_step: int) -> list:
     return [(k, n) for _, k, n in chunks]
 
 
+def advance_acclimation(run: LegacyRun, state, inputs: StepInputs):
+    """The state with the acclimation temperature's running mean advanced by this step's
+    forcing air temperature (decision 15): ``mean += (T - mean) / min(n, N)``, with ``n``
+    the steps averaged so far (this one included) and ``N`` the steps in
+    ``acclimation_days``: the mean of all steps so far for the first ``N`` steps, then a
+    running mean with an ``N``-step time scale (CLM's ``runmean`` accumulation). Unchanged
+    for ``acclimation = run_mean``. Applied before every step after the first."""
+    if run.acclimation != "running_mean":
+        return state
+    c = state.canopy
+    period = run.acclimation_days * 86400.0 / run.time_of(0).dtime
+    n = c.acclimation_steps + 1.0
+    t = jnp.asarray(inputs.met.tref, dtype=jnp.float64)  # tower air temperature (K)
+    mean = c.acclimation_temperature + (t - c.acclimation_temperature) / jnp.minimum(n, period)
+    return state._replace(canopy=c._replace(acclimation_temperature=mean, acclimation_steps=n))
+
+
 def stack_step_inputs(inputs: list) -> tuple:
     """Per-step inputs stacked along a leading time axis (the ``xs`` of a chunk's scan)."""
     return jax.tree.map(
@@ -507,6 +534,7 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers
             forcing_bef=forcing_bef,
             forcing_next=forcing_next,
         )
+        state = advance_acclimation(run, state, inputs)
         insts, _ = advance(
             run,
             instances_with_state(template, state),
@@ -515,7 +543,7 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers
             initialize=False,
             params=params,
         )
-        state = state_from_instances(insts)
+        state = state_from_instances(insts, state)
         if outputs == "state":
             return state, state
         return state, (state, insts.mlcanopy, insts.temperature)
@@ -578,6 +606,7 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
             forcing_bef=forcing_bef,
             forcing_next=forcing_next,
         )
+        state = advance_acclimation(run, state, inputs)
         insts, _ = advance(
             run,
             instances_with_state(template, state),
@@ -591,7 +620,7 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
             S.accumulate(spec.statistic, b, slot, {n: values[n] for n in spec.variables})
             for spec, b, slot in zip(streams, buffers, slots)
         )
-        return (state_from_instances(insts), buffers), None
+        return (state_from_instances(insts, state), buffers), None
 
     # As in jax-gcm: jax.checkpoint on the step (if CHECKPOINT_STEP), so a gradient over a
     # chunk stores only the carry (state and stream buffers) at each step and recomputes the
@@ -970,9 +999,10 @@ def main():
             for _itim in range(2, ntimes + 1):
                 step_t0 = time.perf_counter()
                 inputs = step_inputs(run, run.load_chunk(_itim - 1, 1), _itim - 1)
+                state = advance_acclimation(run, state, inputs)
                 st = instances_with_state(template, state)
                 st, filt = advance(run, st, filt, inputs, initialize=False)
-                state = state_from_instances(st)
+                state = state_from_instances(st, state)
                 write_output(inputs.now.calday, st.mlcanopy, st.temperature)
                 report(_itim, time.perf_counter() - step_t0)
     finally:

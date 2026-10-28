@@ -31,9 +31,12 @@ class CanopyState(NamedTuple):
     leaf_water_potential: Array  # (np, nlev, nleaf + 1) MPa
     intercepted_water: Array  # (np, nlev) kg m-2
     ground_temperature: Array  # (np,) K
-    # Air temperature that photosynthesis acclimates to. Now the whole-run mean (as Fortran,
-    # set once at initialization); Phase 4b makes it a 10-day running mean updated each step.
+    # Air temperature that photosynthesis acclimates to: by default a 10-day running mean of
+    # the forcing air temperature, updated each step (decision 15); or the whole-run mean
+    # (Fortran CLM-ml v2, set once at initialization; validation only).
     acclimation_temperature: Array  # (np,) K
+    # Steps averaged into the running mean so far (its weight is 1 / min(steps, period)).
+    acclimation_steps: Array  # (np,)
 
 
 class SoilState(NamedTuple):

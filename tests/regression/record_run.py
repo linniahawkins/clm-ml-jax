@@ -63,7 +63,13 @@ def write_portable_namelist(source: Path, dest: Path, output_dir: Path) -> Path:
     return dest
 
 
-def run_case(workdir: Path, *, params: str | None = None, legacy_ascii: bool = False):
+def run_case(
+    workdir: Path,
+    *,
+    params: str | None = None,
+    legacy_ascii: bool = False,
+    physics: dict | None = None,
+):
     """Run the reference case through ``clm_ml`` in ``workdir``.
 
     Returns ``(run, {stream: Outputs})`` with streams ``step`` (all named variables) and
@@ -102,6 +108,11 @@ def run_case(workdir: Path, *, params: str | None = None, legacy_ascii: bool = F
     }
     if params is not None:
         data["params"] = params
+    if physics:  # model.yaml physics options (e.g. acclimation_temperature)
+        model_yaml = workdir / data["model"]
+        model = yaml.safe_load(model_yaml.read_text()) or {}
+        model.setdefault("physics", {}).update(physics)
+        model_yaml.write_text(yaml.safe_dump(model))
     run_yaml.write_text(yaml.safe_dump(data))
     run = load_run(run_yaml)
     return run, run.execute(quiet=True)

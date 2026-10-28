@@ -8,7 +8,9 @@ Thresholds (from CLAUDE.md):
   - Mean absolute relative error < 2.5 %
   - Pearson correlation >= 0.9999
 
-Run after a full-month CHATS7 May-2007 simulation (the Fortran reference covers May):
+Run after a full-month CHATS7 May-2007 simulation (the Fortran reference covers May), with
+the Fortran acclimation temperature (add ``acclimation = 'run_mean'`` to the namelist; the
+default 10-day running mean, decision 15, departs from Fortran by design, by up to ~1%):
     clm-ml-offline src/offline_executable/nl.CHATS7.05.2007
     pytest tests/test_fortran_python_comparison.py -m slow -v
 (CLM_ML_COMPARE_DIR=<dir> compares the .out files in another directory.)
