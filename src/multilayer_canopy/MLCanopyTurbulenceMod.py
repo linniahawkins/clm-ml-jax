@@ -70,12 +70,7 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     zdtgridH,
     zdtgridM,
 )
-from multilayer_canopy.MLclm_varctl import (  # noqa: F401
-    GridInfo,
-    HF_extension_type,
-    sparse_canopy_type,
-    turb_type,
-)
+from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLMathToolsMod import (  # noqa: F401
     bisection_traceable,
     is_concrete,
@@ -440,6 +435,7 @@ def _GetPrSc(
     beta_neutral: float,
     beta_neutral_max: float,
     LcL: float,
+    sparse_canopy_type: int,
 ) -> float:
     """
     Calculate the Prandtl (= Schmidt) number at the canopy top.
@@ -632,6 +628,7 @@ def _GetBeta(beta_neutral, LcL):
 
 
 def _ObuFuncPure_jax(
+    sparse_canopy_type: int,
     obu_val,
     *,
     Lc_p: float,
@@ -704,7 +701,7 @@ def _ObuFuncPure_jax(
     hc_minus_d = jnp.minimum(hc_minus_d, jnp.asarray(ztop_p))
     zdisp_val = ztop_p - hc_minus_d
 
-    PrSc_val = _GetPrSc(beta_neutral, beta_neutral_max, LcL_val)
+    PrSc_val = _GetPrSc(beta_neutral, beta_neutral_max, LcL_val, sparse_canopy_type)
 
     psim, psic, _dum1, _dum2 = _GetPsiRSL(zref_p, ztop_p, zdisp_val, obu_cur, beta_val, PrSc_val)
 
@@ -733,7 +730,7 @@ def _ObuFuncPure_jax(
 # ===========================================================================
 
 
-def _obu_body_pure(i, carry):
+def _obu_body_pure(sparse_canopy_type, i, carry):
     """Pure fori_loop body for the Obukhov secant solver.
 
     Defined at module level (not as a closure) so ``jax.lax.fori_loop``
@@ -774,6 +771,7 @@ def _obu_body_pure(i, carry):
     dx = jnp.where(_df == 0.0, 0.0, -f1 * (x1 - x0) * _df_sign / _df_abs_safe)
     x_new = x1 + dx
     f_new = _ObuFuncPure_jax(
+        sparse_canopy_type,
         x_new,
         Lc_p=Lc_p,
         ztop_p=ztop_p,
@@ -808,7 +806,7 @@ def _obu_body_pure(i, carry):
     )
 
 
-def _obu_fixed_iter(init_obu, kwargs, n_iter: int = 25):
+def _obu_fixed_iter(init_obu, kwargs, sparse_canopy_type: int, n_iter: int = 25):
     """
     Fixed-iteration Obukhov-length solver via ``jax.lax.fori_loop``.
 
@@ -858,6 +856,7 @@ def _obu_fixed_iter(init_obu, kwargs, n_iter: int = 25):
     obu1 = jnp.asarray(-100.0)
 
     f0 = _ObuFuncPure_jax(
+        sparse_canopy_type,
         obu0,
         Lc_p=Lc_p,
         ztop_p=ztop_p,
@@ -873,6 +872,7 @@ def _obu_fixed_iter(init_obu, kwargs, n_iter: int = 25):
         qaf_p=qaf_p,
     )
     f1 = _ObuFuncPure_jax(
+        sparse_canopy_type,
         obu1,
         Lc_p=Lc_p,
         ztop_p=ztop_p,
@@ -907,7 +907,9 @@ def _obu_fixed_iter(init_obu, kwargs, n_iter: int = 25):
         qaf_p,
     )
 
-    final_carry = jax.lax.fori_loop(0, n_iter, _obu_body_pure, init_carry)
+    final_carry = jax.lax.fori_loop(
+        0, n_iter, functools.partial(_obu_body_pure, sparse_canopy_type), init_carry
+    )
     obu_final = final_carry[1]  # x1 from final iteration
     return obu_final
 
@@ -917,7 +919,7 @@ def _obu_fixed_iter(init_obu, kwargs, n_iter: int = 25):
 # ===========================================================================
 
 
-def _GetObu(p: int, mlcanopy_inst: mlcanopy_type) -> mlcanopy_type:
+def _GetObu(p: int, mlcanopy_inst: mlcanopy_type, sparse_canopy_type: int) -> mlcanopy_type:
     """
     Solve for the Obukhov length and update the dependent quantities.
 
@@ -963,18 +965,18 @@ def _GetObu(p: int, mlcanopy_inst: mlcanopy_type) -> mlcanopy_type:
     # dF/dobu = dobu_new/dobu - 1 < 0 for a converging fixed-point.
 
     # Forward solve (stop gradient through iterations)
-    obu_raw = _obu_fixed_iter(jnp.asarray(100.0), _kwargs, n_iter=25)
+    obu_raw = _obu_fixed_iter(jnp.asarray(100.0), _kwargs, sparse_canopy_type, n_iter=25)
     obu0 = jax.lax.stop_gradient(obu_raw)
 
     # Residual at obu0 — gradient flows through theta (thref_p, thvref_p, ...)
-    f0 = _ObuFuncPure_jax(obu0, **_kwargs)
+    f0 = _ObuFuncPure_jax(sparse_canopy_type, obu0, **_kwargs)
 
     # dF/dobu via central FD — stop_gradient (denominator only)
     _delta_obu = jnp.asarray(1.0, dtype=obu0.dtype)  # 1 m step (obu is O(100-10000 m))
     df_dobu = jax.lax.stop_gradient(
         (
-            _ObuFuncPure_jax(obu0 + _delta_obu, **_kwargs)
-            - _ObuFuncPure_jax(obu0 - _delta_obu, **_kwargs)
+            _ObuFuncPure_jax(sparse_canopy_type, obu0 + _delta_obu, **_kwargs)
+            - _ObuFuncPure_jax(sparse_canopy_type, obu0 - _delta_obu, **_kwargs)
         )
         / (2.0 * _delta_obu)
     )
@@ -993,11 +995,11 @@ def _GetObu(p: int, mlcanopy_inst: mlcanopy_type) -> mlcanopy_type:
     obu_ift = obu0 - (step - jax.lax.stop_gradient(step))
 
     # Recompute all derived quantities from the IFT-corrected obu (JAX-traceable)
-    mlcanopy_inst = _obu_writeback_jax(p, obu_ift, _kwargs, mlcanopy_inst)
+    mlcanopy_inst = _obu_writeback_jax(p, obu_ift, _kwargs, sparse_canopy_type, mlcanopy_inst)
     return mlcanopy_inst
 
 
-def _obu_writeback_jax(p, obu_val, kwargs, mlcanopy_inst):
+def _obu_writeback_jax(p, obu_val, kwargs, sparse_canopy_type, mlcanopy_inst):
     """JAX-traceable write-back of Obukhov-derived quantities.
 
     Recomputes beta, zdisp, PrSc, ustar, gac_to_hc from ``obu_val``
@@ -1050,7 +1052,7 @@ def _obu_writeback_jax(p, obu_val, kwargs, mlcanopy_inst):
     hc_minus_d = jnp.minimum(hc_minus_d, ztop_p)
     zdisp_val = ztop_p - hc_minus_d
 
-    PrSc_val = _GetPrSc(beta_neutral, beta_neutral_max, LcL_val)
+    PrSc_val = _GetPrSc(beta_neutral, beta_neutral_max, LcL_val, sparse_canopy_type)
 
     psim, psic, _, _ = _GetPsiRSL(zref_p, ztop_p, zdisp_val, obu_cur, beta_val, PrSc_val)
 
@@ -1185,6 +1187,7 @@ def _AerodynamicConductance(
     ncan: int,
     lm_over_beta,
     mlcanopy_inst: mlcanopy_type,
+    HF_extension_type: int,
 ) -> mlcanopy_type:
     """Aerodynamic conductances and eddy diffusivity (Fortran ``AerodynamicConductance``).
 
@@ -1290,8 +1293,8 @@ def _AerodynamicConductance(
 # ===========================================================================
 
 
-@functools.partial(jax.jit, static_argnames=("grid",))
-def _HF2008(grid: GridInfo, mlcanopy_inst: mlcanopy_type) -> mlcanopy_type:
+@functools.partial(jax.jit, static_argnames=("grid", "opts"))
+def _HF2008(grid: GridInfo, mlcanopy_inst: mlcanopy_type, opts: MLOptions) -> mlcanopy_type:
     """Canopy turbulence from the roughness sublayer theory of Harman and Finnigan (2008).
 
     Mirrors Fortran subroutine ``HF2008``. Compiled once per ``grid`` (layer indices are
@@ -1327,7 +1330,7 @@ def _HF2008(grid: GridInfo, mlcanopy_inst: mlcanopy_type) -> mlcanopy_type:
     mlcanopy_inst = mlcanopy_inst._replace(taf_canopy=taf, qaf_canopy=qaf)
 
     # Obukhov length (differentiable)
-    mlcanopy_inst = _GetObu(p, mlcanopy_inst)
+    mlcanopy_inst = _GetObu(p, mlcanopy_inst, opts.sparse_canopy_type)
 
     # Roughness length (differentiable)
     mlcanopy_inst = _RoughnessLength(p, mlcanopy_inst)
@@ -1354,7 +1357,9 @@ def _HF2008(grid: GridInfo, mlcanopy_inst: mlcanopy_type) -> mlcanopy_type:
     mlcanopy_inst = mlcanopy_inst._replace(mflx_profile=mflx)
 
     # Aerodynamic conductances (differentiable)
-    mlcanopy_inst = _AerodynamicConductance(p, ntop, ncan, lm_over_beta, mlcanopy_inst)
+    mlcanopy_inst = _AerodynamicConductance(
+        p, ntop, ncan, lm_over_beta, mlcanopy_inst, opts.HF_extension_type
+    )
 
     return mlcanopy_inst
 
@@ -1371,6 +1376,8 @@ def CanopyTurbulence(
     mlcanopy_inst: mlcanopy_type,
     grid: GridInfo,
     nstep: int = 0,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Main driver for the canopy turbulence parameterisation.
@@ -1389,8 +1396,8 @@ def CanopyTurbulence(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    if turb_type == 1:
-        mlcanopy_inst = _HF2008(grid, mlcanopy_inst)
+    if opts.turb_type == 1:
+        mlcanopy_inst = _HF2008(grid, mlcanopy_inst, opts)
         # Fortran HF2008 warning, from the outputs (it cannot print from compiled code)
         p = grid.p
         beta_p = mlcanopy_inst.beta_canopy[p]

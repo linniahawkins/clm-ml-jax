@@ -123,3 +123,57 @@ met_type: int = 0  # Meteorological forcing for MLcanopy timestep:
 dpai_min: float = 0.01  # Minimum plant area index to treat as a vegetation layer (m2/m2)
 
 pftcon_val: int = 0  # PFT parameters: default values (0) or CHATS overrides (1)
+
+
+# ---------------------------------------------------------------------------
+# Explicit options (plan Phase 5a, decision 20) — not part of original Fortran
+# ---------------------------------------------------------------------------
+
+
+class MLOptions(NamedTuple):
+    """The run-control options above, as one value passed to the physics.
+
+    The module variables above are copied by other modules when they are imported, so a
+    process could hold one configuration only. ``MLOptions`` is passed explicitly instead.
+    It is a hashable tuple of Python numbers, so ``jit`` treats it as static: a different
+    option compiles a different program, as for every ``model.yaml`` setting. Defaults are
+    the Fortran defaults above (CLM-ml v2, the CHATS7 configuration except ``met_type``).
+    """
+
+    gs_type: int = 2
+    gspot_type: int = 1
+    gs_solver: int = 2
+    colim_type: int = 1
+    acclim_type: int = 1
+    kn_val: float = -999.0
+    turb_type: int = 1
+    sparse_canopy_type: int = 1
+    HF_extension_type: int = 2
+    flux_profile_type: int = 1
+    gb_type: int = 3
+    light_type: int = 2
+    leaf_optics_type: int = 0
+    longwave_type: int = 1
+    dtime_ml: float = 300.0
+    runge_kutta_type: int = 41
+    dz_tall: float = 0.5
+    dz_short: float = 0.1
+    dz_param: float = 2.0
+    nlayer_above: int = 0
+    nlayer_within: int = 0
+    mlcan_to_clm: int = 0
+    met_type: int = 0
+    dpai_min: float = 0.01
+
+    @property
+    def nrk(self) -> int:
+        """Number of Runge-Kutta stages — Fortran: runge_kutta_type/10."""
+        return self.runge_kutta_type // 10
+
+    @classmethod
+    def from_codes(cls, codes: dict) -> "MLOptions":
+        """From ``ModelConfig.to_fortran_codes`` values (other keys, e.g. ``nrk``, ignored)."""
+        return cls(**{k: type(getattr(cls(), k))(v) for k, v in codes.items() if k in cls._fields})
+
+
+DEFAULT_OPTIONS = MLOptions()

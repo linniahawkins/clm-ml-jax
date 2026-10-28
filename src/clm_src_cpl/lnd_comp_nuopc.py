@@ -47,6 +47,8 @@ def ModelAdvance(
     forcing_next,
     initialize,
     params=None,
+    *,
+    opts,
 ):
     """
     Advance the CLM model by one time step.
@@ -72,6 +74,7 @@ def ModelAdvance(
         initialize: True on the run's first time step.
         params: The patch's PFT parameters (``MLCanopyParamsMod.CanopyParams``); built from
             the PFT tables when omitted.
+        opts: The multilayer canopy options (``MLclm_varctl.MLOptions``).
 
     Returns:
         ``(insts, filter)``: the updated state containers and filters.
@@ -88,4 +91,5 @@ def ModelAdvance(
         forcing_next,
         initialize,
         params=params,
+        opts=opts,
     )

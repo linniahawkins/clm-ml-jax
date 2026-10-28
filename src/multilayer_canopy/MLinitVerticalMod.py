@@ -32,14 +32,7 @@ from clm_src_main.PatchType import patch  # noqa: F401
 from clm_src_main.wateratm2lndBulkType import wateratm2lndbulk_type  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLclm_varcon import mmdry, mmh2o  # noqa: F401
-from multilayer_canopy.MLclm_varctl import (  # noqa: F401
-    dpai_min,
-    dz_param,
-    dz_short,
-    dz_tall,
-    nlayer_above,
-    nlayer_within,
-)
+from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: F401
 from multilayer_canopy.MLMathToolsMod import beta_distribution_cdf  # noqa: F401
 
@@ -55,6 +48,8 @@ def initVerticalStructure(
     canopystate_inst: canopystate_type,
     frictionvel_inst: frictionvel_type,
     mlcanopy_inst: mlcanopy_type,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Define canopy layer vertical structure from the reference height,
@@ -64,8 +59,8 @@ def initVerticalStructure(
 
     Layer discretization (Fortran lines 66-98)
     -------------------------------------------
-    Two modes are supported, selected by ``nlayer_within`` /
-    ``nlayer_above`` in ``MLclm_varctl``:
+    Two modes are supported, selected by ``opts.nlayer_within`` /
+    ``opts.nlayer_above``:
 
     **Explicit layer counts** (both > 0):
         ``ntop = nlayer_within``, ``nabove = nlayer_above``;
@@ -106,6 +101,8 @@ def initVerticalStructure(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
+    dz_tall, dz_short, dz_param = opts.dz_tall, opts.dz_short, opts.dz_param
+    nlayer_within, nlayer_above, dpai_min = opts.nlayer_within, opts.nlayer_above, opts.dpai_min
     # Unpack output arrays (Fortran associate block, lines 46-63)
     forc_hgt_u = frictionvel_inst.forc_hgt_u_patch
     htop = canopystate_inst.htop_patch

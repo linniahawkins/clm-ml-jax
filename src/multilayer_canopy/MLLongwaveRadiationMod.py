@@ -52,7 +52,7 @@ from clm_src_main.PatchType import patch  # noqa: E402, F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: E402, F401
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams  # noqa: E402
 from multilayer_canopy.MLclm_varcon import emg  # noqa: E402, F401
-from multilayer_canopy.MLclm_varctl import GridInfo, longwave_type  # noqa: E402, F401
+from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions  # noqa: E402
 from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: E402, F401
 from multilayer_canopy.MLMathToolsMod import tridiag  # noqa: E402, F401
 
@@ -68,6 +68,8 @@ def LongwaveRadiation(
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
     grid: GridInfo,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Longwave radiation transfer through the multilayer canopy.
@@ -87,7 +89,7 @@ def LongwaveRadiation(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    if longwave_type == 1:
+    if opts.longwave_type == 1:
         return _Norman(bounds, num_filter, filter_patch, mlcanopy_inst, params, grid=grid)
     else:
         endrun(msg=" ERROR: LongwaveRadiation: longwave_type not valid")

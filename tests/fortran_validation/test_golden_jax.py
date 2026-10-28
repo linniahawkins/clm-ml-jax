@@ -24,7 +24,6 @@ binding and restore it after the call.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import math
 import os
@@ -85,23 +84,6 @@ def _get(mod_dotted: str):
     if not _M:
         _M = _import_jax_modules()
     return _M[mod_dotted]
-
-
-# ---------------------------------------------------------------------------
-# Helper: temporary module-global override
-# ---------------------------------------------------------------------------
-
-
-@contextlib.contextmanager
-def _override(module_path: str, attr: str, value):
-    """Temporarily set a module-level name and restore it afterward."""
-    mod = _get(module_path)
-    old = getattr(mod, attr)
-    setattr(mod, attr, value)
-    try:
-        yield
-    finally:
-        setattr(mod, attr, old)
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +193,7 @@ def _adapt_fth25(inp: dict) -> dict:
 def _adapt_realized_rate(inp: dict) -> dict:
     photo_mod = _get("multilayer_canopy.MLLeafPhotosynthesisMod")
     colim_in = int(inp["colim_type_in"])
-    with _override("multilayer_canopy.MLLeafPhotosynthesisMod", "colim_type", colim_in):
-        agross = photo_mod._RealizedRate(inp["c3psn"], inp["ac"], inp["aj"], inp["ap"])
+    agross = photo_mod._RealizedRate(colim_in, inp["c3psn"], inp["ac"], inp["aj"], inp["ap"])
     return {"agross": float(agross)}
 
 
@@ -241,12 +222,11 @@ def _adapt_get_beta(inp: dict) -> dict:
 
 
 def _adapt_get_prsc(inp: dict) -> dict:
-    """_GetPrSc reads sparse_canopy_type from its module namespace."""
+    """_GetPrSc takes sparse_canopy_type as an argument (an MLOptions field)."""
     turb = _get("multilayer_canopy.MLCanopyTurbulenceMod")
     varcon = _get("multilayer_canopy.MLclm_varcon")
     sparse_in = int(inp["sparse_canopy_type_in"])
-    with _override("multilayer_canopy.MLCanopyTurbulenceMod", "sparse_canopy_type", sparse_in):
-        PrSc = turb._GetPrSc(inp["beta_neutral"], varcon.beta_neutral_max, inp["LcL"])
+    PrSc = turb._GetPrSc(inp["beta_neutral"], varcon.beta_neutral_max, inp["LcL"], sparse_in)
     return {"PrSc": float(PrSc)}
 
 
@@ -320,19 +300,19 @@ def _adapt_leaf_boundary_layer(inp: dict) -> dict:
     dv_dh = dv / dh
     dc_dh = dc / dh
 
-    with _override("multilayer_canopy.MLLeafBoundaryLayerMod", "gb_type", gb_in):
-        gbh, gbv, gbc = lbl_mod._gb_layer(
-            jnp.asarray(1.0),  # dpai > 0 so the layer is active
-            jnp.asarray(u),
-            jnp.asarray(tair),
-            jnp.asarray(tleaf),
-            visc,
-            dh,
-            dv_dh,
-            dc_dh,
-            d,
-            rhomol,
-        )
+    gbh, gbv, gbc = lbl_mod._gb_layer(
+        gb_in,
+        jnp.asarray(1.0),  # dpai > 0 so the layer is active
+        jnp.asarray(u),
+        jnp.asarray(tair),
+        jnp.asarray(tleaf),
+        visc,
+        dh,
+        dv_dh,
+        dc_dh,
+        d,
+        rhomol,
+    )
 
     return {"gbh": float(gbh), "gbv": float(gbv), "gbc": float(gbc)}
 
@@ -356,7 +336,9 @@ def _adapt_runge_kutta_ini(inp: dict) -> dict:
     Unused upper-triangular entries in ``a`` hold spval (1e36) matching Fortran.
     """
     rk_mod = _get("multilayer_canopy.MLRungeKuttaMod")
-    a, b, c = rk_mod.RungeKuttaIni()  # returns (a, b, c) — note order
+    # Fortran default runge_kutta_type (41), as when the golden data were recorded
+    opts = _get("multilayer_canopy.MLclm_varctl").DEFAULT_OPTIONS
+    a, b, c = rk_mod.RungeKuttaIni(opts)  # returns (a, b, c) — note order
     nrk = len(b)  # number of stages from array length
     out = {}
     for i in range(1, nrk + 1):

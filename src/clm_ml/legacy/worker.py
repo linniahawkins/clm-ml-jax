@@ -104,7 +104,14 @@ def setup_legacy_run(spec: dict):
 
     with tempfile.TemporaryDirectory() as tmp:
         namelist = _write_namelist(spec["namelist"], Path(tmp), None)
-        return main_mod.setup_run(main_mod.read_namelist(str(namelist)))
+        return main_mod.setup_run(main_mod.read_namelist(str(namelist)), _options(spec))
+
+
+def _options(spec: dict):
+    """The multilayer canopy options of ``spec`` (model.yaml), passed to the physics."""
+    from multilayer_canopy.MLclm_varctl import MLOptions
+
+    return MLOptions.from_codes(spec["varctl"])
 
 
 def run_spec(spec: dict, out_file: Path) -> None:
@@ -118,7 +125,7 @@ def run_spec(spec: dict, out_file: Path) -> None:
             # Validation output only: the step-by-step legacy driver writing the six .out files.
             namelist = _write_namelist(spec["namelist"], Path(tmp), spec["legacy_ascii_dir"])
             sys.argv = ["clm-ml-offline", str(namelist)]
-            main_mod.main()
+            main_mod.main(_options(spec))
             return
     run = setup_legacy_run(spec)
 

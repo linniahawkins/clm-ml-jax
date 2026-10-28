@@ -38,11 +38,7 @@ from clm_src_main.decompMod import bounds_type  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import J_to_umol, chil_max, chil_min, kb_max  # noqa: F401
-from multilayer_canopy.MLclm_varctl import (  # noqa: F401
-    GridInfo,  # noqa: F401
-    leaf_optics_type,
-    light_type,
-)
+from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: F401
 from multilayer_canopy.MLMathToolsMod import is_concrete, tridiag  # noqa: F401
 
@@ -58,6 +54,8 @@ def SolarRadiation(
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
     grid: GridInfo,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Solar radiation transfer through the multilayer canopy.
@@ -147,7 +145,7 @@ def SolarRadiation(
     zen = solar_zen[p]
     cos_zen = jnp.cos(zen)
 
-    if leaf_optics_type == 0:
+    if opts.leaf_optics_type == 0:
         _xl_pft = params.leaf_angle_index
         _cf_pft = params.clumping_index
         _rhol, _taul = params.leaf_reflectance[rb], params.leaf_transmittance[rb]
@@ -274,7 +272,7 @@ def SolarRadiation(
     # ------------------------------------------------------------------
     # Radiative transfer solver — Fortran lines 216-222
     # ------------------------------------------------------------------
-    if light_type == 1:
+    if opts.light_type == 1:
         mlcanopy_inst = _Norman(
             bounds,
             num_filter,
@@ -285,7 +283,7 @@ def SolarRadiation(
             mlcanopy_inst,
             grid=grid,
         )
-    elif light_type == 2:
+    elif opts.light_type == 2:
         mlcanopy_inst = _TwoStream(
             bounds,
             num_filter,

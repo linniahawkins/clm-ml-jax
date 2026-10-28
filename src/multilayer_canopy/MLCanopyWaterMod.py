@@ -40,7 +40,7 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     maximum_leaf_wetted_fraction,
     mmh2o,
 )
-from multilayer_canopy.MLclm_varctl import dtime_ml  # noqa: F401
+from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
 
 # ---------------------------------------------------------------------------
@@ -131,6 +131,8 @@ def CanopyInterception(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Calculate canopy interception and throughfall.
@@ -177,7 +179,7 @@ def CanopyInterception(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    dtime = dtime_ml  # Python float constant — no cast needed
+    dtime = opts.dtime_ml  # Python float constant — no cast needed
 
     h2ocan = mlcanopy_inst.h2ocan_profile
     qflx_intr = mlcanopy_inst.qflx_intr_canopy
@@ -256,6 +258,8 @@ def CanopyEvaporation(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Update canopy intercepted water for evaporation and dew deposition.
@@ -293,7 +297,7 @@ def CanopyEvaporation(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    dtime = dtime_ml  # Python float constant
+    dtime = opts.dtime_ml  # Python float constant
     h2ocan = mlcanopy_inst.h2ocan_profile
 
     for fp in range(num_filter):  # Fortran: do fp = 1, num_filter

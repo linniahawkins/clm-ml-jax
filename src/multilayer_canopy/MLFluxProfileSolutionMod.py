@@ -18,7 +18,7 @@ from jax import Array
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
-from multilayer_canopy.MLclm_varctl import dtime_ml, flux_profile_type  # noqa: F401
+from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf, nlevmlcan  # noqa: F401
 from multilayer_canopy.MLLeafFluxesMod import LeafFluxes  # noqa: F401
 from multilayer_canopy.MLMathToolsMod import tridiag_2eq  # noqa: F401
@@ -44,6 +44,8 @@ def FluxProfileSolution(
     filter: Array,
     mlcanopy_inst: mlcanopy_type,
     grid,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Source/sink fluxes for leaves and soil, and concentration profiles.
@@ -70,16 +72,16 @@ def FluxProfileSolution(
     co2ref = mlcanopy_inst.co2ref_forcing  # Atmospheric CO2 at ref height (umol/mol)
     cair = mlcanopy_inst.cair_profile  # Canopy layer atmospheric CO2 (umol/mol)
 
-    if flux_profile_type in (0, -1):
+    if opts.flux_profile_type in (0, -1):
         # Legacy well-mixed path — Fortran lines 52-58
-        mlcanopy_inst = WellMixed(num_filter, filter, mlcanopy_inst)
+        mlcanopy_inst = WellMixed(num_filter, filter, mlcanopy_inst, opts=opts)
         endrun(msg=" ERROR: WellMixed option not valid")
 
-    elif flux_profile_type == 1:
+    elif opts.flux_profile_type == 1:
         # Implicit flux-profile solution — Fortran lines 62-74
         for fp in range(num_filter):
             p, n = grid.p, grid.ncan
-            mlcanopy_inst = ImplicitFluxProfileSolution(p, mlcanopy_inst, n=n)
+            mlcanopy_inst = ImplicitFluxProfileSolution(p, mlcanopy_inst, n=n, opts=opts)
 
             # No profile for CO2: set every layer to reference value
             cair = cair.at[p, :n].set(co2ref[p])
@@ -96,10 +98,11 @@ def FluxProfileSolution(
 # ---------------------------------------------------------------------------
 
 
-@partial(jax.jit, static_argnums=(0, 1))
+@partial(jax.jit, static_argnums=(0, 1, 2))
 def _implicit_fps_jit(
     p: int,
     n: int,
+    dtime: float,
     mlcanopy_inst: mlcanopy_type,
 ):
     """JIT-compiled core of ImplicitFluxProfileSolution.
@@ -163,7 +166,6 @@ def _implicit_fps_jit(
     # ------------------------------------------------------------------
     # Timestep and latent heat — Fortran lines 155-158
     # ------------------------------------------------------------------
-    dtime = dtime_ml
     lambda_ = LatVap(_tref_p)
 
     # ------------------------------------------------------------------
@@ -513,6 +515,8 @@ def ImplicitFluxProfileSolution(
     p: int,
     mlcanopy_inst: mlcanopy_type,
     n: int = None,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Implicit solution for source/sink fluxes and concentration profiles.
@@ -530,7 +534,7 @@ def ImplicitFluxProfileSolution(
     """
     if n is None:
         n = int(mlcanopy_inst.ncan_canopy[p])  # concrete before JIT boundary
-    mlcanopy_inst, aux = _implicit_fps_jit(p, n, mlcanopy_inst)
+    mlcanopy_inst, aux = _implicit_fps_jit(p, n, opts.dtime_ml, mlcanopy_inst)
     if DEBUG_FPS_CHECKS:
         (
             lambda_,
@@ -804,6 +808,8 @@ def WellMixed(
     num_filter: int,
     filter: Array,
     mlcanopy_inst: mlcanopy_type,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Set canopy scalar profiles to reference-height values (well-mixed
@@ -855,12 +861,12 @@ def WellMixed(
             cair = cair.at[p, ic].set(co2ref[p])
 
             # Scalar profiles — Fortran lines 538-554
-            if flux_profile_type == 0:
+            if opts.flux_profile_type == 0:
                 # Well-mixed assumption
                 wind = wind.at[p, ic].set(uref[p])
                 tair = tair.at[p, ic].set(tref[p])
                 eair = eair.at[p, ic].set(eref[p])
-            elif flux_profile_type == -1:
+            elif opts.flux_profile_type == -1:
                 # Dataset profiles
                 wind = wind.at[p, ic].set(wind_data[p, ic])
                 tair = tair.at[p, ic].set(tair_data[p, ic])
@@ -885,8 +891,8 @@ def WellMixed(
             )
 
             # Leaf fluxes — Fortran lines 563-564
-            mlcanopy_inst = LeafFluxes(p, ic, isun, mlcanopy_inst)
-            mlcanopy_inst = LeafFluxes(p, ic, isha, mlcanopy_inst)
+            mlcanopy_inst = LeafFluxes(p, ic, isun, mlcanopy_inst, opts=opts)
+            mlcanopy_inst = LeafFluxes(p, ic, isha, mlcanopy_inst, opts=opts)
 
             # Re-read any fields written by LeafFluxes
             wind = mlcanopy_inst.wind_profile

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import inspect
 import json
 import pickle
 import sys
@@ -163,12 +164,22 @@ def replay(out_json: Path) -> None:
             kwargs.pop("_o2ref_py", None)  # O2 is a runtime kernel argument (Phase 4)
             if kwargs.get("grid", "absent") is None:
                 kwargs.update(_grid_kwargs(name, call["args"]))
+            if "opts" in inspect.signature(getattr(F, name)).parameters:
+                kwargs.setdefault("opts", _chats7_options())  # explicit options (Phase 5a)
             out = getattr(F, name)(*_to_jax(call["args"]), **_to_jax(kwargs))
             results.append(
                 {"step": call["step"], "max_rel_diff": _max_rel_diff(call["output"], out)}
             )
         report[name] = results
     Path(out_json).write_text(json.dumps(report, indent=1))
+
+
+#: The multilayer canopy options of the recorded CHATS7 run (the Fortran defaults with the
+#: namelist's three-point forcing interpolation); the recording predates explicit options.
+def _chats7_options():
+    from multilayer_canopy.MLclm_varctl import DEFAULT_OPTIONS
+
+    return DEFAULT_OPTIONS._replace(met_type=3)
 
 
 # Routines that take the patch's parameters (Phase 3d); the recording predates them.

@@ -1111,6 +1111,20 @@ refuses a second), and every end-to-end test pays ~40–60 s of process start-up
   The regression tests then run the model **in-process** and share compiled chunks through
   session fixtures; record the new suite time (numerics doc §6.1).
 
+Progress:
+- ✅ **Scheme options and numerics in the time step**: `MLclm_varctl.MLOptions` (a hashable
+  named tuple; `DEFAULT_OPTIONS` = the Fortran defaults) is built once by `setup_run` (from
+  `model.yaml` through the worker, or the Fortran defaults plus the namelist's `met_type` and
+  `dpai_min` for `clm-ml-offline`), kept in `LegacyRun.opts`, and passed as a keyword `opts`
+  through `ModelAdvance` → `clm_drv` → `MLCanopyFluxes` → every process (radiation,
+  turbulence, boundary layer, photosynthesis, flux–profile solution, hydraulics, canopy
+  water, Runge–Kutta, forcing interpolation, layer structure). Compiled functions take it as
+  a static argument; option-dependent kernel factories (boundary layer, photosynthesis) are
+  cached per option value. The Runge–Kutta update takes its stage count from the tableau.
+  Golden-test adapters pass options as arguments (the module-override helper is gone);
+  the process-IO replay passes the CHATS7 options. Bit for bit.
+  Remaining module reads: `create_mlcanopy` sizes the Runge–Kutta axis from `nrk` (setup).
+
 **Done when:** no physics module reads an option or table from a module global; several models
 run in one process; the regression suite runs in-process.
 

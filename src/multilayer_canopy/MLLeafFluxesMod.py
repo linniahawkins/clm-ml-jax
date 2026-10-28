@@ -26,7 +26,7 @@ import jax.numpy as jnp
 
 from clm_src_main.abortutils import endrun  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
-from multilayer_canopy.MLclm_varctl import dtime_ml  # noqa: F401
+from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLWaterVaporMod import LatVap, SatVap  # noqa: F401
 
 
@@ -35,6 +35,8 @@ def LeafFluxes(
     ic: int,
     il: int,
     mlcanopy_inst: mlcanopy_type,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Calculate leaf temperature and energy fluxes.
@@ -86,7 +88,7 @@ def LeafFluxes(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    dtime = dtime_ml  # Multilayer canopy timestep (s) — Python float constant
+    dtime = opts.dtime_ml  # Multilayer canopy timestep (s) — Python float constant
 
     # Latent heat of vaporization — Fortran line 65
     lam = LatVap(mlcanopy_inst.tref_forcing[p])  # J/mol

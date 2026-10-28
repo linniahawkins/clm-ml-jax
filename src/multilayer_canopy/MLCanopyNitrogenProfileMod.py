@@ -13,7 +13,7 @@ Differentiability notes
   through the nitrogen scaling computation.
 * ``round(float(c3psn[pft])) == 1`` replaced by a JAX-compatible
   ``jnp.where`` branch selection so ``pft`` can be a traced integer.
-* ``acclim_type`` and ``kn_val`` are static Python scalars — their
+* ``acclim_type`` and ``kn_val`` (static :class:`MLOptions`) are Python scalars — their
   ``if/elif`` branches are evaluated once at trace time.
 """
 
@@ -36,23 +36,19 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     rd25_to_vcmax25_c3,
     rd25_to_vcmax25_c4,
 )
-from multilayer_canopy.MLclm_varctl import (
-    GridInfo,
-    acclim_type,
-    kn_val,
-    leaf_optics_type,
-)  # noqa: F401
+from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: F401
-from multilayer_canopy.MLpftconMod import MLpftcon  # noqa: F401
 
 
-@partial(jax.jit, static_argnums=(0, 1))
+@partial(jax.jit, static_argnums=(0, 1), static_argnames=("opts",))
 def CanopyNitrogenProfile(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
     grid: GridInfo,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Calculate the canopy profile of nitrogen and photosynthetic capacity.
@@ -156,6 +152,7 @@ def CanopyNitrogenProfile(
         # Canopy-top photosynthetic parameters — Fortran lines 80-96
         vcmax25top = params.vcmax25
 
+        acclim_type, kn_val = opts.acclim_type, opts.kn_val
         if acclim_type == 0:  # static branch — evaluated at trace time
             j2v = jmax25_to_vcmax25_noacclim
         elif acclim_type == 1:
@@ -225,7 +222,7 @@ def CanopyNitrogenProfile(
         fn = exp_kn_above * (1.0 - jnp.exp(-kn * dpai_v)) / kn
         fn = jnp.where(has_pai, fn, 0.0)
 
-        if leaf_optics_type == 0:  # static branch — Fortran lines 132-139
+        if opts.leaf_optics_type == 0:  # static branch — Fortran lines 132-139
             denom = kn + kb_v * clump
             # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
             denom_safe = jnp.maximum(denom, 1.0e-30)
@@ -239,7 +236,7 @@ def CanopyNitrogenProfile(
             nscale_sun = jnp.where(has_pai, fn_sun / (fs_safe * dpai_safe), 0.0)
             nscale_sha = jnp.where(has_pai, fn_sha / (fsha_safe * dpai_safe), 0.0)
 
-        elif leaf_optics_type == 1:  # static branch — Fortran lines 140-141
+        elif opts.leaf_optics_type == 1:  # static branch — Fortran lines 140-141
             nscale = jnp.where(has_pai, fn / dpai_safe, 0.0)
             nscale_sun = nscale
             nscale_sha = nscale

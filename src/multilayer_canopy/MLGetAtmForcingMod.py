@@ -27,7 +27,7 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     rgas,
     wind_forc_min,
 )
-from multilayer_canopy.MLclm_varctl import GridInfo, met_type  # noqa: F401
+from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 
 # ---------------------------------------------------------------------------
 # Forcing at the previous, current and next CLM time steps
@@ -179,6 +179,8 @@ def GetAtmForcing(
     mlcanopy_inst: mlcanopy_type,
     window: AtmForcingWindow,
     grid: GridInfo,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Interpolate and derive atmospheric forcing for the current multilayer
@@ -280,6 +282,7 @@ def GetAtmForcing(
         # --------------------------------------------------------------
         # Atmospheric forcing interpolation (values stay as JAX scalars)
         # --------------------------------------------------------------
+        met_type = opts.met_type
         if met_type == 0:
             # No interpolation: use current CLM timestep values
             # Fortran lines 122-131

@@ -18,7 +18,7 @@ from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import spval  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
-from multilayer_canopy.MLclm_varctl import nrk, runge_kutta_type  # noqa: F401
+from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
 
 # ---------------------------------------------------------------------------
@@ -76,6 +76,7 @@ def RungeKuttaUpdate(
     #   stage irk < nrk:  x = x_bef + sum_{j<irk} a(irk+1, j) dx_j   (next stage's state)
     #   stage irk = nrk:  x = x_bef + sum_{j<=nrk} b(j) dx_j        (final update)
     #   irk > nrk:        unchanged (physics-only pass after the last stage)
+    nrk = b.shape[0]  # number of stages, from the tableau (RungeKuttaIni)
     irk0 = jnp.asarray(irk) - 1
     do_update = irk0 < nrk
     k = jnp.minimum(irk0, nrk - 1)  # column written this stage (clamped when no update)
@@ -125,12 +126,11 @@ def RungeKuttaUpdate(
 # ---------------------------------------------------------------------------
 
 
-def RungeKuttaIni() -> Tuple[Array, Array, Array]:
+def RungeKuttaIni(opts: MLOptions) -> Tuple[Array, Array, Array]:
     """
     Initialise the Butcher tableau for the selected Runge-Kutta method.
 
-    The method is chosen by the module-level constant ``runge_kutta_type``
-    from ``MLclm_varctl``. Unused tableau entries (upper-triangular part
+    The method is chosen by ``opts.runge_kutta_type``. Unused tableau entries (upper-triangular part
     of ``a``) are set to ``spval`` matching the Fortran convention.
 
     Mirrors Fortran subroutine ``RungeKuttaIni`` (lines 142-240).
@@ -156,6 +156,7 @@ def RungeKuttaIni() -> Tuple[Array, Array, Array]:
         - ``c``: Node vector, shape ``(nrk,)``, dtype ``float64``.
           Fortran: ``real(r8), intent(out) :: c(nrk)``.
     """
+    nrk, runge_kutta_type = opts.nrk, opts.runge_kutta_type
     # Initialise with spval; specific entries overwritten below
     a = jnp.full((nrk, nrk), spval, dtype=jnp.float64)
     b = jnp.zeros(nrk, dtype=jnp.float64)

@@ -44,6 +44,8 @@ def clm_drv(
     forcing_next: AtmForcingRecord,
     initialize: bool,
     params=None,
+    *,
+    opts,
 ) -> tuple[ClmInstances, clumpfilter]:
     """
     Main CLM model driver to calculate surface fluxes.
@@ -264,6 +266,7 @@ def clm_drv(
         forcing_next,
         initialize,
         params=params,
+        opts=opts,
     )
 
     # ------------------------------------------------------------------

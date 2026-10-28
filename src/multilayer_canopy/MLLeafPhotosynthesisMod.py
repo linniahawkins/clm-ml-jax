@@ -64,14 +64,7 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     vcmaxse_noacclim,
     vpd_min_MED,
 )
-from multilayer_canopy.MLclm_varctl import (  # noqa: F401
-    GridInfo,
-    acclim_type,
-    colim_type,
-    gs_solver,
-    gs_type,
-    gspot_type,
-)
+from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLMathToolsMod import (
     bisection,  # noqa: F401
     quadratic,
@@ -163,6 +156,7 @@ def _fth25_py(hd: float, se: float) -> float:
 
 
 def _RealizedRate(
+    colim_type: int,
     c3psn_val: float,
     ac: float,
     aj: float,
@@ -222,6 +216,8 @@ def _CiFuncPure_jax(
     ci_val,
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     vcmax_ic,
     je_ic,
     kp_ic,
@@ -271,7 +267,7 @@ def _CiFuncPure_jax(
         aj_val = jnp.asarray(qe_c4 * apar_ic)
         ap_val = kp_ic * jnp.maximum(ci_val, 0.0)
 
-    agross_val = _RealizedRate(c3psn_pft_val, ac_val, aj_val, ap_val)
+    agross_val = _RealizedRate(colim_type, c3psn_pft_val, ac_val, aj_val, ap_val)
     ac_val = jnp.maximum(ac_val, 0.0)
     aj_val = jnp.maximum(aj_val, 0.0)
     ap_val = jnp.maximum(ap_val, 0.0)
@@ -418,6 +414,8 @@ def _ci_solver_scan_ift(ci0, ci1, func_kwargs, n_iter=40):
 def _make_leaf_photo_kernel(
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     c3psn_pft_val: float,
     vcmaxha: float,
     vcmaxhd: float,
@@ -526,6 +524,8 @@ def _make_leaf_photo_kernel(
 
         _fkw = dict(
             is_c3=is_c3,
+            gs_type=gs_type,
+            colim_type=colim_type,
             vcmax_ic=vcmax_val,
             je_ic=je_val,
             kp_ic=kp_val,
@@ -561,7 +561,7 @@ def _make_leaf_photo_kernel(
             _aj = qe_c4 * apar_ic
             _ap = kp_val * jnp.maximum(ci_root, 0.0)
 
-        _agross = _RealizedRate(c3psn_pft_val, _ac, _aj, _ap)
+        _agross = _RealizedRate(colim_type, c3psn_pft_val, _ac, _aj, _ap)
         _ac = jnp.maximum(_ac, 0.0)
         _aj = jnp.maximum(_aj, 0.0)
         _ap = jnp.maximum(_ap, 0.0)
@@ -618,6 +618,8 @@ def _make_leaf_photo_kernel(
 def _get_vmapped_photo_kernel(
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     c3psn_pft_val: float,
     vcmaxha: float,
     vcmaxhd: float,
@@ -638,6 +640,8 @@ def _get_vmapped_photo_kernel(
     """
     kernel = _make_leaf_photo_kernel(
         is_c3=is_c3,
+        gs_type=gs_type,
+        colim_type=colim_type,
         c3psn_pft_val=c3psn_pft_val,
         vcmaxha=vcmaxha,
         vcmaxhd=vcmaxhd,
@@ -663,6 +667,8 @@ def _get_vmapped_photo_kernel(
 def _make_leaf_photo_kernel_acclim(
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     c3psn_pft_val: float,
     vcmaxha: float,
     vcmaxhd: float,
@@ -752,6 +758,8 @@ def _make_leaf_photo_kernel_acclim(
 
         _fkw = dict(
             is_c3=is_c3,
+            gs_type=gs_type,
+            colim_type=colim_type,
             vcmax_ic=vcmax_val,
             je_ic=je_val,
             kp_ic=kp_val,
@@ -786,7 +794,7 @@ def _make_leaf_photo_kernel_acclim(
             _aj = qe_c4 * apar_ic
             _ap = kp_val * jnp.maximum(ci_root, 0.0)
 
-        _agross = _RealizedRate(c3psn_pft_val, _ac, _aj, _ap)
+        _agross = _RealizedRate(colim_type, c3psn_pft_val, _ac, _aj, _ap)
         _ac = jnp.maximum(_ac, 0.0)
         _aj = jnp.maximum(_aj, 0.0)
         _ap = jnp.maximum(_ap, 0.0)
@@ -842,6 +850,8 @@ def _make_leaf_photo_kernel_acclim(
 def _get_vmapped_photo_kernel_acclim(
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     c3psn_pft_val: float,
     vcmaxha: float,
     vcmaxhd: float,
@@ -861,6 +871,8 @@ def _get_vmapped_photo_kernel_acclim(
     """
     kernel = _make_leaf_photo_kernel_acclim(
         is_c3=is_c3,
+        gs_type=gs_type,
+        colim_type=colim_type,
         c3psn_pft_val=c3psn_pft_val,
         vcmaxha=vcmaxha,
         vcmaxhd=vcmaxhd,
@@ -887,6 +899,8 @@ def _CiFuncGsJax(
     gs_val,
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     dpai_ic,
     gbc_ic,
     cair_ic,
@@ -931,7 +945,7 @@ def _CiFuncGsJax(
         aj_val = qe_c4 * apar_ic
         ap_val = kp_ic * (cair_ic * gleaf + rd_ic) / (gleaf + kp_ic)
 
-    agross_val = _RealizedRate(c3psn_pft_val, ac_val, aj_val, ap_val)
+    agross_val = _RealizedRate(colim_type, c3psn_pft_val, ac_val, aj_val, ap_val)
     anet_val = agross_val - rd_ic
     cs_val = jnp.maximum(cair_ic - anet_val / gbc_safe, 1.0)
     ci_val = cair_ic - anet_val / gleaf
@@ -1054,6 +1068,8 @@ def _bisect_gs_ift(gsmin, gs_upper, se_kwargs, n_iter=20):
 def _make_leaf_photo_kernel_wue(
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     c3psn_pft_val,
     vcmaxha,
     vcmaxhd,
@@ -1135,6 +1151,8 @@ def _make_leaf_photo_kernel_wue(
         # Stomatal optimization (bisection)
         ci_kwargs = dict(
             is_c3=is_c3,
+            gs_type=gs_type,
+            colim_type=colim_type,
             dpai_ic=dpai_ic,
             gbc_ic=gbc_ic,
             cair_ic=cair_ic,
@@ -1211,6 +1229,8 @@ def _make_leaf_photo_kernel_wue(
 def _get_vmapped_photo_kernel_wue(
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     c3psn_pft_val,
     vcmaxha,
     vcmaxhd,
@@ -1234,6 +1254,8 @@ def _get_vmapped_photo_kernel_wue(
     """
     kernel = _make_leaf_photo_kernel_wue(
         is_c3=is_c3,
+        gs_type=gs_type,
+        colim_type=colim_type,
         c3psn_pft_val=c3psn_pft_val,
         vcmaxha=vcmaxha,
         vcmaxhd=vcmaxhd,
@@ -1258,6 +1280,8 @@ def _get_vmapped_photo_kernel_wue(
 def _make_leaf_photo_kernel_wue_acclim(
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     c3psn_pft_val,
     vcmaxha,
     vcmaxhd,
@@ -1330,6 +1354,8 @@ def _make_leaf_photo_kernel_wue_acclim(
 
         ci_kwargs = dict(
             is_c3=is_c3,
+            gs_type=gs_type,
+            colim_type=colim_type,
             dpai_ic=dpai_ic,
             gbc_ic=gbc_ic,
             cair_ic=cair_ic,
@@ -1404,6 +1430,8 @@ def _make_leaf_photo_kernel_wue_acclim(
 def _get_vmapped_photo_kernel_wue_acclim(
     *,
     is_c3: bool,
+    gs_type: int,
+    colim_type: int,
     c3psn_pft_val,
     vcmaxha,
     vcmaxhd,
@@ -1422,6 +1450,8 @@ def _get_vmapped_photo_kernel_wue_acclim(
     """
     kernel = _make_leaf_photo_kernel_wue_acclim(
         is_c3=is_c3,
+        gs_type=gs_type,
+        colim_type=colim_type,
         c3psn_pft_val=c3psn_pft_val,
         vcmaxha=vcmaxha,
         vcmaxhd=vcmaxhd,
@@ -1470,6 +1500,8 @@ def LeafPhotosynthesis(
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
     grid: GridInfo,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Calculate leaf photosynthesis and stomatal conductance for sunlit
@@ -1534,6 +1566,8 @@ def LeafPhotosynthesis(
     p = grid.p  # Fortran loops over the filter; the patch is the unit of computation
     _ncan_p = grid.ncan
     is_c3 = grid.c3  # static: selects the C3 or C4 kernel
+    gs_type, gspot_type, colim_type = opts.gs_type, opts.gspot_type, opts.colim_type
+    acclim_type = opts.acclim_type
     _c3psn_val = 1.0 if is_c3 else 0.0  # pftcon c3psn flag value
 
     # --- Temperature acclimation — Fortran lines 135-153 ---
@@ -1619,6 +1653,8 @@ def LeafPhotosynthesis(
         if acclim_type == 0:
             vmapped = _get_vmapped_photo_kernel(
                 is_c3=is_c3,
+                gs_type=gs_type,
+                colim_type=colim_type,
                 c3psn_pft_val=_c3psn_val,
                 vcmaxha=vcmaxha,
                 vcmaxhd=vcmaxhd,
@@ -1650,6 +1686,8 @@ def LeafPhotosynthesis(
             # acclim_type == 1: vcmaxse/vcmaxc/jmaxse/jmaxc are JAX scalars
             vmapped = _get_vmapped_photo_kernel_acclim(
                 is_c3=is_c3,
+                gs_type=gs_type,
+                colim_type=colim_type,
                 c3psn_pft_val=_c3psn_val,
                 vcmaxha=vcmaxha,
                 vcmaxhd=vcmaxhd,
@@ -1717,6 +1755,8 @@ def LeafPhotosynthesis(
         if acclim_type == 0:
             vmapped = _get_vmapped_photo_kernel_wue(
                 is_c3=is_c3,
+                gs_type=gs_type,
+                colim_type=colim_type,
                 c3psn_pft_val=_c3psn_val,
                 vcmaxha=vcmaxha,
                 vcmaxhd=vcmaxhd,
@@ -1749,6 +1789,8 @@ def LeafPhotosynthesis(
             # acclim_type == 1: vcmaxse/vcmaxc/jmaxse/jmaxc are JAX scalars
             vmapped = _get_vmapped_photo_kernel_wue_acclim(
                 is_c3=is_c3,
+                gs_type=gs_type,
+                colim_type=colim_type,
                 c3psn_pft_val=_c3psn_val,
                 vcmaxha=vcmaxha,
                 vcmaxhd=vcmaxhd,
@@ -1905,7 +1947,7 @@ def LeafPhotosynthesis(
         aj_sl = qe_c4 * _apar_sl
         ap_sl = _kp_sl * (_cair_sl * gleaf_sl + _rd_sl) / (gleaf_sl + _kp_sl)
 
-    agross_sl = _RealizedRate(_c3psn_val, ac_sl, aj_sl, ap_sl)
+    agross_sl = _RealizedRate(colim_type, _c3psn_val, ac_sl, aj_sl, ap_sl)
     anet_sl = agross_sl - _rd_sl
     # Use _gbc_safe (clamped from 0) so d(cs_sl)/d(anet_sl) = 1/_gbc_safe
     # is finite for inactive layers; otherwise -1/0 → -inf and

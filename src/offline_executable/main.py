@@ -39,6 +39,7 @@ jax.config.update("jax_persistent_cache_min_compile_time_secs", 10.0)
 from clm_ml.legacy.state import instances_with_state, state_from_instances  # noqa: E402
 from clm_src_cpl.lnd_comp_nuopc import InitializeRealize, ModelAdvance  # noqa: E402
 from clm_src_main.decompMod import bounds_type  # noqa: E402
+from multilayer_canopy.MLclm_varctl import DEFAULT_OPTIONS, MLOptions  # noqa: E402
 from offline_driver import controlMod  # noqa: E402
 
 # Root of the Python source tree  (…/clm-ml-jax/src)
@@ -151,6 +152,7 @@ class LegacyRun:
     time_of: object  # 0-based run step -> StepTime
     acclimation: str = "running_mean"  # running_mean (decision 15) | run_mean (Fortran)
     acclimation_days: float = 10.0
+    opts: MLOptions = DEFAULT_OPTIONS  # multilayer canopy options (static; decision 20)
 
 
 @dataclasses.dataclass
@@ -172,9 +174,13 @@ class StepInputs:
     forcing_next: object  # AtmForcingRecord, next step
 
 
-def setup_run(nml: dict) -> LegacyRun:
+def setup_run(nml: dict, opts: Optional[MLOptions] = None) -> LegacyRun:
     """Configure the legacy modules from a namelist, initialize CLM, read the run's forcing
-    and install initial conditions (CLMml_drv up to its time loop)."""
+    and install initial conditions (CLMml_drv up to its time loop).
+
+    ``opts``: the multilayer canopy options (``clm_ml``: from model.yaml). Without them (the
+    ``clm-ml-offline`` command), the Fortran defaults with the namelist's ``met_type`` and
+    ``dpai_min``, as Fortran's ``controlMod``."""
     # ------------------------------------------------------------------
     # 1. Namelist settings  (mirrors controlMod.F90 :: read(5, nml=...))
     # ------------------------------------------------------------------
@@ -230,8 +236,11 @@ def setup_run(nml: dict) -> LegacyRun:
     clmSoilOptionMod.clm_phys = str(params.get("clm_phys", clmSoilOptionMod.clm_phys))
     clmSoilOptionMod.nlev_soil_adjust = int(params.get("nlev_soil_adjust", 0))
     clmSoilOptionMod.fin_soil_adjust = fin_soil_adjust
-    MLclm_varctl.met_type = int(params.get("met_type", MLclm_varctl.met_type))
-    MLclm_varctl.dpai_min = float(params.get("dpai_min", MLclm_varctl.dpai_min))
+    if opts is None:
+        opts = DEFAULT_OPTIONS._replace(
+            met_type=int(params.get("met_type", DEFAULT_OPTIONS.met_type)),
+            dpai_min=float(params.get("dpai_min", DEFAULT_OPTIONS.dpai_min)),
+        )
     MLclm_varctl.pftcon_val = int(params.get("pftcon_val", MLclm_varctl.pftcon_val))
 
     clm_time_manager.start_date_ymd = start_ymd
@@ -450,6 +459,7 @@ def setup_run(nml: dict) -> LegacyRun:
         load_chunk=load_chunk,
         acclimation=acclimation,
         acclimation_days=acclimation_days,
+        opts=opts,
         ntimes=ntimes,
         tower_num=tower_num,
         iyear=iyear,
@@ -509,6 +519,7 @@ def advance(run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, p
         inputs.forcing_next,
         initialize=initialize,
         params=params,
+        opts=run.opts,
     )
 
 
@@ -930,9 +941,11 @@ def run_streams(
         on_records(i, collector.close())
 
 
-def main():
+def main(opts: Optional[MLOptions] = None):
+    """``clm-ml-offline NAMELIST``. ``opts``: the multilayer canopy options when called by
+    ``clm_ml`` (legacy text output of a ``run.yaml`` run); see :func:`setup_run`."""
     source = sys.argv[1] if len(sys.argv) > 1 else None
-    run = setup_run(read_namelist(source))
+    run = setup_run(read_namelist(source), opts)
     params, filt, st = run.params, run.filt, run.insts
     ntimes, tower_num, iyear, imonth, dirout = (
         run.ntimes,
@@ -985,7 +998,19 @@ def main():
     chunk_steps = int(params["chunk_steps"]) if "chunk_steps" in params else None
 
     def write_output(calday, mlcanopy, temperature):
-        output(calday, tower_num, fout1, fout2, fout3, fout4, fout5, fout6, mlcanopy, temperature)
+        output(
+            calday,
+            tower_num,
+            fout1,
+            fout2,
+            fout3,
+            fout4,
+            fout5,
+            fout6,
+            mlcanopy,
+            temperature,
+            met_type=run.opts.met_type,
+        )
 
     def report(itim, step_dt, detail=""):
         if itim == 1 or itim == ntimes or (itim % progress_nsteps == 0) or detail:

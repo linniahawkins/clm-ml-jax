@@ -82,8 +82,9 @@ def _build_initialized_model():
     clmSoilOptionMod.clm_phys = str(params.get("clm_phys", clmSoilOptionMod.clm_phys))
     clmSoilOptionMod.nlev_soil_adjust = int(params.get("nlev_soil_adjust", 0))
     clmSoilOptionMod.fin_soil_adjust = fin_soil_adjust
-    MLclm_varctl.met_type = int(params.get("met_type", MLclm_varctl.met_type))
-    MLclm_varctl.dpai_min = float(params.get("dpai_min", MLclm_varctl.dpai_min))
+    OPTS = MLclm_varctl.DEFAULT_OPTIONS._replace(
+        met_type=int(params.get("met_type", 0)), dpai_min=float(params.get("dpai_min", 0.01))
+    )
     MLclm_varctl.pftcon_val = int(params.get("pftcon_val", MLclm_varctl.pftcon_val))
 
     clm_time_manager.start_date_ymd = start_ymd
@@ -218,6 +219,7 @@ def _build_initialized_model():
         forcing_bef,
         forcing_next,
         initialize=True,
+        opts=OPTS,
     )
 
     mlcanopy_inst = st.mlcanopy
@@ -246,6 +248,7 @@ def _build_initialized_model():
         step_time=times[0],
         forcing_bef=forcing_bef,
         forcing_next=forcing_next,
+        opts=OPTS,
     )
 
     return forward_fn, mlcanopy_inst, {"num_evp": num_evp, "evp_list": evp_list}

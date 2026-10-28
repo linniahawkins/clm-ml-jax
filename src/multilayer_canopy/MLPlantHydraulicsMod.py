@@ -49,7 +49,7 @@ from clm_src_main.PatchType import patch  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import mmh2o  # noqa: F401
-from multilayer_canopy.MLclm_varctl import dtime_ml  # noqa: F401
+from multilayer_canopy.MLclm_varctl import MLOptions
 
 # ---------------------------------------------------------------------------
 # PlantResistance — per-layer kernel + vmap
@@ -286,6 +286,8 @@ def LeafWaterPotential(
     il: int,
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Calculate leaf water potential by analytically integrating the
@@ -321,7 +323,7 @@ def LeafWaterPotential(
         Updated :class:`mlcanopy_type`.
     """
     head = denh2o * grav * 1.0e-6  # MPa/m (Python float)
-    dtime = dtime_ml  # Python float constant
+    dtime = opts.dtime_ml  # Python float constant
 
     lwp = mlcanopy_inst.lwp_leaf
 

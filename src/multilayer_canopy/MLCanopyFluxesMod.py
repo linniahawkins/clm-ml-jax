@@ -48,14 +48,7 @@ from multilayer_canopy.MLCanopyWaterMod import (  # noqa: F401
     CanopyWettedFraction,
 )
 from multilayer_canopy.MLclm_varcon import mmh2o, rgas  # noqa: F401
-from multilayer_canopy.MLclm_varctl import (  # noqa: F401
-    GridInfo,
-    dtime_ml,
-    met_type,
-    mlcan_to_clm,
-    nrk,
-    runge_kutta_type,
-)
+from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf, nlevmlcan  # noqa: F401
 from multilayer_canopy.MLFluxProfileSolutionMod import FluxProfileSolution  # noqa: F401
 from multilayer_canopy.MLGetAtmForcingMod import (  # noqa: F401
@@ -154,6 +147,8 @@ def MLCanopyFluxes(
     initialize: bool,
     grid: "GridInfo | None" = None,
     params: "CanopyParams | None" = None,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Compute all multilayer canopy fluxes for one CLM timestep.
@@ -278,7 +273,7 @@ def MLCanopyFluxes(
         Updated :class:`mlcanopy_type` holding end-of-timestep state
         and CLM-timestep-mean fluxes.
     """
-    import multilayer_canopy.MLclm_varctl as _ml_ctl
+    met_type, mlcan_to_clm = opts.met_type, opts.mlcan_to_clm
 
     # ------------------------------------------------------------------
     # CLM time information — Fortran lines 155-165
@@ -310,8 +305,7 @@ def MLCanopyFluxes(
         calday_interp_cur = calday_interp_bef = calday_interp_next = 0.0
 
     # Number of ML sub-steps — Fortran line 132
-    # Re-read from module so test code can override MLclm_varctl.dtime_ml at runtime.
-    num_ml_steps: int = int(dtime_clm / _ml_ctl.dtime_ml)
+    num_ml_steps: int = int(dtime_clm / opts.dtime_ml)
 
     # ------------------------------------------------------------------
     # Build filter for patches to process — Fortran lines 152-160
@@ -339,7 +333,13 @@ def MLCanopyFluxes(
         if masterproc:
             print("Attempting to initialize multilayer canopy vertical structure .....")
         mlcanopy_inst = initVerticalStructure(
-            bounds, num_mlcan, filter_mlcan, canopystate_inst, frictionvel_inst, mlcanopy_inst
+            bounds,
+            num_mlcan,
+            filter_mlcan,
+            canopystate_inst,
+            frictionvel_inst,
+            mlcanopy_inst,
+            opts=opts,
         )
         mlcanopy_inst = initVerticalProfiles(
             num_mlcan, filter_mlcan, atm2lnd_inst, wateratm2lndbulk_inst, mlcanopy_inst
@@ -352,7 +352,7 @@ def MLCanopyFluxes(
     # computed here instead). Constants: evaluated eagerly even when this function is
     # traced (RungeKuttaUpdate uses them as numpy values).
     with jax.ensure_compile_time_eval():
-        ark, brk, crk = RungeKuttaIni()
+        ark, brk, crk = RungeKuttaIni(opts)
 
     # ------------------------------------------------------------------
     # Copy CLM variables to mlcanopy container — Fortran line 201
@@ -467,9 +467,8 @@ def MLCanopyFluxes(
 
     # ------------------------------------------------------------------
     # Runge-Kutta configuration — Fortran lines 265-271
-    # Re-read from module so test code can override MLclm_varctl.runge_kutta_type at runtime.
     # ------------------------------------------------------------------
-    _runge_kutta_type = _ml_ctl.runge_kutta_type
+    _runge_kutta_type = opts.runge_kutta_type
     if _runge_kutta_type == 10:
         nrk_steps = 0
     elif _runge_kutta_type >= 20:
@@ -520,11 +519,12 @@ def MLCanopyFluxes(
             inst,
             forcing_window,
             grid=grid,
+            opts=opts,
         )
         # Solar radiation — Fortran line 290
-        inst = SolarRadiation(bounds, num_mlcan, filter_mlcan, inst, params, grid=grid)
+        inst = SolarRadiation(bounds, num_mlcan, filter_mlcan, inst, params, grid=grid, opts=opts)
         # Nitrogen profile — Fortran line 293
-        inst = CanopyNitrogenProfile(num_mlcan, filter_mlcan, inst, params, grid)
+        inst = CanopyNitrogenProfile(num_mlcan, filter_mlcan, inst, params, grid, opts=opts)
 
         # Runge-Kutta stages — Fortran lines 310-328: nrk_steps stages, each followed by
         # a state update, and a final physics pass. One function, _rk_stage, is a stage:
@@ -533,16 +533,20 @@ def MLCanopyFluxes(
         # enough to compile.
         def _rk_stage(inst, irk):
             inst = CanopyWettedFraction(num_mlcan, filter_mlcan, inst)
-            inst = LongwaveRadiation(bounds, num_mlcan, filter_mlcan, inst, params, grid=grid)
+            inst = LongwaveRadiation(
+                bounds, num_mlcan, filter_mlcan, inst, params, grid=grid, opts=opts
+            )
             inst = inst._replace(
                 rnleaf_leaf=(
                     inst.swleaf_leaf[..., ivis] + inst.swleaf_leaf[..., inir] + inst.lwleaf_leaf
                 ),
                 rnsoi_soil=(inst.swsoi_soil[:, ivis] + inst.swsoi_soil[:, inir] + inst.lwsoi_soil),
             )
-            inst = CanopyTurbulence(nstep_ml, num_mlcan, filter_mlcan, inst, grid=grid, nstep=nstep)
+            inst = CanopyTurbulence(
+                nstep_ml, num_mlcan, filter_mlcan, inst, grid=grid, nstep=nstep, opts=opts
+            )
             # Both sun and shade in one fused GPU dispatch (2× fewer round-trips)
-            inst = LeafBoundaryLayerBoth(num_mlcan, filter_mlcan, inst, params)
+            inst = LeafBoundaryLayerBoth(num_mlcan, filter_mlcan, inst, params, opts=opts)
             inst = LeafPhotosynthesis(
                 num_mlcan,
                 filter_mlcan,
@@ -550,6 +554,7 @@ def MLCanopyFluxes(
                 inst,
                 grid=grid,
                 params=params,
+                opts=opts,
             )
             inst = LeafPhotosynthesis(
                 num_mlcan,
@@ -558,12 +563,13 @@ def MLCanopyFluxes(
                 inst,
                 grid=grid,
                 params=params,
+                opts=opts,
             )
-            inst = FluxProfileSolution(num_mlcan, filter_mlcan, inst, grid=grid)
-            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isun, inst, params)
-            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isha, inst, params)
-            inst = CanopyInterception(num_mlcan, filter_mlcan, inst)
-            inst = CanopyEvaporation(num_mlcan, filter_mlcan, inst)
+            inst = FluxProfileSolution(num_mlcan, filter_mlcan, inst, grid=grid, opts=opts)
+            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isun, inst, params, opts=opts)
+            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isha, inst, params, opts=opts)
+            inst = CanopyInterception(num_mlcan, filter_mlcan, inst, opts=opts)
+            inst = CanopyEvaporation(num_mlcan, filter_mlcan, inst, opts=opts)
             if nrk_steps > 0:  # no-op after the last stage (irk > nrk)
                 inst = RungeKuttaUpdate(
                     irk,
@@ -595,7 +601,7 @@ def MLCanopyFluxes(
         return (inst, accumulators), None
 
     # Calendar day of each ML sub-step — Fortran lines 263-270
-    _dtime_ml = _ml_ctl.dtime_ml
+    _dtime_ml = opts.dtime_ml
     _offset = 0.0 if met_type in (0, 2) else 0.5  # met_type 3: mid-sub-step
     caldays_ml = [
         curr_calday_beg + (float(k) - _offset) * (_dtime_ml / 86400.0)
@@ -636,7 +642,7 @@ def MLCanopyFluxes(
     # ------------------------------------------------------------------
     # Canopy-level diagnostics — Fortran line 346
     # ------------------------------------------------------------------
-    mlcanopy_inst = _CanopyFluxesDiagnostics(num_mlcan, filter_mlcan, mlcanopy_inst, grid)
+    mlcanopy_inst = _CanopyFluxesDiagnostics(num_mlcan, filter_mlcan, mlcanopy_inst, grid, opts)
 
     # ------------------------------------------------------------------
     # Merge sun/shade leaf temperature and water potential — Fortran lines 355-375
@@ -1400,6 +1406,7 @@ def _CanopyFluxesDiagnostics(
     filter: List[int],
     mlcanopy_inst: mlcanopy_type,
     grid: GridInfo,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Compute canopy-integrated fluxes, diagnostics, and energy balance checks.
@@ -1469,7 +1476,8 @@ def _CanopyFluxesDiagnostics(
     """
     from clm_src_main.abortutils import endrun  # noqa: F401
     from clm_src_main.clm_varpar import inir, ivis, numrad  # noqa: F401
-    from multilayer_canopy.MLclm_varctl import flux_profile_type  # noqa: F401
+
+    flux_profile_type = opts.flux_profile_type
     from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
 
     # ------------------------------------------------------------------
@@ -1974,6 +1982,8 @@ def make_clm_ml_forward(
     step_time: StepTime,
     forcing_bef: AtmForcingRecord,
     forcing_next: AtmForcingRecord,
+    *,
+    opts: MLOptions,
 ):
     """Create a differentiable forward function with baked-in structural params.
 
@@ -2027,6 +2037,7 @@ def make_clm_ml_forward(
             initialize=False,
             grid=grid,
             params=params,
+            opts=opts,
         )
         p = grid.p
         n = grid.ncan

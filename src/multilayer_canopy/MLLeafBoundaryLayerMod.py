@@ -11,13 +11,13 @@ Differentiability notes
 The inner layer loop is replaced by ``jax.vmap`` over the full layer
 dimension.  ``max()`` calls are replaced by ``jnp.maximum``; the
 ``dpai == 0`` guard uses ``jnp.where`` instead of a Python ``if``.
-``gb_type`` is a module-level Python integer (static at trace time) so
+``gb_type`` (from the static :class:`MLOptions`) is a Python integer, so
 its ``if/elif`` is evaluated once during tracing — no issue.
 """
 
 from __future__ import annotations
 
-from functools import partial
+from functools import lru_cache, partial
 from typing import Sequence
 
 import jax
@@ -28,7 +28,7 @@ from clm_src_main.clm_varcon import grav, tfrz  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import dc0, dh0, dv0, gb_factor, gbh_min, visc0  # noqa: F401
-from multilayer_canopy.MLclm_varctl import gb_type  # noqa: F401
+from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
 
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
 # ---------------------------------------------------------------------------
 
 
-def _gb_layer(dpai_ic, wind_ic, tair_ic, tleaf_ic, visc, dh, dv_dh, dc_dh, dl, rhomol_p):
+def _gb_layer(gb_type, dpai_ic, wind_ic, tair_ic, tleaf_ic, visc, dh, dv_dh, dc_dh, dl, rhomol_p):
     """Boundary layer conductance for one canopy layer (differentiable).
 
     All scalar arguments (visc, dh, …) are patch-level constants broadcast
@@ -104,19 +104,22 @@ def _gb_layer(dpai_ic, wind_ic, tair_ic, tleaf_ic, visc, dh, dv_dh, dc_dh, dl, r
     )
 
 
-# vmap: first four args are per-layer (axis 0); remaining six are patch scalars
-_gb_layers = jax.vmap(
-    _gb_layer,
-    in_axes=(0, 0, 0, 0, None, None, None, None, None, None),
-)
-
-# Double-vmap: outer axis is sun/shade (axis 0 of tleaf_both = shape (2, nlevmlcan));
-# dpai, wind, tair are shared across sun/shade (in_axes=None for outer vmap).
-# One GPU kernel dispatch computes boundary layer for both sun and shade leaves.
-_gb_layers_both = jax.vmap(
-    _gb_layers,
-    in_axes=(None, None, None, 0, None, None, None, None, None, None),
-)
+@lru_cache(maxsize=None)
+def _gb_vmaps(gb_type: int):
+    """The layer-vectorized ``_gb_layer`` for one ``gb_type``: ``(layers, both)``."""
+    # vmap: first four args are per-layer (axis 0); remaining six are patch scalars
+    layers = jax.vmap(
+        partial(_gb_layer, gb_type),
+        in_axes=(0, 0, 0, 0, None, None, None, None, None, None),
+    )
+    # Double-vmap: outer axis is sun/shade (axis 0 of tleaf_both = shape (2, nlevmlcan));
+    # dpai, wind, tair are shared across sun/shade (in_axes=None for outer vmap).
+    # One GPU kernel dispatch computes boundary layer for both sun and shade leaves.
+    both = jax.vmap(
+        layers,
+        in_axes=(None, None, None, 0, None, None, None, None, None, None),
+    )
+    return layers, both
 
 
 # ---------------------------------------------------------------------------
@@ -124,13 +127,15 @@ _gb_layers_both = jax.vmap(
 # ---------------------------------------------------------------------------
 
 
-@partial(jax.jit, static_argnums=(0, 1, 2))
+@partial(jax.jit, static_argnums=(0, 1, 2), static_argnames=("opts",))
 def LeafBoundaryLayer(
     num_filter: int,
     filter_patch: Sequence[int],
     il: int,
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """
     Calculate leaf boundary layer conductance for heat, water vapour,
@@ -221,7 +226,7 @@ def LeafBoundaryLayer(
         dc_dh = dc / dh
 
         # vmap over all layers (1..nlevmlcan); dpai==0 layers yield zero
-        gbh_v, gbv_v, gbc_v = _gb_layers(
+        gbh_v, gbv_v, gbc_v = _gb_vmaps(opts.gb_type)[0](
             mlcanopy_inst.dpai_profile[p, 1:],  # (nlevmlcan,)
             mlcanopy_inst.wind_profile[p, 1:],
             mlcanopy_inst.tair_profile[p, 1:],
@@ -250,12 +255,14 @@ def LeafBoundaryLayer(
 # ---------------------------------------------------------------------------
 
 
-@partial(jax.jit, static_argnums=(0, 1))
+@partial(jax.jit, static_argnums=(0, 1), static_argnames=("opts",))
 def LeafBoundaryLayerBoth(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
+    *,
+    opts: MLOptions,
 ) -> mlcanopy_type:
     """Compute leaf boundary layer conductance for both sun and shade in one
     fused GPU kernel dispatch.
@@ -310,7 +317,7 @@ def LeafBoundaryLayerBoth(
         # One fused vmap over sun/shade + layers — half the GPU dispatches
         # vs two sequential LeafBoundaryLayer calls.
         # Results: (gbh_v, gbv_v, gbc_v) each shape (2, nlevmlcan)
-        gbh_v, gbv_v, gbc_v = _gb_layers_both(
+        gbh_v, gbv_v, gbc_v = _gb_vmaps(opts.gb_type)[1](
             mlcanopy_inst.dpai_profile[p, 1:],
             mlcanopy_inst.wind_profile[p, 1:],
             mlcanopy_inst.tair_profile[p, 1:],

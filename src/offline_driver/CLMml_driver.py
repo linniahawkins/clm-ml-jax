@@ -441,6 +441,8 @@ def output(
     nout6: IO,
     mlcan: mlcanopy_type,
     temperature_inst: temperature_type,  # noqa: F811
+    *,
+    met_type: int,
 ) -> None:
     """
     Write per-timestep model output to six ASCII files.
@@ -488,7 +490,6 @@ def output(
     from clm_src_main.ColumnType import col  # noqa: F401
     from clm_src_utils.clm_time_manager import dtstep  # noqa: F401
     from multilayer_canopy.MLclm_varcon import mmdry, mmh2o  # noqa: F401
-    from multilayer_canopy.MLclm_varctl import met_type  # noqa: F401
     from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
     from multilayer_canopy.MLWaterVaporMod import LatVap  # noqa: F401
 
