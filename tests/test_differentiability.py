@@ -214,6 +214,7 @@ def _build_initialized_model():
         times[0],
         forcing_bef,
         forcing_next,
+        initialize=True,
     )
 
     mlcanopy_inst = st.mlcanopy

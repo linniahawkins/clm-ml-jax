@@ -407,7 +407,14 @@ def main():
             # Advance physics
             t_adv0 = time.perf_counter()
             st, filt = ModelAdvance(
-                bounds, st, filt, clm_record_at(forcing, t_curr), now, forcing_bef, forcing_next
+                bounds,
+                st,
+                filt,
+                clm_record_at(forcing, t_curr),
+                now,
+                forcing_bef,
+                forcing_next,
+                initialize=(_itim == 1),
             )
             t_adv = time.perf_counter() - t_adv0
 

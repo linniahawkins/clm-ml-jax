@@ -41,6 +41,7 @@ def clm_drv(
     step_time: StepTime,
     forcing_bef: AtmForcingRecord,
     forcing_next: AtmForcingRecord,
+    initialize: bool,
 ) -> tuple[ClmInstances, clumpfilter]:
     """
     Main CLM model driver to calculate surface fluxes.
@@ -88,6 +89,8 @@ def clm_drv(
             calls to the time manager inside the physics).
         forcing_bef, forcing_next: Multilayer canopy forcing at the previous
             and next CLM steps, for time interpolation (see ``MLCanopyFluxes``).
+        initialize: True on the run's first time step (multilayer canopy
+            vertical-structure setup; see ``MLCanopyFluxes``).
     """
     # ------------------------------------------------------------------
     # Unpack the model state (passed in explicitly; no module globals)
@@ -255,6 +258,7 @@ def clm_drv(
         step_time,
         forcing_bef,
         forcing_next,
+        initialize,
     )
 
     # ------------------------------------------------------------------

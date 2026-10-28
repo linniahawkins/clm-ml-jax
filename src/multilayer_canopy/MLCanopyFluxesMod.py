@@ -51,7 +51,6 @@ from multilayer_canopy.MLclm_varctl import (  # noqa: F401
     GridInfo,
     dtime_ml,
     met_type,
-    ml_vert_init,
     mlcan_to_clm,
     nrk,
     runge_kutta_type,
@@ -83,15 +82,6 @@ from multilayer_canopy.MLPlantHydraulicsMod import (  # noqa: F401
 from multilayer_canopy.MLRungeKuttaMod import RungeKuttaIni, RungeKuttaUpdate  # noqa: F401
 from multilayer_canopy.MLSolarRadiationMod import SolarRadiation  # noqa: F401
 from multilayer_canopy.MLWaterVaporMod import LatVap  # noqa: F401
-
-# ---------------------------------------------------------------------------
-# Module-level cache for Runge-Kutta coefficients (computed once on first
-# call, reused on all subsequent calls — mirrors Fortran module state).
-# ---------------------------------------------------------------------------
-_rk_ark = None
-_rk_brk = None
-_rk_crk = None
-
 
 # ---------------------------------------------------------------------------
 # JIT-compiled bef-state copy helper
@@ -153,6 +143,7 @@ def MLCanopyFluxes(
     step_time: StepTime,
     forcing_bef: AtmForcingRecord,
     forcing_next: AtmForcingRecord,
+    initialize: bool,
     grid: "GridInfo | None" = None,
     _o2ref_py: "float | None" = None,
     vcmaxpft_jax=None,
@@ -169,7 +160,7 @@ def MLCanopyFluxes(
        calendar days).
     2. Builds the ``filter_mlcan`` patch filter from the exposed-veg
        filter (Fortran lines 152-160).
-    3. On the first CLM timestep (``zref == spval``), initialises PAD
+    3. On the first CLM timestep (``initialize``), initialises PAD
        parameters, vertical structure, vertical profiles, and
        Runge-Kutta coefficients (Fortran lines 162-198).
     4. Copies CLM state into ``mlcanopy_inst`` via ``_GetCLMVar``
@@ -266,18 +257,19 @@ def MLCanopyFluxes(
             ``*_bef_forcing`` fields carried in ``mlcanopy_type``.
         forcing_next: Forcing at the next CLM time step (replaces
             ``*_next_forcing``, which Fortran ``TowerMetNext`` filled).
+        initialize: True on the first time step of a run: set up the PAD
+            parameters and the vertical structure and profiles. Fortran
+            detected this from an unset ``zref`` (``zref == spval``); the
+            caller now says so explicitly (False when continuing from a
+            restart or in differentiable mode).
 
     Returns:
         Updated :class:`mlcanopy_type` holding end-of-timestep state
         and CLM-timestep-mean fluxes.
     """
-    import multilayer_canopy.MLclm_varctl as _ml_ctl  # for ml_vert_init mutation
+    import multilayer_canopy.MLclm_varctl as _ml_ctl
 
     _diff_mode = grid is not None
-
-    # Declare module-level RK coefficient cache as global so assignments
-    # inside the if-block persist across calls.
-    global _rk_ark, _rk_brk, _rk_crk
 
     # ------------------------------------------------------------------
     # CLM time information — Fortran lines 155-165
@@ -324,17 +316,9 @@ def MLCanopyFluxes(
 
     # ------------------------------------------------------------------
     # First-timestep initialisation — Fortran lines 162-198
-    # Triggered when any zref == spval (unset sentinel)
+    # (Fortran triggered it when zref == spval; the caller passes `initialize`)
     # ------------------------------------------------------------------
-    _ml_vert_init = 0
-    if not _diff_mode:
-        for p in filter_mlcan:
-            if float(mlcanopy_inst.zref_forcing[p]) == spval:
-                _ml_vert_init = 1
-                break
-    _ml_ctl.ml_vert_init = _ml_vert_init  # expose to other modules
-
-    if _ml_vert_init == 1:
+    if initialize:
 
         if masterproc:
             print("Attempting to initialize multilayer canopy pad parameters .....")
@@ -353,11 +337,10 @@ def MLCanopyFluxes(
         if masterproc:
             print("Successfully initialized multilayer canopy vertical structure")
 
-        # Runge-Kutta coefficients — Fortran line 197
-        _rk_ark, _rk_brk, _rk_crk = RungeKuttaIni()
-
-    # Retrieve cached Runge-Kutta coefficients (valid after first call)
-    ark, brk, crk = _rk_ark, _rk_brk, _rk_crk
+    # Runge-Kutta coefficients — Fortran line 197 (computed on the first step
+    # and kept in module state; they depend only on runge_kutta_type, so they are
+    # computed here instead)
+    ark, brk, crk = RungeKuttaIni()
 
     # ------------------------------------------------------------------
     # Copy CLM variables to mlcanopy container — Fortran line 201
@@ -2091,6 +2074,7 @@ def make_clm_ml_forward(
             step_time=step_time,
             forcing_bef=forcing_bef,
             forcing_next=forcing_next,
+            initialize=False,
             grid=grid,
             _o2ref_py=_o2ref_py_fwd,
         )

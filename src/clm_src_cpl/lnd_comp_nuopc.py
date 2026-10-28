@@ -45,6 +45,7 @@ def ModelAdvance(
     step_time,
     forcing_bef,
     forcing_next,
+    initialize,
 ):
     """
     Advance the CLM model by one time step.
@@ -67,10 +68,13 @@ def ModelAdvance(
             (``clm_time_manager.StepTime``).
         forcing_bef, forcing_next: Multilayer canopy forcing at the previous
             and next CLM steps (``MLGetAtmForcingMod.AtmForcingRecord``).
+        initialize: True on the run's first time step.
 
     Returns:
         ``(insts, filter)``: the updated state containers and filters.
     """
     from clm_src_main.clm_driver import clm_drv  # noqa: F401
 
-    return clm_drv(bounds, insts, filter, clm_record, step_time, forcing_bef, forcing_next)
+    return clm_drv(
+        bounds, insts, filter, clm_record, step_time, forcing_bef, forcing_next, initialize
+    )
