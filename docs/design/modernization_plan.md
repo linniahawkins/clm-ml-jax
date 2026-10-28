@@ -612,15 +612,45 @@ for each chunk:
     at restart boundaries: write state to a restart file
 ```
 
-- **Chunk length** is a run setting (`execution.chunk`). The compiled scan is reused for every
-  chunk of the same length. Calendar months have different lengths, so either compile one
-  scan per distinct length (at most four) or pad the last steps with masked steps; this is
-  decided in Phase 4.
+- **Two separate time scales** (as in jax-gcm, `jcm/model.py` and `jcm/runners.py`):
+  - **Output interval, inside the compiled scan.** A chunk is a *nested* scan: an outer loop
+    over output records, and inside it an inner loop over the model steps between records.
+    The inner loop accumulates each output stream's statistic (running sum for a mean,
+    min/max, or the instantaneous value) in the scan's carry and keeps no per-step values,
+    so memory scales with the number of output records in the chunk, not the number of
+    steps. `jax.checkpoint` wraps the inner step (as jax-gcm does) so gradients over a chunk
+    store only the state at each step, not every intermediate value. With several output
+    streams of different frequencies, the inner loop runs at the model step and each stream
+    emits a record when its own interval completes.
+  - **Chunk length, outside it.** The chunk is host bookkeeping: how much forcing is in
+    memory, how often restart files and output files are written, and how often the state's
+    health is checked. jax-gcm runs the whole integration as one compiled call by default
+    (`chunk_days: 0`) and uses 5-day chunks (`run_chunked`) for long runs.
+- **Chunk length** is a run setting (`execution.chunk`). Default: the whole run when it is
+  short (a tower month), otherwise a few days to a month, limited by forcing memory (table
+  above). Chunk boundaries should fall on output-file and forcing-file boundaries. Open
+  decision: calendar units (`1 month`, aligned to month starts; chunks then have 28–31 days,
+  so up to four lengths each compile once) or plain days (one length, but chunks do not line
+  up with months).
+- **When compilation happens.** A compiled chunk program is reused for every chunk with the
+  same input shapes and model options; new data do not trigger compilation. It recompiles
+  only for a different chunk length, different array sizes (number of patches or layers), a
+  different `model.yaml` option, or a new process (and JAX's on-disk compilation cache can
+  skip even that). A short last chunk is padded to the full length, so it reuses the
+  program; the extra steps are discarded. CHATS7 example: the first one-day chunk takes about
+  35 s (about 24 s of it compiling), each later one about 0.7 s of physics.
 - **Reading overlaps computing.** The next chunk is read while the current one runs. jax-gcm
   does the same (its design note `chunked_run_io_overlap.md`).
 - **Storage precision.** Forcing is stored and transferred as float32 and computed in float64.
-- **Restarts** are written at chunk boundaries (`execution.restart_every`). A run can resume
-  from any restart.
+- **Between chunks (host side, as jax-gcm's `run_chunked`):**
+  - **Health check** of the state (NaN, out-of-range temperatures); the run stops at the first
+    failing chunk and says which variable and where, instead of writing garbage for decades.
+  - **Restarts** at chunk boundaries (`execution.restart_every`). Written beside the old one
+    and renamed over it, keeping the previous one (`.prev`) as a fallback, so a run killed
+    mid-write can still resume. A resumed run continues from the last completed chunk; it
+    refuses to overwrite output of a run it cannot resume.
+  - **Partial output intervals** (e.g. a monthly mean in progress) are saved with the
+    restart, so a resumed run produces the same monthly means.
 - **Acclimation temperature.** The 10-day running mean (decision 15) is part of the `State`,
   updated every step, so it needs no look-ahead over the forcing. The legacy whole-run mean
   needs a pre-pass over all forcing, so it is only allowed for short runs (validation against
@@ -629,7 +659,8 @@ for each chunk:
   only the gridcells its patches belong to, so no single process holds global forcing.
 
 **Output streams** (decision 16). Each stream accumulates its statistic during the scan
-(running sums for means, running min/max, or the instantaneous value at the output time). Only
+(the inner loop above): running sums for means, running min/max, or the instantaneous value at
+the output time. Only
 completed output records leave the device. They are written per chunk to files split as
 configured. Output frequency is independent of the forcing interval, model step and chunk
 length. An output interval that spans chunks carries its partial accumulators to the next
@@ -801,7 +832,10 @@ Progress:
   steps: 47 s including compilation (was ~135 s); a compiled step takes ~15 ms (was ~2.7 s). A
   short last chunk is padded to reuse the compiled scan. Two chunks of 4 equal one chunk of 8
   bit for bit (done-when 1). Compiled vs step by step: ≤ 6.6e-11 relative (round-off, within
-  the noise twins); reference regenerated in compiled mode.
+  the noise twins); reference regenerated in compiled mode. **Interim:** each chunk still
+  returns every step's full canopy container (~0.21 MB per step per patch, ~10 MB per day per
+  patch) so the legacy text output can be written; fine for a tower, impossible globally.
+  Replaced by the nested scan with output accumulation (§6.9).
 - ✅ Forcing is read per chunk (with halo records), and the whole-run acclimation mean is summed
   over the forcing read chunk by chunk (same order, bit for bit). Peak memory footprint is flat
   with run length: 4.3 GB for 2 days, 4.2 GB for 20 days of CHATS7 (one month of forcing
@@ -814,9 +848,13 @@ Progress:
   peak; the default member reproduces the single run; at midday higher `vcmax25` gives cooler
   sunlit leaves (296.0, 295.9, 295.8 K for ×0.8, 1.0, 1.2), as expected from more
   transpiration. Test: `tests/regression/test_ensemble.py`.
-- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`), the `ForcingSource` streams
-  interface, restarts, output streams, `run.yaml` stream form, GPU timing (done-when 3, GPU
-  part), the resident-memory check on a long run.
+- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`); output streams as a nested
+  scan (outer loop over output records, inner loop over steps accumulating statistics,
+  `jax.checkpoint` on the step; §6.9), replacing the per-step containers; the `ForcingSource`
+  streams interface; host side between chunks: health checks, rotating restarts (`.prev`),
+  partial output intervals saved with restarts; chunk length in `run.yaml` (calendar months
+  or days: open decision, §6.9); `run.yaml` stream form; GPU timing (done-when 3, GPU part);
+  the resident-memory check on a long run.
 
 - `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one
   chunk, with `jax.checkpoint` on the step.
