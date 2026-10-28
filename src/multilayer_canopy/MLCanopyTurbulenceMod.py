@@ -71,6 +71,7 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     zdtgridM,
 )
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
+from multilayer_canopy.MLLayersMod import Layers, keep, layers, pad_with_top
 from multilayer_canopy.MLMathToolsMod import (  # noqa: F401
     bisection_traceable,
     is_concrete,
@@ -1133,15 +1134,15 @@ def _RoughnessLength(p: int, mlcanopy_inst: mlcanopy_type) -> mlcanopy_type:
 
 
 def _WindProfile(
+    lay: Layers,
     p: int,
-    ntop: int,
-    ncan: int,
     lm_over_beta,
     mlcanopy_inst: mlcanopy_type,
 ) -> mlcanopy_type:
     """Wind speed profile above and within the canopy (Fortran ``WindProfile``).
 
-    Vectorized over layers: ``ntop``/``ncan`` (static, from GridInfo) give the slices.
+    Vectorized over every layer slot: layers ntop+1..ncan get the above-canopy profile,
+    1..ntop the within-canopy profile (``lay``: data, plan Phase 5b); padding is kept.
     """
     ztop_p = mlcanopy_inst.ztop_canopy[p]
     zdisp_p = mlcanopy_inst.zdisp_canopy[p]
@@ -1152,24 +1153,25 @@ def _WindProfile(
 
     wind = mlcanopy_inst.wind_profile
     uaf = mlcanopy_inst.uaf_canopy
-    zs_p = mlcanopy_inst.zs_profile[p]
+    zs = pad_with_top(lay, mlcanopy_inst.zs_profile[p, 1:])  # slots 1..max_layers
 
     # Above-canopy wind (layers ntop+1..ncan)
-    zs_above = zs_p[ntop + 1 : ncan + 1]
+    zs_above = jnp.where(lay.above_canopy, zs, jnp.take(zs, lay.ncan - 1))
     psim, _, _, _ = _psi_rsl_at(zs_above, ztop_p, zdisp_p, obu_p, beta_p, PrSc_p)
     _hcd_w = jnp.maximum(ztop_p - zdisp_p, 1e-30)
     zlog_m = jnp.log(jnp.maximum((zs_above - zdisp_p) / _hcd_w, 1e-30))
-    wind = wind.at[p, ntop + 1 : ncan + 1].set(ustar_p / vkc * (zlog_m + psim))
+    wind_above = ustar_p / vkc * (zlog_m + psim)
 
     # Wind at canopy top
     uaf_val = ustar_p / jnp.maximum(beta_p, 1e-30)
     uaf = uaf.at[p].set(uaf_val)
 
     # Within-canopy wind (layers 1..ntop)
-    wind = wind.at[p, 1 : ntop + 1].set(
-        uaf_val * jnp.exp((zs_p[1 : ntop + 1] - ztop_p) / lm_over_beta)
-    )
+    zs_within = jnp.where(lay.in_canopy, zs, ztop_p)
+    wind_within = uaf_val * jnp.exp((zs_within - ztop_p) / lm_over_beta)
 
+    new = jnp.where(lay.above_canopy, wind_above, wind_within)
+    wind = wind.at[p, 1:].set(keep(lay.in_use, new, wind[p, 1:]))
     return mlcanopy_inst._replace(
         uaf_canopy=uaf,
         wind_profile=wind,
@@ -1182,17 +1184,17 @@ def _WindProfile(
 
 
 def _AerodynamicConductance(
+    lay: Layers,
     p: int,
-    ntop: int,
-    ncan: int,
     lm_over_beta,
     mlcanopy_inst: mlcanopy_type,
     HF_extension_type: int,
 ) -> mlcanopy_type:
     """Aerodynamic conductances and eddy diffusivity (Fortran ``AerodynamicConductance``).
 
-    Vectorized over layers: ``ntop``/``ncan`` (static, from GridInfo) give the slices.
-    Error checks and consistency assertions are omitted for differentiability.
+    Vectorized over every layer slot, the formula chosen per layer (``lay``: data, plan
+    Phase 5b): above the canopy (ntop+1..ncan), within it (1..ntop-1), its top layer
+    (ntop); padding is kept. Error checks are omitted for differentiability.
     """
     ztop_p = mlcanopy_inst.ztop_canopy[p]
     zdisp_p = mlcanopy_inst.zdisp_canopy[p]
@@ -1206,53 +1208,56 @@ def _AerodynamicConductance(
     gac = mlcanopy_inst.gac_profile
     gac0 = mlcanopy_inst.gac0_soil
     kc_eddy = mlcanopy_inst.kc_eddy_profile
-    zs_p = mlcanopy_inst.zs_profile[p]
+    ic = lay.index  # layer numbers 1..max_layers
+    zs = pad_with_top(lay, mlcanopy_inst.zs_profile[p, 1:])
+    is_top_layer = ic == lay.ncan
+    # Height of the next level up: zs(ic+1), zref above the top layer ncan
+    zs_next = jnp.where(is_top_layer, zref_p, jnp.concatenate([zs[1:], zs[-1:]]))
 
     # --- Above-canopy conductances ---
-    # Layer ic (ntop+1..ncan) spans zs(ic) to zs(ic+1), the top layer to zref. psi_c is
-    # evaluated once at each height: zs(ntop+1..ncan), zref, ztop.
+    # Layer ic (ntop+1..ncan) spans zs(ic) to zs(ic+1), the top layer to zref. psi_c at each
+    # height: every slot's zs, and zref and ztop.
     _eps_ac = jnp.asarray(1e-30)
-    z_psi = jnp.concatenate([zs_p[ntop + 1 : ncan + 1], jnp.stack([zref_p, ztop_p])])
+    z_psi = jnp.concatenate([zs, jnp.stack([zref_p, ztop_p])])
     _, psic_z, _, _ = _psi_rsl_at(z_psi, ztop_p, zdisp_p, obu_p, beta_p, PrSc_p)
-    n_above = ncan - ntop
-    zs_lo = z_psi[:n_above]  # zs(ntop+1..ncan)
-    zs_hi = z_psi[1 : n_above + 1]  # zs(ntop+2..ncan), zref
-    psic_d = psic_z[1 : n_above + 1] - psic_z[:n_above]
-    zlog_c = jnp.log(
-        jnp.maximum((zs_hi - zdisp_p) / jnp.maximum(zs_lo - zdisp_p, _eps_ac), _eps_ac)
-    )
+    psic_zs, psic_zref, psic_ztop = psic_z[:-2], psic_z[-2], psic_z[-1]
+    psic_next = jnp.where(is_top_layer, psic_zref, jnp.concatenate([psic_zs[1:], psic_zs[-1:]]))
+    psic_d = psic_next - psic_zs
+    zlog_c = jnp.log(jnp.maximum((zs_next - zdisp_p) / jnp.maximum(zs - zdisp_p, _eps_ac), _eps_ac))
     # sign * max(|x|, eps) avoids jnp.where-as-denominator NaN grads
     _dc_abs = jnp.maximum(jnp.abs(zlog_c + psic_d), _eps_ac)
     _dc_sign = jnp.where((zlog_c + psic_d) < 0.0, jnp.asarray(-1.0), jnp.asarray(1.0))
-    gac = gac.at[p, ntop + 1 : ncan + 1].set(rhomol_p * vkc * ustar_p * _dc_sign / _dc_abs)
+    gac_above = rhomol_p * vkc * ustar_p * _dc_sign / _dc_abs
 
     # ztop to zs(ntop+1)
-    psic_d = psic_z[0] - psic_z[n_above + 1]
+    zs_ntop1 = jnp.take(zs, lay.ntop)  # zs(ntop+1)
+    psic_d = jnp.take(psic_zs, lay.ntop) - psic_ztop
     _hcd_ac = jnp.maximum(ztop_p - zdisp_p, _eps_ac)
-    zlog_c = jnp.log(jnp.maximum((zs_p[ntop + 1] - zdisp_p) / _hcd_ac, _eps_ac))
+    zlog_c = jnp.log(jnp.maximum((zs_ntop1 - zdisp_p) / _hcd_ac, _eps_ac))
     _dc_abs = jnp.maximum(jnp.abs(zlog_c + psic_d), _eps_ac)
     _dc_sign = jnp.where((zlog_c + psic_d) < 0.0, jnp.asarray(-1.0), jnp.asarray(1.0))
     gac_above_foliage = rhomol_p * vkc * ustar_p * _dc_sign / _dc_abs
 
-    # --- Within-canopy conductances ---
+    # --- Within-canopy conductances (layers 1..ntop-1: zs(ic) to zs(ic+1)) ---
     _bu_safe = jnp.maximum(beta_p * ustar_p, _eps_ac)
-    zl = zs_p[1:ntop] - ztop_p  # layers 1..ntop-1
-    zu = zs_p[2 : ntop + 1] - ztop_p
+    zl = jnp.where(lay.in_canopy, zs, ztop_p) - ztop_p
+    zu = jnp.where(lay.in_canopy, jnp.concatenate([zs[1:], zs[-1:]]), ztop_p) - ztop_p
     res = PrSc_p / _bu_safe * (jnp.exp(-zl / lm_over_beta) - jnp.exp(-zu / lm_over_beta))
     res_safe = jnp.maximum(jnp.abs(res), _eps_ac)
-    gac = gac.at[p, 1:ntop].set(rhomol_p / res_safe)
+    gac_within = rhomol_p / res_safe
 
     # Top foliage layer: combine below and above
-    ic = ntop
-    zl = zs_p[ic] - ztop_p
+    zl = jnp.take(zs, lay.ntop - 1) - ztop_p
     res = PrSc_p / _bu_safe * (jnp.exp(-zl / lm_over_beta) - 1.0)  # exp(0)=1
     res_safe = jnp.maximum(jnp.abs(res), _eps_ac)
     gac_below_foliage = rhomol_p / res_safe
-    gac = gac.at[p, ic].set(1.0 / (1.0 / gac_below_foliage + 1.0 / gac_above_foliage))
+    gac_top = 1.0 / (1.0 / gac_below_foliage + 1.0 / gac_above_foliage)
+
+    gac_new = jnp.where(lay.above_canopy, gac_above, jnp.where(ic == lay.ntop, gac_top, gac_within))
 
     # --- Soil surface aerodynamic conductance ---
     z0cg = 0.1 * z0mg
-    zs1 = zs_p[1]
+    zs1 = mlcanopy_inst.zs_profile[p, 1]
     z0mg_safe = jnp.maximum(z0mg, _eps_ac)
 
     if HF_extension_type == 1:  # static branch
@@ -1273,13 +1278,12 @@ def _AerodynamicConductance(
     _gac0_val = rhomol_p / jnp.minimum(rhomol_p / _gac0_val, ra_max)
     gac0 = gac0.at[p].set(_gac0_val)
 
-    gac = gac.at[p, 1 : ncan + 1].set(
-        rhomol_p / jnp.minimum(rhomol_p / gac[p, 1 : ncan + 1], ra_max)
-    )
+    gac_new = rhomol_p / jnp.minimum(rhomol_p / gac_new, ra_max)
+    gac = gac.at[p, 1:].set(keep(lay.in_use, gac_new, gac[p, 1:]))
 
     # Eddy diffusivity: dz to the next level (zref above the top layer)
-    dz = jnp.concatenate([zs_p[2 : ncan + 1], zref_p[None]]) - zs_p[1 : ncan + 1]
-    kc_eddy = kc_eddy.at[p, 1 : ncan + 1].set(gac[p, 1 : ncan + 1] / rhomol_p * dz)
+    kc_new = gac_new / rhomol_p * (zs_next - zs)
+    kc_eddy = kc_eddy.at[p, 1:].set(keep(lay.in_use, kc_new, kc_eddy[p, 1:]))
 
     return mlcanopy_inst._replace(
         gac0_soil=gac0,
@@ -1297,13 +1301,11 @@ def _AerodynamicConductance(
 def _HF2008(grid: GridInfo, mlcanopy_inst: mlcanopy_type, opts: MLOptions) -> mlcanopy_type:
     """Canopy turbulence from the roughness sublayer theory of Harman and Finnigan (2008).
 
-    Mirrors Fortran subroutine ``HF2008``. Compiled once per ``grid`` (layer indices are
-    static): run operation by operation, its per-layer loops dispatch thousands of tiny
-    JAX operations per call.
+    Mirrors Fortran subroutine ``HF2008``. Compiled (run operation by operation, it would
+    dispatch thousands of tiny JAX operations per call); layer counts are data.
     """
     p = grid.p
-    ntop = grid.ntop
-    ncan = grid.ncan
+    lay = layers(mlcanopy_inst, p)  # layer counts as data (plan Phase 5b)
 
     Lc = mlcanopy_inst.Lc_canopy
     taf = mlcanopy_inst.taf_canopy
@@ -1321,8 +1323,8 @@ def _HF2008(grid: GridInfo, mlcanopy_inst: mlcanopy_type, opts: MLOptions) -> ml
     mlcanopy_inst = mlcanopy_inst._replace(Lc_canopy=Lc)
 
     # Temperature and humidity at canopy top
-    tair_ntop = mlcanopy_inst.tair_profile[p, ntop]
-    eair_ntop = mlcanopy_inst.eair_profile[p, ntop]
+    tair_ntop = mlcanopy_inst.tair_profile[p, lay.ntop]
+    eair_ntop = mlcanopy_inst.eair_profile[p, lay.ntop]
     taf_val = tair_ntop
     qaf_val = mmh2o / mmdry * eair_ntop / (pref_p - (1.0 - mmh2o / mmdry) * eair_ntop)
     taf = taf.at[p].set(taf_val)
@@ -1342,23 +1344,23 @@ def _HF2008(grid: GridInfo, mlcanopy_inst: mlcanopy_type, opts: MLOptions) -> ml
     lm_over_beta = ztop_p / eta
 
     # Wind profile (differentiable)
-    mlcanopy_inst = _WindProfile(p, ntop, ncan, lm_over_beta, mlcanopy_inst)
+    mlcanopy_inst = _WindProfile(lay, p, lm_over_beta, mlcanopy_inst)
 
     # Momentum flux profile — use jnp.where instead of if
     ustar_p = mlcanopy_inst.ustar_canopy[p]
     zw_p = mlcanopy_inst.zw_profile[p]
-    zw_v = zw_p[1 : ncan + 1]
+    zw_v = pad_with_top(lay, zw_p[1:])
     mflx_v = jnp.where(
         zw_v > ztop_p,
         -(ustar_p**2),
-        -(ustar_p**2) * jnp.exp(2.0 * (zw_v - ztop_p) / lm_over_beta),
+        -(ustar_p**2) * jnp.exp(2.0 * (jnp.minimum(zw_v, ztop_p) - ztop_p) / lm_over_beta),
     )
-    mflx = mflx.at[p, 1 : ncan + 1].set(mflx_v)
+    mflx = mflx.at[p, 1:].set(keep(lay.in_use, mflx_v, mflx[p, 1:]))
     mlcanopy_inst = mlcanopy_inst._replace(mflx_profile=mflx)
 
     # Aerodynamic conductances (differentiable)
     mlcanopy_inst = _AerodynamicConductance(
-        p, ntop, ncan, lm_over_beta, mlcanopy_inst, opts.HF_extension_type
+        lay, p, lm_over_beta, mlcanopy_inst, opts.HF_extension_type
     )
 
     return mlcanopy_inst

@@ -1247,6 +1247,10 @@ Progress:
   CHATS default, never validated against Fortran in the JAX translation) stops at the first
   CHATS7 step with a conservation error, with the code before and after this step; to be
   investigated separately.
+- ✅ **Step 3d, turbulence**: wind profile, momentum flux and aerodynamic conductances are
+  formulas over every slot, chosen per layer by mask (above the canopy, within it, its top
+  layer); the height above the top layer is zref; the Obukhov solver and roughness length
+  were already per patch. Round-off only; reference regenerated.
 - Gradient padding test (step 1 code): gradients finite for 46, 50 and 100 slots; they
   differ by up to 5e-9 relative (round-off amplified by the implicit-function derivatives
   of the solvers), so the gradient comparison uses 1e-7 (the finite-difference checks pass
