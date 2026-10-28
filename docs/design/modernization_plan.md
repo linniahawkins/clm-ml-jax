@@ -1290,6 +1290,15 @@ Progress:
   test extended: a C4 patch (params.yaml `c3_photosynthesis: false`) runs through the C3
   patch's compiled program without compiling again and matches its own run; night-time leaf
   net photosynthesis (respiration) differs between the pathways, as it should.
+- **Timing after 5b** (`timing/results_model.jsonl`, CHATS7, CPU), against the step-0
+  baselines: compiled step 4.3 ms (2.8 ms; 1.5×); gradient over 8 steps 386 ms per step
+  (15.6 ms; **25×**), peak 4.4 GB (5.9 GB); timing test 8.2 s per simulated day (7.2 s).
+  A diagnostic run with the C3 pathway only (not committed) gives 3.4 ms (1.2×) and 21 ms per
+  gradient step (1.4×): the masks cost ~1.2–1.4×; the 25× comes from the C3/C4 merge, which
+  selects between two complete canopy containers on each of ~60 photosynthesis calls per
+  step. **Over the 1.5× limit: to discuss before going on.** Gradient compilation takes
+  ~11 min (the before-5b first call, 35 s, probably came from the compilation cache, so
+  compile times are not comparable yet).
 - Gradient padding test (step 1 code): gradients finite for 46, 50 and 100 slots; they
   differ by up to 5e-9 relative (round-off amplified by the implicit-function derivatives
   of the solvers), so the gradient comparison uses 1e-7 (the finite-difference checks pass
