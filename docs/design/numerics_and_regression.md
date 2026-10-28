@@ -203,6 +203,15 @@ sub-step recomputes the state. The fix matters only if a process reads that laye
 mid-step. The per-routine reference (`process_io.pkl.gz`) was re-recorded, because
 `RungeKuttaUpdate` itself now returns different values for level 0 and the top layer.
 
+### 4.5 CO₂ profile reset covers levels 0 … ncan−1 (not changed)
+
+Fortran `FluxProfileSolution` sets `cair(p,ic) = co2ref(p)` for `ic = 1, ncan(p)`. The JAX
+translation sets levels 0 … ncan−1 (the same slicing pattern as §4.4): level 0 is set and the
+top layer `ncan` is not. It has no effect today, because `cair` is never computed (no CO₂
+profile: every layer is initialized to the reference value and stays there), so the top
+layer keeps the reference value anyway. Found in Phase 5b; kept as translated (a refactor
+does not change behaviour); to fix together with any change that makes `cair` vary.
+
 ## 5. The apparent evening-transition sensitivity was a solver bug (fixed)
 
 **What was seen.** Two runs differing only by `leaf_emissivity × (1 ± 1e-12)` (the noise twins)

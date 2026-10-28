@@ -21,7 +21,14 @@ from tests.regression.process_io import PROCESS_IO_FILE, ROUTINES
 
 pytestmark = pytest.mark.regression
 
-ROUNDOFF = 1e-12  # largest allowed difference, relative to each field's magnitude
+# Largest allowed difference, relative to each field's magnitude. A one-unit change in the
+# last digit of a solved temperature (2e-16 relative) appears as up to ~1e-11 in fields that
+# are differences of nearly equal values (e.g. the sensible heat flux between layers,
+# -cp (T(ic+1) - T(ic)) gac; storage terms (T - T_bef)); measured in Phase 5b, where
+# computing on all layer slots changed the last digit of the solved air temperatures.
+# 1e-10 is the level above which the regression policy looks for a defect
+# (numerics_and_regression.md §6).
+ROUNDOFF = 1e-10
 
 
 @pytest.fixture(scope="module")

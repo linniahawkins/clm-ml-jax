@@ -1251,6 +1251,16 @@ Progress:
   formulas over every slot, chosen per layer by mask (above the canopy, within it, its top
   layer); the height above the top layer is zref; the Obukhov solver and roughness length
   were already per patch. Round-off only; reference regenerated.
+- ✅ **Step 3e, flux–profile solution**: the coupled air temperature/humidity system is built
+  over every slot; padding slots get the top layer's inputs and identity rows after layer
+  `ncan` (whose upward coupling is zero), so the real solution is unchanged; results go to
+  layers 1..ncan. The solved temperatures change in the last digit (2e-16), which appears
+  as up to 7e-12 in fields that are differences of nearly equal values (sensible heat flux
+  between layers, storage terms); the identical-input replay threshold is therefore 1e-10
+  (the policy's defect threshold) instead of 1e-12. Reference regenerated. Found while
+  converting: the CO₂ profile reset covers levels 0..ncan−1 instead of 1..ncan (no effect;
+  numerics doc §4.5, not changed). Compile time grows with `max_layers` here (the solve is
+  unrolled over every slot): the padding test now takes ~9 min.
 - Gradient padding test (step 1 code): gradients finite for 46, 50 and 100 slots; they
   differ by up to 5e-9 relative (round-off amplified by the implicit-function derivatives
   of the solvers), so the gradient comparison uses 1e-7 (the finite-difference checks pass

@@ -24,6 +24,7 @@ from multilayer_canopy.MLCanopyFluxesType import (
 )
 from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf  # noqa: F401
+from multilayer_canopy.MLLayersMod import keep, layers, pad_with_top
 from multilayer_canopy.MLLeafFluxesMod import LeafFluxes  # noqa: F401
 from multilayer_canopy.MLMathToolsMod import tridiag_2eq  # noqa: F401
 from multilayer_canopy.MLSoilFluxesMod import SoilFluxes  # noqa: F401
@@ -84,11 +85,14 @@ def FluxProfileSolution(
     elif opts.flux_profile_type == 1:
         # Implicit flux-profile solution — Fortran lines 62-74
         for fp in range(num_filter):
-            p, n = grid.p, grid.ncan
-            mlcanopy_inst = ImplicitFluxProfileSolution(p, mlcanopy_inst, n=n, opts=opts)
+            p = grid.p
+            mlcanopy_inst = ImplicitFluxProfileSolution(p, mlcanopy_inst, opts=opts)
 
-            # No profile for CO2: set every layer to reference value
-            cair = cair.at[p, :n].set(co2ref[p])
+            # No profile for CO2: set every layer to reference value. Kept as translated:
+            # levels 0..ncan-1 (Fortran: layers 1..ncan; no effect while cair is constant,
+            # numerics doc §4.5)
+            below_ncan = jnp.arange(cair.shape[1]) < mlcanopy_inst.ncan_canopy[p]
+            cair = cair.at[p].set(jnp.where(below_ncan, co2ref[p], cair[p]))
             mlcanopy_inst = mlcanopy_inst._replace(cair_profile=cair)
 
     else:
@@ -102,19 +106,18 @@ def FluxProfileSolution(
 # ---------------------------------------------------------------------------
 
 
-@partial(jax.jit, static_argnums=(0, 1, 2))
+@partial(jax.jit, static_argnums=(0, 1))
 def _implicit_fps_jit(
     p: int,
-    n: int,
     dtime: float,
     mlcanopy_inst: mlcanopy_type,
 ):
     """JIT-compiled core of ImplicitFluxProfileSolution.
 
-    ``p`` and ``n`` are static Python ints so all Python ``range(1, n+1)``
-    loops and ``slice(1, n+1)`` index expressions are concrete at trace
-    time.  Recompilation occurs only when the canopy layer count changes
-    (rare for a fixed site).
+    The layer count ``ncan`` is data (plan Phase 5b): the system is built over every layer
+    slot; padding slots get the top layer's inputs and identity rows after the top layer
+    (whose upward coupling is zero), so the real solution is unchanged; results are written
+    to layers 1..ncan only.
 
     Returns ``(mlcanopy_inst, aux)`` where ``aux`` is a tuple of arrays
     needed by ``ErrorCheck01`` / ``ErrorCheck02`` which run outside JIT
@@ -124,6 +127,14 @@ def _implicit_fps_jit(
     (lines 86-310).  Reference: Bonan et al. (2018) GMD 11, 1467-1496.
     """
     nlevmlcan = mlcanopy_inst.dpai_profile.shape[1] - 1  # layer slots (model.yaml max_layers)
+    lay = layers(mlcanopy_inst, p)
+    n = lay.ncan  # layers in use (data)
+    use = lay.in_use
+
+    def _pad0(x):
+        """Per-level array (level 0 kept): padding slots get layer ncan's values."""
+        return x.at[1:].set(pad_with_top(lay, x[1:]))
+
     # ------------------------------------------------------------------
     # Unpack inputs from mlcanopy_inst  (Fortran associate block)
     # ------------------------------------------------------------------
@@ -150,23 +161,21 @@ def _implicit_fps_jit(
     _soil_dz_p = mlcanopy_inst.soil_dz_soil[p]
     _soil_tk_p = mlcanopy_inst.soil_tk_soil[p]
     _gac0_p = mlcanopy_inst.gac0_soil[p]
-    # n is passed as a static Python int from the wrapper — do not re-derive
-
-    # 1-D and 2-D slices — JAX arrays used directly
-    _dz_p = mlcanopy_inst.dz_profile[p]
-    _dpai_p = mlcanopy_inst.dpai_profile[p]
-    _fwet_p = mlcanopy_inst.fwet_profile[p]
-    _fdry_p = mlcanopy_inst.fdry_profile[p]
-    _fracsun_p = mlcanopy_inst.fracsun_profile[p]
-    _cpleaf_p = mlcanopy_inst.cpleaf_profile[p]
-    _gac_p = mlcanopy_inst.gac_profile[p]
-    _tair_bef_p = mlcanopy_inst.tair_bef_profile[p]
-    _eair_bef_p = mlcanopy_inst.eair_bef_profile[p]
-    _gbh_p = mlcanopy_inst.gbh_leaf[p]
-    _gbv_p = mlcanopy_inst.gbv_leaf[p]
-    _gs_p = mlcanopy_inst.gs_leaf[p]
-    _rnleaf_p = mlcanopy_inst.rnleaf_leaf[p]
-    _tleaf_bef_p = mlcanopy_inst.tleaf_bef_leaf[p]
+    # 1-D and 2-D slices over every slot; padding gets the top layer's values (finite)
+    _dz_p = _pad0(mlcanopy_inst.dz_profile[p])
+    _dpai_p = _pad0(mlcanopy_inst.dpai_profile[p])
+    _fwet_p = _pad0(mlcanopy_inst.fwet_profile[p])
+    _fdry_p = _pad0(mlcanopy_inst.fdry_profile[p])
+    _fracsun_p = _pad0(mlcanopy_inst.fracsun_profile[p])
+    _cpleaf_p = _pad0(mlcanopy_inst.cpleaf_profile[p])
+    _gac_p = _pad0(mlcanopy_inst.gac_profile[p])
+    _tair_bef_p = _pad0(mlcanopy_inst.tair_bef_profile[p])
+    _eair_bef_p = _pad0(mlcanopy_inst.eair_bef_profile[p])
+    _gbh_p = _pad0(mlcanopy_inst.gbh_leaf[p])
+    _gbv_p = _pad0(mlcanopy_inst.gbv_leaf[p])
+    _gs_p = _pad0(mlcanopy_inst.gs_leaf[p])
+    _rnleaf_p = _pad0(mlcanopy_inst.rnleaf_leaf[p])
+    _tleaf_bef_p = _pad0(mlcanopy_inst.tleaf_bef_leaf[p])
 
     # ------------------------------------------------------------------
     # Timestep and latent heat — Fortran lines 155-158
@@ -206,8 +215,8 @@ def _implicit_fps_jit(
     beta = jnp.zeros((nlevmlcan + 1, nleaf + 1))
     delta = jnp.zeros((nlevmlcan + 1, nleaf + 1))
 
-    # Vectorized over layers 1..n (rows) and [sunlit, shaded] leaves (columns).
-    sl = slice(1, n + 1)
+    # Vectorized over layer slots (rows) and [sunlit, shaded] leaves (columns).
+    sl = slice(1, None)
     lf = slice(isun, isha + 1)  # isun, isha = 1, 2
     active = (_dpai_p[sl] > 0.0)[:, None]
     _gs_v = _gs_p[sl, lf]
@@ -255,13 +264,14 @@ def _implicit_fps_jit(
     # Tridiagonal coefficients — JAX arrays
     # Bonan et al. (2018) eqs. (16)-(17), (S10)-(S31); Fortran lines 258-316
     # ------------------------------------------------------------------
-    # Vectorized over layers 1..n; the bottom (ic = 1, soil below) and top (ic = n,
-    # reference height above) layers are then corrected as in Fortran.
+    # Vectorized over layer slots; the bottom (ic = 1, soil below) and top (ic = n,
+    # reference height above) layers are then corrected as in Fortran, and padding slots
+    # become identity rows.
     rdt = _rhomol_p * _dz_p[sl] / dtime
     rho_dz_over_dt = jnp.zeros(nlevmlcan + 1).at[sl].set(rdt)
     gac_ic = _gac_p[sl]
-    gac_below_sh = jnp.concatenate([jnp.reshape(_gac0_p, (1,)), _gac_p[1:n]])
-    gac_below_et = jnp.concatenate([jnp.reshape(gs0, (1,)), _gac_p[1:n]])
+    gac_below_sh = jnp.concatenate([jnp.reshape(_gac0_p, (1,)), _gac_p[1:nlevmlcan]])
+    gac_below_et = jnp.concatenate([jnp.reshape(gs0, (1,)), _gac_p[1:nlevmlcan]])
     gsh_s, gsh_h = gleaf_sh[sl, isun], gleaf_sh[sl, isha]
     get_s, get_h = gleaf_et[sl, isun], gleaf_et[sl, isha]
     al_s, al_h = alpha[sl, isun], alpha[sl, isha]
@@ -301,18 +311,25 @@ def _implicit_fps_jit(
     b22 = b22.at[0].set(b22[0] - gs0 * _rhg_p * dqsat0 * beta0)
     d2 = d2.at[0].set(d2[0] + gs0 * _rhg_p * (qsat0 + dqsat0 * (delta0 - _tg_bef_p)))
 
+    # Padding slots: identity rows (x = 0), not coupled to layer n (c(n) = 0)
+    zero, one = jnp.zeros_like(a1), jnp.ones_like(a1)
+    a1, c1, d1, a2, c2, d2, b12, b21 = (
+        jnp.where(use, x, zero) for x in (a1, c1, d1, a2, c2, d2, b12, b21)
+    )
+    b11, b22 = jnp.where(use, b11, one), jnp.where(use, b22, one)
+
     # ------------------------------------------------------------------
     # Tridiagonal solve for tair and eair (mol/mol) — Fortran lines 327-329
     # ------------------------------------------------------------------
-    tair_p, eair_p = tridiag_2eq(a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, n)
-    tair = tair.at[p, 1 : n + 1].set(jnp.stack(tair_p))
-    eair = eair.at[p, 1 : n + 1].set(jnp.stack(eair_p))
+    tair_p, eair_p = tridiag_2eq(a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, nlevmlcan)
+    tair = tair.at[p, 1:].set(keep(use, jnp.stack(tair_p), tair[p, 1:]))
+    eair = eair.at[p, 1:].set(keep(use, jnp.stack(eair_p), eair[p, 1:]))
 
     # ------------------------------------------------------------------
     # Soil surface temperature and vapor pressure — Fortran lines 332-333
     # ------------------------------------------------------------------
-    _tair_solved = tair[p]  # JAX array, shape (nlevmlcan+1,)
-    _eair_solved = eair[p]
+    _tair_solved = _pad0(tair[p])  # padding: the top layer's (finite)
+    _eair_solved = _pad0(eair[p])
 
     t0 = alpha0 * _tair_solved[1] + beta0 * _eair_solved[1] + delta0
     e0 = _rhg_p * (qsat0 + dqsat0 * (t0 - _tg_bef_p))
@@ -333,7 +350,7 @@ def _implicit_fps_jit(
     # ------------------------------------------------------------------
     # Convert water vapor from mol/mol to Pa — Fortran lines 343-346
     # ------------------------------------------------------------------
-    eair = eair.at[p, 1 : n + 1].set(eair[p, 1 : n + 1] * _pref_p)
+    eair = eair.at[p, 1:].set(keep(use, eair[p, 1:] * _pref_p, eair[p, 1:]))
     e0 = e0 * _pref_p
 
     mlcanopy_inst = mlcanopy_inst._replace(
@@ -346,7 +363,7 @@ def _implicit_fps_jit(
     # Inlined from LeafFluxes; all inputs are JAX arrays
     # ------------------------------------------------------------------
     # eair in Pa
-    _eair_lf_p = _eair_solved.at[1 : n + 1].set(_eair_solved[1 : n + 1] * _pref_p)
+    _eair_lf_p = _eair_solved.at[1:].set(_eair_solved[1:] * _pref_p)
 
     tair_v = _tair_solved[sl, None]
     eair_v = _eair_lf_p[sl, None]
@@ -399,15 +416,17 @@ def _implicit_fps_jit(
     _evleaf_new = _z.at[sl, lf].set(evleaf_val)
     _trleaf_new = _z.at[sl, lf].set(trleaf_val)
 
-    # Batch write-back: 6 bulk operations
-    _sl_lf = slice(1, n + 1)
+    # Batch write-back: layers 1..n (padding kept)
+    def _set_leaf(arr, new):
+        return arr.at[p, 1:, :].set(keep(use, new[1:, :], arr[p, 1:, :]))
+
     mlcanopy_inst = mlcanopy_inst._replace(
-        tleaf_leaf=mlcanopy_inst.tleaf_leaf.at[p, _sl_lf, :].set(_tleaf_new[_sl_lf, :]),
-        stleaf_leaf=mlcanopy_inst.stleaf_leaf.at[p, _sl_lf, :].set(_stleaf_new[_sl_lf, :]),
-        shleaf_leaf=mlcanopy_inst.shleaf_leaf.at[p, _sl_lf, :].set(_shleaf_new[_sl_lf, :]),
-        lhleaf_leaf=mlcanopy_inst.lhleaf_leaf.at[p, _sl_lf, :].set(_lhleaf_new[_sl_lf, :]),
-        evleaf_leaf=mlcanopy_inst.evleaf_leaf.at[p, _sl_lf, :].set(_evleaf_new[_sl_lf, :]),
-        trleaf_leaf=mlcanopy_inst.trleaf_leaf.at[p, _sl_lf, :].set(_trleaf_new[_sl_lf, :]),
+        tleaf_leaf=_set_leaf(mlcanopy_inst.tleaf_leaf, _tleaf_new),
+        stleaf_leaf=_set_leaf(mlcanopy_inst.stleaf_leaf, _stleaf_new),
+        shleaf_leaf=_set_leaf(mlcanopy_inst.shleaf_leaf, _shleaf_new),
+        lhleaf_leaf=_set_leaf(mlcanopy_inst.lhleaf_leaf, _lhleaf_new),
+        evleaf_leaf=_set_leaf(mlcanopy_inst.evleaf_leaf, _evleaf_new),
+        trleaf_leaf=_set_leaf(mlcanopy_inst.trleaf_leaf, _trleaf_new),
     )
 
     # ------------------------------------------------------------------
@@ -427,42 +446,44 @@ def _implicit_fps_jit(
     # Vertical sensible heat and water vapor fluxes between layers
     # Fortran lines 363-370
     # ------------------------------------------------------------------
-    # tair[ic+1] for ic=1..n-1, then thref at ic=n (no slot above layer n is read, so this
-    # works without padding)
-    _tair_next_inner = jnp.concatenate([_tair_final[2 : n + 1], jnp.reshape(_thref_p, (1,))])
-    _eair_next_inner = jnp.concatenate([_eair_final[2 : n + 1], jnp.reshape(_eref_p, (1,))])
+    # tair[ic+1] for ic=1..n-1, then thref at ic=n (over every slot; padding discarded)
+    is_top = lay.index == n
+    _tair_next_inner = jnp.where(
+        is_top, _thref_p, jnp.concatenate([_tair_final[2:], _tair_final[-1:]])
+    )
+    _eair_next_inner = jnp.where(
+        is_top, _eref_p, jnp.concatenate([_eair_final[2:], _eair_final[-1:]])
+    )
 
     _shair_new = jnp.zeros(nlevmlcan + 1)
     _etair_new = jnp.zeros(nlevmlcan + 1)
-    _shair_new = _shair_new.at[1 : n + 1].set(
-        -_cpair_p * (_tair_next_inner - _tair_final[1 : n + 1]) * _gac_p[1 : n + 1]
+    _shair_new = _shair_new.at[1:].set(
+        -_cpair_p * (_tair_next_inner - _tair_final[1:]) * _gac_p[1:]
     )
-    _etair_new = _etair_new.at[1 : n + 1].set(
-        -(_eair_next_inner - _eair_final[1 : n + 1]) / _pref_p * _gac_p[1 : n + 1]
-    )
+    _etair_new = _etair_new.at[1:].set(-(_eair_next_inner - _eair_final[1:]) / _pref_p * _gac_p[1:])
 
     # ------------------------------------------------------------------
     # Canopy air storage flux — Fortran lines 373-379
     # ------------------------------------------------------------------
     storage_sh = jnp.zeros(nlevmlcan + 1)
     storage_et = jnp.zeros(nlevmlcan + 1)
-    storage_sh = storage_sh.at[1 : n + 1].set(
-        _cpair_p * (_tair_final[1 : n + 1] - _tair_bef_p[1 : n + 1]) * rho_dz_over_dt[1 : n + 1]
+    storage_sh = storage_sh.at[1:].set(
+        _cpair_p * (_tair_final[1:] - _tair_bef_p[1:]) * rho_dz_over_dt[1:]
     )
-    storage_et = storage_et.at[1 : n + 1].set(
-        (_eair_final[1 : n + 1] - _eair_bef_p[1 : n + 1]) / _pref_p * rho_dz_over_dt[1 : n + 1]
+    storage_et = storage_et.at[1:].set(
+        (_eair_final[1:] - _eair_bef_p[1:]) / _pref_p * rho_dz_over_dt[1:]
     )
     _stair_new = jnp.zeros(nlevmlcan + 1)
-    _stair_new = _stair_new.at[1 : n + 1].set(
-        storage_sh[1 : n + 1] + storage_et[1 : n + 1] * lambda_
-    )
+    _stair_new = _stair_new.at[1:].set(storage_sh[1:] + storage_et[1:] * lambda_)
 
-    # Batch write-back
-    _sl = slice(1, n + 1)
+    # Batch write-back: layers 1..n (padding kept)
+    def _set_profile(arr, new):
+        return arr.at[p, 1:].set(keep(use, new[1:], arr[p, 1:]))
+
     mlcanopy_inst = mlcanopy_inst._replace(
-        shair_profile=shair.at[p, _sl].set(_shair_new[_sl]),
-        etair_profile=etair.at[p, _sl].set(_etair_new[_sl]),
-        stair_profile=stair.at[p, _sl].set(_stair_new[_sl]),
+        shair_profile=_set_profile(shair, _shair_new),
+        etair_profile=_set_profile(etair, _etair_new),
+        stair_profile=_set_profile(stair, _stair_new),
     )
 
     # ------------------------------------------------------------------
@@ -529,9 +550,9 @@ def ImplicitFluxProfileSolution(
        default because each call requires 9 ``np.asarray()`` host-device
        syncs that dominate the cost of the flux-profile step.
     """
-    if n is None:
-        n = int(mlcanopy_inst.ncan_canopy[p])  # concrete before JIT boundary
-    mlcanopy_inst, aux = _implicit_fps_jit(p, n, opts.dtime_ml, mlcanopy_inst)
+    mlcanopy_inst, aux = _implicit_fps_jit(p, opts.dtime_ml, mlcanopy_inst)
+    if DEBUG_FPS_CHECKS and n is None:
+        n = int(mlcanopy_inst.ncan_canopy[p])  # the debug checks need a concrete count
     if DEBUG_FPS_CHECKS:
         (
             lambda_,
