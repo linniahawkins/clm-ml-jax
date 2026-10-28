@@ -777,8 +777,18 @@ Progress:
   temperature): the time loop rebuilds each step from a fixed template plus `State`, bit for bit
   (fields found by NaN-poisoning each field before a step). Acclimation temperature in `State`
   ✅ (still the whole-run mean; Phase 4b). Gradients with respect to state, parameters and
-  forcing ✅, each checked against a finite difference. Remaining: `Model.step` in `clm_ml`,
-  `Params` from `params.yaml` into `CanopyParams`.
+  forcing ✅, each checked against a finite difference. `Params.canopy_params(pft)` builds the
+  physics parameters from `params.yaml` (identical to the legacy tables, tested); `params` can be
+  passed through `ModelAdvance`/`clm_drv`/`MLCanopyFluxes` ✅.
+- **Moved to Phase 4:** the `clm_ml.Model` API (`initial_state`, `step`, `run`) and moving
+  first-step initialization into it. Phase 4 builds the run loop as one compiled `scan` per
+  chunk, which fixes the shape of these functions; building `Model.step` around the current
+  per-step loop first would be done twice. The substance is in place: a step is a function of
+  `(State, forcing, params)` (the loop rebuilds every step from a template plus `State`), and
+  gradients with respect to all three work. No `global` statement executes in the time loop;
+  the remaining ones run once at initialization (Phase 4 initial state, Phase 7 cleanup).
+
+**Phase 3 status: done** (with the `Model` API moved to Phase 4, above).
 
 ### Phase 4: Chunked, compiled runs (one patch)
 

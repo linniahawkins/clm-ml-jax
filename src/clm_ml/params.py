@@ -161,6 +161,23 @@ class Params:
             values[name][row] = value
         return Params(values=values, source=self.source)
 
+    def canopy_params(self, pft: str):
+        """The parameters of one PFT as the physics takes them
+        (``multilayer_canopy.MLCanopyParamsMod.CanopyParams``, JAX scalars). Spectral
+        ``[vis, nir]`` pairs become ``[0, vis, nir]`` (the physics indexes wavebands 1, 2)."""
+        import jax.numpy as jnp
+
+        from multilayer_canopy.MLCanopyParamsMod import CanopyParams
+
+        row = pft_index(pft, "canopy_params()")
+        fields = {}
+        for name in CanopyParams._fields:
+            value = jnp.asarray(self.values[name][row], dtype=jnp.float64)
+            if SPECS_BY_NAME[name].spectral:
+                value = jnp.concatenate([jnp.zeros(1), value])
+            fields[name] = value
+        return CanopyParams(**fields)
+
     def missing_for(self, pft_rows: list[int]) -> list[str]:
         """Parameters with no value (NaN) for any of the given PFT rows."""
         return sorted(
