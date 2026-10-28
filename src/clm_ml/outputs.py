@@ -326,15 +326,11 @@ class Outputs:
         )
 
     @classmethod
-    def from_records(
-        cls, records: Mapping[str, np.ndarray], run, static: Mapping[str, np.ndarray]
-    ) -> "Outputs":
-        """One output stream's records (``{"time": ..., variable: (record, patch, ...)}``,
-        from ``clm_ml.legacy.worker``). Raw legacy fields (``mlcanopy.<field>``, validation)
-        go to ``raw``."""
-        nlevgrnd = int(static["static.nlevgrnd"])
+    def from_records(cls, records: Mapping[str, np.ndarray], meta: Mapping) -> "Outputs":
+        """One output stream's records (``{"time": ..., variable: (record, patch, ...)}``).
+        ``meta`` is :func:`domain_meta` plus ``soil_depth`` ``(patch, soil_layer)``. Raw
+        legacy fields (``mlcanopy.<field>``, validation) go to ``raw``."""
         soil = records.get("soil_temperature")
-        d = run.domain
         return cls(
             data={
                 n: np.asarray(v, dtype=float)
@@ -342,12 +338,12 @@ class Outputs:
                 if n not in ("time", "soil_temperature") and "." not in n
             },
             time=np.asarray(records["time"], dtype="datetime64[ns]"),
-            patch_gridcell=d.patches.gridcell_index.copy(),
-            patch_weight=d.patches.weight.copy(),
-            patch_pft=tuple(PFT_NAMES[i] for i in d.patches.pft_index),
-            gridcell_names=d.gridcells.names,
+            patch_gridcell=np.asarray(meta["patch_gridcell"]),
+            patch_weight=np.asarray(meta["patch_weight"], dtype=float),
+            patch_pft=tuple(meta["patch_pft"]),
+            gridcell_names=tuple(meta["gridcell_names"]),
             soil_temperature=None if soil is None else np.asarray(soil, dtype=float),
-            soil_depth=np.asarray(static["static.soil_depth"])[:, 1 : nlevgrnd + 1],
+            soil_depth=np.asarray(meta["soil_depth"]),
             raw={n: v for n, v in records.items() if "." in n},
         )
 
@@ -442,3 +438,69 @@ class Outputs:
             self.to_xarray(level).to_netcdf(out)
             written.append(out)
         return written
+
+
+def domain_meta(domain) -> dict:
+    """Patch and gridcell metadata the output files carry (JSON-serializable)."""
+    return {
+        "patch_gridcell": domain.patches.gridcell_index.tolist(),
+        "patch_weight": domain.patches.weight.tolist(),
+        "patch_pft": [PFT_NAMES[i] for i in domain.patches.pft_index],
+        "gridcell_names": list(domain.gridcells.names),
+    }
+
+
+class StreamFileWriter:
+    """Writes one output stream's netCDF files as their periods complete (``file_per``
+    run, year or month), so a long run holds at most one file's records in memory.
+
+    Files are ``{directory}/{tower}_{stream}_{label}_{level}.nc``."""
+
+    def __init__(self, stream, variables, meta, directory: Path, tower: str, run_start):
+        self.stream, self.variables, self.meta = stream, tuple(variables), meta
+        self.directory, self.tower, self.run_start = Path(directory), tower, run_start
+        self._label = None
+        self._records: list = []
+        self.written: list[Path] = []
+
+    def _label_of(self, end) -> str:
+        if self.stream.file_per == "run":
+            return f"{self.run_start:%Y-%m-%d}"
+        inside = end - dt.timedelta(microseconds=1)  # the record's interval ends at `end`
+        return inside.strftime("%Y" if self.stream.file_per == "year" else "%Y-%m")
+
+    def add(self, records) -> None:
+        """Records ``[(key, end_time, {variable: value}), ...]`` in time order."""
+        for record in records:
+            label = self._label_of(record[1])
+            if self._label is not None and label != self._label:
+                self._flush()
+            self._label = label
+            self._records.append(record)
+
+    def close(self) -> None:
+        if self._records:
+            self._flush()
+
+    def state(self) -> dict:
+        """The records not yet written (saved with a restart)."""
+        return {"label": self._label, "records": list(self._records)}
+
+    def restore(self, saved: dict) -> None:
+        self._label, self._records = saved["label"], list(saved["records"])
+
+    def _flush(self) -> None:
+        outputs = Outputs.from_records(records_to_arrays(self._records, self.variables), self.meta)
+        if outputs.data or outputs.soil_temperature is not None:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            path = self.directory / f"{self.tower}_{self.stream.name}_{self._label}.nc"
+            self.written += outputs.to_netcdf(path, self.stream.level)
+        self._records = []
+
+
+def records_to_arrays(records, variables) -> dict:
+    """``[(key, end, {variable: value}), ...]`` -> ``{"time": ..., variable: stacked}``."""
+    arrays = {"time": np.array([end for _, end, _ in records], dtype="datetime64[ns]")}
+    for name in variables:
+        arrays[name] = np.stack([v[name] for _, _, v in records])
+    return arrays

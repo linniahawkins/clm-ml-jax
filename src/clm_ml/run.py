@@ -152,11 +152,15 @@ class Run:
 
     # -- running -----------------------------------------------------------------------
 
-    def execute(self, *, write: bool = True, quiet: bool = False) -> dict:
-        """Run the model and (if ``write``) write the output streams configured in run.yaml
-        (one netCDF file per stream, level and ``file_per`` period).
+    def execute(
+        self, *, write: bool = True, quiet: bool = False, return_outputs: bool = True
+    ) -> dict:
+        """Run the model and (if ``write``) write the output streams configured in run.yaml:
+        one netCDF file per stream, level and ``file_per`` period, each written as soon as
+        its period is complete.
 
-        Returns ``{stream name: Outputs}``.
+        Returns ``{stream name: Outputs}`` (all records in memory), or ``{}`` with
+        ``return_outputs=False``, so long runs keep only the files' records in memory.
         """
         from clm_ml.outputs import Outputs
 
@@ -164,25 +168,27 @@ class Run:
         out_dir = self.output_directory
         with tempfile.TemporaryDirectory() as tmp:
             raw_file = Path(tmp) / "streams.npz"
-            self._run_worker(self.legacy_spec(None), raw_file, quiet)
+            spec = self.legacy_spec(None)
+            spec["output_dir"] = str(out_dir) if write else None
+            spec["return_records"] = return_outputs
+            self._run_worker(spec, raw_file, quiet)
             with np.load(raw_file) as data:
                 arrays = {key: data[key] for key in data.files}
             if write and out.legacy_ascii:
                 out_dir.mkdir(parents=True, exist_ok=True)
-                spec = dict(self.legacy_spec(out_dir), mode="legacy_ascii")
-                self._run_worker(spec, Path(tmp) / "unused.npz", quiet)
+                legacy = dict(self.legacy_spec(out_dir), mode="legacy_ascii")
+                self._run_worker(legacy, Path(tmp) / "unused.npz", quiet)
 
+        if not return_outputs:
+            return {}
+        from clm_ml.outputs import domain_meta
+
+        meta = dict(domain_meta(self.domain), soil_depth=arrays["static.soil_depth"])
         results = {}
         for stream in out.streams:
             prefix = f"{stream.name}/"
             records = {k[len(prefix) :]: v for k, v in arrays.items() if k.startswith(prefix)}
-            outputs = Outputs.from_records(records, self, arrays)
-            results[stream.name] = outputs
-            if write and (outputs.data or outputs.soil_temperature is not None):
-                out_dir.mkdir(parents=True, exist_ok=True)
-                tower = self.domain.gridcells.names[0]
-                for label, part in outputs.split(stream.file_per, self.start):
-                    part.to_netcdf(out_dir / f"{tower}_{stream.name}_{label}.nc", stream.level)
+            results[stream.name] = Outputs.from_records(records, meta)
         return results
 
     def stream_variables(self, stream) -> tuple[str, ...]:
@@ -246,9 +252,13 @@ class Run:
                     "frequency": st.frequency,
                     "statistic": st.statistic,
                     "variables": list(self.stream_variables(st)),
+                    "level": list(st.level),
+                    "file_per": st.file_per,
                 }
                 for st in self.run_file.output.streams
             ],
+            "meta": _domain_meta(self.domain),
+            "run_start": self.start.isoformat(),
         }
 
     def summary(self) -> str:
@@ -352,6 +362,12 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
             f"divide the forcing step ({run_file.time.step_seconds} s)"
         )
     return run
+
+
+def _domain_meta(domain) -> dict:
+    from clm_ml.outputs import domain_meta
+
+    return domain_meta(domain)
 
 
 #: Raw legacy fields allowed as stream variables (validation): "mlcanopy.<field>" etc.

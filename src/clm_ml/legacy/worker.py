@@ -108,33 +108,64 @@ def run_spec(spec: dict, out_file: Path) -> None:
         namelist = _write_namelist(spec["namelist"], Path(tmp), None)
         run = main_mod.setup_run(main_mod.read_namelist(str(namelist)))
 
+    import datetime as dt
+
     from clm_ml.output_streams import StreamSpec
+    from clm_ml.outputs import StreamFileWriter
+    from clm_src_main import ColumnType
+    from clm_src_main.clm_varpar import nlevgrnd
 
     streams = [
         StreamSpec(s["name"], s["frequency"], s["statistic"], tuple(s["variables"]))
         for s in spec["streams"]
     ]
+    meta = dict(spec["meta"])
+    meta["soil_depth"] = np.asarray(ColumnType.col.z)[:, 1 : nlevgrnd + 1]
+    writers = None
+    if spec.get("output_dir"):
+        start = dt.datetime.fromisoformat(spec["run_start"])
+        writers = [
+            StreamFileWriter(
+                _FileOptions(s["level"], s["file_per"], s["name"]),
+                stream.variables,
+                meta,
+                Path(spec["output_dir"]),
+                spec["tower_name"],
+                start,
+            )
+            for s, stream in zip(spec["streams"], streams)
+        ]
+    keep = bool(spec.get("return_records", True))
     collected: list[list] = [[] for _ in streams]
-    main_mod.run_streams(
-        run, streams, spec["max_layers"], lambda i, records: collected[i].extend(records)
-    )
 
-    from clm_src_main import ColumnType
-    from clm_src_main.clm_varpar import nlevgrnd
+    def on_records(i, records):
+        if writers is not None:
+            writers[i].add(records)  # files are written as their periods complete
+        if keep:
+            collected[i].extend(records)
 
-    arrays = {
-        "static.soil_depth": np.asarray(ColumnType.col.z),
-        "static.nlevgrnd": np.asarray(nlevgrnd),
-    }
-    for stream, records in zip(streams, collected):
-        if not records:
-            raise RuntimeError(f"output stream {stream.name} produced no records")
-        arrays[f"{stream.name}/time"] = np.array(
-            [end for _, end, _ in records], dtype="datetime64[ns]"
-        )
-        for name in stream.variables:
-            arrays[f"{stream.name}/{name}"] = np.stack([v[name] for _, _, v in records])
+    main_mod.run_streams(run, streams, spec["max_layers"], on_records)
+    if writers is not None:
+        for w in writers:
+            w.close()
+
+    arrays = {"static.soil_depth": meta["soil_depth"]}
+    if keep:
+        from clm_ml.outputs import records_to_arrays
+
+        for stream, records in zip(streams, collected):
+            if not records:
+                raise RuntimeError(f"output stream {stream.name} produced no records")
+            for key, value in records_to_arrays(records, stream.variables).items():
+                arrays[f"{stream.name}/{key}"] = value
     np.savez_compressed(out_file, **arrays)
+
+
+class _FileOptions:
+    """The parts of a run.yaml stream the file writer needs."""
+
+    def __init__(self, level, file_per, name):
+        self.level, self.file_per, self.name = tuple(level), file_per, name
 
 
 def _install_tower(name: str, values: dict) -> None:

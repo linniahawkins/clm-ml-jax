@@ -860,9 +860,9 @@ Progress:
   stream and writes one netCDF file per stream, level and period. Raw legacy fields
   (`mlcanopy.<field>`) can be requested for validation; the regression uses that.
   Round-off only (different compiled program; reference regenerated).
-  Still to do here: write each file as soon as its period is complete (the worker now
-  returns all records at the end of the run, so long runs with fine output still hold them
-  in memory); `jax.checkpoint` on the step for gradients over long chunks.
+  ✅ Each file is written as soon as its period (run, year, month) is complete
+  (`StreamFileWriter`, in the worker); `Run.execute(return_outputs=False)` keeps no records in
+  memory beyond the current file's.
 - Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`); the `ForcingSource`
   streams interface; host side between chunks: health checks, rotating restarts (`.prev`),
   partial output intervals saved with restarts; calendar-month chunks (decision 17);

@@ -77,3 +77,30 @@ def test_step_and_hourly_records():
 def test_bad_spec():
     with pytest.raises(ValueError):
         S.StreamSpec("bad", "weekly", "mean", ("x",))
+
+
+def test_file_writer_writes_each_month_when_complete(tmp_path):
+    from clm_ml.outputs import StreamFileWriter
+
+    class Opts:
+        name, level, file_per = "d", ("patch",), "month"
+
+    meta = {"patch_gridcell": [0], "patch_weight": [1.0], "patch_pft": ["x"],
+            "gridcell_names": ["g"], "soil_depth": np.zeros((1, 1))}  # fmt: skip
+    writer = StreamFileWriter(Opts, ("gpp",), meta, tmp_path, "T", dt.datetime(2007, 5, 30))
+    day = dt.timedelta(days=1)
+
+    def record(d):
+        end = dt.datetime(2007, 5, 30) + d * day
+        return (end.date(), end, {"gpp": np.array([float(d)])})
+
+    writer.add([record(1), record(2)])  # records ending 31 May 00:00 and 1 June 00:00
+    assert not writer.written  # May may still continue
+    writer.add([record(3)])  # a June record completes May
+    assert [p.name for p in writer.written] == ["T_d_2007-05_patch.nc"]
+    writer.close()
+    assert [p.name for p in writer.written][-1] == "T_d_2007-06_patch.nc"
+    import xarray as xr
+
+    with xr.open_dataset(tmp_path / "T_d_2007-05_patch.nc") as ds:
+        assert ds.sizes["time"] == 2  # the record ending at 1 June 00:00 belongs to May
