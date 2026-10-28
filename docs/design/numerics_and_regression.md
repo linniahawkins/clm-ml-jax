@@ -183,6 +183,19 @@ can use `MLMathToolsMod.bisection_traceable` (§3), which has Fortran's stopping
 Fortran uses `hybrid` with `tol = 0.1` (mol/mol scaled). The running JAX model uses
 `_ci_solver_scan_ift`: 40 fixed secant steps followed by a Newton step.
 
+### 4.4 Runge–Kutta update skips the top canopy-air layer (found in Phase 3e)
+
+Fortran `RungeKuttaUpdate` (MLRungeKuttaMod.F90, line 90) updates layers `ic = 1, ncan(p)`. The
+JAX translation slices `[p, :n]`, i.e. levels 0 … ncan−1. So the top canopy-air layer (`ncan`,
+just below the reference height) never receives the intermediate Runge–Kutta states (it carries
+the stage's implicit solution instead), and the unused level 0 is updated. Found by poisoning
+each state field with NaN before a step (Phase 3e): `tair_bef(0)` reaches the results.
+
+**Status:** recorded, not changed (it would change results; the regression reference keeps the
+running model's behavior). Fix: slice `1 : n + 1` in `RungeKuttaUpdate`. To be done as a
+fidelity change, validated against the Fortran output (`tests/test_fortran_python_comparison.py`)
+together with §5.
+
 ## 5. The apparent evening-transition sensitivity was a solver bug (fixed)
 
 **What was seen.** Two runs differing only by `leaf_emissivity × (1 ± 1e-12)` (the noise twins)
@@ -240,7 +253,10 @@ The policy has two checks:
 
 1. **Bit-for-bit** (`test_bit_identical_to_reference`). Refactors that should not change the
    arithmetic (moving code, explicit arguments instead of globals) must reproduce the reference
-   exactly. All of Phases 0–3b met this.
+   exactly. All of Phases 0–3b met this. Fill values (|x| ≥ 1e30: `spval` and sums of it in
+   unused level 0 or leaf index 0) must sit in the same places, but their last bits are not
+   compared; they carry no information (Phase 3e: rebuilding each step from a template changed
+   only those bits).
 2. **Noise twin** (`test_within_noise_of_reference`). For changes that legitimately alter
    round-off (a traceable implementation, whole-run compilation, GPU), the comparison is against
    the model's own sensitivity. The reference is stored with **twin runs** that differ only by

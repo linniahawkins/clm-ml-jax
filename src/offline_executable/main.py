@@ -32,6 +32,7 @@ os.makedirs(_jax_cache_dir, exist_ok=True)
 jax.config.update("jax_compilation_cache_dir", _jax_cache_dir)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 10.0)
 
+from clm_ml.legacy.state import instances_with_state, state_from_instances  # noqa: E402
 from clm_src_cpl.lnd_comp_nuopc import InitializeRealize, ModelAdvance  # noqa: E402
 from clm_src_main.decompMod import bounds_type  # noqa: E402
 from offline_driver import controlMod  # noqa: E402
@@ -375,12 +376,19 @@ def main():
     )
 
     run_t0 = time.perf_counter()
+    template = state = None  # set by the first step
     try:
         for _itim in range(1, ntimes + 1):
             step_t0 = time.perf_counter()
             now = _time(_itim - 1)
             curr_calday = now.calday
             t_prev, t_curr, t_next = forcing.window_indices(_itim - 1)
+
+            # After the first step, each step starts from the fixed template plus the
+            # carried prognostic state (clm_ml.state.State): nothing else passes from one
+            # step to the next.
+            if _itim > 1:
+                st = instances_with_state(template, state)
 
             # Install current-step tower meteorology
             t_met0 = time.perf_counter()
@@ -416,6 +424,9 @@ def main():
                 forcing_next,
                 initialize=(_itim == 1),
             )
+            if _itim == 1:
+                template = st
+            state = state_from_instances(st)
             t_adv = time.perf_counter() - t_adv0
 
             # Write output

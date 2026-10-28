@@ -772,9 +772,12 @@ Progress:
   initialization only (`MLinitVerticalMod`, `SoilStateInitTimeConst`).
 - 3e (in progress): gradients through a full CLM step work ✅ (vectorized per-layer loops and
   Runge–Kutta stages as a scan; numerics doc §1; with respect to state and parameters, checked
-  against finite differences). Remaining: `State` and `Model.step` in `clm_ml`, `Params` from
-  `params.yaml` into `CanopyParams`, acclimation temperature in `State`, gradients with respect
-  to forcing.
+  against finite differences). `clm_ml.state.State` ✅ (canopy air temperature, vapor
+  pressure, CO₂, leaf temperature and water potential, intercepted water, ground and soil
+  temperature): the time loop rebuilds each step from a fixed template plus `State`, bit for bit
+  (fields found by NaN-poisoning each field before a step). Remaining: `Model.step` in
+  `clm_ml`, `Params` from `params.yaml` into `CanopyParams`, acclimation temperature in `State`,
+  gradients with respect to forcing.
 
 ### Phase 4: Chunked, compiled runs (one patch)
 

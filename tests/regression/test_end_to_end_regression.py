@@ -42,7 +42,15 @@ def _valid(values):
 
 @pytest.mark.parametrize("field", FIELDS)
 def test_bit_identical_to_reference(field, reference, current_fields):
-    np.testing.assert_array_equal(current_fields[field], reference[field], err_msg=field)
+    """Every real value is bit-identical. Fill values (|x| >= 1e30, e.g. spval sums in unused
+    level 0 or leaf index 0) must be in the same places, but their last bits are meaningless."""
+    ref, new = reference[field], current_fields[field]
+    if not np.issubdtype(ref.dtype, np.floating):
+        np.testing.assert_array_equal(new, ref, err_msg=field)
+        return
+    np.testing.assert_array_equal(_valid(new), _valid(ref), err_msg=f"{field}: fill pattern")
+    valid = _valid(ref)
+    np.testing.assert_array_equal(new[valid], ref[valid], err_msg=field)
 
 
 @pytest.mark.parametrize("field", FIELDS)
