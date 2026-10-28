@@ -586,10 +586,17 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
         )
         return (state_from_instances(insts), buffers), None
 
+    # As in jax-gcm: jax.checkpoint on the step, so a gradient over a chunk stores only the
+    # carry (state and stream buffers) at each step and recomputes the step's intermediate
+    # values in the backward pass. No effect on forward results.
+    checkpointed_step = jax.checkpoint(step)
+
     def run_chunk(state, xs, slots, buffers, params=default_params):
         n = jax.tree.leaves(xs)[0].shape[0]
         per_step_params = jax.tree.map(lambda p: jnp.broadcast_to(p, (n,) + p.shape), params)
-        (state, buffers), _ = jax.lax.scan(step, (state, buffers), (xs, slots, per_step_params))
+        (state, buffers), _ = jax.lax.scan(
+            checkpointed_step, (state, buffers), (xs, slots, per_step_params)
+        )
         return state, buffers
 
     return jax.jit(run_chunk)
