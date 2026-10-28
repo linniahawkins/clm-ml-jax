@@ -16,10 +16,12 @@ when running under ``jax.jit``; use ``jax.debug.callback`` for
 JIT-compatible checking if needed).
 """
 
-import jax
-
 from clm_src_main.abortutils import endrun  # noqa: F401
-from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyFluxesType import (
+    SOIL_ENERGY,
+    mlcanopy_type,  # noqa: F401
+    record_balance_error,
+)
 from multilayer_canopy.MLWaterVaporMod import LatVap, SatVap  # noqa: F401
 
 
@@ -147,15 +149,8 @@ def SoilFluxes(
     # ``if`` on the JAX scalar is skipped under jax.jit.
     # ------------------------------------------------------------------
     err = rnsoi_p - shsoi_p - lhsoi_p - gsoi_p
-    # JIT-compatible diagnostic: callback runs host-side with concrete value
-    jax.debug.callback(
-        lambda e: (
-            endrun(msg=" ERROR: SoilFluxes: energy balance error")
-            if abs(float(e)) > 0.001
-            else None
-        ),
-        err,
-    )
+    # Fortran stops here; recorded and checked on the host (check_balance)
+    mlcanopy_inst = record_balance_error(mlcanopy_inst, p, SOIL_ENERGY, err)
 
     # ------------------------------------------------------------------
     # Water vapour flux: W/m2 → mol H2O/m2/s — Fortran line 92

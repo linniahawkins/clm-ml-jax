@@ -21,11 +21,14 @@ Differentiability notes
 
 from __future__ import annotations
 
-import jax
 import jax.numpy as jnp
 
 from clm_src_main.abortutils import endrun  # noqa: F401
-from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyFluxesType import (
+    LEAF_ENERGY,
+    mlcanopy_type,  # noqa: F401
+    record_balance_error,
+)
 from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLWaterVaporMod import LatVap, SatVap  # noqa: F401
 
@@ -162,17 +165,10 @@ def LeafFluxes(
     evleaf_val = jnp.where(active, evleaf_active, 0.0)
     trleaf_val = jnp.where(active, trleaf_active, 0.0)
 
-    # Energy balance error check — JIT-compatible via debug.callback
-    # Mask inactive layers (dpai=0, rnleaf may hold spval=1e36) to avoid false errors
+    # Energy balance error check — Fortran stops here; recorded and checked on the host
+    # (check_balance). Mask inactive layers (dpai=0, rnleaf may hold spval=1e36).
     err = jnp.where(active, rnleaf_ic - shleaf_val - lhleaf_val - stleaf_val, 0.0)
-    jax.debug.callback(
-        lambda e: (
-            endrun(msg=" ERROR: LeafFluxes: energy balance error")
-            if abs(float(e)) > 1.0e-3
-            else None
-        ),
-        err,
-    )
+    mlcanopy_inst = record_balance_error(mlcanopy_inst, p, LEAF_ENERGY, err)
 
     return mlcanopy_inst._replace(
         tleaf_leaf=mlcanopy_inst.tleaf_leaf.at[p, ic, il].set(tleaf_val),

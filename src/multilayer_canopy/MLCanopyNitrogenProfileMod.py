@@ -27,7 +27,11 @@ import jax.numpy as jnp
 
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import tfrz  # noqa: F401
-from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyFluxesType import (
+    NITROGEN,
+    mlcanopy_type,  # noqa: F401
+    record_balance_error,
+)
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     jmax25_to_vcmax25_acclim,
@@ -295,18 +299,10 @@ def CanopyNitrogenProfile(
         rd25_profile = rd25_profile.at[p, 1:].set(rd25_prof_ord)
         kp25_profile = kp25_profile.at[p, 1:].set(kp25_prof_ord)
 
-        # Conservation check — JIT-compatible via debug.callback
+        # Conservation check — Fortran stops here; recorded and checked on the host
         numerical = jnp.sum(vcmax25_prof_ord * _dpai[1:])
         analytical = vcmax25top * (1.0 - jnp.exp(-kn * (lai_p + sai_p))) / kn
-        jax.debug.callback(
-            lambda n, a: (
-                endrun(msg="ERROR: CanopyNitrogenProfile: canopy integration error")
-                if abs(float(n) - float(a)) > 1.0e-6
-                else None
-            ),
-            numerical,
-            analytical,
-        )
+        mlcanopy_inst = record_balance_error(mlcanopy_inst, p, NITROGEN, numerical - analytical)
 
     return mlcanopy_inst._replace(
         vcmax25_leaf=vcmax25_leaf,

@@ -49,7 +49,11 @@ from clm_src_main.clm_varcon import sb  # noqa: E402, F401
 from clm_src_main.clm_varctl import iulog  # noqa: E402, F401
 from clm_src_main.decompMod import bounds_type  # noqa: E402, F401
 from clm_src_main.PatchType import patch  # noqa: E402, F401
-from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: E402, F401
+from multilayer_canopy.MLCanopyFluxesType import (  # noqa: E402
+    LONGWAVE,
+    mlcanopy_type,  # noqa: E402, F401
+    record_balance_error,
+)
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams  # noqa: E402
 from multilayer_canopy.MLclm_varcon import emg  # noqa: E402, F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions  # noqa: E402
@@ -235,16 +239,9 @@ def _Norman_patch(
 
     _lwup_p = lwupw_new[ntop]
 
-    # Conservation check — JIT-compatible via debug.callback
+    # Conservation check — Fortran stops here; recorded and checked on the host
     err = (_lwsky_p - _lwup_p) - (_lwveg_p + _lwsoi_p)
-    jax.debug.callback(
-        lambda e: (
-            endrun(msg="ERROR: Norman: total longwave conservation error")
-            if abs(float(e)) > 1.0e-3
-            else None
-        ),
-        err,
-    )
+    mlcanopy_inst = record_balance_error(mlcanopy_inst, p, LONGWAVE, err)
 
     _sl = slice(0, ntop + 1)
     return mlcanopy_inst._replace(

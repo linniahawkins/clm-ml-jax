@@ -573,6 +573,15 @@ one column).
   counts, run length, estimated memory) without running.
 - `endrun` calls inside traced code are replaced by an opt-in `check: true` mode using
   `jax.experimental.checkify` (for NaNs and balance errors).
+  **Done for Fortran's conservation checks (Phase 5a):** leaf and soil energy balance,
+  longwave conservation and the canopy nitrogen integral record their largest error in
+  `mlcanopy.balance_error` (`MLCanopyFluxesType.BALANCE_CHECKS`, with Fortran's tolerances)
+  instead of a host callback inside compiled code. The error is checked on the host
+  (`check_balance`): after each step that runs on concrete values (the first step,
+  step-by-step runs) and after each compiled chunk (the chunk's largest error), where the run
+  stops naming the check, the error and the dates. Difference from Fortran: a compiled run
+  stops at the end of the chunk, not at the failing step. Callbacks made the compiled chunk
+  impossible to store in JAX's compilation cache (and paused the device every step).
 - Energy- and water-balance errors are included in `Outputs` by default, per patch and per
   gridcell.
 
@@ -1123,10 +1132,27 @@ Progress:
   cached per option value. The Runge–Kutta update takes its stage count from the tableau.
   Golden-test adapters pass options as arguments (the module-override helper is gone);
   the process-IO replay passes the CHATS7 options. Bit for bit.
-  Remaining module reads: `create_mlcanopy` sizes the Runge–Kutta axis from `nrk` (setup).
+- ✅ **Compiled programs cacheable** (test and start-up speed): profiling one CHATS7 run
+  (57 s) showed ~39 s compiling ~540 programs: ~500 small ones from the eagerly run first
+  step (below the 10 s threshold of the on-disk compilation cache) and four large ones,
+  including the compiled chunk, that the cache refused because they contained host callbacks
+  (the Fortran error checks). With the checks recorded instead (§6.8) and every program
+  cached (`jax_persistent_cache_min_compile_time_secs = 0`; capped at 2 GB, least recently
+  used removed, when the `filelock` package is installed), a second run of the same case in a
+  new process takes **20 s instead of 58 s** and compiles nothing. Bit for bit.
+- ✅ The Runge–Kutta increment arrays have room for the largest method (`MAX_RK_STAGES` = 4),
+  so the container no longer depends on the option.
+- **Scope decided (after measuring):** "same tower, many models". The time step also reads
+  CLM's subgrid structure from module state (`PatchType.patch`, `ColumnType.col` soil layers,
+  `GridcellType.grc` latitude/longitude, soil-colour albedo tables), set up per tower; making
+  it explicit is the `Domain` work of Phase 6/7. Phase 5a ends with several models of the
+  *same* tower (different options or parameters) in one process; models of different towers
+  in one process wait for Phase 6.
 
-**Done when:** no physics module reads an option or table from a module global; several models
-run in one process; the regression suite runs in-process.
+**Done when:** no physics module reads an option or table from a module global (CLM subgrid
+structure excepted, Phase 6); several models of the same tower run in one process; the
+regression suite's runs reuse compiled programs (in-process or through the compilation
+cache).
 
 #### Phase 5b: Mask-aware layers, in place
 

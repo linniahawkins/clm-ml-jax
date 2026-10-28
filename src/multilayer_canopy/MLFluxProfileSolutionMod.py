@@ -17,7 +17,11 @@ from jax import Array
 
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
-from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyFluxesType import (
+    LEAF_ENERGY,
+    mlcanopy_type,  # noqa: F401
+    record_balance_error,
+)
 from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf, nlevmlcan  # noqa: F401
 from multilayer_canopy.MLLeafFluxesMod import LeafFluxes  # noqa: F401
@@ -384,15 +388,7 @@ def _implicit_fps_jit(
     lhleaf_val = jnp.where(active, (trleaf_val + evleaf_val) * lambda_, 0.0)
 
     err = jnp.where(active, rnleaf_v - shleaf_val - lhleaf_val - stleaf_val, 0.0)
-    # JIT-compatible diagnostic — callback runs host-side with concrete values
-    jax.debug.callback(
-        lambda e: (
-            endrun(msg=" ERROR: LeafFluxes: energy balance error")
-            if float(np.max(np.abs(e))) > 1.0e-3
-            else None
-        ),
-        err,
-    )
+    # Fortran stops here; recorded below (record_balance_error) and checked on the host
 
     _z = jnp.zeros((nlevmlcan + 1, nleaf + 1))
     _tleaf_new = _z.at[sl, lf].set(tleaf_val)
@@ -508,6 +504,7 @@ def _implicit_fps_jit(
         storage_sh,
         storage_et,
     )
+    mlcanopy_inst = record_balance_error(mlcanopy_inst, p, LEAF_ENERGY, err)
     return mlcanopy_inst, aux
 
 

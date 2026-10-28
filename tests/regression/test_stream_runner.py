@@ -54,7 +54,7 @@ shapes = M.output_shapes(run, template, names, 50)
 buffers = tuple(S.init_buffers(s.statistic, len(rc.keys), {{v: shapes[v] for v in s.variables}},
                                jnp) for s, rc in zip(specs, recs))
 runner = M.make_stream_runner(run, template, filt, specs, 50)
-_, bufs = runner(state0, xs, tuple(jnp.asarray(rc.index) for rc in recs), buffers)
+_, bufs, _ = runner(state0, xs, tuple(jnp.asarray(rc.index) for rc in recs), buffers)
 step_vals = S.finish("instantaneous", bufs[0])
 worst, nan_mismatch = 0.0, []
 for name, a in ref.items():

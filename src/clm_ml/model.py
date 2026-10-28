@@ -155,7 +155,12 @@ class Model:
             for s, rc in zip(streams, records)
         )
         slots = tuple(jnp.asarray(rc.index) for rc in records)
-        state, buffers = self._runners[key](state, forcing, slots, buffers, params)
+        state, buffers, errors = self._runners[key](state, forcing, slots, buffers, params)
+        from multilayer_canopy.MLCanopyFluxesType import check_balance
+        from multilayer_canopy.MLMathToolsMod import is_concrete
+
+        if is_concrete(errors):  # not under jax.grad: Fortran's conservation checks
+            check_balance(errors, f"the chunk from run step {first_step}")
         out = {}
         for s, b in zip(streams, buffers):
             if s.statistic == "mean":

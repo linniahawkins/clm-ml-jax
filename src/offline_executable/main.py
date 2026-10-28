@@ -34,12 +34,23 @@ _jax_cache_dir = os.environ.get(
 )
 os.makedirs(_jax_cache_dir, exist_ok=True)
 jax.config.update("jax_compilation_cache_dir", _jax_cache_dir)
-jax.config.update("jax_persistent_cache_min_compile_time_secs", 10.0)
+# Every compiled program is cached, small ones included: a run compiles ~500 small programs
+# (the eagerly run first step), ~35 s that a new process would otherwise repeat. With the
+# filelock package installed, least recently used entries are removed beyond 2 GB.
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
+try:
+    import filelock  # noqa: F401
+
+    jax.config.update("jax_compilation_cache_max_size", 2 * 1024**3)
+except ImportError:
+    pass
 
 from clm_ml.legacy.state import instances_with_state, state_from_instances  # noqa: E402
 from clm_src_cpl.lnd_comp_nuopc import InitializeRealize, ModelAdvance  # noqa: E402
 from clm_src_main.decompMod import bounds_type  # noqa: E402
+from multilayer_canopy.MLCanopyFluxesType import BALANCE_CHECKS, check_balance  # noqa: E402
 from multilayer_canopy.MLclm_varctl import DEFAULT_OPTIONS, MLOptions  # noqa: E402
+from multilayer_canopy.MLMathToolsMod import is_concrete  # noqa: E402
 from offline_driver import controlMod  # noqa: E402
 
 # Root of the Python source tree  (…/clm-ml-jax/src)
@@ -509,7 +520,7 @@ def advance(run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, p
     insts = insts._replace(
         atm2lnd=atm2lnd, wateratm2lndbulk=wateratm2lndbulk, frictionvel=frictionvel
     )
-    return ModelAdvance(
+    insts, filt = ModelAdvance(
         run.bounds,
         insts,
         filt,
@@ -521,6 +532,12 @@ def advance(run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, p
         params=params,
         opts=run.opts,
     )
+    # Fortran's conservation checks (recorded in the step, plan §6.8): checked here when the
+    # step runs on concrete values; after each chunk when steps are compiled.
+    errors = insts.mlcanopy.balance_error
+    if is_concrete(errors):
+        check_balance(errors, f"time step {inputs.now.nstep}")
+    return insts, filt
 
 
 def month_chunks(run: LegacyRun, first_step: int) -> list:
@@ -618,13 +635,15 @@ CHECKPOINT_STEP = True
 
 
 def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int):
-    """A compiled function ``(state, xs, slots, buffers[, params]) -> (state, buffers)``
+    """A compiled function ``(state, xs, slots, buffers[, params]) -> (state, buffers,
+    errors)``
     advancing a chunk as one ``jax.lax.scan`` and accumulating output streams inside it
     (plan §6.9): each step's output variables (``clm_ml.outputs``, computed with jax.numpy)
     are added into the slot of the stream record the step belongs to. ``streams`` are
     ``clm_ml.output_streams.StreamSpec``; ``slots[i]`` is the per-step record index of
     stream ``i`` (``chunk_records``), ``buffers[i]`` its ``init_buffers``. No per-step
-    values leave the device."""
+    values leave the device. ``errors``: the chunk's largest error of each Fortran
+    conservation check (``MLCanopyFluxesType.BALANCE_CHECKS``), for ``check_balance``."""
     from clm_ml import output_streams as S
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
     from clm_src_main.clm_varpar import nlevgrnd
@@ -650,7 +669,7 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
         return out
 
     def step(carry, x):
-        state, buffers = carry
+        state, buffers, errors = carry
         (now, met, clm_record, forcing_bef, forcing_next), slots, params = x
         inputs = StepInputs(
             now=now._replace(dtime=dtime),
@@ -673,7 +692,8 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
             S.accumulate(spec.statistic, b, slot, {n: values[n] for n in spec.variables})
             for spec, b, slot in zip(streams, buffers, slots)
         )
-        return (state_from_instances(insts, state), buffers), None
+        errors = jnp.maximum(errors, insts.mlcanopy.balance_error.max(axis=0))
+        return (state_from_instances(insts, state), buffers, errors), None
 
     # As in jax-gcm: jax.checkpoint on the step (if CHECKPOINT_STEP), so a gradient over a
     # chunk stores only the carry (state and stream buffers) at each step and recomputes the
@@ -683,10 +703,11 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
     def run_chunk(state, xs, slots, buffers, params=default_params):
         n = jax.tree.leaves(xs)[0].shape[0]
         per_step_params = jax.tree.map(lambda p: jnp.broadcast_to(p, (n,) + p.shape), params)
-        (state, buffers), _ = jax.lax.scan(
-            checkpointed_step, (state, buffers), (xs, slots, per_step_params)
+        errors = jnp.zeros(len(BALANCE_CHECKS))
+        (state, buffers, errors), _ = jax.lax.scan(
+            checkpointed_step, (state, buffers, errors), (xs, slots, per_step_params)
         )
-        return state, buffers
+        return state, buffers, errors
 
     return jax.jit(run_chunk)
 
@@ -917,10 +938,11 @@ def run_streams(
         )
         slots = tuple(jnp.asarray(rc.index) for rc in records)
         if params is None:
-            state, buffers = runner(state, xs, slots, buffers)
+            state, buffers, errors = runner(state, xs, slots, buffers)
         else:
-            state, buffers = runner(state, xs, slots, buffers, params)
+            state, buffers, errors = runner(state, xs, slots, buffers, params)
         end = step_end(first_step + n - 1)
+        check_balance(errors, f"the chunk {starts[0]} to {end}")
         check_health(state, template_state, f"the chunk {starts[0]} to {end}")
         for i, rc in enumerate(records):
             on_records(i, collectors[i].add_chunk(rc, buffers[i]))
@@ -1053,6 +1075,7 @@ def main(opts: Optional[MLOptions] = None):
                 pad = (chunk_steps - n) if chunk_steps else 0
                 padded = inputs + [inputs[-1]] * pad
                 _, (states, mlcanopy, temperature) = runner(state, stack_step_inputs(padded))
+                check_balance(mlcanopy.balance_error[:n], f"time steps {first + 1}-{first + n}")
                 state = jax.tree.map(lambda a: a[n - 1], states)
                 for k, inp in enumerate(inputs):
                     write_output(

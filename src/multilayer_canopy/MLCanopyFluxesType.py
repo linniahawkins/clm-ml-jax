@@ -32,11 +32,11 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
+import jax
 import jax.numpy as jnp
 
 from clm_src_main.clm_varcon import ispval, spval  # noqa: F401
 from clm_src_main.clm_varpar import nlevgrnd, numrad  # noqa: F401
-from multilayer_canopy.MLclm_varctl import nrk  # noqa: F401
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf, nlevmlcan  # noqa: F401
 
 # ---------------------------------------------------------------------------
@@ -381,6 +381,48 @@ class mlcanopy_type(NamedTuple):
     gs_leaf: jnp.ndarray  # Stomatal conductance (mol H2O/m2 leaf/s)
     gspot_leaf: jnp.ndarray  # Stomatal conductance without water stress (mol H2O/m2 leaf/s)
 
+    # Largest error of each conservation check (BALANCE_CHECKS) in this time step; checked on
+    # the host after the step or chunk (check_balance). Not Fortran: Fortran stopped inside the
+    # routine. The default (None) keeps containers pickled before this field readable.
+    balance_error: jnp.ndarray = None  # shape (np, len(BALANCE_CHECKS))
+
+
+#: The Fortran error checks recorded in ``balance_error``: (name, tolerance). The Fortran
+#: routines stop when the error exceeds the tolerance; compiled code cannot stop, so the
+#: errors are recorded and checked on the host (plan §6.8).
+BALANCE_CHECKS = (
+    ("leaf energy balance (LeafFluxes), W m-2", 1.0e-3),
+    ("total longwave conservation (Norman), W m-2", 1.0e-3),
+    ("canopy nitrogen integration (CanopyNitrogenProfile)", 1.0e-6),
+    ("soil energy balance (SoilFluxes), W m-2", 1.0e-3),
+)
+LEAF_ENERGY, LONGWAVE, NITROGEN, SOIL_ENERGY = range(len(BALANCE_CHECKS))
+
+#: Runge-Kutta stage axis of the increment arrays: room for the largest method (4 stages,
+#: runge_kutta_type 41) plus one, whatever the run's method (the update uses its own count).
+MAX_RK_STAGES = 4
+
+
+def record_balance_error(mlcanopy_inst: "mlcanopy_type", p: int, check: int, err):
+    """``mlcanopy_inst`` with ``|err|`` (largest element) recorded for ``check``."""
+    if mlcanopy_inst.balance_error is None:
+        return mlcanopy_inst
+    e = jax.lax.stop_gradient(jnp.max(jnp.abs(jnp.asarray(err))))
+    return mlcanopy_inst._replace(balance_error=mlcanopy_inst.balance_error.at[p, check].max(e))
+
+
+def check_balance(errors, where: str) -> None:
+    """Stop the run if any recorded error (``(..., len(BALANCE_CHECKS))``, maximum taken
+    over the leading axes) exceeds its tolerance. ``where`` goes into the message."""
+    import numpy as np
+
+    from clm_src_main.abortutils import endrun
+
+    worst = np.max(np.asarray(errors, dtype=float).reshape(-1, len(BALANCE_CHECKS)), axis=0)
+    for (name, tol), e in zip(BALANCE_CHECKS, worst):
+        if e > tol:
+            endrun(msg=f" ERROR: {name}: error {e:.3g} exceeds {tol:g} ({where})")
+
 
 # ---------------------------------------------------------------------------
 # Factory function: replaces InitAllocate + Init
@@ -431,7 +473,7 @@ def create_mlcanopy(begp: int, endp: int) -> mlcanopy_type:
     nl = nlevmlcan + 1  # level dimension (0..nlevmlcan or 1..nlevmlcan)
     nf = nleaf + 1  # leaf dimension
     nr = numrad + 1  # spectral dimension
-    nrk_ = nrk + 1  # Runge-Kutta stage dimension
+    nrk_ = MAX_RK_STAGES + 1  # Runge-Kutta stage dimension
     ng = nlevgrnd + 1  # soil layer dimension
 
     def _r(*shape):
@@ -687,6 +729,7 @@ def create_mlcanopy(begp: int, endp: int) -> mlcanopy_type:
         vpd_leaf=_r(np_, nl, nf),
         gs_leaf=_r(np_, nl, nf),
         gspot_leaf=_r(np_, nl, nf),
+        balance_error=jnp.zeros((np_, len(BALANCE_CHECKS)), dtype=jnp.float64),
     )
 
 
