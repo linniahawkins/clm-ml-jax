@@ -863,10 +863,22 @@ Progress:
   ✅ Each file is written as soon as its period (run, year, month) is complete
   (`StreamFileWriter`, in the worker); `Run.execute(return_outputs=False)` keeps no records in
   memory beyond the current file's.
+- ✅ `jax.checkpoint` on the step of the compiled chunk (as jax-gcm).
+- ✅ **Between chunks:** a health check of the state (finite; air, leaf, ground and soil
+  temperatures within 150–350 K at every meaningful position) stops the run with the variable,
+  its range and the chunk's dates. **Restarts** (`execution.restart_every`, e.g. `1 month`,
+  `10 years`, and always at the end of the run) hold the state, its time and the output
+  bookkeeping (partial records, records not yet in a file); written beside the old one and
+  renamed over it, keeping `.prev`, and read with a fallback to `.prev`. Format: a versioned
+  Python pickle (`{output}/restart/{tower}_restart.pkl`; netCDF could come later).
+  `initial_conditions.source: restart` resumes: a restart time inside the run continues it
+  (results equal the uninterrupted run bit for bit, tested with a daily mean spanning the
+  restart); a restart time equal to the run start begins a new run from that state (e.g.
+  after a spin-up). The layer grid is rebuilt by running the initialization step, whose
+  results are discarded. Note: a new run from a restart keeps the restart's acclimation
+  temperature (the whole-run mean of the earlier run) until Phase 4b's running mean.
 - Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`); the `ForcingSource`
-  streams interface; host side between chunks: health checks, rotating restarts (`.prev`),
-  partial output intervals saved with restarts; calendar-month chunks (decision 17);
-  `run.yaml` stream form; GPU timing (done-when 3, GPU part);
+  streams interface; GPU timing (done-when 3, GPU part);
   the resident-memory check on a long run.
 
 - `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one

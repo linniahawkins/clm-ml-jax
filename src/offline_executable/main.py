@@ -16,6 +16,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import f90nml  # pip install f90nml
 import jax
@@ -652,38 +653,163 @@ def step_starts(run: LegacyRun, first_step: int, n_steps: int) -> list:
     return out
 
 
-def run_streams(run: LegacyRun, streams, max_layers: int, on_records, params=None) -> None:
-    """Run the whole model with output streams (plan §6.9): the first step step by step,
-    then one compiled chunk per calendar month accumulating every stream inside the scan.
+#: State fields that are temperatures (K), checked against a plausible range
+_TEMPERATURE_FIELDS = (
+    "air_temperature", "leaf_temperature", "ground_temperature", "acclimation_temperature",
+    "temperature",
+)  # fmt: skip
+_TEMPERATURE_RANGE = (150.0, 350.0)
+
+
+def check_health(state, template_state, where: str) -> None:
+    """Stop the run if the state has non-finite values, or temperatures outside
+    150-350 K, at any position that is meaningful in the template state (finite and not a
+    fill value; for temperatures also nonzero, since 0 marks unused entries). ``where`` (e.g. the chunk's dates) goes into the error message.
+    """
+    problems = []
+    for part in ("canopy", "soil"):
+        for name, value in getattr(state, part)._asdict().items():
+            ref = np.asarray(getattr(getattr(template_state, part), name), dtype=float)
+            x = np.asarray(value, dtype=float)
+            meaningful = np.isfinite(ref) & (np.abs(ref) < 1e30)
+            bad = meaningful & ~np.isfinite(x)
+            if bad.any():
+                problems.append(f"{part}.{name}: {int(bad.sum())} non-finite values")
+            elif name in _TEMPERATURE_FIELDS and (meaningful & (ref > 0)).any():
+                used = meaningful & (ref > 0)  # 0 marks unused entries (e.g. leafless layers)
+                lo, hi = float(x[used].min()), float(x[used].max())
+                if lo < _TEMPERATURE_RANGE[0] or hi > _TEMPERATURE_RANGE[1]:
+                    problems.append(f"{part}.{name}: range {lo:.1f}-{hi:.1f} K")
+    if problems:
+        raise RuntimeError(f"unhealthy model state after {where}: " + "; ".join(problems))
+
+
+def restart_boundary(end: datetime.datetime, every) -> bool:
+    """Whether a chunk ending at ``end`` ends on a ``restart_every`` boundary
+    (``(n, "month")`` or ``(n, "year")``; None: never)."""
+    if every is None or (end.day, end.hour, end.minute, end.second) != (1, 0, 0, 0):
+        return False
+    n, unit = every
+    if unit == "month":
+        return (end.year * 12 + end.month - 1) % n == 0
+    return end.month == 1 and end.year % n == 0
+
+
+def write_restart(path: Path, content: dict) -> None:
+    """Write ``content`` beside the old restart and rename it over it, keeping the previous
+    one as ``<path>.prev`` (a run killed while writing can resume from the previous one)."""
+    import pickle
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "wb") as fh:
+        pickle.dump(content, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    if path.exists():
+        os.replace(path, path.with_name(path.name + ".prev"))
+    os.replace(tmp, path)
+
+
+def read_restart(path: Path) -> dict:
+    """A restart written by :func:`write_restart`; falls back to ``<path>.prev`` if the file
+    is missing or unreadable."""
+    import pickle
+
+    path = Path(path)
+    errors = []
+    for candidate in (path, path.with_name(path.name + ".prev")):
+        try:
+            with open(candidate, "rb") as fh:
+                content = pickle.load(fh)
+            if content.get("version") != RESTART_VERSION:
+                raise ValueError(f"restart version {content.get('version')}")
+            return content
+        except Exception as exc:  # noqa: BLE001 - report every candidate
+            errors.append(f"{candidate}: {exc}")
+    raise RuntimeError("no readable restart: " + "; ".join(errors))
+
+
+RESTART_VERSION = 1
+
+
+def run_streams(
+    run: LegacyRun,
+    streams,
+    max_layers: int,
+    on_records,
+    params=None,
+    *,
+    restart: Optional[dict] = None,
+    restart_path: Optional[Path] = None,
+    restart_every=None,
+    save_extra=None,
+    restore_extra=None,
+) -> None:
+    """Run the model with output streams (plan §6.9): the first step step by step, then one
+    compiled chunk per calendar month accumulating every stream inside the scan. After each
+    chunk the state's health is checked, and a restart is written (``restart_path``) when the
+    chunk ends on a ``restart_every`` boundary and at the end of the run.
+
     ``on_records(stream_index, records)`` receives each stream's completed records
-    ``[(key, end_time, {variable: value}), ...]`` as soon as they are complete."""
+    ``[(key, end_time, {variable: value}), ...]`` as soon as they are complete.
+
+    ``restart`` (from :func:`read_restart`) starts from a saved state: if its time is inside
+    the run, the run continues from there (with the saved output bookkeeping; results equal
+    an uninterrupted run); if it is the run's start, a new run starts from that state. The
+    layer grid (the template) is rebuilt by running the initialization step, whose results
+    are then discarded. ``save_extra()`` / ``restore_extra(saved)`` carry the caller's own
+    bookkeeping (e.g. output files in progress) in the restart."""
     from clm_ml import output_streams as S
 
     names = sorted({n for spec in streams for n in spec.variables})
     collectors = [S.StreamCollector(spec) for spec in streams]
     step_seconds = run.time_of(0).dtime
+    run_start = step_starts(run, 0, 1)[0]
 
-    # First step (initializes the canopy): run step by step; its values form a one-step chunk
+    def step_end(k):
+        return step_starts(run, k, 1)[0] + datetime.timedelta(seconds=step_seconds)
+
+    # First step (initializes the canopy and builds the template)
     st, filt = advance(
         run, run.insts, run.filt, step_inputs(run, run.load_chunk(0, 1), 0), True, params
     )
     template, state = st, state_from_instances(st)
+    template_state = state
     shapes = output_shapes(run, template, names, max_layers)
-    values = step_values(st, names, max_layers)
-    for i, spec in enumerate(streams):
-        rec = S.chunk_records(step_starts(run, 0, 1), 0, step_seconds, spec.frequency)
-        buffers = S.init_buffers(spec.statistic, 1, {n: shapes[n] for n in spec.variables}, jnp)
-        buffers = S.accumulate(
-            spec.statistic, buffers, 0, {n: jnp.asarray(values[n]) for n in spec.variables}
-        )
-        on_records(i, collectors[i].add_chunk(rec, buffers))
+
+    if restart is None:
+        first = 1
+        values = step_values(st, names, max_layers)
+        for i, spec in enumerate(streams):
+            rec = S.chunk_records(step_starts(run, 0, 1), 0, step_seconds, spec.frequency)
+            buffers = S.init_buffers(spec.statistic, 1, {n: shapes[n] for n in spec.variables}, jnp)
+            buffers = S.accumulate(
+                spec.statistic, buffers, 0, {n: jnp.asarray(values[n]) for n in spec.variables}
+            )
+            on_records(i, collectors[i].add_chunk(rec, buffers))
+    else:
+        elapsed = (restart["time"] - run_start).total_seconds()
+        first = int(round(elapsed / step_seconds))
+        if first * step_seconds != elapsed or not 0 <= first < run.ntimes:
+            raise ValueError(
+                f"restart time {restart['time']} is not a step of this run "
+                f"({run_start} + {run.ntimes} steps of {step_seconds} s)"
+            )
+        state = jax.tree.map(jnp.asarray, restart["state"])
+        if first > 0:  # continuing the same run: restore the output bookkeeping
+            for collector, pending in zip(collectors, restart["collectors"]):
+                collector._pending = pending
+            if restore_extra is not None:
+                restore_extra(restart.get("extra"))
 
     runner = make_stream_runner(run, template, filt, streams, max_layers)
-    for first, n in month_chunks(run, 1):
-        chunk = run.load_chunk(first, n)
-        xs = stack_step_inputs([step_inputs(run, chunk, k) for k in range(first, first + n)])
-        starts = step_starts(run, first, n)
-        records = [S.chunk_records(starts, first, step_seconds, s.frequency) for s in streams]
+    for first_step, n in month_chunks(run, first):
+        chunk = run.load_chunk(first_step, n)
+        xs = stack_step_inputs(
+            [step_inputs(run, chunk, k) for k in range(first_step, first_step + n)]
+        )
+        starts = step_starts(run, first_step, n)
+        records = [S.chunk_records(starts, first_step, step_seconds, s.frequency) for s in streams]
         buffers = tuple(
             S.init_buffers(s.statistic, len(rc.keys), {v: shapes[v] for v in s.variables}, jnp)
             for s, rc in zip(streams, records)
@@ -693,8 +819,22 @@ def run_streams(run: LegacyRun, streams, max_layers: int, on_records, params=Non
             state, buffers = runner(state, xs, slots, buffers)
         else:
             state, buffers = runner(state, xs, slots, buffers, params)
+        end = step_end(first_step + n - 1)
+        check_health(state, template_state, f"the chunk {starts[0]} to {end}")
         for i, rc in enumerate(records):
             on_records(i, collectors[i].add_chunk(rc, buffers[i]))
+        last = first_step + n == run.ntimes
+        if restart_path is not None and (last or restart_boundary(end, restart_every)):
+            write_restart(
+                restart_path,
+                {
+                    "version": RESTART_VERSION,
+                    "time": end,
+                    "state": jax.tree.map(np.asarray, state),
+                    "collectors": [c._pending for c in collectors],
+                    "extra": save_extra() if save_extra is not None else None,
+                },
+            )
     for i, collector in enumerate(collectors):
         on_records(i, collector.close())
 

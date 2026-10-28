@@ -1,0 +1,59 @@
+"""Health checks, restart boundaries and restart files (offline_executable.main)."""
+
+import datetime as dt
+
+import numpy as np
+import pytest
+
+from clm_ml.state import CanopyState, SoilState, State
+from offline_executable.main import (
+    RESTART_VERSION,
+    check_health,
+    read_restart,
+    restart_boundary,
+    write_restart,
+)
+
+
+def _state(tair=300.0, tleaf=(0.0, 295.0)):
+    canopy = CanopyState(
+        air_temperature=np.array([[1e36, tair, 299.0]]),  # level 0 is a fill value
+        vapor_pressure=np.array([[0.0, 1500.0, 1400.0]]),
+        co2=np.array([[0.0, 380.0, 380.0]]),
+        leaf_temperature=np.array([[list(tleaf)]]),  # 0 marks an unused entry
+        leaf_water_potential=np.array([[[0.0, -1.0]]]),
+        intercepted_water=np.array([[0.0, 0.0, 0.0]]),
+        ground_temperature=np.array([290.0]),
+        acclimation_temperature=np.array([288.0]),
+    )
+    return State(canopy=canopy, soil=SoilState(temperature=np.array([[0.0, 285.0, 284.0]])))
+
+
+def test_health_check_passes_and_ignores_fill_values_and_zeros():
+    check_health(_state(), _state(), "test")
+
+
+def test_health_check_catches_nan_and_implausible_temperatures():
+    with pytest.raises(RuntimeError, match="air_temperature: 1 non-finite"):
+        check_health(_state(tair=np.nan), _state(), "test")
+    with pytest.raises(RuntimeError, match=r"leaf_temperature: range 400.0-400.0 K"):
+        check_health(_state(tleaf=(0.0, 400.0)), _state(), "test")
+
+
+def test_restart_boundaries():
+    jan1, jun1 = dt.datetime(2010, 1, 1), dt.datetime(2010, 6, 1)
+    assert restart_boundary(jan1, (1, "year")) and not restart_boundary(jun1, (1, "year"))
+    assert restart_boundary(jan1, (10, "year")) and not restart_boundary(jan1, (4, "year"))
+    assert restart_boundary(jun1, (1, "month"))
+    assert not restart_boundary(dt.datetime(2010, 6, 1, 0, 30), (1, "month"))
+    assert not restart_boundary(jan1, None)
+
+
+def test_restart_file_keeps_previous_and_falls_back(tmp_path):
+    path = tmp_path / "restart.pkl"
+    write_restart(path, {"version": RESTART_VERSION, "n": 1})
+    write_restart(path, {"version": RESTART_VERSION, "n": 2})
+    assert read_restart(path)["n"] == 2
+    assert read_restart(tmp_path / "restart.pkl.prev")["n"] == 1
+    path.write_bytes(b"truncated")  # e.g. killed while writing
+    assert read_restart(path)["n"] == 1  # falls back to .prev

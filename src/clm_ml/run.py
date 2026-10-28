@@ -72,6 +72,25 @@ class ForcingSection:
 
 
 @dataclasses.dataclass(frozen=True)
+class ExecutionSection:
+    """How the run is divided into compiled chunks and how often it saves restarts."""
+
+    chunk: str = "1 month"  # decision 17: one compiled chunk per calendar month
+    restart_every: Optional[str] = None  # "N month(s)" / "N year(s)"; null: end of run only
+
+
+def parse_every(text: Optional[str], key: str):
+    """``"3 months"`` -> ``(3, "month")``; ``None`` -> ``None``."""
+    if text is None:
+        return None
+    parts = str(text).split()
+    units = {"month": "month", "months": "month", "year": "year", "years": "year"}
+    if len(parts) != 2 or not parts[0].isdigit() or int(parts[0]) < 1 or parts[1] not in units:
+        raise ConfigError(f"{key}: {text!r}: expected e.g. '1 month', '6 months' or '10 years'")
+    return int(parts[0]), units[parts[1]]
+
+
+@dataclasses.dataclass(frozen=True)
 class InitialConditionsSection:
     source: Literal["clm_history", "restart"] = "clm_history"
     restart_file: Optional[str] = None
@@ -116,6 +135,7 @@ class RunFile:
     forcing: ForcingSection
     model: Optional[str] = None  # model.yaml path; null = all defaults
     params: str = "clm5_defaults"  # params file path or built-in name (clm5_defaults, chats)
+    execution: ExecutionSection = ExecutionSection()
     initial_conditions: InitialConditionsSection = InitialConditionsSection()
     output: OutputSection = OutputSection()
 
@@ -150,6 +170,12 @@ class Run:
     def output_directory(self) -> Path:
         return self.path(self.run_file.output.directory)
 
+    @property
+    def restart_path(self) -> Path:
+        """Where this run writes its restart (the previous one is kept as ``.prev``)."""
+        tower = self.domain.gridcells.names[0]
+        return self.output_directory / "restart" / f"{tower}_restart.pkl"
+
     # -- running -----------------------------------------------------------------------
 
     def execute(
@@ -171,6 +197,7 @@ class Run:
             spec = self.legacy_spec(None)
             spec["output_dir"] = str(out_dir) if write else None
             spec["return_records"] = return_outputs
+            spec["restart_out"] = str(self.restart_path) if write else None
             self._run_worker(spec, raw_file, quiet)
             with np.load(raw_file) as data:
                 arrays = {key: data[key] for key in data.files}
@@ -259,6 +286,12 @@ class Run:
             ],
             "meta": _domain_meta(self.domain),
             "run_start": self.start.isoformat(),
+            "restart_every": parse_every(self.run_file.execution.restart_every, "restart_every"),
+            "restart_in": (
+                str(self.path(self.run_file.initial_conditions.restart_file, tower_name))
+                if self.run_file.initial_conditions.source == "restart"
+                else None
+            ),
         }
 
     def summary(self) -> str:
@@ -382,8 +415,17 @@ def _check_supported(run_file: RunFile, source: str) -> None:
             f"{source}: domain.towers: this version runs one tower per run "
             f"(got {list(run_file.domain.towers)}; multi-tower runs: Phase 6)"
         )
-    if run_file.initial_conditions.source != "clm_history":
-        raise ConfigError(f"{source}: initial_conditions.source: 'restart' is not yet supported")
+    ic = run_file.initial_conditions
+    if ic.source == "restart" and not ic.restart_file:
+        raise ConfigError(
+            f"{source}: initial_conditions.restart_file: required with source restart"
+        )
+    if run_file.execution.chunk != "1 month":
+        raise ConfigError(
+            f"{source}: execution.chunk: only '1 month' (calendar-month chunks, decision 17) "
+            "is supported"
+        )
+    parse_every(run_file.execution.restart_every, f"{source}: execution.restart_every")
     names = [st.name for st in run_file.output.streams]
     if len(set(names)) != len(names):
         raise ConfigError(f"{source}: output.streams: stream names must be unique ({names})")

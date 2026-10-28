@@ -144,7 +144,32 @@ def run_spec(spec: dict, out_file: Path) -> None:
         if keep:
             collected[i].extend(records)
 
-    main_mod.run_streams(run, streams, spec["max_layers"], on_records)
+    def save_extra():
+        return {"writers": [w.state() for w in writers] if writers is not None else None,
+                "collected": collected}  # fmt: skip
+
+    def restore_extra(saved):
+        if saved is None:
+            return
+        if writers is not None and saved.get("writers") is not None:
+            for w, ws in zip(writers, saved["writers"]):
+                w.restore(ws)
+        for i, records in enumerate(saved.get("collected") or []):
+            collected[i][:0] = records
+
+    restart = main_mod.read_restart(Path(spec["restart_in"])) if spec.get("restart_in") else None
+    every = spec.get("restart_every")
+    main_mod.run_streams(
+        run,
+        streams,
+        spec["max_layers"],
+        on_records,
+        restart=restart,
+        restart_path=Path(spec["restart_out"]) if spec.get("restart_out") else None,
+        restart_every=tuple(every) if every else None,
+        save_extra=save_extra,
+        restore_extra=restore_extra,
+    )
     if writers is not None:
         for w in writers:
             w.close()
