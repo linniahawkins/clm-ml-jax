@@ -877,8 +877,14 @@ Progress:
   after a spin-up). The layer grid is rebuilt by running the initialization step, whose
   results are discarded. Note: a new run from a restart keeps the restart's acclimation
   temperature (the whole-run mean of the earlier run) until Phase 4b's running mean.
-- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`); the `ForcingSource`
-  streams interface; GPU timing (done-when 3, GPU part);
+- ✅ **`ForcingSource`** (`clm_ml.forcing`): any object with `chunk(first_step, n_steps) ->
+  Forcing` (with halos, at the model step). `clm_ml.legacy.forcing.TowerForcingSource` reads
+  the tower meteorology and CLM history files; readers for coarser streams (6-hourly
+  meteorology, daily or monthly LAI/SAI/soil water with interpolation to the model step,
+  decision 13–14) implement the same interface (Phase 4b). The next chunk is read on a
+  background thread while the current one runs.
+- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`); GPU timing (done-when 3,
+  GPU part);
   the resident-memory check on a long run.
 
 - `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one

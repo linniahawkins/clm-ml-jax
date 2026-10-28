@@ -273,7 +273,6 @@ def setup_run(nml: dict) -> LegacyRun:
     # 6. Pre-loop setup  (mirrors CLMml_drv lines 84-120)
     # ------------------------------------------------------------------
     from clm_ml.legacy.forcing import (
-        load_forcing,
         tower_met_at,
     )
     from offline_driver.CLMml_driver import (
@@ -312,19 +311,20 @@ def setup_run(nml: dict) -> LegacyRun:
     first_record = tower_first_record(fin1, run_start, dtstep_sec)
     tower_height = float(TowerDataMod.tower_ht[tower_num])
 
+    from clm_ml.legacy.forcing import TowerForcingSource
+
+    source = TowerForcingSource(
+        tower_file=fin1,
+        clm_history_file=fin2,
+        soil_adjust_file=fin_soil_adjust,
+        first_record=first_record,
+        n_steps=ntimes,
+        history_index=_history_index,
+        tower_height=tower_height,
+    )
+
     def load_chunk(first_step: int, n_steps: int) -> ForcingChunk:
-        forcing = load_forcing(
-            fin1,
-            fin2,
-            fin_soil_adjust,
-            first_record=first_record,
-            run_n_steps=ntimes,
-            first_step=first_step,
-            n_steps=n_steps,
-            history_index=_history_index,
-            tower_height=tower_height,
-        )
-        return ForcingChunk(first_step=first_step, forcing=forcing)
+        return ForcingChunk(first_step=first_step, forcing=source.chunk(first_step, n_steps))
 
     def run_tower_met(chunk_steps: int = 1000):
         """Each step's tower meteorology, read chunk by chunk (index t + 1 skips the
@@ -803,11 +803,24 @@ def run_streams(
                 restore_extra(restart.get("extra"))
 
     runner = make_stream_runner(run, template, filt, streams, max_layers)
-    for first_step, n in month_chunks(run, first):
+
+    def read_inputs(first_step, n):
         chunk = run.load_chunk(first_step, n)
-        xs = stack_step_inputs(
+        return stack_step_inputs(
             [step_inputs(run, chunk, k) for k in range(first_step, first_step + n)]
         )
+
+    # The next chunk's forcing is read on a background thread while the current chunk runs
+    # (plan §6.9; jax-gcm overlaps I/O the same way).
+    from concurrent.futures import ThreadPoolExecutor
+
+    schedule = month_chunks(run, first)
+    reader = ThreadPoolExecutor(max_workers=1)
+    pending = reader.submit(read_inputs, *schedule[0]) if schedule else None
+    for c, (first_step, n) in enumerate(schedule):
+        xs = pending.result()
+        if c + 1 < len(schedule):
+            pending = reader.submit(read_inputs, *schedule[c + 1])
         starts = step_starts(run, first_step, n)
         records = [S.chunk_records(starts, first_step, step_seconds, s.frequency) for s in streams]
         buffers = tuple(
@@ -835,6 +848,7 @@ def run_streams(
                     "extra": save_extra() if save_extra is not None else None,
                 },
             )
+    reader.shutdown()
     for i, collector in enumerate(collectors):
         on_records(i, collector.close())
 

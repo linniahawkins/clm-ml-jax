@@ -22,7 +22,7 @@ partitioning).
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional
+from typing import Optional, Protocol
 
 import numpy as np
 
@@ -92,3 +92,21 @@ def chunk_run_steps(run_n_steps: int, first_step: int, n_steps: int) -> list[int
         )
     steps = list(range(first_step, first_step + n_steps))
     return [max(first_step - 1, 0), *steps, min(first_step + n_steps, run_n_steps - 1)]
+
+
+class ForcingSource(Protocol):
+    """Where a run's forcing comes from (plan §6.9): any object that returns one chunk.
+
+    ``chunk(first_step, n_steps)`` returns the :class:`Forcing` for run steps
+    ``first_step ... first_step + n_steps - 1`` with one halo record at each end, already at
+    the model step. Implementations read only the files covering those times. A run asks
+    for consecutive chunks; the next one is read in the background while the current one
+    runs. Implemented by :class:`clm_ml.legacy.forcing.TowerForcingSource` (tower meteorology
+    and the CLM history file, as CHATS7); readers for coarser streams (6-hourly meteorology,
+    daily or monthly LAI, SAI and soil water, interpolated to the model step) implement the
+    same interface.
+    """
+
+    n_steps: int  # steps in the whole run
+
+    def chunk(self, first_step: int, n_steps: int) -> Forcing: ...

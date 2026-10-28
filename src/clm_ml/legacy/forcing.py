@@ -7,6 +7,7 @@ Must be imported after ``InitializeRealize`` (the legacy modules it uses import
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Callable
 
 import numpy as np
@@ -78,6 +79,34 @@ def load_forcing(
         ),
     )
     return Forcing(tower=tower, clm_history=clm, first_step=first_step)
+
+
+@dataclasses.dataclass(frozen=True)
+class TowerForcingSource:
+    """:class:`clm_ml.forcing.ForcingSource` for one tower: the tower meteorology file and
+    the CLM history file (leaf/stem area, soil water), read chunk by chunk with
+    :func:`load_forcing`."""
+
+    tower_file: str
+    clm_history_file: str
+    soil_adjust_file: str
+    first_record: int  # 0-based tower-file record at the run's first step
+    n_steps: int  # steps in the whole run
+    history_index: Callable[[int], int]
+    tower_height: float
+
+    def chunk(self, first_step: int, n_steps: int) -> Forcing:
+        return load_forcing(
+            self.tower_file,
+            self.clm_history_file,
+            self.soil_adjust_file,
+            first_record=self.first_record,
+            run_n_steps=self.n_steps,
+            first_step=first_step,
+            n_steps=n_steps,
+            history_index=self.history_index,
+            tower_height=self.tower_height,
+        )
 
 
 def tower_met_at(forcing: Forcing, t: int, g: int = 0) -> TowerMet:
