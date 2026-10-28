@@ -25,9 +25,8 @@ import jax.numpy as jnp
 
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import grav, tfrz  # noqa: F401
-from clm_src_main.PatchType import patch  # noqa: F401
-from clm_src_main.pftconMod import pftcon  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import dc0, dh0, dv0, gb_factor, gbh_min, visc0  # noqa: F401
 from multilayer_canopy.MLclm_varctl import gb_type  # noqa: F401
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
@@ -131,6 +130,7 @@ def LeafBoundaryLayer(
     filter_patch: Sequence[int],
     il: int,
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
 ) -> mlcanopy_type:
     """
     Calculate leaf boundary layer conductance for heat, water vapour,
@@ -200,15 +200,12 @@ def LeafBoundaryLayer(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    dleaf = pftcon.dleaf
-
     gbh = mlcanopy_inst.gbh_leaf
     gbv = mlcanopy_inst.gbv_leaf
     gbc = mlcanopy_inst.gbc_leaf
 
     for fp in range(num_filter):  # Fortran: do fp = 1, num_filter
         p = filter_patch[fp]
-        pft = patch.itype[p]  # JAX int — dynamic index
 
         # Diffusivity correction for temperature and pressure — Fortran lines 72-76
         pref_p = mlcanopy_inst.pref_forcing[p]
@@ -219,7 +216,7 @@ def LeafBoundaryLayer(
         dv = dv0 * fac
         dc = dc0 * fac
         rhomol_p = mlcanopy_inst.rhomol_forcing[p]
-        dl = dleaf[pft]  # JAX dynamic gather
+        dl = params.leaf_dimension
         dv_dh = dv / dh
         dc_dh = dc / dh
 
@@ -258,6 +255,7 @@ def LeafBoundaryLayerBoth(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
 ) -> mlcanopy_type:
     """Compute leaf boundary layer conductance for both sun and shade in one
     fused GPU kernel dispatch.
@@ -279,15 +277,12 @@ def LeafBoundaryLayerBoth(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    dleaf = pftcon.dleaf
-
     gbh = mlcanopy_inst.gbh_leaf
     gbv = mlcanopy_inst.gbv_leaf
     gbc = mlcanopy_inst.gbc_leaf
 
     for fp in range(num_filter):
         p = filter_patch[fp]
-        pft = patch.itype[p]
 
         # Diffusivity correction (same for sun and shade) — Fortran lines 72-76
         pref_p = mlcanopy_inst.pref_forcing[p]
@@ -298,7 +293,7 @@ def LeafBoundaryLayerBoth(
         dv = dv0 * fac
         dc = dc0 * fac
         rhomol_p = mlcanopy_inst.rhomol_forcing[p]
-        dl = dleaf[pft]
+        dl = params.leaf_dimension
         dv_dh = dv / dh
         dc_dh = dc / dh
 

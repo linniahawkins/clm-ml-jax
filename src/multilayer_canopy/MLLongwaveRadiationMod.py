@@ -50,11 +50,11 @@ from clm_src_main.clm_varctl import iulog  # noqa: E402, F401
 from clm_src_main.decompMod import bounds_type  # noqa: E402, F401
 from clm_src_main.PatchType import patch  # noqa: E402, F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: E402, F401
+from multilayer_canopy.MLCanopyParamsMod import CanopyParams  # noqa: E402
 from multilayer_canopy.MLclm_varcon import emg  # noqa: E402, F401
 from multilayer_canopy.MLclm_varctl import GridInfo, longwave_type  # noqa: E402, F401
 from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: E402, F401
 from multilayer_canopy.MLMathToolsMod import tridiag  # noqa: E402, F401
-from multilayer_canopy.MLpftconMod import MLpftcon  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
 # Public driver
@@ -66,6 +66,7 @@ def LongwaveRadiation(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
     grid: GridInfo,
 ) -> mlcanopy_type:
     """
@@ -87,7 +88,7 @@ def LongwaveRadiation(
         Updated :class:`mlcanopy_type`.
     """
     if longwave_type == 1:
-        return _Norman(bounds, num_filter, filter_patch, mlcanopy_inst, grid=grid)
+        return _Norman(bounds, num_filter, filter_patch, mlcanopy_inst, params, grid=grid)
     else:
         endrun(msg=" ERROR: LongwaveRadiation: longwave_type not valid")
         return mlcanopy_inst  # Unreachable; satisfies type checker
@@ -104,6 +105,7 @@ def _Norman_patch(
     ntop: int,
     nbot: int,
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
 ) -> mlcanopy_type:
     """JIT-compiled Norman longwave solver for a single patch.
 
@@ -113,10 +115,7 @@ def _Norman_patch(
     the canopy structure changes (rare for a fixed site).
     """
     neq: int = (nlevmlcan + 1) * 2
-    emleaf = MLpftcon.emleaf
-
-    pft = patch.itype[p]  # dynamic gather — valid in JIT
-    em_leaf = emleaf[pft]
+    em_leaf = params.leaf_emissivity
     rho = 1.0 - em_leaf
     tau = 0.0
 
@@ -266,6 +265,7 @@ def _Norman(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
     grid: GridInfo,
 ) -> mlcanopy_type:
     """
@@ -333,5 +333,5 @@ def _Norman(
     """
     for fp in range(num_filter):
         p, ntop, nbot = grid.p, grid.ntop, grid.nbot
-        mlcanopy_inst = _Norman_patch(p, ntop, nbot, mlcanopy_inst)
+        mlcanopy_inst = _Norman_patch(p, ntop, nbot, mlcanopy_inst, params)
     return mlcanopy_inst

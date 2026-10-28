@@ -27,7 +27,6 @@ from __future__ import annotations
 from typing import Sequence
 
 import jax.numpy as jnp
-import numpy as np
 from jax import Array
 
 from clm_src_main.abortutils import endrun  # noqa: F401
@@ -35,9 +34,8 @@ from clm_src_main.clm_varcon import rpi as pi  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
 from clm_src_main.clm_varpar import ivis, numrad  # noqa: F401
 from clm_src_main.decompMod import bounds_type  # noqa: F401
-from clm_src_main.PatchType import patch  # noqa: F401
-from clm_src_main.pftconMod import pftcon  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import J_to_umol, chil_max, chil_min, kb_max  # noqa: F401
 from multilayer_canopy.MLclm_varctl import (  # noqa: F401
     GridInfo,  # noqa: F401
@@ -46,7 +44,6 @@ from multilayer_canopy.MLclm_varctl import (  # noqa: F401
 )
 from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: F401
 from multilayer_canopy.MLMathToolsMod import is_concrete, tridiag  # noqa: F401
-from multilayer_canopy.MLpftconMod import MLpftcon  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Public driver
@@ -58,6 +55,7 @@ def SolarRadiation(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
     grid: GridInfo,
 ) -> mlcanopy_type:
     """
@@ -110,12 +108,6 @@ def SolarRadiation(
     # ------------------------------------------------------------------
     # Unpack inputs (Fortran associate block, lines 65-95)
     # ------------------------------------------------------------------
-    xl = pftcon.xl
-    rhol = pftcon.rhol
-    taul = pftcon.taul
-    rhos = pftcon.rhos
-    taus = pftcon.taus
-    clump_fac = MLpftcon.clump_fac
 
     solar_zen = mlcanopy_inst.solar_zen_forcing
     dlai = mlcanopy_inst.dlai_profile
@@ -146,11 +138,8 @@ def SolarRadiation(
     # ------------------------------------------------------------------
     # Calculate canopy layer optical properties — Fortran lines 100-182
     # ------------------------------------------------------------------
-    _itype_np = np.asarray(patch.itype)
-
     for fp in range(1, num_filter + 1):
         p = grid.p
-        pft = int(_itype_np[p])
         zen = solar_zen[p]
         cos_zen = jnp.cos(zen)
         _ncan = grid.ncan
@@ -166,12 +155,12 @@ def SolarRadiation(
 
         # Extract scalar PFT values once
         if leaf_optics_type == 0:
-            _xl_pft = xl[pft]
-            _cf_pft = clump_fac[pft]
-            _rhol_ib = [rhol[pft, ib] for ib in range(n_rad)]
-            _taul_ib = [taul[pft, ib] for ib in range(n_rad)]
-            _rhos_ib = [rhos[pft, ib] for ib in range(n_rad)]
-            _taus_ib = [taus[pft, ib] for ib in range(n_rad)]
+            _xl_pft = params.leaf_angle_index
+            _cf_pft = params.clumping_index
+            _rhol_ib = [params.leaf_reflectance[ib] for ib in range(n_rad)]
+            _taul_ib = [params.leaf_transmittance[ib] for ib in range(n_rad)]
+            _rhos_ib = [params.stem_reflectance[ib] for ib in range(n_rad)]
+            _taus_ib = [params.stem_transmittance[ib] for ib in range(n_rad)]
         else:
             endrun(msg=" ERROR: SolarRadiation: need to specify vertical profile for rho & tau")
             _xl_pft = 0.01

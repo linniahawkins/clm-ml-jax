@@ -22,18 +22,15 @@ from __future__ import annotations
 
 import functools
 import math
-from typing import Tuple
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import tfrz  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
-from clm_src_main.PatchType import patch  # noqa: F401
-from clm_src_main.pftconMod import pftcon  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     colim_c3a,
     colim_c4a,
@@ -77,12 +74,8 @@ from multilayer_canopy.MLclm_varctl import (  # noqa: F401
 )
 from multilayer_canopy.MLMathToolsMod import (
     bisection,  # noqa: F401
-    bisection_scalar,
     quadratic,
-    quadratic_py,
-    zbrent_scalar,
 )
-from multilayer_canopy.MLpftconMod import MLpftcon  # noqa: F401
 from multilayer_canopy.MLWaterVaporMod import SatVap, SatVap_py  # noqa: F401
 
 # ---------------------------------------------------------------------------
@@ -158,45 +151,10 @@ def _fth25(hd: float, se: float) -> float:
 # ---------------------------------------------------------------------------
 
 
-def _ft_py(tl: float, ha: float) -> float:
-    """Pure-Python (math.exp) version of :func:`_ft` for per-layer loops."""
-    return math.exp(ha / (rgas * (tfrz + 25.0)) * (1.0 - (tfrz + 25.0) / tl))
-
-
-def _fth_py(tl: float, hd: float, se: float, c: float) -> float:
-    """Pure-Python (math.exp) version of :func:`_fth` for per-layer loops."""
-    return c / (1.0 + math.exp((-hd + se * tl) / (rgas * tl)))
-
-
 def _fth25_py(hd: float, se: float) -> float:
     """Pure-Python (math.exp) version of :func:`_fth25` for per-layer loops."""
     t25 = tfrz + 25.0
     return 1.0 + math.exp((-hd + se * t25) / (rgas * t25))
-
-
-def _RealizedRate_py(c3psn_val: float, ac: float, aj: float, ap: float) -> float:
-    """Pure-Python version of :func:`_RealizedRate` — no JAX ops."""
-    is_c3 = round(c3psn_val) == 1
-    if colim_type == 0:
-        if is_c3:
-            return min(ac, aj)
-        else:
-            return min(min(ac, aj), ap)
-    elif colim_type == 1:
-        aq = colim_c3a if is_c3 else colim_c4a
-        bq = -(ac + aj)
-        cq = ac * aj
-        r1, r2 = quadratic_py(aq, bq, cq)
-        ai = min(r1, r2)
-        if is_c3:
-            return ai
-        else:
-            bq2 = -(ai + ap)
-            cq2 = ai * ap
-            r1b, r2b = quadratic_py(colim_c4b, bq2, cq2)
-            return min(r1b, r2b)
-    else:
-        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -253,448 +211,6 @@ def _RealizedRate(
     else:
         endrun(msg=" ERROR: RealizedRate: colim_type not valid")
         return jnp.zeros(())  # Unreachable
-
-
-# ---------------------------------------------------------------------------
-# Private: photosynthesis for a specified stomatal conductance
-# ---------------------------------------------------------------------------
-
-
-def _CiFuncGs(
-    p: int,
-    ic: int,
-    il: int,
-    mlcanopy_inst: mlcanopy_type,
-) -> Tuple[float, mlcanopy_type]:
-    """
-    Calculate leaf photosynthesis for the current stomatal conductance
-    ``gs(p,ic,il)`` and return the intercellular CO2 ``ci_val``
-    derived from the diffusion equation.
-
-    Mirrors Fortran subroutine ``CiFuncGs`` (private, lines 320-400).
-
-    Substitutes the diffusion equation for Ci into each metabolic
-    photosynthesis expression, yielding a quadratic in An:
-
-    .. code-block:: none
-
-        a*An^2 + b*An + c = 0     →    An = min(r1, r2) + rd
-
-    For C4, the PEP carboxylase-limited rate is computed directly.
-    After finding the limiting rate via :func:`_RealizedRate`,
-    ``ci_val`` is recovered from the diffusion equation.
-
-    Args:
-        p: Patch index.
-        ic: Canopy layer index.
-        il: Sunlit/shaded leaf index.
-        mlcanopy_inst: Canopy container; ac, aj, ap, agross, anet,
-            cs updated.
-
-    Returns:
-        Tuple ``(ci_val, mlcanopy_inst)``.
-    """
-    c3psn = pftcon.c3psn
-    pft = int(patch.itype[p])
-    is_c3 = jnp.round(c3psn[pft]) == 1
-
-    dpai_ic = mlcanopy_inst.dpai_profile[p, ic]
-    active = dpai_ic > 0.0
-    ac = mlcanopy_inst.ac_leaf
-    aj = mlcanopy_inst.aj_leaf
-    ap = mlcanopy_inst.ap_leaf
-    agross = mlcanopy_inst.agross_leaf
-    anet = mlcanopy_inst.anet_leaf
-    cs = mlcanopy_inst.cs_leaf
-
-    # Unpack all inputs as JAX scalars — always computed (masked below)
-    gbc_ic = mlcanopy_inst.gbc_leaf[p, ic, il]
-    gs_ic = mlcanopy_inst.gs_leaf[p, ic, il]
-    cair_ic = mlcanopy_inst.cair_profile[p, ic]
-    vcmax_ic = mlcanopy_inst.vcmax_leaf[p, ic, il]
-    je_ic = mlcanopy_inst.je_leaf[p, ic, il]
-    kp_ic = mlcanopy_inst.kp_leaf[p, ic, il]
-    rd_ic = mlcanopy_inst.rd_leaf[p, ic, il]
-    kc_ic = mlcanopy_inst.kc_leaf[p, ic, il]
-    ko_ic = mlcanopy_inst.ko_leaf[p, ic, il]
-    cp_ic = mlcanopy_inst.cp_leaf[p, ic, il]
-    o2ref_p = mlcanopy_inst.o2ref_forcing[p]
-    apar_ic = mlcanopy_inst.apar_leaf[p, ic, il]
-
-    # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug
-    gs_safe = jnp.maximum(gs_ic, 1.0e-30)
-    gbc_safe = jnp.maximum(gbc_ic, 1.0e-30)
-    gleaf = 1.0 / (1.0 / gbc_safe + dh2o_to_dco2 / gs_safe)
-
-    # C3 Rubisco-limited — Fortran lines 386-392
-    a0_c = vcmax_ic
-    b0_c = kc_ic * (1.0 + o2ref_p / ko_ic)
-    aq_c = 1.0 / gleaf
-    bq_c = -(cair_ic + b0_c) - (a0_c - rd_ic) / gleaf
-    cq_c = a0_c * (cair_ic - cp_ic) - rd_ic * (cair_ic + b0_c)
-    r1, r2 = quadratic(aq_c, bq_c, cq_c)
-    ac_c3 = jnp.minimum(r1, r2) + rd_ic
-
-    # C3 RuBP-regeneration-limited — Fortran lines 394-400
-    a0_j = je_ic / 4.0
-    b0_j = 2.0 * cp_ic
-    aq_j = 1.0 / gleaf
-    bq_j = -(cair_ic + b0_j) - (a0_j - rd_ic) / gleaf
-    cq_j = a0_j * (cair_ic - cp_ic) - rd_ic * (cair_ic + b0_j)
-    r1j, r2j = quadratic(aq_j, bq_j, cq_j)
-    aj_c3 = jnp.minimum(r1j, r2j) + rd_ic
-
-    # C4 — Fortran lines 404-409
-    ac_c4 = vcmax_ic
-    aj_c4 = qe_c4 * apar_ic
-    ap_c4 = kp_ic * (cair_ic * gleaf + rd_ic) / (gleaf + kp_ic)
-
-    ac_val = jnp.where(is_c3, ac_c3, ac_c4)
-    aj_val = jnp.where(is_c3, aj_c3, aj_c4)
-    ap_val = jnp.where(is_c3, 0.0, ap_c4)
-
-    agross_val = _RealizedRate(c3psn[pft], ac_val, aj_val, ap_val)
-    anet_val = agross_val - rd_ic
-
-    cs_val = jnp.maximum(cair_ic - anet_val / gbc_safe, 1.0)
-    ci_val = cair_ic - anet_val / gleaf
-
-    # Mask results for empty layers — Fortran lines 420-427
-    ac_val = jnp.where(active, ac_val, 0.0)
-    aj_val = jnp.where(active, aj_val, 0.0)
-    ap_val = jnp.where(active, ap_val, 0.0)
-    agross_val = jnp.where(active, agross_val, 0.0)
-    anet_val = jnp.where(active, anet_val, 0.0)
-    cs_val = jnp.where(active, cs_val, 0.0)
-    ci_val = jnp.where(active, ci_val, 0.0)
-
-    ac = ac.at[p, ic, il].set(ac_val)
-    aj = aj.at[p, ic, il].set(aj_val)
-    ap = ap.at[p, ic, il].set(ap_val)
-    agross = agross.at[p, ic, il].set(agross_val)
-    anet = anet.at[p, ic, il].set(anet_val)
-    cs = cs.at[p, ic, il].set(cs_val)
-
-    mlcanopy_inst = mlcanopy_inst._replace(
-        ac_leaf=ac,
-        aj_leaf=aj,
-        ap_leaf=ap,
-        agross_leaf=agross,
-        anet_leaf=anet,
-        cs_leaf=cs,
-    )
-    return ci_val, mlcanopy_inst
-
-
-# ---------------------------------------------------------------------------
-# Private: pure-scalar version of _CiFuncGs (no JAX reads/writes)
-# ---------------------------------------------------------------------------
-
-
-def _CiFuncGsPure(
-    gs_val: float,
-    *,
-    is_c3: bool,
-    dpai_ic: float,
-    gbc_ic: float,
-    cair_ic: float,
-    vcmax_ic: float,
-    je_ic: float,
-    kp_ic: float,
-    rd_ic: float,
-    kc_ic: float,
-    ko_ic: float,
-    cp_ic: float,
-    o2ref_p: float,
-    apar_ic: float,
-    c3psn_pft_val: float,
-) -> Tuple[float, float, float, float, float, float, float]:
-    """
-    Pure-scalar version of :func:`_CiFuncGs`.
-
-    All inputs are pre-extracted Python floats; no JAX array reads or
-    writes occur.  Returns ``(ci_val, ac_val, aj_val, ap_val,
-    agross_val, anet_val, cs_val)`` as Python floats.
-    """
-    if dpai_ic > 0.0:
-        gleaf = 1.0 / (1.0 / gbc_ic + dh2o_to_dco2 / gs_val)
-
-        if is_c3:
-            a0 = vcmax_ic
-            b0 = kc_ic * (1.0 + o2ref_p / ko_ic)
-            aq = 1.0 / gleaf
-            bq = -(cair_ic + b0) - (a0 - rd_ic) / gleaf
-            cq = a0 * (cair_ic - cp_ic) - rd_ic * (cair_ic + b0)
-            r1, r2 = quadratic_py(aq, bq, cq)
-            ac_val = min(r1, r2) + rd_ic
-
-            a0 = je_ic / 4.0
-            b0 = 2.0 * cp_ic
-            aq = 1.0 / gleaf
-            bq = -(cair_ic + b0) - (a0 - rd_ic) / gleaf
-            cq = a0 * (cair_ic - cp_ic) - rd_ic * (cair_ic + b0)
-            r1, r2 = quadratic_py(aq, bq, cq)
-            aj_val = min(r1, r2) + rd_ic
-
-            ap_val = 0.0
-        else:
-            ac_val = vcmax_ic
-            aj_val = qe_c4 * apar_ic
-            ap_val = kp_ic * (cair_ic * gleaf + rd_ic) / (gleaf + kp_ic)
-
-        agross_val = _RealizedRate_py(c3psn_pft_val, ac_val, aj_val, ap_val)
-        anet_val = agross_val - rd_ic
-        cs_val = max(cair_ic - anet_val / gbc_ic, 1.0)
-        ci_val = cair_ic - anet_val / gleaf
-
-    else:
-        ac_val = aj_val = ap_val = agross_val = anet_val = cs_val = ci_val = 0.0
-
-    return ci_val, ac_val, aj_val, ap_val, agross_val, anet_val, cs_val
-
-
-# ---------------------------------------------------------------------------
-# Private: photosynthesis + gs for a specified Ci (hybrid callback)
-# ---------------------------------------------------------------------------
-
-
-def _CiFunc(
-    p: int,
-    ic: int,
-    il: int,
-    mlcanopy_inst: mlcanopy_type,
-    ci_val: float,
-) -> Tuple[float, mlcanopy_type]:
-    """
-    Calculate leaf photosynthesis and stomatal conductance for a
-    specified ``ci_val``, then derive a new Ci from the diffusion
-    equation.  Returns ``ci_dif = cinew - ci_val`` (= 0 at convergence).
-
-    Mirrors Fortran subroutine ``CiFunc`` (private, lines 228-320).
-
-    This is the callback function passed to :func:`hybrid`.
-
-    **Step 1** — metabolic (demand-side) photosynthesis at ``ci_val``.
-    **Step 2** — stomatal conductance from Ball-Berry or Medlyn
-    quadratic.
-    **Step 3** — new Ci from the diffusion equation.
-
-    Returns ``ci_dif = 0`` whenever ``dpai == 0`` or ``anet < 0``.
-
-    Args:
-        p: Patch index.
-        ic: Canopy layer index.
-        il: Sunlit/shaded leaf index.
-        mlcanopy_inst: Canopy container; ac, aj, ap, agross, anet,
-            cs, gs updated.
-        ci_val: Trial value for Ci (umol/mol).
-
-    Returns:
-        Tuple ``(ci_dif, mlcanopy_inst)``.
-    """
-    c3psn = pftcon.c3psn
-    pft = int(patch.itype[p])
-    is_c3 = round(float(c3psn[pft])) == 1
-
-    dpai_ic = float(mlcanopy_inst.dpai_profile[p, ic])
-    ac = mlcanopy_inst.ac_leaf
-    aj = mlcanopy_inst.aj_leaf
-    ap = mlcanopy_inst.ap_leaf
-    agross = mlcanopy_inst.agross_leaf
-    anet = mlcanopy_inst.anet_leaf
-    cs = mlcanopy_inst.cs_leaf
-    gs = mlcanopy_inst.gs_leaf
-
-    if dpai_ic > 0.0:  # Fortran lines 266-313
-
-        vcmax_ic = float(mlcanopy_inst.vcmax_leaf[p, ic, il])
-        je_ic = float(mlcanopy_inst.je_leaf[p, ic, il])
-        kp_ic = float(mlcanopy_inst.kp_leaf[p, ic, il])
-        rd_ic = float(mlcanopy_inst.rd_leaf[p, ic, il])
-        kc_ic = float(mlcanopy_inst.kc_leaf[p, ic, il])
-        ko_ic = float(mlcanopy_inst.ko_leaf[p, ic, il])
-        cp_ic = float(mlcanopy_inst.cp_leaf[p, ic, il])
-        o2ref_p = float(mlcanopy_inst.o2ref_forcing[p])
-        cair_ic = float(mlcanopy_inst.cair_profile[p, ic])
-        apar_ic = float(mlcanopy_inst.apar_leaf[p, ic, il])
-        gbc_ic = float(mlcanopy_inst.gbc_leaf[p, ic, il])
-        gbv_ic = float(mlcanopy_inst.gbv_leaf[p, ic, il])
-        g0_p = float(mlcanopy_inst.g0_canopy[p])
-        g1_p = float(mlcanopy_inst.g1_canopy[p])
-        ceair_ic = float(mlcanopy_inst.ceair_leaf[p, ic, il])
-        lesat_ic = float(mlcanopy_inst.leaf_esat_leaf[p, ic, il])
-
-        # --- Step 1: metabolic photosynthesis — Fortran lines 268-292 ---
-        if is_c3:
-            ac_val = (
-                vcmax_ic * max(ci_val - cp_ic, 0.0) / (ci_val + kc_ic * (1.0 + o2ref_p / ko_ic))
-            )
-            aj_val = je_ic * max(ci_val - cp_ic, 0.0) / (4.0 * ci_val + 8.0 * cp_ic)
-            ap_val = 0.0
-        else:
-            ac_val = vcmax_ic
-            aj_val = qe_c4 * apar_ic
-            ap_val = kp_ic * max(ci_val, 0.0)
-
-        agross_val = _RealizedRate(float(c3psn[pft]), ac_val, aj_val, ap_val)
-        ac_val = max(ac_val, 0.0)
-        aj_val = max(aj_val, 0.0)
-        ap_val = max(ap_val, 0.0)
-        agross_val = max(agross_val, 0.0)
-        anet_val = agross_val - rd_ic
-
-        cs_val = max(cair_ic - anet_val / gbc_ic, 1.0)  # Fortran line 299
-
-        # --- Step 2: stomatal conductance — Fortran lines 301-322 ---
-        if gs_type == 1:  # Ball-Berry
-            if anet_val > 0.0:
-                term = anet_val / cs_val
-                aq = 1.0
-                bq = gbv_ic - g0_p - g1_p * term
-                cq = -gbv_ic * (g0_p + g1_p * term * ceair_ic / lesat_ic)
-                r1, r2 = quadratic(aq, bq, cq)
-                gs_val = max(r1, r2)
-            else:
-                gs_val = g0_p
-
-        elif gs_type == 0:  # Medlyn
-            if anet_val > 0.0:
-                vpd_term = max(lesat_ic - ceair_ic, vpd_min_MED) * 0.001
-                term = dh2o_to_dco2 * anet_val / cs_val
-                aq = 1.0
-                bq = -(2.0 * (g0_p + term) + (g1_p * term) ** 2 / (gbv_ic * vpd_term))
-                cq = g0_p * g0_p + (2.0 * g0_p + term * (1.0 - g1_p * g1_p / vpd_term)) * term
-                r1, r2 = quadratic(aq, bq, cq)
-                gs_val = max(r1, r2)
-            else:
-                gs_val = g0_p
-        else:
-            gs_val = g0_p  # Fallback (should not reach)
-
-        # --- Step 3: new Ci from diffusion — Fortran lines 324-330 ---
-        gleaf = 1.0 / (1.0 / gbc_ic + dh2o_to_dco2 / gs_val)
-        cinew = cair_ic - anet_val / gleaf
-        ci_dif = cinew - ci_val
-        if anet_val < 0.0:
-            ci_dif = 0.0  # Fortran line 330
-
-        ac = ac.at[p, ic, il].set(ac_val)
-        aj = aj.at[p, ic, il].set(aj_val)
-        ap = ap.at[p, ic, il].set(ap_val)
-        agross = agross.at[p, ic, il].set(agross_val)
-        anet = anet.at[p, ic, il].set(anet_val)
-        cs = cs.at[p, ic, il].set(cs_val)
-        gs = gs.at[p, ic, il].set(gs_val)
-
-    else:  # Fortran lines 332-340
-        ac = ac.at[p, ic, il].set(0.0)
-        aj = aj.at[p, ic, il].set(0.0)
-        ap = ap.at[p, ic, il].set(0.0)
-        agross = agross.at[p, ic, il].set(0.0)
-        anet = anet.at[p, ic, il].set(0.0)
-        cs = cs.at[p, ic, il].set(0.0)
-        gs = gs.at[p, ic, il].set(0.0)
-        ci_dif = 0.0
-
-    mlcanopy_inst = mlcanopy_inst._replace(
-        ac_leaf=ac,
-        aj_leaf=aj,
-        ap_leaf=ap,
-        agross_leaf=agross,
-        anet_leaf=anet,
-        cs_leaf=cs,
-        gs_leaf=gs,
-    )
-    return ci_dif, mlcanopy_inst
-
-
-# ---------------------------------------------------------------------------
-# Private: pure-scalar version of _CiFunc (no JAX reads/writes)
-# ---------------------------------------------------------------------------
-
-
-def _CiFuncPure(
-    ci_val: float,
-    *,
-    is_c3: bool,
-    vcmax_ic: float,
-    je_ic: float,
-    kp_ic: float,
-    rd_ic: float,
-    kc_ic: float,
-    ko_ic: float,
-    cp_ic: float,
-    o2ref_p: float,
-    cair_ic: float,
-    apar_ic: float,
-    gbc_ic: float,
-    gbv_ic: float,
-    g0_p: float,
-    g1_p: float,
-    ceair_ic: float,
-    lesat_ic: float,
-    c3psn_pft_val: float,
-    dpai_ic: float,
-) -> float:
-    """
-    Pure-scalar version of :func:`_CiFunc`.
-
-    All inputs are pre-extracted Python floats; no JAX array reads or
-    writes occur.  Returns ``ci_dif = ci_new - ci_val`` (= 0 at
-    convergence) as a Python float.
-    """
-    if dpai_ic <= 0.0:
-        return 0.0
-
-    if is_c3:
-        ac_val = vcmax_ic * max(ci_val - cp_ic, 0.0) / (ci_val + kc_ic * (1.0 + o2ref_p / ko_ic))
-        aj_val = je_ic * max(ci_val - cp_ic, 0.0) / (4.0 * ci_val + 8.0 * cp_ic)
-        ap_val = 0.0
-    else:
-        ac_val = vcmax_ic
-        aj_val = qe_c4 * apar_ic
-        ap_val = kp_ic * max(ci_val, 0.0)
-
-    agross_val = _RealizedRate_py(c3psn_pft_val, ac_val, aj_val, ap_val)
-    ac_val = max(ac_val, 0.0)
-    aj_val = max(aj_val, 0.0)
-    ap_val = max(ap_val, 0.0)
-    agross_val = max(agross_val, 0.0)
-    anet_val = agross_val - rd_ic
-
-    cs_val = max(cair_ic - anet_val / gbc_ic, 1.0)
-
-    if gs_type == 1:
-        if anet_val > 0.0:
-            term = anet_val / cs_val
-            aq = 1.0
-            bq = gbv_ic - g0_p - g1_p * term
-            cq = -gbv_ic * (g0_p + g1_p * term * ceair_ic / lesat_ic)
-            r1, r2 = quadratic_py(aq, bq, cq)
-            gs_val = max(r1, r2)
-        else:
-            gs_val = g0_p
-    elif gs_type == 0:
-        if anet_val > 0.0:
-            vpd_term = max(lesat_ic - ceair_ic, vpd_min_MED) * 0.001
-            term = dh2o_to_dco2 * anet_val / cs_val
-            aq = 1.0
-            bq = -(2.0 * (g0_p + term) + (g1_p * term) ** 2 / (gbv_ic * vpd_term))
-            cq = g0_p * g0_p + (2.0 * g0_p + term * (1.0 - g1_p * g1_p / vpd_term)) * term
-            r1, r2 = quadratic_py(aq, bq, cq)
-            gs_val = max(r1, r2)
-        else:
-            gs_val = g0_p
-    else:
-        gs_val = g0_p
-
-    gleaf = 1.0 / (1.0 / gbc_ic + dh2o_to_dco2 / gs_val)
-    cinew = cair_ic - anet_val / gleaf
-    ci_dif = cinew - ci_val
-    if anet_val < 0.0:
-        ci_dif = 0.0
-
-    return ci_dif
 
 
 # ---------------------------------------------------------------------------
@@ -1366,146 +882,6 @@ def _get_vmapped_photo_kernel_acclim(
 
 
 # ---------------------------------------------------------------------------
-# Private: marginal water-use efficiency check (zbrent/bisection callback)
-# ---------------------------------------------------------------------------
-
-
-def _StomataEfficiency(
-    p: int,
-    ic: int,
-    il: int,
-    mlcanopy_inst: mlcanopy_type,
-    gs_val: float,
-) -> Tuple[float, mlcanopy_type]:
-    """
-    Marginal water-use efficiency check for optimal stomatal conductance.
-
-    Mirrors Fortran subroutine ``StomataEfficiency`` (private,
-    lines 430-450).
-
-    Computes photosynthesis at ``gs_val - delta`` and ``gs_val``,
-    then checks whether the marginal gain in An exceeds
-    ``iota * vpd * delta``:
-
-    .. code-block:: none
-
-        check = (An_high - An_low) - iota * delta * (vpd / pref)
-
-    Positive ``check`` → increase in gs is still profitable.
-    Negative ``check`` → optimal gs has been exceeded.
-
-    This function matches the :data:`MLMathToolsMod.FuncType` callback
-    signature used by :func:`zbrent` and :func:`bisection`.
-
-    Args:
-        p: Patch index.
-        ic: Canopy layer index.
-        il: Sunlit/shaded leaf index.
-        mlcanopy_inst: Canopy container threaded through CiFuncGs calls.
-        gs_val: Trial stomatal conductance (mol H2O/m2/s).
-
-    Returns:
-        Tuple ``(check, mlcanopy_inst)``.
-    """
-    delta: float = 0.001  # Fortran: delta = 0.001_r8
-
-    pft = int(patch.itype[p])
-    iota = float(MLpftcon.iota_SPA[pft])
-    pref_p = float(mlcanopy_inst.pref_forcing[p])
-    eair_ic = float(mlcanopy_inst.eair_profile[p, ic])
-    gbv_ic = float(mlcanopy_inst.gbv_leaf[p, ic, il])
-    lesat_ic = float(mlcanopy_inst.leaf_esat_leaf[p, ic, il])
-
-    # Photosynthesis at lower gs — Fortran lines 441-443
-    mlcanopy_inst = mlcanopy_inst._replace(
-        gs_leaf=mlcanopy_inst.gs_leaf.at[p, ic, il].set(gs_val - delta)
-    )
-    ci_lo, mlcanopy_inst = _CiFuncGs(p, ic, il, mlcanopy_inst)
-    mlcanopy_inst = mlcanopy_inst._replace(ci_leaf=mlcanopy_inst.ci_leaf.at[p, ic, il].set(ci_lo))
-    an_low = float(mlcanopy_inst.anet_leaf[p, ic, il])
-
-    # Photosynthesis at gs_val — Fortran lines 445-447
-    mlcanopy_inst = mlcanopy_inst._replace(gs_leaf=mlcanopy_inst.gs_leaf.at[p, ic, il].set(gs_val))
-    ci_hi, mlcanopy_inst = _CiFuncGs(p, ic, il, mlcanopy_inst)
-    mlcanopy_inst = mlcanopy_inst._replace(ci_leaf=mlcanopy_inst.ci_leaf.at[p, ic, il].set(ci_hi))
-    an_high = float(mlcanopy_inst.anet_leaf[p, ic, il])
-
-    # VPD at leaf surface — Fortran lines 449-452
-    gs_cur = float(mlcanopy_inst.gs_leaf[p, ic, il])
-    hs = (gbv_ic * eair_ic + gs_cur * lesat_ic) / ((gbv_ic + gs_cur) * lesat_ic)
-    vpd = max(lesat_ic - hs * lesat_ic, vpd_min_MED)
-
-    # Marginal WUE check — Fortran line 455
-    check = (an_high - an_low) - iota * delta * (vpd / pref_p)
-
-    return check, mlcanopy_inst
-
-
-# ---------------------------------------------------------------------------
-# Private: pure-scalar version of _StomataEfficiency (no JAX reads/writes)
-# ---------------------------------------------------------------------------
-
-
-def _StomataEfficiencyPure(
-    gs_val: float,
-    *,
-    iota: float,
-    pref_p: float,
-    eair_ic: float,
-    gbv_ic: float,
-    lesat_ic: float,
-    # Forwarded to _CiFuncGsPure:
-    is_c3: bool,
-    dpai_ic: float,
-    gbc_ic: float,
-    cair_ic: float,
-    vcmax_ic: float,
-    je_ic: float,
-    kp_ic: float,
-    rd_ic: float,
-    kc_ic: float,
-    ko_ic: float,
-    cp_ic: float,
-    o2ref_p: float,
-    apar_ic: float,
-    c3psn_pft_val: float,
-) -> float:
-    """
-    Pure-scalar version of :func:`_StomataEfficiency`.
-
-    All inputs are pre-extracted Python floats; no JAX array reads or
-    writes occur.  Returns ``check`` (positive → increase gs is
-    profitable, negative → optimal gs exceeded) as a Python float.
-    """
-    delta: float = 0.001
-
-    _kwargs = dict(
-        is_c3=is_c3,
-        dpai_ic=dpai_ic,
-        gbc_ic=gbc_ic,
-        cair_ic=cair_ic,
-        vcmax_ic=vcmax_ic,
-        je_ic=je_ic,
-        kp_ic=kp_ic,
-        rd_ic=rd_ic,
-        kc_ic=kc_ic,
-        ko_ic=ko_ic,
-        cp_ic=cp_ic,
-        o2ref_p=o2ref_p,
-        apar_ic=apar_ic,
-        c3psn_pft_val=c3psn_pft_val,
-    )
-
-    _, _, _, _, _, an_low, _ = _CiFuncGsPure(gs_val - delta, **_kwargs)
-    _, _, _, _, _, an_high, _ = _CiFuncGsPure(gs_val, **_kwargs)
-
-    hs = (gbv_ic * eair_ic + gs_val * lesat_ic) / ((gbv_ic + gs_val) * lesat_ic)
-    vpd = max(lesat_ic - hs * lesat_ic, vpd_min_MED)
-
-    return (an_high - an_low) - iota * delta * (vpd / pref_p)
-
-
-# ---------------------------------------------------------------------------
 # Private: JAX-traceable scalar versions for differentiable gs_type==2 path
 # ---------------------------------------------------------------------------
 
@@ -2086,143 +1462,6 @@ def _get_vmapped_photo_kernel_wue_acclim(
 
 
 # ---------------------------------------------------------------------------
-# Private: WUE-optimal stomatal conductance
-# ---------------------------------------------------------------------------
-
-
-def _StomataOptimization(
-    p: int,
-    ic: int,
-    il: int,
-    mlcanopy_inst: mlcanopy_type,
-) -> mlcanopy_type:
-    """
-    Solve for the WUE-optimal stomatal conductance.
-
-    Mirrors Fortran subroutine ``StomataOptimization`` (private,
-    lines 400-430).
-
-    Sets ``gs1 = gsmin_SPA`` and ``gs2 = 2.0`` mol/m2/s as brackets,
-    evaluates :func:`_StomataEfficiency` at both ends, and:
-
-    - If ``check1 * check2 < 0``: uses :func:`zbrent` (``gs_solver=1``)
-      or :func:`bisection` (``gs_solver=2``) to find the optimal gs
-      to within ``tol = 0.001`` mol/m2/s.
-    - Otherwise (low light): sets ``gs = gsmin_SPA``.
-
-    Finally calls :func:`_CiFuncGs` to recompute photosynthesis at the
-    solved gs.
-
-    Args:
-        p: Patch index.
-        ic: Canopy layer index.
-        il: Sunlit/shaded leaf index.
-        mlcanopy_inst: Canopy container; gs, ci, and photosynthesis
-            fields are updated.
-
-    Returns:
-        Updated :class:`mlcanopy_type`.
-    """
-    tol: float = 0.001  # Fortran: parameter tol = 0.001_r8
-
-    pft = int(patch.itype[p])
-    gsmin = float(MLpftcon.gsmin_SPA[pft])
-    dpai_ic = float(mlcanopy_inst.dpai_profile[p, ic])
-
-    gs1: float = gsmin
-    gs2: float = 2.0
-
-    if dpai_ic > 0.0:  # Fortran lines 416-426
-        # Pre-extract all scalar inputs needed by _StomataEfficiencyPure
-        # (one-time JAX sync cost, amortized over all solver iterations).
-        _is_c3 = round(float(pftcon.c3psn[pft])) == 1
-        _c3psn_val = float(pftcon.c3psn[pft])
-        _iota = float(MLpftcon.iota_SPA[pft])
-        _pref_p = float(mlcanopy_inst.pref_forcing[p])
-        _eair_ic = float(mlcanopy_inst.eair_profile[p, ic])
-        _gbv_ic = float(mlcanopy_inst.gbv_leaf[p, ic, il])
-        _lesat_ic = float(mlcanopy_inst.leaf_esat_leaf[p, ic, il])
-        _gbc_ic = float(mlcanopy_inst.gbc_leaf[p, ic, il])
-        _cair_ic = float(mlcanopy_inst.cair_profile[p, ic])
-        _vcmax_ic = float(mlcanopy_inst.vcmax_leaf[p, ic, il])
-        _je_ic = float(mlcanopy_inst.je_leaf[p, ic, il])
-        _kp_ic = float(mlcanopy_inst.kp_leaf[p, ic, il])
-        _rd_ic = float(mlcanopy_inst.rd_leaf[p, ic, il])
-        _kc_ic = float(mlcanopy_inst.kc_leaf[p, ic, il])
-        _ko_ic = float(mlcanopy_inst.ko_leaf[p, ic, il])
-        _cp_ic = float(mlcanopy_inst.cp_leaf[p, ic, il])
-        _o2ref_p = float(mlcanopy_inst.o2ref_forcing[p])
-        _apar_ic = float(mlcanopy_inst.apar_leaf[p, ic, il])
-
-        _scalar_kwargs = dict(
-            iota=_iota,
-            pref_p=_pref_p,
-            eair_ic=_eair_ic,
-            gbv_ic=_gbv_ic,
-            lesat_ic=_lesat_ic,
-            is_c3=_is_c3,
-            dpai_ic=dpai_ic,
-            gbc_ic=_gbc_ic,
-            cair_ic=_cair_ic,
-            vcmax_ic=_vcmax_ic,
-            je_ic=_je_ic,
-            kp_ic=_kp_ic,
-            rd_ic=_rd_ic,
-            kc_ic=_kc_ic,
-            ko_ic=_ko_ic,
-            cp_ic=_cp_ic,
-            o2ref_p=_o2ref_p,
-            apar_ic=_apar_ic,
-            c3psn_pft_val=_c3psn_val,
-        )
-
-        # Evaluate bracket endpoints using the pure-scalar function.
-        check1 = _StomataEfficiencyPure(gs1, **_scalar_kwargs)
-        check2 = _StomataEfficiencyPure(gs2, **_scalar_kwargs)
-
-        if check1 * check2 < 0.0:
-            # Build closure that captures pre-extracted scalars (factory
-            # pattern avoids Python loop-variable capture bug).
-            def _make_func(**kw):
-                def _f(gs_v):
-                    return _StomataEfficiencyPure(gs_v, **kw)
-
-                return _f
-
-            _stomata_func = _make_func(**_scalar_kwargs)
-
-            if gs_solver == 1:
-                gs_opt = zbrent_scalar(
-                    "StomataOptimization",
-                    _stomata_func,
-                    gs1,
-                    gs2,
-                    tol,
-                )
-            else:
-                gs_opt = bisection_scalar(
-                    "StomataOptimization",
-                    _stomata_func,
-                    gs1,
-                    gs2,
-                    tol,
-                )
-        else:
-            gs_opt = gsmin
-
-        mlcanopy_inst = mlcanopy_inst._replace(
-            gs_leaf=mlcanopy_inst.gs_leaf.at[p, ic, il].set(gs_opt)
-        )
-    else:
-        mlcanopy_inst = mlcanopy_inst._replace(gs_leaf=mlcanopy_inst.gs_leaf.at[p, ic, il].set(0.0))
-
-    # Final photosynthesis at solved gs — one JAX write-back call — Fortran line 428
-    ci_val, mlcanopy_inst = _CiFuncGs(p, ic, il, mlcanopy_inst)
-    mlcanopy_inst = mlcanopy_inst._replace(ci_leaf=mlcanopy_inst.ci_leaf.at[p, ic, il].set(ci_val))
-    return mlcanopy_inst
-
-
-# ---------------------------------------------------------------------------
 # Public: leaf photosynthesis and stomatal conductance
 # ---------------------------------------------------------------------------
 
@@ -2232,9 +1471,9 @@ def LeafPhotosynthesis(
     filter_patch,
     il: int,
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
     grid: GridInfo,
     _o2ref_py: float = None,
-    g1_MED_jax=None,
 ) -> mlcanopy_type:
     """
     Calculate leaf photosynthesis and stomatal conductance for sunlit
@@ -2287,52 +1526,21 @@ def LeafPhotosynthesis(
         il: Sunlit (``isun``) or shaded (``isha``) leaf index.
         mlcanopy_inst: Canopy container; all photosynthesis and
             stomatal conductance fields are updated.
-        grid: Patch index and canopy layer indices (:class:`GridInfo`).
+        params: Parameters of the patch's PFT (:class:`CanopyParams`).
+        grid: Patch index, canopy layer indices and C3/C4 flag (:class:`GridInfo`).
         _o2ref_py: O2 concentration as a Python float (selects the cached
             Medlyn/Ball-Berry kernel); read from ``mlcanopy_inst`` if omitted.
-        g1_MED_jax: Optional JAX array of shape ``(mxpft+1,)`` with the
-            Medlyn stomatal slope values.  When provided, overrides
-            ``MLpftcon.g1_MED`` so that autodiff can trace through it
-            (mirrors the ``vcmaxpft_jax`` pattern used in
-            ``CanopyNitrogenProfile``).  Pass ``alpha * MLpftcon.g1_MED``
-            to differentiate w.r.t. a global g1 scale factor ``alpha``.
 
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    c3psn_pft = pftcon.c3psn
-
-    # Pre-materialise patch.itype, pftcon, and MLpftcon arrays as numpy once so
-    # that int()/float() calls below are always concrete, even when this function
-    # is traced by jax.grad/jit/checkpoint (JAX arrays become abstract tracers
-    # under jax.checkpoint, so all float() calls must use numpy arrays instead).
-    _patch_itype_np = np.asarray(patch.itype)
-    _c3psn_np = np.asarray(c3psn_pft)
-    # Stomatal parameters as JAX arrays for differentiability.
-    # pft is a concrete Python int (derived from numpy), so jnp indexing gives
-    # a JAX scalar that is differentiable — gradient flows through g1, iota, etc.
-    # These are NOT converted to float() so they remain on the JAX tape.
-    # g1_MED_jax: when provided (diff-mode gradient check), use it in place of
-    # MLpftcon.g1_MED so the JAX tracer for alpha flows into g1_val and
-    # d(GPP)/d(alpha_g1) is computed correctly — mirrors vcmaxpft_jax pattern.
-    _g0_MED_jnp = jnp.asarray(MLpftcon.g0_MED)
-    _g1_MED_jnp = (
-        jnp.asarray(g1_MED_jax) if g1_MED_jax is not None else jnp.asarray(MLpftcon.g1_MED)
-    )
-    _g0_BB_jnp = jnp.asarray(MLpftcon.g0_BB)
-    _g1_BB_jnp = jnp.asarray(MLpftcon.g1_BB)
-    _iota_jnp = jnp.asarray(MLpftcon.iota_SPA)
-    _gsmin_jnp = jnp.asarray(MLpftcon.gsmin_SPA)
-    _o2ref_np = np.asarray(MLpftcon.o2ref_pftcon) if hasattr(MLpftcon, "o2ref_pftcon") else None
-
     # ------------------------------------------------------------------
     # First loop: temperature responses + photosynthesis
     # ------------------------------------------------------------------
     p = grid.p  # Fortran loops over the filter; the patch is the unit of computation
     _ncan_p = grid.ncan
-    pft = int(_patch_itype_np[p])
-    _c3psn_val = float(_c3psn_np[pft])
-    is_c3 = round(_c3psn_val) == 1
+    is_c3 = grid.c3  # static: selects the C3 or C4 kernel
+    _c3psn_val = 1.0 if is_c3 else 0.0  # pftcon c3psn flag value
 
     # --- Temperature acclimation — Fortran lines 135-153 ---
     # (Same for all ic within this patch, compute once.)
@@ -2375,23 +1583,20 @@ def LeafPhotosynthesis(
         jmaxc = _fth25(jmaxhd, jmaxse)  # JAX scalar, passed as runtime arg
 
     # --- Stomatal model parameters — same for all ic ---
-    # Use jnp-indexed JAX arrays so gradients flow through g0/g1/iota.
-    # pft is a concrete Python int (not a tracer), so jnp[pft] gives a
-    # JAX scalar that stays on the autodiff tape.
     if gs_type == 0:
-        g0_val = _g0_MED_jnp[pft]  # JAX scalar — differentiable
-        g1_val = _g1_MED_jnp[pft]  # JAX scalar — differentiable
+        g0_val = params.g0_medlyn
+        g1_val = params.g1_medlyn
     elif gs_type == 1:
-        g0_val = _g0_BB_jnp[pft]  # JAX scalar — differentiable
-        g1_val = _g1_BB_jnp[pft]  # JAX scalar — differentiable
+        g0_val = params.g0_ball_berry
+        g1_val = params.g1_ball_berry
     else:
         g0_val = jnp.asarray(-999.0)
         g1_val = jnp.asarray(-999.0)
 
     # Per-pft constants for gs_type==2
     if gs_type == 2:
-        _iota_pft = _iota_jnp[pft]  # JAX scalar — differentiable via IFT
-        _gsmin_pft = _gsmin_jnp[pft]  # JAX scalar — differentiable
+        _iota_pft = params.iota  # differentiable via the implicit function theorem
+        _gsmin_pft = params.gs_min
 
     # --- Pre-extract constant input slices (JAX arrays, no D→H syncs) ---
     _dpai_p = mlcanopy_inst.dpai_profile[p]
@@ -2620,10 +1825,7 @@ def LeafPhotosynthesis(
     # ------------------------------------------------------------------
     # Second loop: soil moisture adjustment — Fortran lines 262-212
     # ------------------------------------------------------------------
-    pft = int(_patch_itype_np[p])  # use pre-materialised numpy copy
-    _c3psn_val = float(_c3psn_np[pft])  # use pre-materialised numpy copy
-    is_c3 = round(_c3psn_val) == 1
-    _gsmin_pft2 = _gsmin_jnp[pft]  # JAX scalar — differentiable floor
+    _gsmin_pft2 = params.gs_min
 
     # Pre-extract slices for second loop (JAX arrays, no D→H syncs)
     _gs_p2 = mlcanopy_inst.gs_leaf[p, :, il]
@@ -2646,8 +1848,8 @@ def LeafPhotosynthesis(
 
     if gspot_type == 1:
         _lwp_p2 = mlcanopy_inst.lwp_leaf[p, :, il]
-        _psi50_pft2 = MLpftcon.psi50_gs[pft]
-        _shape_pft2 = MLpftcon.shape_gs[pft]
+        _psi50_pft2 = params.psi50_gs
+        _shape_pft2 = params.shape_gs
 
     # --- Second loop: vectorized over layers (replaces per-ic Python loop) ---
     # All operations are element-wise; gspot_type and is_c3 are static Python

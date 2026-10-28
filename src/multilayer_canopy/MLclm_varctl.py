@@ -33,6 +33,7 @@ class GridInfo(NamedTuple):
     ncan: int  # number of canopy layers
     ntop: int  # top foliage layer
     nbot: int  # bottom foliage layer
+    c3: bool  # C3 (True) or C4 photosynthesis: selects a code path, so static
 
 
 # ---------------------------------------------------------------------------

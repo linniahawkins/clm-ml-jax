@@ -47,9 +47,9 @@ from clm_src_main.clm_varpar import nlevsoi  # noqa: F401
 from clm_src_main.ColumnType import col  # noqa: F401
 from clm_src_main.PatchType import patch  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import mmh2o  # noqa: F401
 from multilayer_canopy.MLclm_varctl import dtime_ml  # noqa: F401
-from multilayer_canopy.MLpftconMod import MLpftcon  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # PlantResistance — per-layer kernel + vmap
@@ -70,6 +70,7 @@ def PlantResistance(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
 ) -> mlcanopy_type:
     """
     Calculate whole-plant leaf-specific conductance (soil-to-leaf).
@@ -96,17 +97,15 @@ def PlantResistance(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    gplant_SPA = MLpftcon.gplant_SPA
     lsc = mlcanopy_inst.lsc_profile
 
     for fp in range(num_filter):  # Fortran: do fp = 1, num_filter
         p = filter_patch[fp]
-        pft = patch.itype[p]  # JAX int — dynamic index
 
         lsc_v = _lsc_layers(
             mlcanopy_inst.dpai_profile[p, 1:],
             mlcanopy_inst.rsoil_soil[p],
-            gplant_SPA[pft],
+            params.plant_conductance,
         )
         lsc = lsc.at[p, 1:].set(lsc_v)
 
@@ -124,6 +123,7 @@ def SoilResistance(
     soilstate_inst: soilstate_type,
     waterstatebulk_inst: waterstatebulk_type,
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
 ) -> mlcanopy_type:
     """
     Calculate soil hydraulic resistance and fractional water uptake
@@ -172,10 +172,6 @@ def SoilResistance(
     minlwp_SPA = -2.0  # Fortran local parameter (line 95)
     head = denh2o * grav * 1.0e-6  # MPa/m  (Python float)
 
-    root_radius_SPA = MLpftcon.root_radius_SPA
-    root_density_SPA = MLpftcon.root_density_SPA
-    root_resist_SPA = MLpftcon.root_resist_SPA
-
     dz_col = col.dz
     nbedrock = col.nbedrock
     smp_l = soilstate_inst.smp_l_col
@@ -195,13 +191,12 @@ def SoilResistance(
     for fp in range(num_filter):  # Fortran: do fp = 1, num_filter
         p = filter_patch[fp]
         c = patch.column[p]  # JAX int — dynamic index
-        pft = patch.itype[p]
 
         # Active-layer mask: j <= nbedrock[c] — Fortran: nlayers = nbedrock(c)
         active_j = j_arr <= nbedrock[c]  # shape (nlevsoi,), JAX bool
 
         # Root cross-sectional area — Fortran line 111
-        rr = root_radius_SPA[pft]
+        rr = params.root_radius
         root_cross_sec_area = pi * rr * rr
 
         # Vectorised per-soil-layer computation (j=1..nlevsoi)
@@ -214,7 +209,7 @@ def SoilResistance(
         rbd_v = jnp.maximum(root_biomass[p] * rootfr[p, 1 : nlevsoi + 1] / dz_v, 1.0e-10)
 
         # Root length density and mean inter-root distance — Fortran lines 125-128
-        rld_v = rbd_v / (root_density_SPA[pft] * root_cross_sec_area)
+        rld_v = rbd_v / (params.root_density * root_cross_sec_area)
         # Guard rld_v > 0 for safe 1/rld_v and sqrt(1/rld_v) gradients
         rld_v = jnp.maximum(rld_v, 1.0e-30)
         root_dist_v = jnp.sqrt(1.0 / (rld_v * pi))
@@ -223,7 +218,7 @@ def SoilResistance(
         # hk_v can be 0 for frozen layers; guard prevents NaN in jax.grad
         hk_v_safe = jnp.maximum(hk_v, 1.0e-30)
         soilr1_v = jnp.log(root_dist_v / rr) / (2.0 * pi * rld_v * dz_v * hk_v_safe)
-        soilr2_v = root_resist_SPA[pft] / (rbd_v * dz_v)
+        soilr2_v = params.root_resistivity / (rbd_v * dz_v)
         soilr_v = soilr1_v + soilr2_v  # total belowground resistance
         # Guard soilr_v > 0 for safe division gradients inside jnp.where
         soilr_v_safe = jnp.maximum(soilr_v, 1.0e-30)
@@ -290,6 +285,7 @@ def LeafWaterPotential(
     filter_patch: Sequence[int],
     il: int,
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
 ) -> mlcanopy_type:
     """
     Calculate leaf water potential by analytically integrating the
@@ -327,12 +323,10 @@ def LeafWaterPotential(
     head = denh2o * grav * 1.0e-6  # MPa/m (Python float)
     dtime = dtime_ml  # Python float constant
 
-    capac_SPA = MLpftcon.capac_SPA
     lwp = mlcanopy_inst.lwp_leaf
 
     for fp in range(num_filter):  # Fortran: do fp = 1, num_filter
         p = filter_patch[fp]
-        pft = patch.itype[p]  # JAX int — dynamic index
 
         lwp_v = _lwp_layers(
             mlcanopy_inst.dpai_profile[p, 1:],
@@ -342,7 +336,7 @@ def LeafWaterPotential(
             mlcanopy_inst.lwp_bef_leaf[p, 1:, il],
             mlcanopy_inst.psis_soil[p],
             head,
-            capac_SPA[pft],
+            params.plant_capacitance,
             dtime,
         )
         lwp = lwp.at[p, 1:, il].set(lwp_v)

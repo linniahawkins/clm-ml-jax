@@ -153,8 +153,9 @@ The running JAX model (`_make_leaf_photo_kernel_wue` → `_bisect_gs_ift`) inste
 So the result is closer to the exact root than Fortran's. Switching to Fortran's rule changed
 gs by up to 1e-2 relative in a test at dusk and midday (the size of the tolerance).
 
-The tolerance-based `_StomataOptimization` / `bisection_scalar` code in the same module matches
-Fortran, but **no run uses it**.
+A tolerance-based `_StomataOptimization` that matched Fortran existed in the same module, but no
+run used it; it was deleted in Phase 3d with the other unused scalar copies. The fidelity step
+can use `MLMathToolsMod.bisection_traceable` (§3), which has Fortran's stopping rule.
 
 ### 4.3 Intercellular CO₂ (Medlyn and Ball–Berry, `gs_type = 0, 1`; not the CHATS default)
 

@@ -22,9 +22,8 @@ import jax
 import jax.numpy as jnp
 
 from clm_src_main.clm_varcon import cpliq  # noqa: F401
-from clm_src_main.PatchType import patch  # noqa: F401
-from clm_src_main.pftconMod import pftcon  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import cpbio, fcarbon, fwater  # noqa: F401
 
 # ---------------------------------------------------------------------------
@@ -69,6 +68,7 @@ def LeafHeatCapacity(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
+    params: CanopyParams,
 ) -> mlcanopy_type:
     """
     Calculate leaf heat capacity for each canopy layer.
@@ -100,16 +100,14 @@ def LeafHeatCapacity(
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    slatop = pftcon.slatop
     dpai = mlcanopy_inst.dpai_profile  # shape (num_patch, nlevmlcan+1)
     cpleaf = mlcanopy_inst.cpleaf_profile  # shape (num_patch, nlevmlcan+1)
 
     for fp in range(num_filter):  # Fortran: do fp = 1, num_filter
         p = filter_patch[fp]
-        pft = patch.itype[p]  # JAX int — dynamic index, differentiable
 
         # vmap over all layers (index 1..nlevmlcan); dpai==0 layers yield 0
-        layers = _cpleaf_layers(dpai[p, 1:], slatop[pft])  # shape (nlevmlcan,)
+        layers = _cpleaf_layers(dpai[p, 1:], params.sla_top)  # shape (nlevmlcan,)
         cpleaf = cpleaf.at[p, 1:].set(layers)
 
     return mlcanopy_inst._replace(cpleaf_profile=cpleaf)

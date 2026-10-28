@@ -154,6 +154,7 @@ def replay(out_json: Path) -> None:
         results = []
         for call in calls:
             kwargs = dict(call["kwargs"])
+            kwargs.pop("g1_MED_jax", None)  # replaced by params (Phase 3d)
             if kwargs.get("grid", "absent") is None:
                 kwargs.update(_grid_kwargs(name, call["args"]))
             out = getattr(F, name)(*_to_jax(call["args"]), **_to_jax(kwargs))
@@ -164,22 +165,22 @@ def replay(out_json: Path) -> None:
     Path(out_json).write_text(json.dumps(report, indent=1))
 
 
+# Routines that take the patch's parameters (Phase 3d); the recording predates them.
+TAKES_PARAMS = ("SolarRadiation", "LongwaveRadiation", "LeafPhotosynthesis")
+
+
 def _grid_kwargs(name: str, args) -> dict:
-    """``GridInfo`` (and the O2 value LeafPhotosynthesis needs with it) from the recorded
-    multilayer canopy state among ``args`` (single-patch runs)."""
+    """``GridInfo``, the patch's ``CanopyParams`` and (for LeafPhotosynthesis) the O2 value,
+    from the recorded multilayer canopy state among ``args`` (single-patch runs)."""
     from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type
-    from multilayer_canopy.MLclm_varctl import GridInfo
+    from multilayer_canopy.MLCanopyParamsMod import patch_setup
 
     inst = next(a for a in args if isinstance(a, mlcanopy_type))
     p = 0
-    kwargs = {
-        "grid": GridInfo(
-            p=p,
-            ncan=int(inst.ncan_canopy[p]),
-            ntop=int(inst.ntop_canopy[p]),
-            nbot=int(inst.nbot_canopy[p]),
-        )
-    }
+    grid, params = patch_setup(p, inst)
+    kwargs = {"grid": grid}
+    if name in TAKES_PARAMS:
+        kwargs["params"] = params
     if name == "LeafPhotosynthesis":
         kwargs["_o2ref_py"] = float(inst.o2ref_forcing[p])
     return kwargs

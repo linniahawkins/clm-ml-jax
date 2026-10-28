@@ -40,6 +40,7 @@ from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 
 # Physics modules (translated elsewhere)
 from multilayer_canopy.MLCanopyNitrogenProfileMod import CanopyNitrogenProfile  # noqa: F401
+from multilayer_canopy.MLCanopyParamsMod import CanopyParams, patch_setup
 from multilayer_canopy.MLCanopyTurbulenceMod import CanopyTurbulence  # noqa: F401
 from multilayer_canopy.MLCanopyWaterMod import (  # noqa: F401
     CanopyEvaporation,
@@ -147,8 +148,7 @@ def MLCanopyFluxes(
     initialize: bool,
     grid: "GridInfo | None" = None,
     _o2ref_py: "float | None" = None,
-    vcmaxpft_jax=None,
-    g1_MED_jax=None,
+    params: "CanopyParams | None" = None,
 ) -> mlcanopy_type:
     """
     Compute all multilayer canopy fluxes for one CLM timestep.
@@ -268,6 +268,8 @@ def MLCanopyFluxes(
             (e.g. under ``jax.grad``), where the indices cannot be read.
         _o2ref_py: Atmospheric O2 as a Python float; read from
             ``mlcanopy_inst`` when omitted (pass it when the state is traced).
+        params: Parameters of the patch's PFT (:class:`CanopyParams`); built from the PFT
+            tables when omitted (pass it to differentiate with respect to parameters).
 
     Returns:
         Updated :class:`mlcanopy_type` holding end-of-timestep state
@@ -375,14 +377,12 @@ def MLCanopyFluxes(
     # ------------------------------------------------------------------
     if num_mlcan != 1:
         endrun(msg=" ERROR: MLCanopyFluxes: one patch per call (batch patches with vmap)")
-    if grid is None:
-        _p0 = filter_mlcan[0]
-        grid = GridInfo(
-            p=_p0,
-            ncan=int(mlcanopy_inst.ncan_canopy[_p0]),
-            ntop=int(mlcanopy_inst.ntop_canopy[_p0]),
-            nbot=int(mlcanopy_inst.nbot_canopy[_p0]),
-        )
+    # Layer indices and C3/C4 flag (static) and the PFT's parameters (traced), unless the
+    # caller passes them (it must when the state or the parameters are traced).
+    if grid is None or params is None:
+        _grid, _params = patch_setup(filter_mlcan[0], mlcanopy_inst)
+        grid = _grid if grid is None else grid
+        params = _params if params is None else params
     # O2 (constant in a run) as a Python float: LeafPhotosynthesis uses it to select
     # its cached kernel, and it must be concrete when the state is traced.
     if _o2ref_py is None:
@@ -432,10 +432,10 @@ def MLCanopyFluxes(
     # Plant hydraulics and leaf heat capacity — Fortran lines 245-257
     # ------------------------------------------------------------------
     mlcanopy_inst = SoilResistance(
-        num_mlcan, filter_mlcan, soilstate_inst, waterstatebulk_inst, mlcanopy_inst
+        num_mlcan, filter_mlcan, soilstate_inst, waterstatebulk_inst, mlcanopy_inst, params
     )
-    mlcanopy_inst = PlantResistance(num_mlcan, filter_mlcan, mlcanopy_inst)
-    mlcanopy_inst = LeafHeatCapacity(num_mlcan, filter_mlcan, mlcanopy_inst)
+    mlcanopy_inst = PlantResistance(num_mlcan, filter_mlcan, mlcanopy_inst, params)
+    mlcanopy_inst = LeafHeatCapacity(num_mlcan, filter_mlcan, mlcanopy_inst, params)
 
     # Soil surface relative humidity — Fortran lines 259-262
     # Pre-materialise patch.column as numpy so int() is concrete even inside
@@ -520,13 +520,13 @@ def MLCanopyFluxes(
             grid=grid,
         )
         # Solar radiation — Fortran line 290
-        inst = SolarRadiation(bounds, num_mlcan, filter_mlcan, inst, grid=grid)
+        inst = SolarRadiation(bounds, num_mlcan, filter_mlcan, inst, params, grid=grid)
         # Nitrogen profile — Fortran line 293
-        inst = CanopyNitrogenProfile(num_mlcan, filter_mlcan, inst, vcmaxpft_jax)
+        inst = CanopyNitrogenProfile(num_mlcan, filter_mlcan, inst, params, grid)
         # Runge-Kutta inner loop — Fortran lines 310-328
         for _irk in range(1, nrk_steps + 2):
             inst = CanopyWettedFraction(num_mlcan, filter_mlcan, inst)
-            inst = LongwaveRadiation(bounds, num_mlcan, filter_mlcan, inst, grid=grid)
+            inst = LongwaveRadiation(bounds, num_mlcan, filter_mlcan, inst, params, grid=grid)
             inst = inst._replace(
                 rnleaf_leaf=(
                     inst.swleaf_leaf[..., ivis] + inst.swleaf_leaf[..., inir] + inst.lwleaf_leaf
@@ -535,7 +535,7 @@ def MLCanopyFluxes(
             )
             inst = CanopyTurbulence(nstep_ml, num_mlcan, filter_mlcan, inst, grid=grid, nstep=nstep)
             # Both sun and shade in one fused GPU dispatch (2× fewer round-trips)
-            inst = LeafBoundaryLayerBoth(num_mlcan, filter_mlcan, inst)
+            inst = LeafBoundaryLayerBoth(num_mlcan, filter_mlcan, inst, params)
             inst = LeafPhotosynthesis(
                 num_mlcan,
                 filter_mlcan,
@@ -543,7 +543,7 @@ def MLCanopyFluxes(
                 inst,
                 grid=grid,
                 _o2ref_py=_o2ref_py,
-                g1_MED_jax=g1_MED_jax,
+                params=params,
             )
             inst = LeafPhotosynthesis(
                 num_mlcan,
@@ -552,11 +552,11 @@ def MLCanopyFluxes(
                 inst,
                 grid=grid,
                 _o2ref_py=_o2ref_py,
-                g1_MED_jax=g1_MED_jax,
+                params=params,
             )
             inst = FluxProfileSolution(num_mlcan, filter_mlcan, inst, grid=grid)
-            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isun, inst)
-            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isha, inst)
+            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isun, inst, params)
+            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isha, inst, params)
             inst = CanopyInterception(num_mlcan, filter_mlcan, inst)
             inst = CanopyEvaporation(num_mlcan, filter_mlcan, inst)
             if nrk_steps > 0 and _irk <= nrk_steps:
@@ -1977,18 +1977,14 @@ def make_clm_ml_forward(
         ``jax.grad``.
     """
     _p = int(filter_exposedvegp[0])
-    grid = GridInfo(
-        p=_p,
-        ncan=int(mlcanopy_inst_template.ncan_canopy[_p]),
-        ntop=int(mlcanopy_inst_template.ntop_canopy[_p]),
-        nbot=int(mlcanopy_inst_template.nbot_canopy[_p]),
-    )
+    grid, default_params = patch_setup(_p, mlcanopy_inst_template)
     # Pre-extract o2ref as a concrete Python float from the template instance.
     # mlcanopy_inst inside forward() is abstract under jax.grad tracing.
     _o2ref_py_fwd: float = float(mlcanopy_inst_template.o2ref_forcing[_p])
 
-    def forward(mlcanopy_inst: mlcanopy_type) -> jnp.ndarray:
-        """Differentiable CLM-ML forward pass. Returns scalar loss."""
+    def forward(mlcanopy_inst: mlcanopy_type, params: CanopyParams = default_params) -> jnp.ndarray:
+        """Differentiable CLM-ML forward pass. Returns scalar loss. Differentiate with
+        respect to the state (``argnums=0``) or the parameters (``argnums=1``)."""
         inst = MLCanopyFluxes(
             bounds=bounds,
             num_exposedvegp=num_exposedvegp,
@@ -2012,6 +2008,7 @@ def make_clm_ml_forward(
             initialize=False,
             grid=grid,
             _o2ref_py=_o2ref_py_fwd,
+            params=params,
         )
         p = grid.p
         n = grid.ncan

@@ -27,9 +27,8 @@ import jax.numpy as jnp
 
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import tfrz  # noqa: F401
-from clm_src_main.PatchType import patch  # noqa: F401
-from clm_src_main.pftconMod import pftcon  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
+from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     jmax25_to_vcmax25_acclim,
     jmax25_to_vcmax25_noacclim,
@@ -37,7 +36,12 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     rd25_to_vcmax25_c3,
     rd25_to_vcmax25_c4,
 )
-from multilayer_canopy.MLclm_varctl import acclim_type, kn_val, leaf_optics_type  # noqa: F401
+from multilayer_canopy.MLclm_varctl import (
+    GridInfo,
+    acclim_type,
+    kn_val,
+    leaf_optics_type,
+)  # noqa: F401
 from multilayer_canopy.MLclm_varpar import isha, isun, nlevmlcan  # noqa: F401
 from multilayer_canopy.MLpftconMod import MLpftcon  # noqa: F401
 
@@ -47,7 +51,8 @@ def CanopyNitrogenProfile(
     num_filter: int,
     filter_patch: Sequence[int],
     mlcanopy_inst: mlcanopy_type,
-    vcmaxpft_jax=None,
+    params: CanopyParams,
+    grid: GridInfo,
 ) -> mlcanopy_type:
     """
     Calculate the canopy profile of nitrogen and photosynthetic capacity.
@@ -125,18 +130,13 @@ def CanopyNitrogenProfile(
             ``jmax25_leaf``, ``rd25_leaf``, ``kp25_leaf``,
             ``vcmax25_profile``, ``jmax25_profile``, ``rd25_profile``,
             and ``kp25_profile`` are updated.
-        vcmaxpft_jax: Optional JAX array override for ``MLpftcon.vcmaxpft``
-            (shape matching the PFT dimension).  When provided, this is used
-            instead of the module-global ``MLpftcon.vcmaxpft`` so that JAX
-            autodiff can trace gradients through vcmaxpft.  When ``None``
-            (default), the module-global value is used (standard non-diff path).
+        params: Parameters of the patch's PFT (:class:`CanopyParams`; ``vcmax25`` and
+            ``clumping_index`` are used).
+        grid: Patch layer indices and C3/C4 flag (:class:`GridInfo`).
 
     Returns:
         Updated :class:`mlcanopy_type`.
     """
-    c3psn = pftcon.c3psn
-    # Use explicit JAX arg when provided (differentiable path); else module global.
-    _vcmaxpft = MLpftcon.vcmaxpft if vcmaxpft_jax is None else vcmaxpft_jax
 
     vcmax25_leaf = mlcanopy_inst.vcmax25_leaf
     jmax25_leaf = mlcanopy_inst.jmax25_leaf
@@ -149,13 +149,12 @@ def CanopyNitrogenProfile(
 
     for fp in range(num_filter):  # Fortran: do fp = 1, num_filter
         p = filter_patch[fp]
-        pft = patch.itype[p]  # JAX int — dynamic index
 
         # is_c3: JAX boolean scalar; used with jnp.where for differentiable branching
-        is_c3 = jnp.round(c3psn[pft]) == 1  # Fortran implicit round of 0/1 flag
+        is_c3 = grid.c3  # static (Python bool)
 
         # Canopy-top photosynthetic parameters — Fortran lines 80-96
-        vcmax25top = _vcmaxpft[pft]  # JAX scalar via dynamic gather
+        vcmax25top = params.vcmax25
 
         if acclim_type == 0:  # static branch — evaluated at trace time
             j2v = jmax25_to_vcmax25_noacclim
@@ -182,7 +181,7 @@ def CanopyNitrogenProfile(
             endrun(msg="ERROR: CanopyNitrogenProfile: incorrect Kn")
             kn = jnp.zeros(())  # Unreachable
 
-        clump = MLpftcon.clump_fac[pft]  # JAX scalar
+        clump = params.clumping_index
         lai_p = mlcanopy_inst.lai_canopy[p]
         sai_p = mlcanopy_inst.sai_canopy[p]
 

@@ -764,8 +764,12 @@ Progress:
 - 3b ✅ explicit first-step initialization; no Runge–Kutta or flag globals.
 - 3c ✅ one implementation per process (normal/traceable duplicates and `DIFFERENTIABLE_MODE`
   deleted; round-off-only change, checked routine by routine and with the noise twin).
-- 3d: `Params` passed explicitly (replaces global `MLpftcon`/`pftcon` reads and
-  `vcmaxpft_jax`/`g1_MED_jax`).
+- 3d ✅ parameters passed explicitly: each routine takes a `CanopyParams` (the patch's PFT
+  values, `params.yaml` names, a pytree of JAX scalars) instead of reading the global
+  `MLpftcon`/`pftcon` tables; `vcmaxpft_jax`/`g1_MED_jax` removed. The C3/C4 flag selects a
+  code path, so it is static, in `GridInfo`. `MLCanopyFluxes` builds both from the tables
+  (`patch_setup`); 3e builds them from `clm_ml.Params`. Remaining table reads are in
+  initialization only (`MLinitVerticalMod`, `SoilStateInitTimeConst`).
 - 3e: `State` and `Model.step` in `clm_ml`; acclimation temperature in `State`; gradients with
   respect to `Params`, `Forcing` and `State`. Starting point: `tests/test_differentiability.py`
   (one CLM step) runs out of memory on a 16 GB machine. After 3c the traced forward pass works
