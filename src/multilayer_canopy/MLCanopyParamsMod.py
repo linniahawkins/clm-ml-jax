@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 
 
@@ -104,12 +105,13 @@ def patch_setup(p: int, mlcanopy_inst) -> tuple:
     from clm_src_main.pftconMod import pftcon
     from multilayer_canopy.MLclm_varctl import GridInfo
 
-    pft = int(patch.itype[p])
+    # Structure (NumPy indexing, so this works while a step is being traced)
+    pft = int(np.asarray(patch.itype)[p])
     grid = GridInfo(
         p=p,
-        ncan=int(mlcanopy_inst.ncan_canopy[p]),
-        ntop=int(mlcanopy_inst.ntop_canopy[p]),
-        nbot=int(mlcanopy_inst.nbot_canopy[p]),
-        c3=round(float(pftcon.c3psn[pft])) == 1,
+        ncan=int(np.asarray(mlcanopy_inst.ncan_canopy)[p]),
+        ntop=int(np.asarray(mlcanopy_inst.ntop_canopy)[p]),
+        nbot=int(np.asarray(mlcanopy_inst.nbot_canopy)[p]),
+        c3=round(float(np.asarray(pftcon.c3psn)[pft])) == 1,
     )
     return grid, canopy_params_from_tables(pft)

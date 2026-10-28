@@ -147,7 +147,6 @@ def MLCanopyFluxes(
     forcing_next: AtmForcingRecord,
     initialize: bool,
     grid: "GridInfo | None" = None,
-    _o2ref_py: "float | None" = None,
     params: "CanopyParams | None" = None,
 ) -> mlcanopy_type:
     """
@@ -266,8 +265,6 @@ def MLCanopyFluxes(
         grid: Patch index and canopy layer indices as Python ints. Built from
             ``mlcanopy_inst`` when omitted; pass it when the state is traced
             (e.g. under ``jax.grad``), where the indices cannot be read.
-        _o2ref_py: Atmospheric O2 as a Python float; read from
-            ``mlcanopy_inst`` when omitted (pass it when the state is traced).
         params: Parameters of the patch's PFT (:class:`CanopyParams`); built from the PFT
             tables when omitted (pass it to differentiate with respect to parameters).
 
@@ -385,10 +382,6 @@ def MLCanopyFluxes(
         _grid, _params = patch_setup(filter_mlcan[0], mlcanopy_inst)
         grid = _grid if grid is None else grid
         params = _params if params is None else params
-    # O2 (constant in a run) as a Python float: LeafPhotosynthesis uses it to select
-    # its cached kernel, and it must be concrete when the state is traced.
-    if _o2ref_py is None:
-        _o2ref_py = float(mlcanopy_inst.o2ref_forcing[grid.p])
 
     # ------------------------------------------------------------------
     # Update leaf/stem area profiles for current LAI/SAI — Fortran lines 220-243
@@ -549,7 +542,6 @@ def MLCanopyFluxes(
                 isun,
                 inst,
                 grid=grid,
-                _o2ref_py=_o2ref_py,
                 params=params,
             )
             inst = LeafPhotosynthesis(
@@ -558,7 +550,6 @@ def MLCanopyFluxes(
                 isha,
                 inst,
                 grid=grid,
-                _o2ref_py=_o2ref_py,
                 params=params,
             )
             inst = FluxProfileSolution(num_mlcan, filter_mlcan, inst, grid=grid)
@@ -1995,9 +1986,6 @@ def make_clm_ml_forward(
     """
     _p = int(filter_exposedvegp[0])
     grid, default_params = patch_setup(_p, mlcanopy_inst_template)
-    # Pre-extract o2ref as a concrete Python float from the template instance.
-    # mlcanopy_inst inside forward() is abstract under jax.grad tracing.
-    _o2ref_py_fwd: float = float(mlcanopy_inst_template.o2ref_forcing[_p])
 
     def forward(
         mlcanopy_inst: mlcanopy_type,
@@ -2030,7 +2018,6 @@ def make_clm_ml_forward(
             forcing_next=forcing_next,
             initialize=False,
             grid=grid,
-            _o2ref_py=_o2ref_py_fwd,
             params=params,
         )
         p = grid.p

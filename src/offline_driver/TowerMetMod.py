@@ -21,6 +21,7 @@ from typing import List, NamedTuple, Sequence, Tuple
 
 import jax.numpy as jnp
 import netCDF4 as nc  # noqa: F401
+import numpy as np
 from jax import Array
 
 from clm_src_biogeophys.FrictionVelocityMod import frictionvel_type  # noqa: F401
@@ -307,6 +308,21 @@ def derive_tower_met(raw: TowerMetRaw, tower_height: float) -> TowerMet:
     )
 
 
+def set_tower_location(it: int, begp: int, endp: int) -> None:
+    """Set the gridcell latitude and longitude to tower ``it``'s (Fortran TowerMetCurr,
+    lines 211-212, did this at every step; the values are constant)."""
+    assert GridcellType.grc.latdeg is not None
+    assert GridcellType.grc.londeg is not None
+    latdeg = jnp.asarray(GridcellType.grc.latdeg)
+    londeg = jnp.asarray(GridcellType.grc.londeg)
+    _gridcell = np.asarray(patch.gridcell)
+    for p in range(begp, endp + 1):
+        g = int(_gridcell[p])
+        latdeg = latdeg.at[g].set(float(tower_lat[it]))
+        londeg = londeg.at[g].set(float(tower_lon[it]))
+    GridcellType.grc = GridcellType.grc._replace(latdeg=latdeg, londeg=londeg)
+
+
 def TowerMetCurr(
     met: TowerMet,
     it: int,
@@ -356,9 +372,11 @@ def TowerMetCurr(
     forc_snow: Array = wateratm2lndbulk_inst.forc_snow_downscaled_col
     forc_hgt_u: Array = frictionvel_inst.forc_hgt_u_patch
 
+    _column = np.asarray(patch.column)  # patch structure: static (NumPy) indices
+    _gridcell = np.asarray(patch.gridcell)
     for p in range(begp, endp + 1):  # Fortran: do p = begp, endp
-        c = int(patch.column[p])
-        g = int(patch.gridcell[p])
+        c = int(_column[p])
+        g = int(_gridcell[p])
 
         forc_u = forc_u.at[g].set(met.uref)
         forc_v = forc_v.at[g].set(0.0)
@@ -375,16 +393,8 @@ def TowerMetCurr(
         forc_hgt_u = forc_hgt_u.at[p].set(met.hgt)
         forc_pco2 = forc_pco2.at[g].set(met.pco2)
         forc_po2 = forc_po2.at[g].set(met.po2)
-
-        # Tower latitude and longitude — Fortran lines 211-212
-        assert GridcellType.grc.latdeg is not None
-        assert GridcellType.grc.londeg is not None
-        latdeg_jax = jnp.asarray(GridcellType.grc.latdeg)
-        londeg_jax = jnp.asarray(GridcellType.grc.londeg)
-        GridcellType.grc = GridcellType.grc._replace(
-            latdeg=latdeg_jax.at[g].set(float(tower_lat[it])),
-            londeg=londeg_jax.at[g].set(float(tower_lon[it])),
-        )
+        # (Fortran also sets the tower latitude and longitude here, lines 211-212; they are
+        # constant, so set_tower_location sets them once before the time loop.)
 
     return (
         atm2lnd_inst._replace(

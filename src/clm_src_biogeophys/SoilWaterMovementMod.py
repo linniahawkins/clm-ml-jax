@@ -112,11 +112,11 @@ def soilwater_moisture_form(
     vwc_liq = jnp.zeros((n_col, nlevsoi), dtype=jnp.float64)
 
     for fc in range(num_hydrologyc):  # Fortran: do fc = 1, num_hydrologyc
-        c = int(filter_hydrologyc[fc])
+        c = int(np.asarray(filter_hydrologyc)[fc])  # structure: static
         ci = c - bounds.begc  # 0-based offset into local arrays
 
         # Number of active layers — Fortran line 92
-        nlayers = int(nbedrock[c])
+        nlayers = int(np.asarray(nbedrock)[c])
 
         # Liquid volumetric water content — Fortran lines 95-97
         for j in range(1, nlayers + 1):  # Fortran: do j = 1, nlayers

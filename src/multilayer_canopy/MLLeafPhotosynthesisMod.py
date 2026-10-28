@@ -428,7 +428,6 @@ def _make_leaf_photo_kernel(
     jmaxse: float,
     jmaxc: float,
     rdc: float,
-    o2ref_p: float,
 ):
     """
     Factory returning a per-layer leaf-photosynthesis kernel for
@@ -472,6 +471,7 @@ def _make_leaf_photo_kernel(
         cair_ic,
         g0_rt,  # broadcast scalar: stomatal min conductance (JAX runtime arg — differentiable)
         g1_rt,  # broadcast scalar: stomatal slope parameter (JAX runtime arg — differentiable)
+        o2ref_p,  # broadcast scalar: O2 (mmol/mol), forcing (runtime arg)
     ):
         """Per-layer photosynthesis + stomatal conductance kernel."""
         active = dpai_ic > 0.0
@@ -628,7 +628,6 @@ def _get_vmapped_photo_kernel(
     jmaxse: float,
     jmaxc: float,
     rdc: float,
-    o2ref_p: float,
 ):
     """Return a JIT-compiled vmapped leaf-photosynthesis kernel (gs_type 0/1).
 
@@ -649,10 +648,9 @@ def _get_vmapped_photo_kernel(
         jmaxse=jmaxse,
         jmaxc=jmaxc,
         rdc=rdc,
-        o2ref_p=o2ref_p,
     )
-    # First 11 args are per-layer (axis 0); g0_rt/g1_rt are broadcast scalars.
-    return jax.jit(jax.vmap(kernel, in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None, None)))
+    # First 11 args are per-layer (axis 0); g0_rt, g1_rt and o2ref_p are broadcast scalars.
+    return jax.jit(jax.vmap(kernel, in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None)))
 
 
 # ---------------------------------------------------------------------------
@@ -671,7 +669,6 @@ def _make_leaf_photo_kernel_acclim(
     jmaxha: float,
     jmaxhd: float,
     rdc: float,
-    o2ref_p: float,
 ):
     """
     Factory returning a per-layer leaf-photosynthesis kernel for acclim_type==1.
@@ -707,6 +704,7 @@ def _make_leaf_photo_kernel_acclim(
         vcmaxc_rt,  # broadcast scalar: JAX runtime arg
         jmaxse_rt,  # broadcast scalar: JAX runtime arg
         jmaxc_rt,  # broadcast scalar: JAX runtime arg
+        o2ref_p,  # broadcast scalar: O2 (mmol/mol), forcing (runtime arg)
     ):
         """Per-layer photosynthesis + stomatal conductance kernel (acclim)."""
         active = dpai_ic > 0.0
@@ -850,7 +848,6 @@ def _get_vmapped_photo_kernel_acclim(
     jmaxha: float,
     jmaxhd: float,
     rdc: float,
-    o2ref_p: float,
 ):
     """Return a JIT-compiled vmapped leaf-photosynthesis kernel for acclim_type==1.
 
@@ -870,13 +867,13 @@ def _get_vmapped_photo_kernel_acclim(
         jmaxha=jmaxha,
         jmaxhd=jmaxhd,
         rdc=rdc,
-        o2ref_p=o2ref_p,
     )
-    # First 11 args are per-layer (in_axes=0); g0_rt, g1_rt + 4 acclim scalars are broadcast.
+    # First 11 args are per-layer (in_axes=0); g0_rt, g1_rt, 4 acclim scalars and o2ref_p
+    # are broadcast.
     return jax.jit(
         jax.vmap(
             kernel,
-            in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None),
+            in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None, None, None, None, None, None, None),
         )
     )
 
@@ -1473,7 +1470,6 @@ def LeafPhotosynthesis(
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
     grid: GridInfo,
-    _o2ref_py: float = None,
 ) -> mlcanopy_type:
     """
     Calculate leaf photosynthesis and stomatal conductance for sunlit
@@ -1528,8 +1524,6 @@ def LeafPhotosynthesis(
             stomatal conductance fields are updated.
         params: Parameters of the patch's PFT (:class:`CanopyParams`).
         grid: Patch index, canopy layer indices and C3/C4 flag (:class:`GridInfo`).
-        _o2ref_py: O2 concentration as a Python float (selects the cached
-            Medlyn/Ball-Berry kernel); read from ``mlcanopy_inst`` if omitted.
 
     Returns:
         Updated :class:`mlcanopy_type`.
@@ -1610,17 +1604,8 @@ def LeafPhotosynthesis(
     _gbc_p = mlcanopy_inst.gbc_leaf[p, :, il]
     _gbv_p = mlcanopy_inst.gbv_leaf[p, :, il]
     _cair_p = mlcanopy_inst.cair_profile[p]
-    _o2ref_p = mlcanopy_inst.o2ref_forcing[p]  # JAX scalar (runtime arg for WUE)
+    _o2ref_p = mlcanopy_inst.o2ref_forcing[p]  # JAX scalar (runtime arg of every kernel)
     _pref_p = mlcanopy_inst.pref_forcing[p]
-    # For Medlyn/BB kernels, o2ref_p is used as a lru_cache key (float).
-    # Under jax.checkpoint, reading mlcanopy_inst.o2ref_forcing[p] returns
-    # an abstract tracer, so float() fails.  Use the pre-extracted Python
-    # float _o2ref_py when available (passed in by the diff-mode caller),
-    # otherwise fall back to float() for non-checkpoint use.
-    if _o2ref_py is not None:
-        _o2ref_cache_key = _o2ref_py  # Python float, always concrete
-    else:
-        _o2ref_cache_key = float(_o2ref_p)  # OK in eager / non-checkpoint mode
 
     if gs_type in (0, 1):
         # ---- Differentiable vmap path: no numpy accumulators ---
@@ -1644,7 +1629,6 @@ def LeafPhotosynthesis(
                 jmaxse=jmaxse,
                 jmaxc=jmaxc,
                 rdc=rdc,
-                o2ref_p=_o2ref_cache_key,
             )
             layer_out = vmapped(
                 _dpai_p[_sl],
@@ -1660,6 +1644,7 @@ def LeafPhotosynthesis(
                 _cair_p[_sl],
                 g0_val,
                 g1_val,  # JAX scalar broadcast — gradients flow here
+                _o2ref_p,
             )
         else:
             # acclim_type == 1: vcmaxse/vcmaxc/jmaxse/jmaxc are JAX scalars
@@ -1671,7 +1656,6 @@ def LeafPhotosynthesis(
                 jmaxha=jmaxha,
                 jmaxhd=jmaxhd,
                 rdc=rdc,
-                o2ref_p=_o2ref_cache_key,
             )
             layer_out = vmapped(
                 _dpai_p[_sl],
@@ -1691,6 +1675,7 @@ def LeafPhotosynthesis(
                 vcmaxc,
                 jmaxse,
                 jmaxc,
+                _o2ref_p,
             )
         # Write vmap JAX output directly (18-tuple) — skip numpy round-trip
         _out_names = [

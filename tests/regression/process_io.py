@@ -155,6 +155,7 @@ def replay(out_json: Path) -> None:
         for call in calls:
             kwargs = dict(call["kwargs"])
             kwargs.pop("g1_MED_jax", None)  # replaced by params (Phase 3d)
+            kwargs.pop("_o2ref_py", None)  # O2 is a runtime kernel argument (Phase 4)
             if kwargs.get("grid", "absent") is None:
                 kwargs.update(_grid_kwargs(name, call["args"]))
             out = getattr(F, name)(*_to_jax(call["args"]), **_to_jax(kwargs))
@@ -170,8 +171,8 @@ TAKES_PARAMS = ("SolarRadiation", "LongwaveRadiation", "LeafPhotosynthesis")
 
 
 def _grid_kwargs(name: str, args) -> dict:
-    """``GridInfo``, the patch's ``CanopyParams`` and (for LeafPhotosynthesis) the O2 value,
-    from the recorded multilayer canopy state among ``args`` (single-patch runs)."""
+    """``GridInfo`` and the patch's ``CanopyParams`` from the recorded multilayer canopy
+    state among ``args`` (single-patch runs)."""
     from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type
     from multilayer_canopy.MLCanopyParamsMod import patch_setup
 
@@ -181,8 +182,6 @@ def _grid_kwargs(name: str, args) -> dict:
     kwargs = {"grid": grid}
     if name in TAKES_PARAMS:
         kwargs["params"] = params
-    if name == "LeafPhotosynthesis":
-        kwargs["_o2ref_py"] = float(inst.o2ref_forcing[p])
     return kwargs
 
 

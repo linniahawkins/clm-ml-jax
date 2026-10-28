@@ -11,6 +11,7 @@ Fortran lines 1-110
 """
 
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 
 from clm_src_biogeophys.SoilWaterMovementMod import SoilWater  # noqa: F401
@@ -156,8 +157,10 @@ def clm_drv(
     # ------------------------------------------------------------------
     # 2. Set frac_veg_nosno and exposedvegp filter — Fortran lines 61-64
     # ------------------------------------------------------------------
+    # Local and constant (1): a NumPy copy, so the filter stays static when the step is traced
+    frac_veg_nosno = np.array(frac_veg_nosno)
     for p in range(bounds.begp, bounds.endp + 1):  # Fortran: do p = bounds%begp, bounds%endp
-        frac_veg_nosno = frac_veg_nosno.at[p].set(1)
+        frac_veg_nosno[p] = 1
 
     # setExposedvegpFilter returns a new filter; it is returned to the caller
     # with the updated state.

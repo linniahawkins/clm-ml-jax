@@ -23,7 +23,7 @@ from clm_src_main.abortutils import endrun
 from clm_src_main.ColumnType import col
 from clm_src_main.decompMod import bounds_type
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type
-from multilayer_canopy.MLMathToolsMod import tridiag
+from multilayer_canopy.MLMathToolsMod import is_concrete, tridiag
 
 # Threshold for thin surface layer — Fortran line 33
 _thin_sfclayer: float = 1.0e-6
@@ -108,9 +108,10 @@ def SoilTemperature(
     # pfilter: p→c identity map — Fortran lines 90-93
     # Integer indices only; not part of the differentiable computation.
     # ------------------------------------------------------------------
+    _filter_nolakec_np = np.asarray(filter_nolakec)  # structure: static indices
     pfilter = np.zeros(nc, dtype=np.int32)
     for fc in range(1, num_nolakec + 1):
-        c = int(filter_nolakec[fc - 1])
+        c = int(_filter_nolakec_np[fc - 1])
         pfilter[c] = c
 
     # ------------------------------------------------------------------
@@ -118,11 +119,7 @@ def SoilTemperature(
     # tssbef(c,j) = t_soisno(c,j) for j in 1:nlevgrnd
     # Only used in the energy-conservation error check (concrete values OK).
     # ------------------------------------------------------------------
-    tssbef = np.zeros((nc, nlevgrnd + 1), dtype=np.float64)
-    for j in range(1, nlevgrnd + 1):
-        for fc in range(1, num_nolakec + 1):
-            c = int(filter_nolakec[fc - 1])
-            tssbef[c, j] = float(t_soisno[c, j])
+    tssbef = t_soisno  # immutable JAX array: the values before the update
 
     # ------------------------------------------------------------------
     # Thermal conductivity and heat capacity — Fortran lines 107-110
@@ -157,7 +154,7 @@ def SoilTemperature(
 
     for j in range(1, nlevgrnd + 1):
         for fc in range(1, num_nolakec + 1):
-            c = int(filter_nolakec[fc - 1])
+            c = int(_filter_nolakec_np[fc - 1])
 
             fact = dtime / cv[c, j]
 
@@ -192,7 +189,7 @@ def SoilTemperature(
     # data at indices 1..n.  Pass full slices [0:nlevgrnd+1].
     # ------------------------------------------------------------------
     for fc in range(1, num_nolakec + 1):
-        c = int(filter_nolakec[fc - 1])
+        c = int(_filter_nolakec_np[fc - 1])
         u_sol = tridiag(
             atri[c, 0 : nlevgrnd + 1],
             btri[c, 0 : nlevgrnd + 1],
@@ -209,11 +206,14 @@ def SoilTemperature(
     # |gsoi - edif| < 1e-6 W/m2
     # Concrete float comparisons are acceptable for this error-check path.
     # ------------------------------------------------------------------
+    # (skipped when the step is traced: needs concrete values)
     for fc in range(1, num_nolakec + 1):
-        c = int(filter_nolakec[fc - 1])
+        if not is_concrete(t_soisno, cv, gsoi):
+            break
+        c = int(_filter_nolakec_np[fc - 1])
         edif = 0.0
         for j in range(1, nlevgrnd + 1):
-            edif += float(cv[c, j]) * (float(t_soisno[c, j]) - tssbef[c, j]) / dtime
+            edif += float(cv[c, j]) * (float(t_soisno[c, j]) - float(tssbef[c, j])) / dtime
         if abs(float(gsoi[pfilter[c]]) - edif) >= 1.0e-6:
             endrun(msg="ERROR: MLSoilTemperatureMod: soil temperature energy conservation error")
 
@@ -345,6 +345,10 @@ def SoilThermProp(
 
     nbedrock = _fresh_col.nbedrock
     snl = _fresh_col.snl
+    # Structure: static indices (NumPy), so the routine can be traced
+    _filter_nolakec_np = np.asarray(filter_nolakec)
+    _nbedrock_np = np.asarray(nbedrock)
+    _snl_np = np.asarray(snl)
     dz = _fresh_col.dz
     zi = _fresh_col.zi
     z = _fresh_col.z
@@ -379,7 +383,7 @@ def SoilThermProp(
     # ------------------------------------------------------------------
     for j in range(1, nlevgrnd + 1):
         for fc in range(1, num_nolakec + 1):
-            c = int(filter_nolakec[fc - 1])
+            c = int(_filter_nolakec_np[fc - 1])
 
             # h2osoi_liq/ice are stored at [c, j-1] (clmDataMod convention: first
             # soil layer at index 0). Using [c, j] reads the next layer's moisture.
@@ -418,7 +422,7 @@ def SoilThermProp(
             thk_val = jnp.where(satw > 1.0e-7, thk_wet, thk_dry)
 
             # Bedrock override (static Python comparison — j and nbedrock[c] are concrete)
-            if j > int(nbedrock[c]):
+            if j > int(_nbedrock_np[c]):
                 thk_val = jnp.asarray(thk_bedrock)
 
             thk = thk.at[c, j].set(thk_val)
@@ -431,7 +435,7 @@ def SoilThermProp(
     # tk uses direct j indexing (matches SoilTemperature)
     # ------------------------------------------------------------------
     for fc in range(1, num_nolakec + 1):
-        c = int(filter_nolakec[fc - 1])
+        c = int(_filter_nolakec_np[fc - 1])
 
         for j in range(1, nlevgrnd):  # j = 1 .. nlevgrnd-1
             thk_j = thk[c, j]
@@ -452,7 +456,7 @@ def SoilThermProp(
     # z[c, 1] and thk[c, 1] use direct index 1 (top soil layer)
     # ------------------------------------------------------------------
     for fc in range(1, num_nolakec + 1):
-        c = int(filter_nolakec[fc - 1])
+        c = int(_filter_nolakec_np[fc - 1])
         zh2osfc = 1.0e-3 * (0.5 * h2osfc[c])
         z1 = z[c, 1]
         thk1 = thk[c, 1]
@@ -472,7 +476,7 @@ def SoilThermProp(
     # ------------------------------------------------------------------
     for j in range(1, nlevgrnd + 1):
         for fc in range(1, num_nolakec + 1):
-            c = int(filter_nolakec[fc - 1])
+            c = int(_filter_nolakec_np[fc - 1])
             # h2osoi_liq/ice stored at [c, j-1] (clmDataMod convention)
             cv_val = (
                 csol[c, j] * (1.0 - watsat[c, j]) * dz[c, j]
@@ -481,12 +485,12 @@ def SoilThermProp(
             )
 
             # Bedrock override (static Python comparison)
-            if j > int(nbedrock[c]):
+            if j > int(_nbedrock_np[c]):
                 cv_val = jnp.asarray(csol_bedrock) * dz[c, j]
 
             # Top layer: add snow heat capacity if no active snow layers
             if j == 1:
-                snl_c = int(snl[c])
+                snl_c = int(_snl_np[c])
                 if snl_c + 1 == 1:
                     cv_val = cv_val + jnp.where(
                         h2osno[c] > 0.0,

@@ -149,6 +149,9 @@ def _build_initialized_model():
     )
     t_prev, t_curr, t_next = forcing.window_indices(0)
 
+    from offline_driver.TowerMetMod import set_tower_location
+
+    set_tower_location(tower_num, bounds.begp, bounds.endp)
     (
         clm_instMod.atm2lnd_inst,
         clm_instMod.wateratm2lndbulk_inst,

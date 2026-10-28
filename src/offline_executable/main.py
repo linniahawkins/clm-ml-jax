@@ -313,6 +313,9 @@ def setup_run(nml: dict) -> LegacyRun:
     # 6a. Acclimation temperature: mean over the whole run (Fortran CLM-ml v2 definition,
     #     which needs every step's forcing up front; plan Phase 4b replaces it with a
     #     10-day running mean). Array index t + 1 skips the chunk's leading halo record.
+    from offline_driver.TowerMetMod import set_tower_location
+
+    set_tower_location(tower_num, bounds.begp, bounds.endp)
     atm2lnd, wateratm2lndbulk, temperature, frictionvel, mlcanopy = init_acclim(
         [tower_met_at(forcing, t + 1) for t in range(ntimes)],
         tower_num,

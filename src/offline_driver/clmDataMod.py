@@ -16,6 +16,7 @@ from typing import Dict, Iterable, NamedTuple, Optional
 
 import jax.numpy as jnp
 import netCDF4 as nc  # noqa: F401
+import numpy as np
 from jax import Array
 
 from clm_src_biogeophys.CanopyStateType import canopystate_type  # noqa: F401
@@ -138,8 +139,8 @@ def clmData(
 
     # Broadcast single gridcell value to all patches — Fortran lines 89-91
     for p in range(begp, endp + 1):  # Fortran: do p = begp, endp
-        elai = elai.at[p].set(float(elai_loc))
-        esai = esai.at[p].set(float(esai_loc))
+        elai = elai.at[p].set(elai_loc)
+        esai = esai.at[p].set(esai_loc)
 
     # ------------------------------------------------------------------
     # Read volumetric soil water for current time step — Fortran lines 93-94
@@ -155,12 +156,12 @@ def clmData(
         if clm_phys == "CLM4_5":
             # CLM4.5: nlevgrnd layers — Fortran lines 98-100
             for j in range(1, nlevgrnd + 1):
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(float(h2osoi_clm45[j - 1]))
+                h2osoi_vol = h2osoi_vol.at[ci, j].set(h2osoi_clm45[j - 1])
 
         elif clm_phys == "CLM5_0":
             # CLM5.0: nlevsoi soil layers — Fortran lines 101-105
             for j in range(1, nlevsoi + 1):
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(float(h2osoi_clm50[j - 1]))
+                h2osoi_vol = h2osoi_vol.at[ci, j].set(h2osoi_clm50[j - 1])
             # Bedrock layers set to zero — Fortran lines 106-108
             for j in range(nlevsoi + 1, nlevgrnd + 1):
                 h2osoi_vol = h2osoi_vol.at[ci, j].set(0.0)
@@ -169,21 +170,17 @@ def clmData(
         if nlev_soil_adjust > 0:
             h2osoi_factor = record.h2osoi_factor
             for j in range(1, nlev_soil_adjust + 1):
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(float(h2osoi_vol[ci, j]) * h2osoi_factor)
+                h2osoi_vol = h2osoi_vol.at[ci, j].set(h2osoi_vol[ci, j] * h2osoi_factor)
 
         # Cap soil moisture at porosity for CLM5.0 — Fortran lines 117-121
         if clm_phys == "CLM5_0":
-            nb = int(nbedrock[c])
+            nb = int(np.asarray(nbedrock)[c])  # structure: static
             for j in range(1, nb + 1):  # Fortran: do j = 1, nbedrock(c)
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(
-                    jnp.minimum(float(h2osoi_vol[ci, j]), float(watsat[c, j]))
-                )
+                h2osoi_vol = h2osoi_vol.at[ci, j].set(jnp.minimum(h2osoi_vol[ci, j], watsat[c, j]))
 
         # Set liquid water and ice — Fortran lines 123-126
         for j in range(1, nlevgrnd + 1):  # Fortran: do j = 1, nlevgrnd
-            h2osoi_liq = h2osoi_liq.at[ci, j - 1].set(
-                float(h2osoi_vol[ci, j]) * float(dz[c, j]) * denh2o
-            )
+            h2osoi_liq = h2osoi_liq.at[ci, j - 1].set(h2osoi_vol[ci, j] * dz[c, j] * denh2o)
             h2osoi_ice = h2osoi_ice.at[ci, j - 1].set(0.0)
 
     return (

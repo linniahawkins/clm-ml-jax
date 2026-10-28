@@ -265,10 +265,10 @@ def SoilAlbedo(
     # Calculate soil albedo — Fortran lines 120-129
     for ib in range(1, numrad + 1):  # Fortran: do ib = 1, numrad (1-based)
         for f in range(num_nourbanc):  # Fortran: do f = 1, num_nourbanc
-            c = int(filter_nourbanc[f])
+            c = int(np.asarray(filter_nourbanc)[f])  # structure: static
             ci = c - begc  # 0-based offset into isoicol
 
-            soilcol = int(isoicol[ci])  # Soil color class (1-based into albsat/albdry)
+            soilcol = int(np.asarray(isoicol)[ci])  # Soil color class (1-based into albsat/albdry)
 
             # Soil water correction — Fortran line 125
             # h2osoi_vol_col uses j=1..nlevgrnd indexing (SoilInit/clmDataMod),
