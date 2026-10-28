@@ -22,8 +22,22 @@ Original Fortran module: shr_orb_mod
 from __future__ import annotations
 
 import math
+import types
+
+import jax
+import jax.numpy as jnp
 
 from clm_src_main.clm_varcon import pi  # pi = rpi
+
+# jax.numpy versions of the math functions used here, for traced arguments
+_JNP_MATH = types.SimpleNamespace(sin=jnp.sin, cos=jnp.cos, asin=jnp.arcsin)
+
+
+def _math_for(*values):
+    """``math`` for Python numbers (results identical to before), or jax.numpy when any
+    value is traced (a whole time step compiled by jax.jit)."""
+    return _JNP_MATH if any(isinstance(v, jax.core.Tracer) for v in values) else math
+
 
 # ---------------------------------------------------------------------------
 # Series coefficients for shr_orb_params — Fortran parameter arrays
@@ -523,9 +537,8 @@ def shr_orb_cosz(jday: float, lat: float, lon: float, declin: float) -> float:
     Returns:
         Cosine of the solar zenith angle (dimensionless).
     """
-    return math.sin(lat) * math.sin(declin) - math.cos(lat) * math.cos(declin) * math.cos(
-        jday * 2.0 * pi + lon
-    )
+    m = _math_for(jday, lat, lon, declin)
+    return m.sin(lat) * m.sin(declin) - m.cos(lat) * m.cos(declin) * m.cos(jday * 2.0 * pi + lon)
 
 
 # ---------------------------------------------------------------------------
@@ -585,6 +598,7 @@ def shr_orb_decl(
         - ``delta`` — solar declination angle (radians).
         - ``eccf``  — Earth-sun distance factor ``(1/r)²``.
     """
+    m = _math_for(calday, eccen, mvelpp, lambm0, obliqr)
     dayspy = 365.0  # Days per year — Fortran line 49
     ve = 80.5  # Vernal equinox calendar day — Fortran line 50
 
@@ -593,18 +607,18 @@ def shr_orb_decl(
     lmm = lambm - mvelpp
 
     # Earth's true longitude — Fortran lines 68-70
-    sinl = math.sin(lmm)
+    sinl = m.sin(lmm)
     lamb = lambm + eccen * (
         2.0 * sinl
         + eccen
-        * (1.25 * math.sin(2.0 * lmm) + eccen * ((13.0 / 12.0) * math.sin(3.0 * lmm) - 0.25 * sinl))
+        * (1.25 * m.sin(2.0 * lmm) + eccen * ((13.0 / 12.0) * m.sin(3.0 * lmm) - 0.25 * sinl))
     )
 
     # Inverse normalised sun/earth distance — Fortran line 76
-    invrho = (1.0 + eccen * math.cos(lamb - mvelpp)) / (1.0 - eccen * eccen)
+    invrho = (1.0 + eccen * m.cos(lamb - mvelpp)) / (1.0 - eccen * eccen)
 
     # Solar declination and eccentricity factor — Fortran lines 79-80
-    delta = math.asin(math.sin(obliqr) * math.sin(lamb))
+    delta = m.asin(m.sin(obliqr) * m.sin(lamb))
     eccf = invrho * invrho
 
     return delta, eccf

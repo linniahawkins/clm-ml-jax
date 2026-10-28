@@ -19,6 +19,7 @@ from pathlib import Path
 
 import f90nml  # pip install f90nml
 import jax
+import jax.numpy as jnp
 
 # Enable 64-bit floats in JAX before any module-level array creation.
 jax.config.update("jax_enable_x64", True)
@@ -435,6 +436,40 @@ def advance(run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, p
     )
 
 
+def stack_step_inputs(inputs: list) -> tuple:
+    """Per-step inputs stacked along a leading time axis (the ``xs`` of a chunk's scan)."""
+    return jax.tree.map(
+        lambda *x: jnp.stack([jnp.asarray(v) for v in x]),
+        *[(i.now, i.met, i.clm_record, i.forcing_bef, i.forcing_next) for i in inputs],
+    )
+
+
+def make_chunk_runner(run: LegacyRun, template, filt):
+    """A compiled function ``(state, xs) -> (state, per-step outputs)`` that advances a
+    chunk of steps as one ``jax.lax.scan`` (plan Phase 4). ``xs`` is from
+    :func:`stack_step_inputs`; the per-step outputs are ``(state, mlcanopy,
+    temperature)`` after each step (the containers are for the output writer). Steps are
+    rebuilt from ``template`` plus the carried state, as in the step-by-step loop."""
+    dtime = run.time_of(0).dtime  # static: the model step
+
+    def body(state, x):
+        now, met, clm_record, forcing_bef, forcing_next = x
+        inputs = StepInputs(
+            now=now._replace(dtime=dtime),
+            met=met,
+            clm_record=clm_record,
+            forcing_bef=forcing_bef,
+            forcing_next=forcing_next,
+        )
+        insts, _ = advance(
+            run, instances_with_state(template, state), filt, inputs, initialize=False
+        )
+        state = state_from_instances(insts)
+        return state, (state, insts.mlcanopy, insts.temperature)
+
+    return jax.jit(lambda state, xs: jax.lax.scan(body, state, xs))
+
+
 def main():
     source = sys.argv[1] if len(sys.argv) > 1 else None
     run = setup_run(read_namelist(source))
@@ -483,57 +518,66 @@ def main():
         flush=True,
     )
 
-    run_t0 = time.perf_counter()
-    template = state = None  # set by the first step
-    try:
-        for _itim in range(1, ntimes + 1):
-            step_t0 = time.perf_counter()
-            t_met0 = time.perf_counter()
-            inputs = step_inputs(run, _itim - 1)
-            curr_calday = inputs.now.calday
-            t_met = time.perf_counter() - t_met0
+    # Steps after the first run as compiled chunks of chunk_steps steps (one jax.lax.scan
+    # each, plan Phase 4); chunk_steps = 0 runs every step separately (no compilation of
+    # the step; slower, for debugging).
+    chunk_steps = int(params.get("chunk_steps", 48))
 
-            # After the first step, each step starts from the fixed template plus the
-            # carried prognostic state (clm_ml.state.State): nothing else passes from one
-            # step to the next.
-            if _itim > 1:
-                st = instances_with_state(template, state)
+    def write_output(calday, mlcanopy, temperature):
+        output(calday, tower_num, fout1, fout2, fout3, fout4, fout5, fout6, mlcanopy, temperature)
 
-            # Advance physics
-            t_adv0 = time.perf_counter()
-            st, filt = advance(run, st, filt, inputs, initialize=(_itim == 1))
-            if _itim == 1:
-                template = st
-            state = state_from_instances(st)
-            t_adv = time.perf_counter() - t_adv0
-
-            # Write output
-            t_out0 = time.perf_counter()
-            output(
-                curr_calday,
-                tower_num,
-                fout1,
-                fout2,
-                fout3,
-                fout4,
-                fout5,
-                fout6,
-                st.mlcanopy,
-                st.temperature,
+    def report(itim, step_dt, detail=""):
+        if itim == 1 or itim == ntimes or (itim % progress_nsteps == 0) or detail:
+            elapsed = time.perf_counter() - run_t0
+            eta = max(ntimes - itim, 0) * elapsed / float(itim)
+            print(
+                f"  timestep {itim}/{ntimes} | step={step_dt:.2f}s {detail}"
+                f"| elapsed={elapsed:.1f}s | eta={eta:.1f}s",
+                flush=True,
             )
-            t_out = time.perf_counter() - t_out0
 
-            step_dt = time.perf_counter() - step_t0
-            if _itim == 1 or _itim == ntimes or (_itim % progress_nsteps == 0):
-                elapsed = time.perf_counter() - run_t0
-                avg_step = elapsed / float(_itim)
-                eta = max(ntimes - _itim, 0) * avg_step
-                print(
-                    f"  timestep {_itim}/{ntimes} | step={step_dt:.2f}s "
-                    f"(met={t_met:.2f}s, adv={t_adv:.2f}s, out={t_out:.2f}s) "
-                    f"| elapsed={elapsed:.1f}s | eta={eta:.1f}s",
-                    flush=True,
-                )
+    run_t0 = time.perf_counter()
+    try:
+        # First step: initializes the canopy (step by step, not compiled). The containers
+        # after it are the template every later step is rebuilt from, with the carried
+        # prognostic state (clm_ml.state.State).
+        step_t0 = time.perf_counter()
+        inputs = step_inputs(run, 0)
+        st, filt = advance(run, st, filt, inputs, initialize=True)
+        template, state = st, state_from_instances(st)
+        write_output(inputs.now.calday, st.mlcanopy, st.temperature)
+        report(1, time.perf_counter() - step_t0)
+
+        if chunk_steps > 0:
+            runner = make_chunk_runner(run, template, filt)
+            itim = 1
+            while itim < ntimes:
+                n = min(chunk_steps, ntimes - itim)
+                chunk_t0 = time.perf_counter()
+                inputs = [step_inputs(run, k) for k in range(itim, itim + n)]
+                # A short last chunk is padded (repeating its last input) to the chunk
+                # length, so it reuses the compiled scan; the extra steps are discarded.
+                padded = inputs + [inputs[-1]] * (chunk_steps - n)
+                _, (states, mlcanopy, temperature) = runner(state, stack_step_inputs(padded))
+                state = jax.tree.map(lambda a: a[n - 1], states)
+                for k, inp in enumerate(inputs):
+                    write_output(
+                        inp.now.calday,
+                        jax.tree.map(lambda a, k=k: a[k], mlcanopy),
+                        jax.tree.map(lambda a, k=k: a[k], temperature),
+                    )
+                itim += n
+                chunk_dt = time.perf_counter() - chunk_t0
+                report(itim, chunk_dt / n, detail=f"(chunk of {n} steps: {chunk_dt:.1f}s) ")
+        else:
+            for _itim in range(2, ntimes + 1):
+                step_t0 = time.perf_counter()
+                inputs = step_inputs(run, _itim - 1)
+                st = instances_with_state(template, state)
+                st, filt = advance(run, st, filt, inputs, initialize=False)
+                state = state_from_instances(st)
+                write_output(inputs.now.calday, st.mlcanopy, st.temperature)
+                report(_itim, time.perf_counter() - step_t0)
     finally:
         for fh in (fout1, fout2, fout3, fout4, fout5, fout6):
             try:

@@ -792,6 +792,20 @@ Progress:
 
 ### Phase 4: Chunked, compiled runs (one patch)
 
+Progress:
+- ✅ Driver split into `setup_run` / `step_inputs` / `advance` (`offline_executable/main.py`).
+- ✅ A whole CLM step traces (structural lookups as NumPy constants, no globals written in the
+  step, time and O₂ as data, orbital functions on traced calendar days).
+- ✅ **Compiled chunks are the run loop**: after the first (initializing) step, `chunk_steps`
+  steps (namelist, default 48 = one day; 0 = step by step) run as one `jit(scan)`. 50 CHATS7
+  steps: 47 s including compilation (was ~135 s); a compiled step takes ~15 ms (was ~2.7 s). A
+  short last chunk is padded to reuse the compiled scan. Two chunks of 4 equal one chunk of 8
+  bit for bit (done-when 1). Compiled vs step by step: ≤ 6.6e-11 relative (round-off, within
+  the noise twins); reference regenerated in compiled mode.
+- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`), forcing streams and the chunk
+  loop reading forcing per chunk, restarts, output streams, `run.yaml` stream form, parameter
+  ensembles with `vmap`, memory flat with run length, GPU timing.
+
 - `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one
   chunk, with `jax.checkpoint` on the step.
 - **Forcing streams** (§6.9): the `ForcingSource` interface, with readers for tower files and

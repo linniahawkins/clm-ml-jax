@@ -90,6 +90,12 @@ from multilayer_canopy.MLWaterVaporMod import LatVap  # noqa: F401
 # ---------------------------------------------------------------------------
 
 
+def _float_if_concrete(x):
+    """``float(x)`` in a normal run (Python-float arithmetic, as before); ``x`` itself when
+    it is traced (a chunk of steps compiled with jax.jit)."""
+    return float(x) if is_concrete(x) else x
+
+
 @partial(jax.jit, static_argnums=(0, 1))
 def _copy_bef_state(
     filter_mlcan: tuple,
@@ -281,8 +287,9 @@ def MLCanopyFluxes(
     nstep = step_time.nstep
     dtime_clm = float(step_time.dtime)
 
-    curr_calday_end = float(step_time.calday)
-    curr_calday_beg = float(step_time.calday_beg)
+    # Python floats in a normal run; traced values when a chunk of steps is compiled
+    curr_calday_end = _float_if_concrete(step_time.calday)
+    curr_calday_beg = _float_if_concrete(step_time.calday_beg)
 
     # Interpolation calendar days — Fortran lines 105-130
     if met_type == 0:
@@ -470,7 +477,7 @@ def MLCanopyFluxes(
     else:
         nrk_steps = 0
 
-    if masterproc and nstep == 1:
+    if masterproc and is_concrete(nstep) and nstep == 1:
         print(
             f"MLCanopyFluxes: starting ML sub-steps (num_ml_steps={num_ml_steps}, "
             f"nrk_steps={nrk_steps}, num_mlcan={num_mlcan})",
@@ -610,6 +617,7 @@ def MLCanopyFluxes(
         for nstep_ml, calday_ml in enumerate(caldays_ml, start=1):
             if (
                 masterproc
+                and is_concrete(nstep)
                 and nstep == 1
                 and (nstep_ml == 1 or nstep_ml == num_ml_steps or (nstep_ml % progress_stride == 0))
             ):
@@ -949,7 +957,7 @@ def _GetCLMVar(
     # calday(nstep-1):  caldaym1 = get_curr_calday(offset=-dtime_clm),
     # passed in as calday_beg
     # ------------------------------------------------------------------
-    caldaym1 = float(calday_beg)
+    caldaym1 = _float_if_concrete(calday_beg)
 
     # Orbital declination for caldaym1 — Fortran line 105
     declinm1, eccf = shr_orb_decl(caldaym1, eccen, mvelpp, lambm0, obliqr)
