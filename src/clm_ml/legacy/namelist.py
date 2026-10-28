@@ -114,7 +114,7 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
         "initial_conditions": {"source": "clm_history"},
         "output": {
             "directory": rel(g.get("dirout", "output")) or "output",
-            "format": ["netcdf"],
+            "streams": [{"name": "step", "frequency": "step", "variables": ["all"]}],
         },
     }
     model = {

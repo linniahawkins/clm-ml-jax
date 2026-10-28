@@ -51,7 +51,7 @@ Convert an existing namelist to get started:
 ```bash
 clm-ml convert src/offline_executable/nl.CHATS7.1day -o chats7/   # writes run.yaml + model.yaml
 clm-ml check chats7/run.yaml        # validate everything and print a summary, without running
-clm-ml run chats7/run.yaml          # run; writes netCDF output with names and units
+clm-ml run chats7/run.yaml          # run; writes one netCDF file per output stream
 clm-ml run chats7/run.yaml --set time.days=7 --set model.physics.stomatal_conductance=medlyn
 ```
 
@@ -61,9 +61,27 @@ Or from Python:
 from clm_ml.run import load_run
 
 run = load_run("chats7/run.yaml")
-out = run.execute()
+out = run.execute()["step"]   # one result per output stream (run.yaml output.streams)
 ds = out.to_xarray()          # dims (time, patch, layer, ...), with units
 ds["latent_heat_flux"].plot()
+```
+
+Output is configured as streams in `run.yaml`; each is accumulated during the run, so
+memory does not grow with the number of model steps:
+
+```yaml
+output:
+  directory: output/
+  streams:
+    - name: step                  # every variable at every model step
+      frequency: step
+    - name: daily
+      frequency: daily            # step | hourly | daily | monthly | yearly
+      statistic: mean             # mean | instantaneous | min | max
+      variables: [latent_heat_flux, sensible_heat_flux, gpp]
+      level: [patch, gridcell]
+      file_per: year              # run | year | month
+  legacy_ascii: false             # true: also the Fortran-format .out files (validation)
 ```
 
 The built-in parameter sets are `clm5_defaults` and `chats` (the CHATS walnut-orchard

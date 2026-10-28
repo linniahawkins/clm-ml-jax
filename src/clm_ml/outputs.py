@@ -288,8 +288,8 @@ class Outputs:
     patch_weight: np.ndarray  # (patch,)
     patch_pft: tuple[str, ...]
     gridcell_names: tuple[str, ...]
-    soil_temperature: np.ndarray  # (time, patch, soil_layer) K
-    soil_depth: np.ndarray  # (patch, soil_layer) m, node depth
+    soil_temperature: np.ndarray | None = None  # (time, patch, soil_layer) K
+    soil_depth: np.ndarray | None = None  # (patch, soil_layer) m, node depth
     raw: Mapping[str, np.ndarray] = dataclasses.field(default_factory=dict, repr=False)
 
     def __getattr__(self, name: str) -> np.ndarray:
@@ -303,7 +303,7 @@ class Outputs:
         r = _Raw(raw, run.config.canopy_layers.max_layers)
         data = {v.name: np.asarray(v.compute(r), dtype=float) for v in VARIABLES}
 
-        n_steps = raw["calendar_day"].shape[0]
+        n_steps = raw["mlcanopy.ncan_canopy"].shape[0]
         step = dt.timedelta(seconds=run.run_file.time.step_seconds)
         time = np.array([run.start + (k + 1) * step for k in range(n_steps)], "datetime64[ns]")
 
@@ -323,6 +323,53 @@ class Outputs:
             soil_temperature=np.asarray(soil, dtype=float),
             soil_depth=np.asarray(depth, dtype=float),
             raw=dict(raw),
+        )
+
+    @classmethod
+    def from_records(
+        cls, records: Mapping[str, np.ndarray], run, static: Mapping[str, np.ndarray]
+    ) -> "Outputs":
+        """One output stream's records (``{"time": ..., variable: (record, patch, ...)}``,
+        from ``clm_ml.legacy.worker``). Raw legacy fields (``mlcanopy.<field>``, validation)
+        go to ``raw``."""
+        nlevgrnd = int(static["static.nlevgrnd"])
+        soil = records.get("soil_temperature")
+        d = run.domain
+        return cls(
+            data={
+                n: np.asarray(v, dtype=float)
+                for n, v in records.items()
+                if n not in ("time", "soil_temperature") and "." not in n
+            },
+            time=np.asarray(records["time"], dtype="datetime64[ns]"),
+            patch_gridcell=d.patches.gridcell_index.copy(),
+            patch_weight=d.patches.weight.copy(),
+            patch_pft=tuple(PFT_NAMES[i] for i in d.patches.pft_index),
+            gridcell_names=d.gridcells.names,
+            soil_temperature=None if soil is None else np.asarray(soil, dtype=float),
+            soil_depth=np.asarray(static["static.soil_depth"])[:, 1 : nlevgrnd + 1],
+            raw={n: v for n, v in records.items() if "." in n},
+        )
+
+    def split(self, file_per: str, run_start: dt.datetime) -> list:
+        """``[(label, Outputs), ...]``, one per output file: the whole run (labelled by the run
+        start date), or per year / month of the records (by the start of their interval)."""
+        if file_per == "run":
+            return [(f"{run_start:%Y-%m-%d}", self)]
+        # A record's time is the end of its interval; one microsecond earlier is inside it.
+        inside = self.time - np.timedelta64(1, "us")
+        fmt = "%Y" if file_per == "year" else "%Y-%m"
+        labels = np.array([dt.datetime.fromisoformat(str(t)[:26]).strftime(fmt) for t in inside])
+        return [(label, self.take(labels == label)) for label in dict.fromkeys(labels)]
+
+    def take(self, mask: np.ndarray) -> "Outputs":
+        """The records selected by a boolean ``mask`` over time."""
+        return dataclasses.replace(
+            self,
+            data={n: v[mask] for n, v in self.data.items()},
+            time=self.time[mask],
+            soil_temperature=None if self.soil_temperature is None else self.soil_temperature[mask],
+            raw={n: v[mask] for n, v in self.raw.items()},
         )
 
     def select(self, names: Sequence[str]) -> "Outputs":
@@ -368,22 +415,23 @@ class Outputs:
             )
         coords = {"time": self.time, **{k: v for k, v in COORDINATES.items()}}
         if level == "patch":
-            variables["soil_temperature"] = xr.Variable(
-                ("time", "patch", "soil_layer"),
-                self.soil_temperature,
-                attrs={"units": "K", "long_name": "Soil temperature"},
-            )
             coords.update(
                 gridcell=("patch", self.patch_gridcell),
                 weight=("patch", self.patch_weight),
                 pft=("patch", list(self.patch_pft)),
-                soil_depth=(("patch", "soil_layer"), self.soil_depth, {"units": "m"}),
             )
+            if self.soil_temperature is not None:
+                variables["soil_temperature"] = xr.Variable(
+                    ("time", "patch", "soil_layer"),
+                    self.soil_temperature,
+                    attrs={"units": "K", "long_name": "Soil temperature"},
+                )
+                coords["soil_depth"] = (("patch", "soil_layer"), self.soil_depth, {"units": "m"})
         else:
             coords["gridcell"] = list(self.gridcell_names)
         ds = xr.Dataset(variables, coords=coords)
         ds.attrs["title"] = "CLM-ML-JAX multilayer canopy model output"
-        ds.attrs["time_convention"] = "time is the end of each forcing time step"
+        ds.attrs["time_convention"] = "time is the end of each output interval"
         return ds
 
     def to_netcdf(self, path: Path, levels: Sequence[str] = ("patch", "gridcell")) -> list[Path]:

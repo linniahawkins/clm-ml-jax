@@ -15,7 +15,7 @@ REFERENCE = PROJECT_ROOT / "tests" / "regression" / "reference" / "CHATS7_50step
 def outputs(chats_run_dir):
     with np.load(REFERENCE) as data:
         raw = {k: data[k] for k in data.files if not k.startswith("meta.")}
-    n_steps = raw["calendar_day"].shape[0]
+    n_steps = raw["mlcanopy.ncan_canopy"].shape[0]
     # Fields the worker adds that the Phase 0 reference does not record:
     raw["derived.latvap_tref"] = np.full((n_steps, 1), 44000.0)  # J/mol, roughly
     raw["static.nlevgrnd"] = np.asarray(25)

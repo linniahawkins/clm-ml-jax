@@ -849,9 +849,21 @@ Progress:
   peak; the default member reproduces the single run; at midday higher `vcmax25` gives cooler
   sunlit leaves (296.0, 295.9, 295.8 K for ×0.8, 1.0, 1.2), as expected from more
   transpiration. Test: `tests/regression/test_ensemble.py`.
-- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`); output streams as a nested
-  scan (outer loop over output records, inner loop over steps accumulating statistics,
-  `jax.checkpoint` on the step; §6.9), replacing the per-step containers; the `ForcingSource`
+- ✅ **Output streams** (decision 16, §6.9): `run.yaml` `output.streams` (name, frequency
+  step/hourly/daily/monthly/yearly, statistic mean/instantaneous/min/max, variables, level,
+  `file_per` run/year/month); Phase 1 keys are rejected with their replacements. Each step's
+  variables (one definition for numpy and jax.numpy, `clm_ml.outputs`) are accumulated inside
+  the compiled monthly chunk into one buffer slot per output record (`clm_ml.output_streams`;
+  the equivalent of jax-gcm's nested scan, for several streams at once); records spanning
+  chunks are completed on the host. The `clm_ml` run no longer records every step; the first
+  (initializing) step is included on the host. `Run.execute()` returns one `Outputs` per
+  stream and writes one netCDF file per stream, level and period. Raw legacy fields
+  (`mlcanopy.<field>`) can be requested for validation; the regression uses that.
+  Round-off only (different compiled program; reference regenerated).
+  Still to do here: write each file as soon as its period is complete (the worker now
+  returns all records at the end of the run, so long runs with fine output still hold them
+  in memory); `jax.checkpoint` on the step for gradients over long chunks.
+- Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`); the `ForcingSource`
   streams interface; host side between chunks: health checks, rotating restarts (`.prev`),
   partial output intervals saved with restarts; calendar-month chunks (decision 17);
   `run.yaml` stream form; GPU timing (done-when 3, GPU part);

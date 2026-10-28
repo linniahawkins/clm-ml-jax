@@ -78,12 +78,33 @@ class InitialConditionsSection:
 
 
 @dataclasses.dataclass(frozen=True)
+class OutputStreamSection:
+    """One output stream (plan §4.1, decision 16): accumulated during the run."""
+
+    name: str
+    frequency: Literal["step", "hourly", "daily", "monthly", "yearly"] = "step"
+    statistic: Literal["mean", "instantaneous", "min", "max"] = "mean"
+    variables: tuple[str, ...] = ("all",)
+    level: tuple[Literal["patch", "gridcell"], ...] = ("patch", "gridcell")
+    file_per: Literal["run", "year", "month"] = "run"
+
+
+@dataclasses.dataclass(frozen=True)
 class OutputSection:
     directory: str = "output"
-    format: tuple[Literal["netcdf", "legacy_ascii"], ...] = ("netcdf",)
-    variables: tuple[str, ...] = ("all",)
-    frequency: Literal["step", "hourly", "daily"] = "step"
-    level: tuple[Literal["patch", "gridcell"], ...] = ("patch", "gridcell")
+    streams: tuple[OutputStreamSection, ...] = (OutputStreamSection(name="step"),)
+    # The six Fortran-format .out files (validation against Fortran only; runs the model a
+    # second time, step-by-step output).
+    legacy_ascii: bool = False
+
+
+#: Phase 1 output keys and what replaced them (decision 16).
+_OLD_OUTPUT_KEYS = {
+    "format": "output.legacy_ascii: true (netCDF is always written)",
+    "variables": "output.streams[].variables",
+    "frequency": "output.streams[].frequency",
+    "level": "output.streams[].level",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -131,40 +152,61 @@ class Run:
 
     # -- running -----------------------------------------------------------------------
 
-    def execute(self, *, write: bool = True, quiet: bool = False):
-        """Run the model and (if ``write``) write the outputs configured in run.yaml.
+    def execute(self, *, write: bool = True, quiet: bool = False) -> dict:
+        """Run the model and (if ``write``) write the output streams configured in run.yaml
+        (one netCDF file per stream, level and ``file_per`` period).
 
-        Returns :class:`~clm_ml.outputs.Outputs`.
+        Returns ``{stream name: Outputs}``.
         """
         from clm_ml.outputs import Outputs
 
         out = self.run_file.output
         out_dir = self.output_directory
-        legacy_dir = out_dir if (write and "legacy_ascii" in out.format) else None
         with tempfile.TemporaryDirectory() as tmp:
-            spec_file, raw_file = Path(tmp) / "spec.json", Path(tmp) / "raw.npz"
-            spec_file.write_text(json.dumps(self.legacy_spec(legacy_dir)))
-            src_dir = Path(__file__).resolve().parents[1]
-            env = dict(os.environ)
-            env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(src_dir), env.get("PYTHONPATH")]))
-            subprocess.run(
-                [sys.executable, "-m", "clm_ml.legacy.worker", str(spec_file), str(raw_file)],
-                cwd=src_dir,
-                env=env,
-                check=True,
-                stdout=subprocess.DEVNULL if quiet else None,
-            )
+            raw_file = Path(tmp) / "streams.npz"
+            self._run_worker(self.legacy_spec(None), raw_file, quiet)
             with np.load(raw_file) as data:
-                raw = {key: data[key] for key in data.files}
+                arrays = {key: data[key] for key in data.files}
+            if write and out.legacy_ascii:
+                out_dir.mkdir(parents=True, exist_ok=True)
+                spec = dict(self.legacy_spec(out_dir), mode="legacy_ascii")
+                self._run_worker(spec, Path(tmp) / "unused.npz", quiet)
 
-        outputs = Outputs.from_legacy(raw, self)
-        if out.variables != ("all",):
-            outputs = outputs.select(out.variables)
-        if write and "netcdf" in out.format:
-            out_dir.mkdir(parents=True, exist_ok=True)
-            tower = self.domain.gridcells.names[0]
-            outputs.to_netcdf(out_dir / f"{tower}_{self.start:%Y-%m-%d}.nc", levels=out.level)
-        return outputs
+        results = {}
+        for stream in out.streams:
+            prefix = f"{stream.name}/"
+            records = {k[len(prefix) :]: v for k, v in arrays.items() if k.startswith(prefix)}
+            outputs = Outputs.from_records(records, self, arrays)
+            results[stream.name] = outputs
+            if write and (outputs.data or outputs.soil_temperature is not None):
+                out_dir.mkdir(parents=True, exist_ok=True)
+                tower = self.domain.gridcells.names[0]
+                for label, part in outputs.split(stream.file_per, self.start):
+                    part.to_netcdf(out_dir / f"{tower}_{stream.name}_{label}.nc", stream.level)
+        return results
+
+    def stream_variables(self, stream) -> tuple[str, ...]:
+        """A stream's variable names, with ``all`` expanded."""
+        from clm_ml.outputs import VARIABLES
+
+        names = []
+        for v in stream.variables:
+            names += [x.name for x in VARIABLES] + ["soil_temperature"] if v == "all" else [v]
+        return tuple(dict.fromkeys(names))
+
+    def _run_worker(self, spec: dict, out_file: Path, quiet: bool) -> None:
+        spec_file = out_file.with_suffix(".json")
+        spec_file.write_text(json.dumps(spec))
+        src_dir = Path(__file__).resolve().parents[1]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(src_dir), env.get("PYTHONPATH")]))
+        subprocess.run(
+            [sys.executable, "-m", "clm_ml.legacy.worker", str(spec_file), str(out_file)],
+            cwd=src_dir,
+            env=env,
+            check=True,
+            stdout=subprocess.DEVNULL if quiet else None,
+        )
 
     def legacy_spec(self, legacy_ascii_dir: Optional[Path]) -> dict:
         """Everything the legacy worker needs, as JSON-serializable values."""
@@ -197,6 +239,16 @@ class Run:
             "tower_name": tower_name,
             "tower": _legacy_tower_values(self.domain),
             "legacy_ascii_dir": str(legacy_ascii_dir) if legacy_ascii_dir else None,
+            "max_layers": self.config.canopy_layers.max_layers,
+            "streams": [
+                {
+                    "name": st.name,
+                    "frequency": st.frequency,
+                    "statistic": st.statistic,
+                    "variables": list(self.stream_variables(st)),
+                }
+                for st in self.run_file.output.streams
+            ],
         }
 
     def summary(self) -> str:
@@ -242,6 +294,12 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
     model_overrides = [o[len("model.") :] for o in overrides if o.startswith("model.")]
     run_overrides = [o for o in overrides if not o.startswith("model.")]
     apply_overrides(data, run_overrides, source=path.name)
+    old = sorted(set(data.get("output") or {}) & set(_OLD_OUTPUT_KEYS))
+    if old:
+        raise ConfigError(
+            f"{path.name}: output: "
+            + "; ".join(f"{k} was replaced by {_OLD_OUTPUT_KEYS[k]}" for k in old)
+        )
     run_file = from_dict(RunFile, data, source=path.name)
     base_dir = path.parent
 
@@ -296,6 +354,10 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
     return run
 
 
+#: Raw legacy fields allowed as stream variables (validation): "mlcanopy.<field>" etc.
+_RAW_PREFIXES = ("mlcanopy.", "temperature.")
+
+
 def _check_supported(run_file: RunFile, source: str) -> None:
     if run_file.domain.type != "towers":
         raise ConfigError(f"{source}: domain.type: 'grid' is planned but not yet supported")
@@ -306,8 +368,25 @@ def _check_supported(run_file: RunFile, source: str) -> None:
         )
     if run_file.initial_conditions.source != "clm_history":
         raise ConfigError(f"{source}: initial_conditions.source: 'restart' is not yet supported")
-    if run_file.output.frequency != "step":
-        raise ConfigError(f"{source}: output.frequency: only 'step' is supported so far")
+    names = [st.name for st in run_file.output.streams]
+    if len(set(names)) != len(names):
+        raise ConfigError(f"{source}: output.streams: stream names must be unique ({names})")
+    if not names:
+        raise ConfigError(f"{source}: output.streams: at least one stream is needed")
+    from clm_ml.outputs import VARIABLES_BY_NAME
+
+    for st in run_file.output.streams:
+        unknown = [
+            v for v in st.variables
+            if v not in ("all", "soil_temperature")
+            and v not in VARIABLES_BY_NAME
+            and not v.startswith(_RAW_PREFIXES)
+        ]  # fmt: skip
+        if unknown:
+            raise ConfigError(
+                f"{source}: output.streams[{st.name}].variables: unknown {unknown}; "
+                "see clm_ml.outputs.VARIABLES"
+            )
 
 
 def _parse_datetime(text: str, key: str) -> dt.datetime:

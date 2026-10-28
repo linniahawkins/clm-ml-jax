@@ -27,7 +27,8 @@ def twins():
 
 @pytest.fixture(scope="session")
 def current(tmp_path_factory):
-    """``(run, outputs, output_directory)`` of the reference case with the current code."""
+    """``(run, {stream: outputs}, output_directory)`` of the reference case with the current
+    code."""
     workdir = tmp_path_factory.mktemp("regression")
     run, outputs = run_case(workdir, legacy_ascii=True)
     return run, outputs, workdir / "out"
@@ -35,4 +36,4 @@ def current(tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def current_fields(current):
-    return recorded_fields(current[1].raw)
+    return recorded_fields(current[1]["fields"].raw)

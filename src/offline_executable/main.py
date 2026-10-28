@@ -554,6 +554,9 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
         for n in names:
             if n == "soil_temperature":  # (patch == column) soil layers 1..nlevgrnd
                 out[n] = insts.temperature.t_soisno_col[:, 1 : nlevgrnd + 1]
+            elif "." in n:  # raw legacy field, e.g. "mlcanopy.tair_profile" (validation)
+                container, field = n.split(".", 1)
+                out[n] = jnp.asarray(getattr(getattr(insts, container), field), dtype=float)
             else:
                 out[n] = VARIABLES_BY_NAME[n].compute(r)[0]
         return out
@@ -603,9 +606,90 @@ def output_shapes(run: LegacyRun, template, names, max_layers: int) -> dict:
     for n in names:
         if n == "soil_temperature":
             shapes[n] = np.asarray(template.temperature.t_soisno_col)[:, 1 : nlevgrnd + 1].shape
+        elif "." in n:
+            container, field = n.split(".", 1)
+            shapes[n] = np.shape(getattr(getattr(template, container), field))
         else:
             shapes[n] = np.shape(VARIABLES_BY_NAME[n].compute(r))[1:]
     return shapes
+
+
+def step_values(insts, names, max_layers: int) -> dict:
+    """Output variables of one step from its containers (numpy), as the stream runner
+    computes them inside a chunk; used for the first (initializing) step."""
+    from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
+    from clm_src_main.clm_varpar import nlevgrnd
+
+    m = insts.mlcanopy
+    r = _Raw({f"mlcanopy.{f}": np.asarray(getattr(m, f))[None] for f in m._fields}, max_layers)
+    out = {}
+    for n in names:
+        if n == "soil_temperature":
+            out[n] = np.asarray(insts.temperature.t_soisno_col)[:, 1 : nlevgrnd + 1]
+        elif "." in n:
+            container, field = n.split(".", 1)
+            out[n] = np.asarray(getattr(getattr(insts, container), field), dtype=float)
+        else:
+            out[n] = np.asarray(VARIABLES_BY_NAME[n].compute(r), dtype=float)[0]
+    return out
+
+
+def step_starts(run: LegacyRun, first_step: int, n_steps: int) -> list:
+    """Start times (datetime) of run steps ``first_step ... first_step + n_steps - 1``."""
+    out = []
+    for k in range(first_step, first_step + n_steps):
+        t = run.time_of(k)
+        out.append(
+            datetime.datetime(t.year, t.month, t.day) + datetime.timedelta(seconds=t.tod - t.dtime)
+        )
+    return out
+
+
+def run_streams(run: LegacyRun, streams, max_layers: int, on_records, params=None) -> None:
+    """Run the whole model with output streams (plan §6.9): the first step step by step,
+    then one compiled chunk per calendar month accumulating every stream inside the scan.
+    ``on_records(stream_index, records)`` receives each stream's completed records
+    ``[(key, end_time, {variable: value}), ...]`` as soon as they are complete."""
+    from clm_ml import output_streams as S
+
+    names = sorted({n for spec in streams for n in spec.variables})
+    collectors = [S.StreamCollector(spec) for spec in streams]
+    step_seconds = run.time_of(0).dtime
+
+    # First step (initializes the canopy): run step by step; its values form a one-step chunk
+    st, filt = advance(
+        run, run.insts, run.filt, step_inputs(run, run.load_chunk(0, 1), 0), True, params
+    )
+    template, state = st, state_from_instances(st)
+    shapes = output_shapes(run, template, names, max_layers)
+    values = step_values(st, names, max_layers)
+    for i, spec in enumerate(streams):
+        rec = S.chunk_records(step_starts(run, 0, 1), 0, step_seconds, spec.frequency)
+        buffers = S.init_buffers(spec.statistic, 1, {n: shapes[n] for n in spec.variables}, jnp)
+        buffers = S.accumulate(
+            spec.statistic, buffers, 0, {n: jnp.asarray(values[n]) for n in spec.variables}
+        )
+        on_records(i, collectors[i].add_chunk(rec, buffers))
+
+    runner = make_stream_runner(run, template, filt, streams, max_layers)
+    for first, n in month_chunks(run, 1):
+        chunk = run.load_chunk(first, n)
+        xs = stack_step_inputs([step_inputs(run, chunk, k) for k in range(first, first + n)])
+        starts = step_starts(run, first, n)
+        records = [S.chunk_records(starts, first, step_seconds, s.frequency) for s in streams]
+        buffers = tuple(
+            S.init_buffers(s.statistic, len(rc.keys), {v: shapes[v] for v in s.variables}, jnp)
+            for s, rc in zip(streams, records)
+        )
+        slots = tuple(jnp.asarray(rc.index) for rc in records)
+        if params is None:
+            state, buffers = runner(state, xs, slots, buffers)
+        else:
+            state, buffers = runner(state, xs, slots, buffers, params)
+        for i, rc in enumerate(records):
+            on_records(i, collectors[i].add_chunk(rc, buffers[i]))
+    for i, collector in enumerate(collectors):
+        on_records(i, collector.close())
 
 
 def main():

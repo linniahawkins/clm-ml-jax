@@ -45,7 +45,7 @@ TWIN_PFT = "broadleaf_deciduous_temperate_tree"  # CHATS7's PFT
 
 # Prefixes of the recorded fields kept in the reference: every mlcanopy field the legacy
 # output writer reads, soil temperature, and the calendar day.
-RECORDED_PREFIXES = ("mlcanopy.", "temperature.", "calendar_day")
+RECORDED_PREFIXES = ("mlcanopy.", "temperature.")
 
 
 def write_portable_namelist(source: Path, dest: Path, output_dir: Path) -> Path:
@@ -66,7 +66,9 @@ def write_portable_namelist(source: Path, dest: Path, output_dir: Path) -> Path:
 def run_case(workdir: Path, *, params: str | None = None, legacy_ascii: bool = False):
     """Run the reference case through ``clm_ml`` in ``workdir``.
 
-    Returns ``(run, outputs)``. ``params`` overrides the params file (e.g. for twins).
+    Returns ``(run, {stream: Outputs})`` with streams ``step`` (all named variables) and
+    ``fields`` (the raw legacy fields, in ``.raw``). ``params`` overrides the params file
+    (e.g. for twins).
     """
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
@@ -79,8 +81,25 @@ def run_case(workdir: Path, *, params: str | None = None, legacy_ascii: bool = F
     convert_namelist(REFERENCE_NAMELIST, workdir)
     run_yaml = workdir / "run.yaml"
     data = yaml.safe_load(run_yaml.read_text())
-    formats = ["netcdf", "legacy_ascii"] if legacy_ascii else ["netcdf"]
-    data["output"] = {"directory": str(workdir / "out"), "format": formats}
+    from clm_ml.legacy.worker import MLCANOPY_FIELDS, TEMPERATURE_FIELDS
+
+    data["output"] = {
+        "directory": str(workdir / "out"),
+        "legacy_ascii": legacy_ascii,
+        "streams": [
+            # every named variable at every step
+            {"name": "step", "frequency": "step", "statistic": "mean", "variables": ["all"]},
+            # validation: the raw legacy fields the regression compares, at every step
+            {
+                "name": "fields",
+                "frequency": "step",
+                "statistic": "instantaneous",
+                "variables": [f"mlcanopy.{f}" for f in MLCANOPY_FIELDS]
+                + [f"temperature.{f}" for f in TEMPERATURE_FIELDS],
+                "level": ["patch"],
+            },
+        ],
+    }
     if params is not None:
         data["params"] = params
     run_yaml.write_text(yaml.safe_dump(data))
@@ -100,7 +119,7 @@ def _record_one(name: str, out_file: Path) -> str:
             params = str(_twin_params_file(Path(tmp), sign))
         _, outputs = run_case(Path(tmp) / "case", params=params)
         out_file.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(out_file, **recorded_fields(outputs.raw), **_provenance(name))
+        np.savez_compressed(out_file, **recorded_fields(outputs["fields"].raw), **_provenance(name))
     return f"wrote {out_file}"
 
 

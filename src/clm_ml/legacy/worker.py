@@ -14,9 +14,10 @@ first imported. So the order here matters:
 3. build the PFT parameter tables from ``Params`` and install them (replacing both the
    tables and the ``Init`` functions that ``initialize2`` calls to rebuild them),
 4. write the tower into ``TowerDataMod``,
-5. only then run ``offline_executable.main.main()`` -- the same driver as ``clm-ml-offline``,
-   so results are identical -- with a hook that records every output field at full
-   precision at each time step.
+5. only then run the model: ``offline_executable.main.setup_run`` and ``run_streams`` (the
+   same physics as ``clm-ml-offline``), accumulating the output streams inside each
+   compiled chunk and saving their records. With ``mode: legacy_ascii`` it instead runs the
+   legacy driver to write the Fortran-format .out files (validation only).
 
 The spec is produced by :meth:`clm_ml.run.Run.legacy_spec`.
 """
@@ -94,61 +95,45 @@ def run_spec(spec: dict, out_file: Path) -> None:
     # 4. Tower table.
     _install_tower(spec["tower_name"], spec["tower"])
 
-    # 5. Run the unchanged legacy driver, recording output each step.
+    # 5. Run.
     import offline_executable.main as main_mod
 
-    records: dict[str, list[np.ndarray]] = {}
-    extras: dict[str, object] = {}
-
-    def recording_output(original_output):
-        from multilayer_canopy.MLWaterVaporMod import LatVap
-
-        def wrapper(curr_calday, tower_num, *rest):
-            mlcanopy_inst, temperature_inst = rest[-2], rest[-1]
-            records.setdefault("calendar_day", []).append(np.asarray(float(curr_calday)))
-            for name in MLCANOPY_FIELDS:
-                records.setdefault(f"mlcanopy.{name}", []).append(
-                    np.asarray(getattr(mlcanopy_inst, name))
-                )
-            for name in TEMPERATURE_FIELDS:
-                records.setdefault(f"temperature.{name}", []).append(
-                    np.asarray(getattr(temperature_inst, name))
-                )
-            tref = np.asarray(mlcanopy_inst.tref_forcing)
-            records.setdefault("derived.latvap_tref", []).append(
-                np.array([float(LatVap(float(t))) for t in tref])
-            )
-            if "soil_depth" not in extras:
-                from clm_src_main import ColumnType
-                from clm_src_main.clm_varpar import nlevgrnd
-
-                extras["soil_depth"] = np.asarray(ColumnType.col.z)
-                extras["nlevgrnd"] = np.asarray(nlevgrnd)
-            return original_output(curr_calday, tower_num, *rest)
-
-        return wrapper
-
-    original_initialize = main_mod.InitializeRealize
-
-    def initialize_then_install_recorder(bounds):
-        # CLMml_driver imports clm_instMod, which must not be imported before
-        # InitializeRealize (see main.py), so the recorder is installed right after it.
-        original_initialize(bounds)
-        import offline_driver.CLMml_driver as driver_mod
-
-        driver_mod.output = recording_output(driver_mod.output)
-
-    main_mod.InitializeRealize = initialize_then_install_recorder
-
     with tempfile.TemporaryDirectory() as tmp:
-        namelist = _write_namelist(spec["namelist"], Path(tmp), spec.get("legacy_ascii_dir"))
-        sys.argv = ["clm-ml-offline", str(namelist)]
-        main_mod.main()
+        if spec.get("mode") == "legacy_ascii":
+            # Validation output only: the step-by-step legacy driver writing the six .out files.
+            namelist = _write_namelist(spec["namelist"], Path(tmp), spec["legacy_ascii_dir"])
+            sys.argv = ["clm-ml-offline", str(namelist)]
+            main_mod.main()
+            return
+        namelist = _write_namelist(spec["namelist"], Path(tmp), None)
+        run = main_mod.setup_run(main_mod.read_namelist(str(namelist)))
 
-    if "calendar_day" not in records:
-        raise RuntimeError("the model ran but recorded no time steps")
-    arrays = {key: np.stack(values) for key, values in records.items()}
-    arrays.update({f"static.{k}": v for k, v in extras.items()})
+    from clm_ml.output_streams import StreamSpec
+
+    streams = [
+        StreamSpec(s["name"], s["frequency"], s["statistic"], tuple(s["variables"]))
+        for s in spec["streams"]
+    ]
+    collected: list[list] = [[] for _ in streams]
+    main_mod.run_streams(
+        run, streams, spec["max_layers"], lambda i, records: collected[i].extend(records)
+    )
+
+    from clm_src_main import ColumnType
+    from clm_src_main.clm_varpar import nlevgrnd
+
+    arrays = {
+        "static.soil_depth": np.asarray(ColumnType.col.z),
+        "static.nlevgrnd": np.asarray(nlevgrnd),
+    }
+    for stream, records in zip(streams, collected):
+        if not records:
+            raise RuntimeError(f"output stream {stream.name} produced no records")
+        arrays[f"{stream.name}/time"] = np.array(
+            [end for _, end, _ in records], dtype="datetime64[ns]"
+        )
+        for name in stream.variables:
+            arrays[f"{stream.name}/{name}"] = np.stack([v[name] for _, _, v in records])
     np.savez_compressed(out_file, **arrays)
 
 
