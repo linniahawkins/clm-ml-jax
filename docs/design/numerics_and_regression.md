@@ -183,18 +183,25 @@ can use `MLMathToolsMod.bisection_traceable` (§3), which has Fortran's stopping
 Fortran uses `hybrid` with `tol = 0.1` (mol/mol scaled). The running JAX model uses
 `_ci_solver_scan_ift`: 40 fixed secant steps followed by a Newton step.
 
-### 4.4 Runge–Kutta update skips the top canopy-air layer (found in Phase 3e)
+### 4.4 Runge–Kutta update skipped the top canopy-air layer (fixed)
 
 Fortran `RungeKuttaUpdate` (MLRungeKuttaMod.F90, line 90) updates layers `ic = 1, ncan(p)`. The
-JAX translation slices `[p, :n]`, i.e. levels 0 … ncan−1. So the top canopy-air layer (`ncan`,
-just below the reference height) never receives the intermediate Runge–Kutta states (it carries
-the stage's implicit solution instead), and the unused level 0 is updated. Found by poisoning
-each state field with NaN before a step (Phase 3e): `tair_bef(0)` reaches the results.
+JAX translation sliced `[p, :n]`, i.e. levels 0 … ncan−1: the top canopy-air layer (`ncan`,
+just below the reference height) never received the intermediate Runge–Kutta states, and the
+unused level 0 was updated. Found by poisoning each state field with NaN before a step
+(Phase 3e): `tair_bef(0)` reached the results.
 
-**Status:** recorded, not changed (it would change results; the regression reference keeps the
-running model's behavior). Fix: slice `1 : n + 1` in `RungeKuttaUpdate`. To be done as a
-fidelity change, validated against the Fortran output (`tests/test_fortran_python_comparison.py`)
-together with §5.
+**Fixed** (after Phase 4, at the maintainer's request): the slices are now `1 : ncan + 1`.
+
+**Effect on results: none for CHATS7.** A full-month (May 2007) run gives byte-identical
+output files with and without the fix, and the regression run is bit for bit unchanged. The
+reason: within a Runge–Kutta stage no process reads the top layer's current air
+temperature, vapor pressure or water. The flux–profile solution starts from the values at
+the beginning of the sub-step, turbulence uses the canopy-top layer (`ntop`, inside the
+canopy), and leaf and radiation processes use the foliage layers; the final pass of each
+sub-step recomputes the state. The fix matters only if a process reads that layer
+mid-step. The per-routine reference (`process_io.pkl.gz`) was re-recorded, because
+`RungeKuttaUpdate` itself now returns different values for level 0 and the top layer.
 
 ## 5. The apparent evening-transition sensitivity was a solver bug (fixed)
 

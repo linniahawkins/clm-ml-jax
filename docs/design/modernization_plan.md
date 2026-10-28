@@ -870,7 +870,7 @@ Progress:
   `10 years`, and always at the end of the run) hold the state, its time and the output
   bookkeeping (partial records, records not yet in a file); written beside the old one and
   renamed over it, keeping `.prev`, and read with a fallback to `.prev`. Format: a versioned
-  Python pickle (`{output}/restart/{tower}_restart.pkl`; netCDF could come later).
+  Python pickle (`{output}/restart/{tower}_restart.pkl`); **to become netCDF in Phase 7**.
   `initial_conditions.source: restart` resumes: a restart time inside the run continues it
   (results equal the uninterrupted run bit for bit, tested with a daily mean spanning the
   restart); a restart time equal to the run start begins a new run from that state (e.g.
@@ -998,8 +998,13 @@ multi-GPU machine (or on CPU with simulated devices in CI).
   data under `examples/data/`.
 - Remove the duplicated `src/pyproject.toml` and `src/pytest.ini`.
 - Retire `clm-ml-offline` in favor of `clm-ml convert` + `clm-ml run` (see §8, question 4).
+- **Restart files as netCDF** (maintainer request). Phase 4 writes them as a versioned Python
+  pickle (`{output}/restart/{tower}_restart.pkl`): the state plus output bookkeeping (partial
+  records, records not yet in a file). Change to netCDF with named, documented variables (state
+  fields with their dimensions and units; the bookkeeping as additional variables/groups), keep
+  the `.prev` rotation and fallback, and keep the resume test bit for bit.
 
-**Done when:** `src/` contains only `clm_ml/`, and all tests pass.
+**Done when:** `src/` contains only `clm_ml/`, restarts are netCDF, and all tests pass.
 
 ### Phase 8: Documentation and release
 

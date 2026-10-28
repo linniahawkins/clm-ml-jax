@@ -94,14 +94,15 @@ def RungeKuttaUpdate(
         x_new = x_bef + jnp.where(j < k, dx_prev * w_prev, 0.0).sum(axis=-1) + w_curr * dx_new
         return jnp.where(do_update, x_new, x_cur), dx_new
 
+    # Canopy layers 1..ncan (Fortran: do ic = 1, ncan(p)); the arrays are 1-based.
     p, n = grid.p, grid.ncan
     updates = {}
     for state, delta, bef, sl in (
-        ("tair_profile", "dtair_profile", "tair_bef_profile", (p, slice(None, n))),
-        ("eair_profile", "deair_profile", "eair_bef_profile", (p, slice(None, n))),
-        ("h2ocan_profile", "dh2ocan_profile", "h2ocan_bef_profile", (p, slice(None, n))),
-        ("tleaf_leaf", "dtleaf_leaf", "tleaf_bef_leaf", (p, slice(None, n), slice(None))),
-        ("lwp_leaf", "dlwp_leaf", "lwp_bef_leaf", (p, slice(None, n), slice(None))),
+        ("tair_profile", "dtair_profile", "tair_bef_profile", (p, slice(1, n + 1))),
+        ("eair_profile", "deair_profile", "eair_bef_profile", (p, slice(1, n + 1))),
+        ("h2ocan_profile", "dh2ocan_profile", "h2ocan_bef_profile", (p, slice(1, n + 1))),
+        ("tleaf_leaf", "dtleaf_leaf", "tleaf_bef_leaf", (p, slice(1, n + 1), slice(None))),
+        ("lwp_leaf", "dlwp_leaf", "lwp_bef_leaf", (p, slice(1, n + 1), slice(None))),
         ("tg_soil", "dtg_soil", "tg_bef_soil", (p,)),
     ):
         x_arr = getattr(mlcanopy_inst, state)

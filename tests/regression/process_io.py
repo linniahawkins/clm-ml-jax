@@ -82,6 +82,11 @@ def _run_model(n_steps: int, hook) -> None:
         (tmp / "out").mkdir()
         nml = write_portable_namelist(NAMELIST, tmp / "nl", tmp / "out")
         text = nml.read_text().replace("stop_n = 50", f"stop_n = {n_steps}")
+        # Step by step (chunk_steps = 0): the routines see concrete values to record, not the
+        # traced values of a compiled chunk.
+        body = text.rstrip()
+        assert body.endswith("/"), "namelist group should end with '/'"
+        text = body[:-1] + "    chunk_steps = 0\n/\n"
         nml.write_text(text)
         sys.argv = ["clm-ml-offline", str(nml)]
         main_mod.main()

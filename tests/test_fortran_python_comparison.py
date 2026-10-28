@@ -8,13 +8,15 @@ Thresholds (from CLAUDE.md):
   - Mean absolute relative error < 2.5 %
   - Pearson correlation >= 0.9999
 
-Run after executing a 1-day CHATS7 May-2007 simulation:
-    clm-ml-offline input_files/nl.CHATS7.1day
-    pytest tests/integration/test_fortran_python_comparison.py -v
+Run after a full-month CHATS7 May-2007 simulation (the Fortran reference covers May):
+    clm-ml-offline src/offline_executable/nl.CHATS7.05.2007
+    pytest tests/test_fortran_python_comparison.py -m slow -v
+(CLM_ML_COMPARE_DIR=<dir> compares the .out files in another directory.)
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -23,9 +25,11 @@ import pytest
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 FORTRAN_DIR = REPO_ROOT / "tests" / "fortran_output_files"
-JAX_DIR = REPO_ROOT / "src" / "output_files"
+# The JAX run's legacy .out files (May 2007, nl.CHATS7.05.2007); override with
+# CLM_ML_COMPARE_DIR to compare another run's output directory.
+JAX_DIR = Path(os.environ.get("CLM_ML_COMPARE_DIR", REPO_ROOT / "src" / "output_files"))
 
 OUTPUT_TAGS = ["flux", "aux", "fsun", "soiltemp", "profile", "fluxprofile"]
 
