@@ -19,11 +19,10 @@ from clm_src_biogeophys.TemperatureType import temperature_type
 from clm_src_biogeophys.WaterDiagnosticBulkType import waterdiagnosticbulk_type
 from clm_src_biogeophys.WaterStateBulkType import waterstatebulk_type
 from clm_src_biogeophys.WaterType import water_type
-from clm_src_main.abortutils import endrun
 from clm_src_main.ColumnType import col
 from clm_src_main.decompMod import bounds_type
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type
-from multilayer_canopy.MLMathToolsMod import is_concrete, tridiag
+from multilayer_canopy.MLMathToolsMod import tridiag
 
 # Threshold for thin surface layer — Fortran line 33
 _thin_sfclayer: float = 1.0e-6
@@ -202,25 +201,22 @@ def SoilTemperature(
             t_soisno = t_soisno.at[c, j].set(u_sol[j])
 
     # ------------------------------------------------------------------
-    # Energy conservation check — Fortran lines 151-159
-    # |gsoi - edif| < 1e-6 W/m2
-    # Concrete float comparisons are acceptable for this error-check path.
+    # Energy conservation check — Fortran lines 151-159: |gsoi - edif| < 1e-6 W/m2.
+    # Fortran stops here; the error is returned, recorded by clm_drv and checked on the host
+    # (MLCanopyFluxesType.check_balance), also when the step is compiled.
     # ------------------------------------------------------------------
-    # (skipped when the step is traced: needs concrete values)
+    energy_error = {}
     for fc in range(1, num_nolakec + 1):
-        if not is_concrete(t_soisno, cv, gsoi):
-            break
         c = int(_filter_nolakec_np[fc - 1])
-        edif = 0.0
+        edif = jnp.zeros(())
         for j in range(1, nlevgrnd + 1):
-            edif += float(cv[c, j]) * (float(t_soisno[c, j]) - float(tssbef[c, j])) / dtime
-        if abs(float(gsoi[pfilter[c]]) - edif) >= 1.0e-6:
-            endrun(msg="ERROR: MLSoilTemperatureMod: soil temperature energy conservation error")
+            edif = edif + cv[c, j] * (t_soisno[c, j] - tssbef[c, j]) / dtime
+        energy_error[int(pfilter[c])] = gsoi[pfilter[c]] - edif
 
     # Write updated t_soisno back to temperature_inst
     temperature_inst = temperature_inst._replace(t_soisno_col=t_soisno)
 
-    return temperature_inst, soilstate_inst
+    return temperature_inst, soilstate_inst, energy_error
 
 
 # ---------------------------------------------------------------------------

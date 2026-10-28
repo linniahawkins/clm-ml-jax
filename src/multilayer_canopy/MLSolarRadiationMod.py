@@ -38,6 +38,7 @@ from clm_src_main.decompMod import bounds_type  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import (
     NORMAN_SOLAR,
     SOLAR,
+    SUNLIT_FRACTION,
     mlcanopy_type,  # noqa: F401
     record_balance_error,
 )
@@ -231,10 +232,12 @@ def SolarRadiation(
     # When kb*dpai=0, the exp term also =0 so fracsun=0 regardless of denom.
     kb_dp_safe = jnp.maximum(kb_v * dpai_v, 1.0e-30)
     fracsun_v = tbi_v / kb_dp_safe * (1.0 - jnp.exp(-kb_v * cf * dpai_v))
-    if is_concrete(fracsun_v) and jnp.any(leafy & (fracsun_v <= 0.0)):
-        endrun(msg=" ERROR: SolarRadiation: fracsun is too small")
-    if is_concrete(fracsun_v) and jnp.any(leafy & ((1.0 - fracsun_v) <= 0.0)):
-        endrun(msg=" ERROR: SolarRadiation: fracsha is too small")
+    # Fortran stops if fracsun or fracsha is not positive; recorded (1 = violated), checked
+    # on the host
+    bad = jnp.any(leafy & ((fracsun_v <= 0.0) | ((1.0 - fracsun_v) <= 0.0)))
+    mlcanopy_inst = record_balance_error(
+        mlcanopy_inst, p, SUNLIT_FRACTION, jnp.where(bad, 1.0, 0.0)
+    )
 
     # Two-stream avmu — Fortran lines 190-194
     # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug

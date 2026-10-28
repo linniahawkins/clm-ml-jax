@@ -1269,6 +1269,11 @@ Progress:
   `GridInfo` no longer holds the layer counts (only the patch index and C3/C4 flag); old
   process-IO recordings are read with a compatibility class. Round-off only; reference
   regenerated.
+- ✅ **Step 4, concrete-only checks**: the last Fortran stops that ran only on concrete values
+  (soil-temperature energy conservation; sunlit/shaded fractions positive) are recorded like
+  the others (13 checks), so they now also run in compiled chunks. The `HF2008` warning
+  (`eta >= eta_max`) is a Fortran warning, not a stop: still printed only for concrete
+  values. Bit for bit.
 - ✅ **Step 5, done-when test** (`tests/regression/test_one_program_any_layers.py`): CHATS7
   with its default 46 layers and with explicit counts (10 within + 10 above = 20 layers),
   same `max_layers`: the 20-layer model's chunk runs through the 46-layer model's compiled

@@ -25,6 +25,7 @@ from clm_src_main.decompMod import bounds_type  # noqa: F401
 from clm_src_main.filterMod import clumpfilter, setExposedvegpFilter  # noqa: F401
 from clm_src_utils.clm_time_manager import StepTime
 from multilayer_canopy.MLCanopyFluxesMod import MLCanopyFluxes  # noqa: F401
+from multilayer_canopy.MLCanopyFluxesType import SOIL_TEMPERATURE, record_balance_error
 from multilayer_canopy.MLGetAtmForcingMod import AtmForcingRecord
 from multilayer_canopy.MLSoilTemperatureMod import SoilTemperature, SoilThermProp  # noqa: F401
 from offline_driver.clmDataMod import ClmHistoryRecord, clmData  # noqa: F401
@@ -277,7 +278,7 @@ def clm_drv(
     # WARNING: specific to multilayer canopy, not standard CLM
     # ------------------------------------------------------------------
     assert filter.nolakec is not None, "filter.nolakec must be initialized"
-    temperature_inst, soilstate_inst = SoilTemperature(
+    temperature_inst, soilstate_inst, soil_energy_error = SoilTemperature(
         bounds,
         filter.num_nolakec,
         filter.nolakec,
@@ -289,6 +290,8 @@ def clm_drv(
         mlcanopy_inst,
         step_time.dtime,
     )
+    for p, err in soil_energy_error.items():  # Fortran stops; recorded, checked on the host
+        mlcanopy_inst = record_balance_error(mlcanopy_inst, p, SOIL_TEMPERATURE, err)
 
     # ------------------------------------------------------------------
     # Return the updated state (Fortran updated module-level instances)
