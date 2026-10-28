@@ -895,8 +895,20 @@ Progress:
   step. `clm_ml.model` selects it on import (warning if JAX has already started); normal
   runs keep the default runtime. Cost: an 8-step chunk gradient takes ~7 min and ~13 GB
   (mostly compilation). Re-test with newer JAX.
-- Remaining: GPU timing (done-when 3, GPU part);
-  the resident-memory check on a long run.
+- ✅ **Memory with run length** (streams path, daily-mean stream, no records kept): 2 days
+  3.56 GB peak footprint (3.32 GB resident), 31 days 3.68 GB (2.88 GB resident); the earlier
+  growth of resident memory came from the per-step containers and text output, now gone.
+  Only one month of CHATS7 forcing exists, so runs of several months (several chunks) are
+  not tested here.
+- ✅ **Timing test (CPU)**, `timing/results.jsonl`: the 50-step run takes 56 s (Phase 0:
+  246 s), 39 s per simulated day (Phase 0: 214 s); this path still writes the legacy text
+  output. A compiled step takes ~15 ms; a 31-day run with a daily stream takes 82 s.
+
+**Phase 4 status: done, except GPU timing** (done-when 3, GPU part; deferred, no GPU here).
+Done-when 1 (a chunked run is bit for bit identical to one chunk: two chunks of 4 vs one of 8,
+and a resumed run vs an uninterrupted one), done-when 2 (memory flat with run length, within
+the one month of forcing available) and the CPU part of done-when 3 (32-member ensemble,
+timing) are met.
 
 - `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one
   chunk, with `jax.checkpoint` on the step.
