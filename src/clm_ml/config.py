@@ -46,6 +46,9 @@ class PhysicsOptions:
 
 @dataclasses.dataclass(frozen=True)
 class NumericsOptions:
+    # Model time step (decision 13); null = the forcing data interval. The forcing is
+    # interpolated to it (clm_ml.forcing_interpolation); it must divide the data interval.
+    step_seconds: Optional[int] = None
     substep_seconds: float = 300.0  # dtime_ml
     integrator: Literal[
         "euler",

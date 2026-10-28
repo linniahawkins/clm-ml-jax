@@ -304,7 +304,7 @@ class Outputs:
         data = {v.name: np.asarray(v.compute(r), dtype=float) for v in VARIABLES}
 
         n_steps = raw["mlcanopy.ncan_canopy"].shape[0]
-        step = dt.timedelta(seconds=run.run_file.time.step_seconds)
+        step = dt.timedelta(seconds=run.step_seconds)
         time = np.array([run.start + (k + 1) * step for k in range(n_steps)], "datetime64[ns]")
 
         # Soil layers 1..nlevgrnd (legacy arrays are 1-based in this dimension).

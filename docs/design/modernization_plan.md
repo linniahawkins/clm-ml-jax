@@ -965,6 +965,25 @@ comparison against the Fortran output:
   model step) results are unchanged. New tests: 6-hourly forcing derived from the CHATS7
   half-hourly data, interpolated back to 30 minutes, conserves daily totals; monthly LAI is
   interpolated as specified.
+  ✅ Done. `model.yaml` `numerics.step_seconds` (null: the forcing data interval, which
+  `run.yaml` `time.step_seconds` gives); it must divide the data interval, and the
+  substep must divide it. `clm_ml.forcing_interpolation`: a record stamped `t` is the mean
+  over `[t, t + Δf]`, located at its midpoint; air temperature, humidity, wind, pressure,
+  longwave and height are linear between midpoints (evaluated at the step midpoint); shortwave
+  is scaled by `cosz(step) / cosz(interval)` (mean of `max(cos zenith, 0)`, the model's orbital
+  functions), conserving each interval's mean (held constant if the sun is down for the whole
+  interval); precipitation is held constant. Raw file variables are interpolated, then
+  derived per step (humidity from RH, longwave, solar partitioning), as CLM's data atmosphere.
+  The CLM history slice is the one whose interval (read from the file's time axis) contains
+  the step's end. With equal intervals nothing is interpolated: CHATS7 results bit for bit
+  unchanged, so the Fortran comparison is that of the item above.
+  Tests: 6-hourly means of the CHATS7 data interpolated back to 30 min conserve daily and
+  6-hourly shortwave and precipitation to 1e-12, put no sunlight at night, follow the sun
+  (correlation with the observed half-hourly shortwave 0.92, vs 0.79 holding the 6-hour mean
+  constant) and interpolate temperature linearly; end to end, 3 CHATS7 days forced by 6-hourly
+  data at a 30-min step vs half-hourly forcing: daily net radiation within ~2 %, latent heat
+  within ~7 %, GPP within ~6 %, sensible heat (the small residual) within ~11 W m-2.
+  Daily or monthly LAI, SAI and soil water: next item.
 - **Daily/monthly prescribed land data** (decision 14): readers for user-supplied LAI, SAI and
   soil water files.
 

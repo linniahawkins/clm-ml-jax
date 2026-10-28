@@ -226,7 +226,15 @@ def setup_run(nml: dict) -> LegacyRun:
 
     clm_time_manager.start_date_ymd = start_ymd
     clm_time_manager.start_date_tod = int(params.get("start_tod", 0))
-    clm_time_manager.dtstep = int(TowerDataMod.tower_time[tower_num]) * 60
+    # The forcing data interval is the tower's; the model step (decision 13) defaults to it,
+    # and the forcing is interpolated to it otherwise (clm_ml.forcing_interpolation).
+    record_sec = int(TowerDataMod.tower_time[tower_num]) * 60
+    clm_time_manager.dtstep = int(params.get("dtstep_seconds", record_sec))
+    if record_sec % clm_time_manager.dtstep:
+        raise ValueError(
+            f"model step {clm_time_manager.dtstep} s must divide the forcing interval "
+            f"{record_sec} s"
+        )
 
     # ------------------------------------------------------------------
     # 3. Build decomposition bounds  (single column for offline case)
@@ -296,12 +304,26 @@ def setup_run(nml: dict) -> LegacyRun:
         """StepTime of a 0-based run step."""
         return step_time(start_ymd, run_start_tod, dtstep_sec, run_step + 1)
 
-    start_calday_clm = step_time(clm_start_ymd, clm_start_tod, dtstep_sec, 1).calday
+    # The CLM history file has its own interval (from its time axis): a model step uses the
+    # time slice whose interval contains the step's end (slice s ends at the history start
+    # + s intervals). With the history interval equal to the model step, slice k + 1 for step k.
+    import netCDF4 as _nc
+
+    with _nc.Dataset(fin2) as _ds:
+        _t = _ds.variables["time"]
+        history_sec = int(round(float(_t[1] - _t[0]) * 86400.0))
+    clm_start = datetime.datetime.strptime(str(clm_start_ymd), "%Y%m%d") + datetime.timedelta(
+        seconds=clm_start_tod
+    )
+    _run_start = datetime.datetime.strptime(str(start_ymd), "%Y%m%d") + datetime.timedelta(
+        seconds=run_start_tod
+    )
 
     def _history_index(run_step: int) -> int:
         """1-based CLM history time slice of a 0-based run step."""
-        calday = _time(run_step).calday
-        return round((calday - start_calday_clm) * 86400.0 / float(dtstep_sec)) + 1
+        step_end = _run_start + datetime.timedelta(seconds=(run_step + 1) * dtstep_sec)
+        elapsed = (step_end - clm_start).total_seconds()
+        return int(-(-elapsed // history_sec))  # ceil: the slice whose interval contains it
 
     soil_init_time_indx = _history_index(0)
 
@@ -310,7 +332,7 @@ def setup_run(nml: dict) -> LegacyRun:
     run_start = datetime.datetime.strptime(str(start_ymd), "%Y%m%d") + datetime.timedelta(
         seconds=run_start_tod
     )
-    first_record = tower_first_record(fin1, run_start, dtstep_sec)
+    first_record = tower_first_record(fin1, run_start, record_sec)
     tower_height = float(TowerDataMod.tower_ht[tower_num])
 
     from clm_ml.legacy.forcing import TowerForcingSource
@@ -323,6 +345,11 @@ def setup_run(nml: dict) -> LegacyRun:
         n_steps=ntimes,
         history_index=_history_index,
         tower_height=tower_height,
+        record_seconds=record_sec,
+        step_seconds=dtstep_sec,
+        run_start=run_start,
+        lat=float(TowerDataMod.tower_lat[tower_num]),
+        lon=float(TowerDataMod.tower_lon[tower_num]),
     )
 
     def load_chunk(first_step: int, n_steps: int) -> ForcingChunk:

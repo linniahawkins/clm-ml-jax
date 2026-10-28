@@ -40,7 +40,7 @@ class TimeSection:
     end: Optional[str] = None  # give exactly one of end, days, steps
     days: Optional[float] = None
     steps: Optional[int] = None
-    step_seconds: int = 1800  # forcing time step
+    step_seconds: int = 1800  # forcing data interval (the model step: model.yaml numerics)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -171,6 +171,11 @@ class Run:
         return self.path(self.run_file.output.directory)
 
     @property
+    def step_seconds(self) -> int:
+        """The model step (model.yaml numerics.step_seconds, default the forcing interval)."""
+        return self.config.numerics.step_seconds or self.run_file.time.step_seconds
+
+    @property
     def restart_path(self) -> Path:
         """Where this run writes its restart (the previous one is kept as ``.prev``)."""
         tower = self.domain.gridcells.names[0]
@@ -263,6 +268,7 @@ class Run:
             "met_type": 3 if f.interpolation == "three_point" else 0,
             "dpai_min": self.config.canopy_layers.min_plant_area_per_layer,
             "pftcon_val": 0,
+            "dtstep_seconds": self.step_seconds,
             "acclimation": self.config.physics.acclimation_temperature,
             "acclimation_days": self.config.physics.acclimation_days,
         }
@@ -299,11 +305,11 @@ class Run:
     def summary(self) -> str:
         """What ``clm-ml check`` prints."""
         d, c = self.domain, self.config
-        end = self.start + dt.timedelta(seconds=self.n_steps * self.run_file.time.step_seconds)
+        end = self.start + dt.timedelta(seconds=self.n_steps * self.step_seconds)
         lines = [
             f"Run: {self.source}",
             f"  time       {self.start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M}, "
-            f"{self.n_steps} steps of {self.run_file.time.step_seconds} s",
+            f"{self.n_steps} steps of {self.step_seconds} s",
             f"  params     {self.params.source}",
             f"  gridcells  {d.n_gridcells}   patches {d.n_patches}",
         ]
@@ -378,7 +384,13 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
             f"{domain.gridcells.names[0]} has forcing_step_minutes {step_minutes}"
         )
 
-    start, n_steps = _resolve_time(run_file.time, path.name)
+    model_step = config.numerics.step_seconds or run_file.time.step_seconds
+    if model_step <= 0 or run_file.time.step_seconds % model_step:
+        raise ConfigError(
+            f"model.yaml: numerics.step_seconds ({model_step}) must divide the forcing "
+            f"interval (run.yaml time.step_seconds, {run_file.time.step_seconds} s)"
+        )
+    start, n_steps = _resolve_time(run_file.time, path.name, model_step)
     run = Run(run_file, base_dir, config, params, domain, start, n_steps, source=path.name)
     tower = domain.gridcells.names[0]
     files = {"forcing.meteorology": run_file.forcing.meteorology,
@@ -390,11 +402,11 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
     for key, text in files.items():
         if not run.path(text, tower).exists():
             raise ConfigError(f"{path.name}: {key}: file not found: {run.path(text, tower)}")
-    substeps = run_file.time.step_seconds / config.numerics.substep_seconds
+    substeps = model_step / config.numerics.substep_seconds
     if substeps != int(substeps):
         raise ConfigError(
             f"model.yaml: numerics.substep_seconds ({config.numerics.substep_seconds:g}) must "
-            f"divide the forcing step ({run_file.time.step_seconds} s)"
+            f"divide the model step ({model_step} s)"
         )
     return run
 
@@ -456,7 +468,8 @@ def _parse_datetime(text: str, key: str) -> dt.datetime:
         raise ConfigError(f"run.yaml: {key}: {text!r} is not a date-time like 2007-05-01T00:00")
 
 
-def _resolve_time(t: TimeSection, source: str) -> tuple[dt.datetime, int]:
+def _resolve_time(t: TimeSection, source: str, step_seconds: int) -> tuple[dt.datetime, int]:
+    """Start and number of model steps (``step_seconds`` long)."""
     start = _parse_datetime(t.start, "time.start")
     given = [k for k in ("end", "days", "steps") if getattr(t, k) is not None]
     if len(given) != 1:
@@ -469,7 +482,7 @@ def _resolve_time(t: TimeSection, source: str) -> tuple[dt.datetime, int]:
             if t.end is not None
             else t.days * 86400.0
         )
-        n = seconds / t.step_seconds
+        n = seconds / step_seconds
         if n != int(n):
             raise ConfigError(f"{source}: time: run length is not a whole number of steps")
     if int(n) < 1:

@@ -8,7 +8,8 @@ Must be imported after ``InitializeRealize`` (the legacy modules it uses import
 from __future__ import annotations
 
 import dataclasses
-from typing import Callable
+import datetime as dt
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -45,6 +46,12 @@ def load_forcing(
     run_steps = chunk_run_steps(run_n_steps, first_step, n_steps)
     raws = read_tower_met_series(tower_file, [first_record + k for k in run_steps])
     mets = [derive_tower_met(raw, tower_height) for raw in raws]
+    slices = [history_index(k) for k in run_steps]
+    return _forcing(mets, slices, clm_history_file, soil_adjust_file, first_step)
+
+
+def _forcing(mets, slices, clm_history_file, soil_adjust_file, first_step) -> Forcing:
+    """A chunk from per-step derived meteorology and CLM history time slices."""
 
     def col(name):
         return np.array([[getattr(m, name)] for m in mets], dtype=float)
@@ -64,7 +71,6 @@ def load_forcing(
         shortwave_diffuse=np.array([[m.solai] for m in mets], dtype=float),
     )
 
-    slices = [history_index(k) for k in run_steps]
     records = read_clm_history_series(clm_history_file, soil_adjust_file, slices)
     steps = [records[i] for i in slices]
     factors = [r.h2osoi_factor for r in steps]
@@ -94,8 +100,17 @@ class TowerForcingSource:
     n_steps: int  # steps in the whole run
     history_index: Callable[[int], int]
     tower_height: float
+    # The model step and the data interval (decision 13): equal -> records are steps;
+    # otherwise the records are interpolated to the model step.
+    record_seconds: int = 1800
+    step_seconds: int = 1800
+    run_start: Optional[dt.datetime] = None  # needed when interpolating
+    lat: float = 0.0  # degrees, for the solar zenith angle (coszen interpolation)
+    lon: float = 0.0
 
     def chunk(self, first_step: int, n_steps: int) -> Forcing:
+        if self.step_seconds != self.record_seconds:
+            return _interpolated_chunk(self, first_step, n_steps)
         return load_forcing(
             self.tower_file,
             self.clm_history_file,
@@ -107,6 +122,54 @@ class TowerForcingSource:
             history_index=self.history_index,
             tower_height=self.tower_height,
         )
+
+
+_COSZ_FUNCTIONS: dict = {}  # (lat, lon, year) -> mean_cosz function
+
+
+def _file_records(path: str) -> int:
+    import netCDF4 as nc
+
+    with nc.Dataset(path) as ds:
+        return ds.dimensions["time"].size
+
+
+def _interpolated_chunk(self: TowerForcingSource, first_step: int, n_steps: int) -> Forcing:
+    """The chunk at the model step, interpolated from the data records
+    (:mod:`clm_ml.forcing_interpolation`), then derived step by step."""
+    import math
+
+    from clm_ml.forcing_interpolation import interpolate_records, mean_cosz_function
+    from offline_driver.TowerMetMod import TowerMetRaw
+
+    run_steps = chunk_run_steps(self.n_steps, first_step, n_steps)
+    step = dt.timedelta(seconds=self.step_seconds)
+    starts = [self.run_start + k * step for k in run_steps]
+    per = self.record_seconds // self.step_seconds
+    # records covering the steps, plus one on each side for linear interpolation
+    lo = max(min(run_steps) // per - 1, -self.first_record)
+    hi = min(max(run_steps) // per + 1, _file_records(self.tower_file) - 1 - self.first_record)
+    records = list(range(lo, hi + 1))
+    raws = read_tower_met_series(self.tower_file, [self.first_record + j for j in records])
+    rec = dt.timedelta(seconds=self.record_seconds)
+    rec_starts = [self.run_start + j * rec for j in records]
+    values = {f: np.array([getattr(r, f) for r in raws], dtype=float) for f in TowerMetRaw._fields}
+    key = (self.lat, self.lon, self.run_start.year)
+    if key not in _COSZ_FUNCTIONS:
+        _COSZ_FUNCTIONS[key] = mean_cosz_function(
+            math.radians(self.lat), math.radians(self.lon), self.run_start.year
+        )
+    at_step = interpolate_records(
+        values, rec_starts, self.record_seconds, starts, self.step_seconds, _COSZ_FUNCTIONS[key]
+    )
+    mets = [
+        derive_tower_met(
+            TowerMetRaw(**{f: float(at_step[f][i]) for f in at_step}), self.tower_height
+        )
+        for i in range(len(starts))
+    ]
+    slices = [self.history_index(k) for k in run_steps]
+    return _forcing(mets, slices, self.clm_history_file, self.soil_adjust_file, first_step)
 
 
 def tower_met_at(forcing: Forcing, t: int, g: int = 0) -> TowerMet:
