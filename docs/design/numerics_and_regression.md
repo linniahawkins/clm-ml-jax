@@ -86,55 +86,63 @@ that value. This predates the modernization. It is within the validated agreemen
 
 **Status:** recorded, not changed. Matching Fortran here would change results, so it is a
 deliberate fidelity change with its own validation (plan Phase 4b or later), not part of a
-refactor. The sensitivity in §5 may be related.
+refactor.
 
-## 5. The model is sensitive at the evening transition
+**Bug fixed (Phase 3).** The fixed-step secant iteration took a huge step when two consecutive
+residuals were exactly equal after convergence; it now takes no step (§5).
 
-**Evidence.** Two runs of the same code that differ only by `leaf_emissivity × (1 + 1e-12)`
-agree to about 1e-13 for six half-hour steps. At step 7 (00:00–03:30 UTC, about 17:00–20:30 PST,
-the evening transition to stable conditions) they differ by:
+## 5. The apparent evening-transition sensitivity was a solver bug (fixed)
 
-| Quantity | Difference |
-|---|---|
-| u* | 1.1e-3 m s⁻¹ |
-| sensible heat flux | 0.12 W m⁻² |
-| aerodynamic conductance | 2.5 |
-| roughness-sublayer β | 2.2e-4 |
+**What was seen.** Two runs differing only by `leaf_emissivity × (1 ± 1e-12)` (the noise twins)
+differed by up to 4.5% in turbulence fields (`mflx_profile`, `gac_profile`, wind at the leaves,
+u*), with jumps at single steps (largest at step 7, the evening transition). A refactor that
+changed only round-off produced jumps of the same kind. This was first read as a property of
+the model.
 
-The difference then decays. A refactor that changes only round-off (moving to the traceable
-branches) produced exactly the same jump at the same step.
+**Cause.** The secant iteration of the Obukhov-length solver (`_obu_body_pure`; the same code is
+in the intercellular-CO₂ solver `_ci_solver_scan`) runs a fixed number of steps and does not stop
+once converged. After about five steps the residual is at round-off level (±1e-14). When two
+consecutive residuals come out *exactly equal*, the secant denominator `f1 − f0` is zero, and the
+code divided by a floor of 1e-30 instead:
 
-**Over the full 50-step reference day** (twins `leaf_emissivity × (1 ± 1e-12)`), the largest
-difference from the reference, relative to the field's magnitude, is:
+```
+dx = −f1 · (x1 − x0) / max(|f1 − f0|, 1e-30)  ≈  (1e-14 · 1e-14) / 1e-30  ≈  100 m
+```
 
-| Field | Twin difference |
-|---|---|
-| momentum flux profile (`mflx_profile`) | 4.5e-2 |
-| aerodynamic conductance profile (`gac_profile`) | 4.4e-2 |
-| wind speed at shaded leaves / all leaves | 4.4e-2 / 3.9e-2 |
-| canopy air heat storage (`stflx_air_canopy`) | 3.2e-2 |
-| canopy evaporation (`evveg_canopy`) | 3.1e-2 |
+The converged iterate was thrown far away (in one case from L = 73.6 m, stable, to −128 m,
+unstable). The secant then pulled it back over the following steps, in a cycle, and the value
+returned after step 25 depended on where in that cycle the iteration ended. Whether this
+happened depended on round-off in the last digits, hence the "sensitivity".
 
-35 of the 88 recorded fields do not change at all. Those are radiation, APAR, albedo and soil
-water stress, which do not depend on the turbulence solution. A perturbation in the 12th
-digit therefore moves turbulence-related fields by several percent at some steps. That is a
-scientifically notable property of the model (and may account for part of the 2.5% tolerance
-needed in the existing JAX–Fortran comparison).
+**Fix.** When `f1 == f0` the secant step is undefined, so no step is taken
+(`dx = where(f1 == f0, 0, …)`). Converged values are unchanged; Fortran's `hybrid`, which stops
+when the step is below 0.1 m, never does this.
 
-**Interpretation.** At the transition, a discrete outcome flips on round-off-sized input
-differences. The most likely candidates are:
-- the stability bounds of the roughness-sublayer theory (−2 ≤ L_c/L ≤ 1, where the Obukhov length
-  is clipped);
-- the stopping tests of the Obukhov and roughness-length solvers.
+**Effect on the reference day** (CHATS7, 50 steps):
+- The old reference itself was distorted by the bug at several steps: the fix changes it by up
+  to 2.4% (relative to the field's magnitude) at step 32, 0.8% at step 7 and 0.4% at steps 5 and
+  23, and by ≤ 1e-4 elsewhere.
+- **The twins now differ from the reference by at most 4e-11** (any field, any step), against
+  4.5e-2 before. The model is well conditioned: a perturbation in the 12th digit stays in the
+  11th digit.
 
-The same sensitivity is expected in Fortran. It is a property of the model, not of the
-translation or the refactor. Worth investigating as a science question (§4 may contribute);
-not a refactoring bug.
+| Field | Twin difference before | after |
+|---|---|---|
+| momentum flux profile (`mflx_profile`) | 4.5e-2 | 7.9e-13 |
+| aerodynamic conductance profile (`gac_profile`) | 4.4e-2 | 3.8e-12 |
+| wind speed at shaded leaves | 4.4e-2 | 2.6e-12 |
+| canopy air heat storage (`stflx_air_canopy`) | 3.2e-2 | 3.1e-12 |
+| u* | 3.1e-2 | 7.7e-13 |
+| sensible heat flux | 1.2e-2 | 3.0e-11 |
+
+The bug may account for part of the 2.5% tolerance needed in the JAX–Fortran comparison of the
+full month (`tests/test_fortran_python_comparison.py`, not yet re-run with the fix).
 
 ## 6. Regression testing policy
 
-Because of §5, **no tolerance on per-step values separates round-off changes from real
-changes**. A correct change that alters round-off can move a single step by 1e-3 relative.
+A change that alters only round-off (compiling code, a different order of operations, GPU)
+cannot reproduce the reference bit for bit, so a tolerance is needed. The model's own
+sensitivity to round-off, measured by noise twins, sets it.
 
 The policy has two checks:
 
@@ -156,9 +164,9 @@ The policy has two checks:
    --update-reference`. Say in the commit that the step changes round-off only, and why.
 3. The bit-for-bit test then guards the next refactors again.
 
-**What the noise twin cannot catch:** an error smaller than one regime flip. For turbulence
-fields that means up to ~9% (2 × 4.5%) at a single step, so **the noise-twin test is a coarse
-guard, not a precise one.** Precise checking comes from three other tests:
+**How tight it is.** Since the solver fix (§5), the twin noise is at most about 4e-11 relative,
+so the noise-twin test detects any change larger than about 1e-10. (Before the fix it allowed
+up to ~9% at a single step.) The other checks remain:
 - the bit-for-bit test, for refactors;
 - the per-routine identical-input checks (§1), for changes that alter round-off;
 - the Fortran golden tests (`rtol = 1e-9`).

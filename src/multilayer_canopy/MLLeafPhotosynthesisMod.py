@@ -843,7 +843,10 @@ def _ci_solver_scan(ci0, ci1, func_kwargs, n_iter=40):
         _df = f1 - f0
         _df_abs_safe = jnp.maximum(jnp.abs(_df), jnp.asarray(1.0e-30))
         _df_sign = jnp.where(_df < 0.0, jnp.asarray(-1.0), jnp.asarray(1.0))
-        dx = -f1 * (x1 - x0) * _df_sign / _df_abs_safe
+        # Identical residuals (f1 == f0, typically both round-off after convergence) leave
+        # the secant step undefined: take no step. Dividing by the 1e-30 floor instead
+        # throws a converged iterate far away (e.g. Obukhov length 73.6 m -> -128 m).
+        dx = jnp.where(_df == 0.0, 0.0, -f1 * (x1 - x0) * _df_sign / _df_abs_safe)
         x_new = x1 + dx
         f_new = _CiFuncPure_jax(x_new, **func_kwargs)
         return (x1, x_new, f1, f_new), None
