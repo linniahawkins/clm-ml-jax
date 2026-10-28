@@ -37,7 +37,6 @@ class CanopyParams(NamedTuple):
     g1_medlyn: Array
     psi50_gs: Array
     shape_gs: Array
-    c3_photosynthesis: Array  # 1 for C3, 0 for C4 (data: both pathways are computed)
     # Plant hydraulics and roots
     plant_conductance: Array
     plant_capacitance: Array
@@ -65,7 +64,6 @@ LEGACY_FIELDS: dict[str, tuple[str, str]] = {
     "g1_ball_berry": ("MLpftcon", "g1_BB"),
     "g0_medlyn": ("MLpftcon", "g0_MED"),
     "g1_medlyn": ("MLpftcon", "g1_MED"),
-    "c3_photosynthesis": ("pftcon", "c3psn"),
     "psi50_gs": ("MLpftcon", "psi50_gs"),
     "shape_gs": ("MLpftcon", "shape_gs"),
     "plant_conductance": ("MLpftcon", "gplant_SPA"),
@@ -101,13 +99,14 @@ def canopy_params_from_tables(pft: int) -> CanopyParams:
 
 
 def patch_setup(p: int, mlcanopy_inst) -> tuple:
-    """``(GridInfo, CanopyParams)`` for patch ``p``: its index (static) and its PFT's
-    parameters, from the patch's PFT (``patch.itype``). Layer counts are data in the
-    container (``MLLayersMod``), the C3/C4 flag in the parameters."""
+    """``(GridInfo, CanopyParams)`` for patch ``p``: its index and C3/C4 flag (static, Python
+    values) and its PFT's parameters, from the patch's PFT (``patch.itype``). Layer counts are
+    data in the container (``MLLayersMod``)."""
     from clm_src_main.PatchType import patch
+    from clm_src_main.pftconMod import pftcon
     from multilayer_canopy.MLclm_varctl import GridInfo
 
     # Structure (NumPy indexing, so this works while a step is being traced)
     pft = int(np.asarray(patch.itype)[p])
-    grid = GridInfo(p=p)
+    grid = GridInfo(p=p, c3=round(float(np.asarray(pftcon.c3psn)[pft])) == 1)
     return grid, canopy_params_from_tables(pft)

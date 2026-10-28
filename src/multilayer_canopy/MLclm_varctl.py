@@ -20,15 +20,15 @@ from clm_src_main.clm_varcon import ispval  # noqa: F401
 
 
 class GridInfo(NamedTuple):
-    """The patch's index, passed to the physics (static).
+    """The patch's static structure: Python values that select code, passed to the physics.
 
-    The layer counts (``ncan``, ``ntop``, ``nbot``) and the C3/C4 flag were here until
-    Phase 5b; they are data now (``mlcanopy_inst.ncan_canopy`` etc., see ``MLLayersMod``;
-    ``CanopyParams.c3_photosynthesis``), so patches with different layer counts or
-    photosynthetic pathways share one compiled program.
+    The layer counts (``ncan``, ``ntop``, ``nbot``) were here until Phase 5b; they are data
+    now (``mlcanopy_inst.ncan_canopy`` etc., see ``MLLayersMod``), so patches with different
+    layer counts share one compiled program.
     """
 
     p: int  # patch index (always 1 in single-site mode)
+    c3: bool  # C3 (True) or C4 photosynthesis: selects a code path, so static
 
 
 # ---------------------------------------------------------------------------

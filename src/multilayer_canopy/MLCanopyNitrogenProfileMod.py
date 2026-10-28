@@ -152,7 +152,7 @@ def CanopyNitrogenProfile(
         p = filter_patch[fp]
 
         # is_c3: JAX boolean scalar; used with jnp.where for differentiable branching
-        is_c3 = jnp.asarray(params.c3_photosynthesis) > 0.5  # data (plan Phase 5b)
+        is_c3 = grid.c3  # static (Python bool)
 
         # Canopy-top photosynthetic parameters — Fortran lines 80-96
         vcmax25top = params.vcmax25

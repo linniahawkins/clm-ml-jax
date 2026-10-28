@@ -42,6 +42,7 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 19 | Different layer counts | **Masks**, so one compiled program serves every patch (simpler batching and sharding, gradients across mixed patches). Not grouping patches by layer structure. Cost: compute on padded layers (e.g. a 20-layer grass in 50 slots). |
 | 20 | Configuration in the code | **Passed explicitly** (Phase 5a), not module globals: options static, tunable numbers in the differentiable parameters. Allows several models per process and in-process tests. |
 | 21 | Process interface (§6.6) | **Deferred to Phase 7** (not needed for batching). |
+| 22 | C3/C4 photosynthesis with mixed patches | **A static choice per group of patches**, not per-patch data. Phase 6 sorts patches into a C3 group and a C4 group *inside one compiled program* (group sizes are known when the run is set up), so each patch computes only its own pathway. Computing both pathways for every patch (tried in Phase 5b) wastes about half the photosynthesis work and memory on a GPU, where patches in a batch run in lockstep. Masks remain the choice for layer counts, which take many values; C3/C4 takes two. Extends to other per-PFT code switches as long as their combinations stay few. |
 
 Smaller decisions: see §8.
 
@@ -1280,16 +1281,14 @@ Progress:
   program **without compiling again** (`_cache_size` unchanged) and gives its own results
   within 1e-9 of each variable (measured ~1e-11: separately compiled programs round
   differently).
-- ✅ **C3/C4 as data** (decision with the maintainer: end of 5b): `CanopyParams` carries
-  `c3_photosynthesis` (from params.yaml, per PFT); `GridInfo` holds only the patch index.
-  Photosynthesis computes both pathways (the existing code for a fixed pathway, run as C3 and
-  as C4) and each patch keeps its own (`jnp.where`; exact for the selected pathway); when the
-  pathway is concrete (the eager first step) only that one is computed. The nitrogen profile
-  selects with the data flag. Cost: about twice the photosynthesis work in compiled chunks.
-  Round-off only (the larger program rounds differently); reference regenerated. Done-when
-  test extended: a C4 patch (params.yaml `c3_photosynthesis: false`) runs through the C3
-  patch's compiled program without compiling again and matches its own run; night-time leaf
-  net photosynthesis (respiration) differs between the pathways, as it should.
+- **C3/C4 as data: tried, measured, reverted (decision 22).** Computing both pathways for
+  every patch and selecting each patch's own (commit `29cb2fb`) let one program serve C3 and
+  C4 patches, but doubles the photosynthesis work for every patch on a GPU (patches in a batch
+  run in lockstep, so a per-patch branch computes both), and the first implementation made
+  the gradient 25× slower (below). C3/C4 is therefore a static choice again
+  (`GridInfo.c3`); Phase 6 groups patches by pathway inside one compiled program (decision
+  22). Reverted in commit "Phase 5b: C3/C4 static per group"; code, tests and regression
+  reference are back to commit `33dea92` (bit for bit).
 - **Timing after 5b** (`timing/results_model.jsonl`, CHATS7, CPU), against the step-0
   baselines: compiled step 4.3 ms (2.8 ms; 1.5×); gradient over 8 steps 386 ms per step
   (15.6 ms; **25×**), peak 4.4 GB (5.9 GB); timing test 8.2 s per simulated day (7.2 s).
@@ -1317,6 +1316,12 @@ memory are acceptable is mostly a GPU question, and the Phase 4 GPU timing is st
 
 - Turn on `vmap` over the patch axis, with forcing gathered from gridcells and outputs
   aggregated back (`segment_sum`). Remove the one-patch restriction from Phase 1.
+- **Group patches by photosynthetic pathway inside one compiled program** (decision 22): the
+  C3 patches and the C4 patches form two groups of fixed size (known at setup), each
+  batched with `vmap` and running only its own pathway's code (`GridInfo.c3` static per
+  group); forcing is gathered and outputs aggregated for both groups, and gradients with
+  respect to the PFT parameters add up across them. Test: a gridcell with a C3 and a C4 patch
+  matches each patch run alone. Layer counts need no grouping (masks, Phase 5b).
 - Load forcing for several towers (the `{tower}` placeholders in file paths).
 - Tests:
   - **Multi-tower:** running CHATS7 and US-UMB together must match running each alone.
