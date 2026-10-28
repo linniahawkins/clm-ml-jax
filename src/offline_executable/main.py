@@ -10,6 +10,7 @@ Mirrors the Fortran entry point in offline_driver/CLMml.F90 and
 the namelist reader in offline_driver/controlMod.F90.
 """
 
+import dataclasses
 import datetime
 import os
 import sys
@@ -123,13 +124,40 @@ def build_bounds(nml: dict) -> bounds_type:
     )
 
 
-def main():
-    # ------------------------------------------------------------------
-    # 1. Parse namelist  (mirrors controlMod.F90 :: read(5, nml=...))
-    # ------------------------------------------------------------------
-    source = sys.argv[1] if len(sys.argv) > 1 else None
-    nml = read_namelist(source)
+@dataclasses.dataclass
+class LegacyRun:
+    """A run set up by :func:`setup_run`: everything the time loop needs."""
 
+    params: dict  # namelist group
+    bounds: bounds_type
+    filt: object  # filterMod.clumpfilter
+    insts: object  # clm_instMod.ClmInstances, initial conditions installed
+    forcing: object  # clm_ml.forcing.Forcing for the run (one chunk)
+    ntimes: int
+    tower_num: int
+    iyear: int
+    imonth: int
+    dirout: str
+    time_of: object  # 0-based run step -> StepTime
+
+
+@dataclasses.dataclass
+class StepInputs:
+    """Forcing and time of one step (0-based ``run_step``)."""
+
+    now: object  # StepTime
+    met: object  # tower meteorology record
+    clm_record: object  # CLM history record
+    forcing_bef: object  # AtmForcingRecord, previous step
+    forcing_next: object  # AtmForcingRecord, next step
+
+
+def setup_run(nml: dict) -> LegacyRun:
+    """Configure the legacy modules from a namelist, initialize CLM, read the run's forcing
+    and install initial conditions (CLMml_drv up to its time loop)."""
+    # ------------------------------------------------------------------
+    # 1. Namelist settings  (mirrors controlMod.F90 :: read(5, nml=...))
+    # ------------------------------------------------------------------
     # Offline CLMml namelist group is typically &clmML_inparm
     params = nml.get("clmML_inparm", nml.get("clm_inparm", nml.get("clm_input", {})))
 
@@ -234,9 +262,6 @@ def main():
     # 6. Pre-loop setup  (mirrors CLMml_drv lines 84-120)
     # ------------------------------------------------------------------
     from clm_ml.legacy.forcing import (
-        atm_record_current,
-        atm_record_next,
-        clm_record_at,
         load_forcing,
         tower_met_at,
     )
@@ -244,9 +269,8 @@ def main():
         SoilInit,
         TowerVeg,
         init_acclim,
-        output,
     )
-    from offline_driver.TowerMetMod import TowerMetCurr, tower_first_record
+    from offline_driver.TowerMetMod import tower_first_record
 
     # 6-pre. Time axis of the run, and the matching time slice of the CLM history file
     #     for every step. Fortran CLMml_drv computed the history file's first calendar day
@@ -341,6 +365,87 @@ def main():
     )
     st = st._replace(waterstatebulk=waterstatebulk, temperature=temperature)
 
+    return LegacyRun(
+        params=params,
+        bounds=bounds,
+        filt=filt,
+        insts=st,
+        forcing=forcing,
+        ntimes=ntimes,
+        tower_num=tower_num,
+        iyear=iyear,
+        imonth=imonth,
+        dirout=dirout,
+        time_of=_time,
+    )
+
+
+def step_inputs(run: LegacyRun, run_step: int) -> StepInputs:
+    """Time and forcing of a 0-based run step, including the previous and next forcing
+    records for the multilayer canopy's 3-point time interpolation (Fortran
+    *_bef/_next_forcing; TowerMetNext)."""
+    from clm_ml.legacy.forcing import (
+        atm_record_current,
+        atm_record_next,
+        clm_record_at,
+        tower_met_at,
+    )
+
+    t_prev, t_curr, t_next = run.forcing.window_indices(run_step)
+    n_patch = run.bounds.endp + 1
+    return StepInputs(
+        now=run.time_of(run_step),
+        met=tower_met_at(run.forcing, t_curr),
+        clm_record=clm_record_at(run.forcing, t_curr),
+        forcing_bef=atm_record_current(run.forcing, t_prev, n_patch),
+        forcing_next=atm_record_next(run.forcing, t_next, n_patch),
+    )
+
+
+def advance(run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, params=None):
+    """One time step: install the step's tower meteorology, then ModelAdvance.
+    Returns ``(insts, filt)``."""
+    from offline_driver.TowerMetMod import TowerMetCurr
+
+    atm2lnd, wateratm2lndbulk, frictionvel = TowerMetCurr(
+        inputs.met,
+        run.tower_num,
+        run.bounds.begp,
+        run.bounds.endp,
+        insts.atm2lnd,
+        insts.wateratm2lndbulk,
+        insts.frictionvel,
+    )
+    insts = insts._replace(
+        atm2lnd=atm2lnd, wateratm2lndbulk=wateratm2lndbulk, frictionvel=frictionvel
+    )
+    return ModelAdvance(
+        run.bounds,
+        insts,
+        filt,
+        inputs.clm_record,
+        inputs.now,
+        inputs.forcing_bef,
+        inputs.forcing_next,
+        initialize=initialize,
+        params=params,
+    )
+
+
+def main():
+    source = sys.argv[1] if len(sys.argv) > 1 else None
+    run = setup_run(read_namelist(source))
+    params, filt, st = run.params, run.filt, run.insts
+    ntimes, tower_num, iyear, imonth, dirout = (
+        run.ntimes,
+        run.tower_num,
+        run.iyear,
+        run.imonth,
+        run.dirout,
+    )
+    from offline_driver import TowerDataMod
+    from offline_driver.CLMml_driver import output
+
     # ------------------------------------------------------------------
     # 7. Open output files  (mirrors CLMml_drv lines 123-153)
     # ------------------------------------------------------------------
@@ -370,7 +475,7 @@ def main():
     if progress_nsteps <= 0:
         progress_nsteps = 1
     print(
-        f"Starting time loop: ntimes={ntimes}, dtstep={dtstep_sec}s, "
+        f"Starting time loop: ntimes={ntimes}, dtstep={run.time_of(0).dtime}s, "
         f"progress every {progress_nsteps} step(s)",
         flush=True,
     )
@@ -380,9 +485,10 @@ def main():
     try:
         for _itim in range(1, ntimes + 1):
             step_t0 = time.perf_counter()
-            now = _time(_itim - 1)
-            curr_calday = now.calday
-            t_prev, t_curr, t_next = forcing.window_indices(_itim - 1)
+            t_met0 = time.perf_counter()
+            inputs = step_inputs(run, _itim - 1)
+            curr_calday = inputs.now.calday
+            t_met = time.perf_counter() - t_met0
 
             # After the first step, each step starts from the fixed template plus the
             # carried prognostic state (clm_ml.state.State): nothing else passes from one
@@ -390,40 +496,9 @@ def main():
             if _itim > 1:
                 st = instances_with_state(template, state)
 
-            # Install current-step tower meteorology
-            t_met0 = time.perf_counter()
-            atm2lnd, wateratm2lndbulk, frictionvel = TowerMetCurr(
-                tower_met_at(forcing, t_curr),
-                tower_num,
-                bounds.begp,
-                bounds.endp,
-                st.atm2lnd,
-                st.wateratm2lndbulk,
-                st.frictionvel,
-            )
-            st = st._replace(
-                atm2lnd=atm2lnd, wateratm2lndbulk=wateratm2lndbulk, frictionvel=frictionvel
-            )
-
-            # Forcing at the previous and next steps, for the multilayer canopy's
-            # 3-point time interpolation (Fortran *_bef/_next_forcing; TowerMetNext)
-            n_patch = bounds.endp + 1
-            forcing_bef = atm_record_current(forcing, t_prev, n_patch)
-            forcing_next = atm_record_next(forcing, t_next, n_patch)
-            t_met = time.perf_counter() - t_met0
-
             # Advance physics
             t_adv0 = time.perf_counter()
-            st, filt = ModelAdvance(
-                bounds,
-                st,
-                filt,
-                clm_record_at(forcing, t_curr),
-                now,
-                forcing_bef,
-                forcing_next,
-                initialize=(_itim == 1),
-            )
+            st, filt = advance(run, st, filt, inputs, initialize=(_itim == 1))
             if _itim == 1:
                 template = st
             state = state_from_instances(st)
