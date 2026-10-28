@@ -1261,6 +1261,20 @@ Progress:
   converting: the CO₂ profile reset covers levels 0..ncan−1 instead of 1..ncan (no effect;
   numerics doc §4.5, not changed). Compile time grows with `max_layers` here (the solve is
   unrolled over every slot): the padding test now takes ~9 min.
+- ✅ **Step 3f, the canopy driver** (`MLCanopyFluxesMod`): leaf/stem area profile update,
+  copy of the previous state, sub-step flux accumulation and write-back, sun/shade merge and
+  the canopy diagnostics work on every slot with masks. The remaining Fortran checks that ran
+  only on concrete values (plant area profile; the four energy balances of
+  `CanopyFluxesDiagnostics`) are recorded like the others (`BALANCE_CHECKS` now has 11).
+  `GridInfo` no longer holds the layer counts (only the patch index and C3/C4 flag); old
+  process-IO recordings are read with a compatibility class. Round-off only; reference
+  regenerated.
+- ✅ **Step 5, done-when test** (`tests/regression/test_one_program_any_layers.py`): CHATS7
+  with its default 46 layers and with explicit counts (10 within + 10 above = 20 layers),
+  same `max_layers`: the 20-layer model's chunk runs through the 46-layer model's compiled
+  program **without compiling again** (`_cache_size` unchanged) and gives its own results
+  within 1e-9 of each variable (measured ~1e-11: separately compiled programs round
+  differently).
 - Gradient padding test (step 1 code): gradients finite for 46, 50 and 100 slots; they
   differ by up to 5e-9 relative (round-off amplified by the implicit-function derivatives
   of the solvers), so the gradient comparison uses 1e-7 (the finite-difference checks pass

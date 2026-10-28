@@ -155,7 +155,7 @@ def replay(out_json: Path) -> None:
     _run_model(1, hook)  # initializes tables (PFT parameters, lookup tables, filters)
     F = report.pop("module")
     with gzip.open(PROCESS_IO_FILE, "rb") as fh:
-        records = pickle.load(fh)
+        records = _Unpickler(fh).load()
     for name, calls in records.items():
         results = []
         for call in calls:
@@ -172,6 +172,22 @@ def replay(out_json: Path) -> None:
             )
         report[name] = results
     Path(out_json).write_text(json.dumps(report, indent=1))
+
+
+class _Unpickler(pickle.Unpickler):
+    """Reads recordings made before Phase 5b, whose ``GridInfo`` also held the layer counts
+    ``(p, ncan, ntop, nbot, c3)``: those are data in the container now."""
+
+    def find_class(self, module, name):
+        cls = super().find_class(module, name)
+        if name != "GridInfo":
+            return cls
+
+        class OldGridInfo(cls):
+            def __new__(klass, *fields):
+                return cls(p=fields[0], c3=fields[-1]) if len(fields) == 5 else cls(*fields)
+
+        return OldGridInfo
 
 
 #: The multilayer canopy options of the recorded CHATS7 run (the Fortran defaults with the

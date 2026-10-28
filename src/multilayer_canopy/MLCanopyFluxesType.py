@@ -397,8 +397,14 @@ BALANCE_CHECKS = (
     ("soil energy balance (SoilFluxes), W m-2", 1.0e-3),
     ("total solar radiation conservation (TwoStream), W m-2", 1.0e-6),
     ("solar radiation conservation (Norman), W m-2", 1.0e-3),
+    ("plant area profile sums to LAI + SAI (MLCanopyFluxes), m2 m-2", 1.0e-6),
+    ("vegetation energy balance (CanopyFluxesDiagnostics 1), W m-2", 1.0e-3),
+    ("net radiation (CanopyFluxesDiagnostics 2), W m-2", 1.0e-3),
+    ("canopy energy balance (CanopyFluxesDiagnostics 3), W m-2", 1.0e-2),
+    ("radiation at the canopy top (CanopyFluxesDiagnostics 4), W m-2", 1.0e-3),
 )
-LEAF_ENERGY, LONGWAVE, NITROGEN, SOIL_ENERGY, SOLAR, NORMAN_SOLAR = range(len(BALANCE_CHECKS))
+(LEAF_ENERGY, LONGWAVE, NITROGEN, SOIL_ENERGY, SOLAR, NORMAN_SOLAR, PLANT_AREA,
+ CANOPY_ENERGY_1, CANOPY_ENERGY_2, CANOPY_ENERGY_3, CANOPY_ENERGY_4) = range(len(BALANCE_CHECKS))  # fmt: skip
 
 #: Runge-Kutta stage axis of the increment arrays: room for the largest method (4 stages,
 #: runge_kutta_type 41) plus one, whatever the run's method (the update uses its own count).

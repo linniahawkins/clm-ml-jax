@@ -99,19 +99,14 @@ def canopy_params_from_tables(pft: int) -> CanopyParams:
 
 
 def patch_setup(p: int, mlcanopy_inst) -> tuple:
-    """``(GridInfo, CanopyParams)`` for patch ``p``: its layer indices and C3/C4 flag (static,
-    Python values) and its PFT's parameters, from the patch's PFT (``patch.itype``)."""
+    """``(GridInfo, CanopyParams)`` for patch ``p``: its index and C3/C4 flag (static, Python
+    values) and its PFT's parameters, from the patch's PFT (``patch.itype``). Layer counts are
+    data in the container (``MLLayersMod``)."""
     from clm_src_main.PatchType import patch
     from clm_src_main.pftconMod import pftcon
     from multilayer_canopy.MLclm_varctl import GridInfo
 
     # Structure (NumPy indexing, so this works while a step is being traced)
     pft = int(np.asarray(patch.itype)[p])
-    grid = GridInfo(
-        p=p,
-        ncan=int(np.asarray(mlcanopy_inst.ncan_canopy)[p]),
-        ntop=int(np.asarray(mlcanopy_inst.ntop_canopy)[p]),
-        nbot=int(np.asarray(mlcanopy_inst.nbot_canopy)[p]),
-        c3=round(float(np.asarray(pftcon.c3psn)[pft])) == 1,
-    )
+    grid = GridInfo(p=p, c3=round(float(np.asarray(pftcon.c3psn)[pft])) == 1)
     return grid, canopy_params_from_tables(pft)

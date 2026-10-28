@@ -20,19 +20,14 @@ from clm_src_main.clm_varcon import ispval  # noqa: F401
 
 
 class GridInfo(NamedTuple):
-    """Structural grid constants extracted *before* JAX tracing.
+    """The patch's static structure: Python values that select code, passed to the physics.
 
-    Under ``jax.grad``, NamedTuple fields of ``mlcanopy_inst`` become
-    abstract tracers.  Calling ``int()`` on a tracer raises
-    ``ConcretizationTypeError``.  ``GridInfo`` bundles those integers so
-    they can be extracted once (as concrete Python ints) and threaded
-    through all physics functions via a closure or explicit parameter.
+    The layer counts (``ncan``, ``ntop``, ``nbot``) were here until Phase 5b; they are data
+    now (``mlcanopy_inst.ncan_canopy`` etc., see ``MLLayersMod``), so patches with different
+    layer counts share one compiled program.
     """
 
     p: int  # patch index (always 1 in single-site mode)
-    ncan: int  # number of canopy layers
-    ntop: int  # top foliage layer
-    nbot: int  # bottom foliage layer
     c3: bool  # C3 (True) or C4 photosynthesis: selects a code path, so static
 
 
