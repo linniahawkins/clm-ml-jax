@@ -20,6 +20,7 @@ from pathlib import Path
 import f90nml  # pip install f90nml
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 # Enable 64-bit floats in JAX before any module-level array creation.
 jax.config.update("jax_enable_x64", True)
@@ -466,15 +467,20 @@ def stack_step_inputs(inputs: list) -> tuple:
     )
 
 
-def make_chunk_runner(run: LegacyRun, template, filt):
+def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers"):
     """A compiled function ``(state, xs) -> (state, per-step outputs)`` that advances a
     chunk of steps as one ``jax.lax.scan`` (plan Phase 4). ``xs`` is from
     :func:`stack_step_inputs`; the per-step outputs are ``(state, mlcanopy,
-    temperature)`` after each step (the containers are for the output writer). Steps are
-    rebuilt from ``template`` plus the carried state, as in the step-by-step loop."""
+    temperature)`` after each step (the containers are for the output writer), or only the
+    state with ``outputs="state"`` (e.g. for ensembles). Steps are rebuilt from ``template``
+    plus the carried state, as in the step-by-step loop.
+
+    The compiled function takes an optional third argument, the patch's ``CanopyParams``
+    (default: from the PFT tables), so ``jax.vmap`` over it runs a parameter ensemble and
+    ``jax.grad`` differentiates with respect to it."""
     dtime = run.time_of(0).dtime  # static: the model step
 
-    def body(state, x):
+    def body(state, x, params):
         now, met, clm_record, forcing_bef, forcing_next = x
         inputs = StepInputs(
             now=now._replace(dtime=dtime),
@@ -484,12 +490,26 @@ def make_chunk_runner(run: LegacyRun, template, filt):
             forcing_next=forcing_next,
         )
         insts, _ = advance(
-            run, instances_with_state(template, state), filt, inputs, initialize=False
+            run,
+            instances_with_state(template, state),
+            filt,
+            inputs,
+            initialize=False,
+            params=params,
         )
         state = state_from_instances(insts)
+        if outputs == "state":
+            return state, state
         return state, (state, insts.mlcanopy, insts.temperature)
 
-    return jax.jit(lambda state, xs: jax.lax.scan(body, state, xs))
+    from multilayer_canopy.MLCanopyParamsMod import patch_setup
+
+    _, default_params = patch_setup(int(np.asarray(filt.exposedvegp)[0]), template.mlcanopy)
+
+    def run_chunk(state, xs, params=default_params):
+        return jax.lax.scan(lambda s, x: body(s, x, params), state, xs)
+
+    return jax.jit(run_chunk)
 
 
 def main():

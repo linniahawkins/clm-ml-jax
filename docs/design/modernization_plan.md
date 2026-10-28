@@ -808,9 +808,15 @@ Progress:
   available). The resident set grew from 2.2 to 3.5 GB over the 20 days: to check on a longer
   run (possible slow leak). Per step, writing the legacy text output (~80 ms) now dominates
   the compiled physics (~15 ms); output streams will replace it.
+- ✅ **Parameter ensembles**: the compiled chunk takes the patch's `CanopyParams`, and
+  `jax.vmap` over a batch runs an ensemble (done-when 3, CPU part). 32 members with
+  `vcmax25` × 0.8–1.2, one day (48 steps): 11 s after compiling (~7 ms per member-step), 3.1 GB
+  peak; the default member reproduces the single run; at midday higher `vcmax25` gives cooler
+  sunlit leaves (296.0, 295.9, 295.8 K for ×0.8, 1.0, 1.2), as expected from more
+  transpiration. Test: `tests/regression/test_ensemble.py`.
 - Remaining: `clm_ml.Model` API (`initial_state`, `step`, `run`), the `ForcingSource` streams
-  interface, restarts, output streams, `run.yaml` stream form, parameter ensembles with `vmap`,
-  GPU timing.
+  interface, restarts, output streams, `run.yaml` stream form, GPU timing (done-when 3, GPU
+  part), the resident-memory check on a long run.
 
 - `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one
   chunk, with `jax.checkpoint` on the step.
