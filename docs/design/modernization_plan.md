@@ -1078,6 +1078,25 @@ refuses a second), and every end-to-end test pays ~40–60 s of process start-up
   `clm_varctl`, `MLpftconMod`/`pftconMod` tables and their `Init` functions, `TowerDataMod`,
   `clm_varpar` sizes such as `nlevgrnd`, `clm_instMod` instances still read as globals). Record it
   here with what replaces each.
+- **Inventory** (done; AST scan of every import and attribute read, `src/` outside `clm_ml`):
+
+  | Group | Globals | Read by | Replacement |
+  |---|---|---|---|
+  | Fixed indices and sizes | `isun`, `isha`, `nleaf`, `ivis`, `inir`, `numrad`, `mxpft`, `iulog` | many | **Keep**: true constants, identical for every model |
+  | Scheme options | `MLclm_varctl`: `gs_type`, `gs_solver`, `gspot_type`, `colim_type`, `acclim_type`, `gb_type`, `turb_type`, `HF_extension_type`, `sparse_canopy_type`, `flux_profile_type`, `light_type`, `longwave_type`, `leaf_optics_type`, `runge_kutta_type`, `nrk`, `met_type`, `mlcan_to_clm` | 12 physics modules, copied at import | One static `MLOptions` argument (built from `ModelConfig`) |
+  | Numerics | `dtime_ml` (sub-step) | 5 physics modules | In `MLOptions` (static) |
+  | Layer structure | `dz_tall`, `dz_short`, `dz_param`, `dpai_min`, `nlayer_within`, `nlayer_above`; `nlevmlcan` = 100 | `MLinitVerticalMod`; 8 modules (size) | Arguments of the layer setup; `nlevmlcan` becomes `max_layers` in 5b |
+  | Tunable numbers among the options | `kn_val` (leaf nitrogen decay coefficient) | `MLCanopyNitrogenProfileMod` | Parameter (differentiable); in `MLOptions` until then if needed |
+  | PFT tables | `pftcon`, `MLpftcon` (and their `Init`, replaced by the worker) | `MLCanopyNitrogenProfileMod`, `MLCanopyParamsMod`, `SoilStateInitTimeConstMod`, `clm_initializeMod` | `Params` → `CanopyParams` (already the run path for most canopy parameters); the rest passed to the setup functions |
+  | Tower table | `TowerDataMod.tower_*` (height, lat/lon, canopy height, beta parameters, PFT, roots, soil texture, colour, bedrock, time step) | `CLMml_driver`, `TowerMetMod`, `SurfaceAlbedoMod`, `SoilStateInitTimeConstMod`, `initVerticalMod`, `initGridCellsMod` | One tower record (from `Domain`) passed to the setup functions |
+  | Soil layer structure | `clm_phys` → `nlevgrnd`, `nlevsoi`, `nlevsno` (`clm_varpar_init`), `nlev_soil_adjust` | 14 modules (sizes), `clmDataMod` | Static structure argument; the sizes are the same for CLM5.0 runs |
+  | Run control and time | `controlMod`, `clm_time_manager.dtstep`/start date | `main`, `CLMml_driver` (host side) | Already data in the run path (Phase 2: `StepTime`); remove the host globals |
+  | Model instances | `clm_instMod` | `main` only | Already explicit (Phase 3) |
+
+  The time step reads only the scheme options, numerics, `kn_val`, `MLpftcon` and the fixed
+  constants; the tables and soil structure are read by the setup code run once before the time
+  loop. Order of work: scheme options and numerics (the traced step) first, then the setup
+  code (layers, tower table, PFT tables), then the soil structure and host-side globals.
 - **Options** (scheme choices, numerics) become one frozen, hashable object built from
   `ModelConfig`, passed down as an argument and treated as *static* by `jit` (changing an option
   recompiles, as decided for `model.yaml`).
