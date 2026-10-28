@@ -459,6 +459,23 @@ def advance(run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, p
     )
 
 
+def month_chunks(run: LegacyRun, first_step: int) -> list:
+    """``(first_step, n_steps)`` chunks covering run steps ``first_step ... ntimes - 1``, one
+    per calendar month of the steps' start times (plan decision 17)."""
+    chunks = []
+    for k in range(first_step, run.ntimes):
+        t = run.time_of(k)
+        start = datetime.datetime(t.year, t.month, t.day) + datetime.timedelta(
+            seconds=t.tod - t.dtime
+        )
+        key = (start.year, start.month)
+        if chunks and chunks[-1][0] == key:
+            chunks[-1][2] += 1
+        else:
+            chunks.append([key, k, 1])
+    return [(k, n) for _, k, n in chunks]
+
+
 def stack_step_inputs(inputs: list) -> tuple:
     """Per-step inputs stacked along a leading time axis (the ``xs`` of a chunk's scan)."""
     return jax.tree.map(
@@ -560,10 +577,11 @@ def main():
         flush=True,
     )
 
-    # Steps after the first run as compiled chunks of chunk_steps steps (one jax.lax.scan
-    # each, plan Phase 4); chunk_steps = 0 runs every step separately (no compilation of
-    # the step; slower, for debugging).
-    chunk_steps = int(params.get("chunk_steps", 48))
+    # Steps after the first run as compiled chunks (one jax.lax.scan each, plan Phase 4):
+    # one chunk per calendar month by default (decision 17); namelist chunk_steps = N gives
+    # fixed N-step chunks, and 0 runs every step separately (no compilation of the step;
+    # slower, for debugging).
+    chunk_steps = int(params["chunk_steps"]) if "chunk_steps" in params else None
 
     def write_output(calday, mlcanopy, temperature):
         output(calday, tower_num, fout1, fout2, fout3, fout4, fout5, fout6, mlcanopy, temperature)
@@ -590,17 +608,24 @@ def main():
         write_output(inputs.now.calday, st.mlcanopy, st.temperature)
         report(1, time.perf_counter() - step_t0)
 
-        if chunk_steps > 0:
+        if chunk_steps is None or chunk_steps > 0:
             runner = make_chunk_runner(run, template, filt)
-            itim = 1
-            while itim < ntimes:
-                n = min(chunk_steps, ntimes - itim)
+            if chunk_steps is None:
+                schedule = month_chunks(run, 1)
+            else:
+                schedule = [
+                    (k, min(chunk_steps, ntimes - k)) for k in range(1, ntimes, chunk_steps)
+                ]
+            for first, n in schedule:
                 chunk_t0 = time.perf_counter()
-                chunk = run.load_chunk(itim, n)
-                inputs = [step_inputs(run, chunk, k) for k in range(itim, itim + n)]
-                # A short last chunk is padded (repeating its last input) to the chunk
-                # length, so it reuses the compiled scan; the extra steps are discarded.
-                padded = inputs + [inputs[-1]] * (chunk_steps - n)
+                chunk = run.load_chunk(first, n)
+                inputs = [step_inputs(run, chunk, k) for k in range(first, first + n)]
+                # Fixed-length chunks: a short last chunk is padded (repeating its last
+                # input) to the chunk length so it reuses the compiled scan; the extra steps
+                # are discarded. Monthly chunks are run at their own length (each distinct
+                # length compiles once).
+                pad = (chunk_steps - n) if chunk_steps else 0
+                padded = inputs + [inputs[-1]] * pad
                 _, (states, mlcanopy, temperature) = runner(state, stack_step_inputs(padded))
                 state = jax.tree.map(lambda a: a[n - 1], states)
                 for k, inp in enumerate(inputs):
@@ -609,9 +634,8 @@ def main():
                         jax.tree.map(lambda a, k=k: a[k], mlcanopy),
                         jax.tree.map(lambda a, k=k: a[k], temperature),
                     )
-                itim += n
                 chunk_dt = time.perf_counter() - chunk_t0
-                report(itim, chunk_dt / n, detail=f"(chunk of {n} steps: {chunk_dt:.1f}s) ")
+                report(first + n, chunk_dt / n, detail=f"(chunk of {n} steps: {chunk_dt:.1f}s) ")
         else:
             for _itim in range(2, ntimes + 1):
                 step_t0 = time.perf_counter()

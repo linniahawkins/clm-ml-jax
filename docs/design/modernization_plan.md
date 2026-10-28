@@ -36,6 +36,7 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 14 | Prescribed land data | LAI, SAI and soil water come from **user-supplied daily or monthly streams**. The CLM history file at the forcing interval, as used for CHATS7, remains supported. |
 | 15 | Acclimation temperature | **10-day running mean** of air temperature, carried in the model state. This is a science change that alters CHATS7 results slightly, so the reference is regenerated when it is adopted (Phase 4b). The Fortran CLM-ml v2 definition (mean over the whole run, which needs all forcing before the run starts) stays available as an option, for validation against Fortran only. |
 | 16 | Output | **Configurable and independent of the forcing and model step.** Several output streams, each with its own variables, frequency, statistic (mean, instantaneous, min, max), level (patch, gridcell) and file split. Statistics are accumulated during the run, so per-step values are never all held in memory. |
+| 17 | Chunk length | **Calendar months**, aligned to month starts (a chunk is the steps whose start time falls in one month); a run shorter than a month is one chunk. Chunks therefore have up to four full-month lengths plus partial first/last months; each distinct length compiles once (§6.9). As in jax-gcm, output is accumulated inside the compiled chunk, and the chunk length only sets forcing memory, restart and file frequency, and health checks. |
 
 Smaller decisions: see §8.
 
@@ -628,10 +629,10 @@ for each chunk:
     (`chunk_days: 0`) and uses 5-day chunks (`run_chunked`) for long runs.
 - **Chunk length** is a run setting (`execution.chunk`). Default: the whole run when it is
   short (a tower month), otherwise a few days to a month, limited by forcing memory (table
-  above). Chunk boundaries should fall on output-file and forcing-file boundaries. Open
-  decision: calendar units (`1 month`, aligned to month starts; chunks then have 28–31 days,
-  so up to four lengths each compile once) or plain days (one length, but chunks do not line
-  up with months).
+  above). Chunk boundaries should fall on output-file and forcing-file boundaries.
+  **Decided (decision 17): calendar months**, aligned to month starts; a chunk is the steps
+  whose start time falls in one month. Full months have 28–31 days and partial first/last
+  months other lengths, so at most six lengths each compile once.
 - **When compilation happens.** A compiled chunk program is reused for every chunk with the
   same input shapes and model options; new data do not trigger compilation. It recompiles
   only for a different chunk length, different array sizes (number of patches or layers), a
@@ -852,8 +853,8 @@ Progress:
   scan (outer loop over output records, inner loop over steps accumulating statistics,
   `jax.checkpoint` on the step; §6.9), replacing the per-step containers; the `ForcingSource`
   streams interface; host side between chunks: health checks, rotating restarts (`.prev`),
-  partial output intervals saved with restarts; chunk length in `run.yaml` (calendar months
-  or days: open decision, §6.9); `run.yaml` stream form; GPU timing (done-when 3, GPU part);
+  partial output intervals saved with restarts; calendar-month chunks (decision 17);
+  `run.yaml` stream form; GPU timing (done-when 3, GPU part);
   the resident-memory check on a long run.
 
 - `Model.run(state, forcing_chunk, params) -> (state, outputs)` = `jit(scan(step))` over one
