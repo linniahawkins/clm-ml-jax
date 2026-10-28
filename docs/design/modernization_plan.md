@@ -11,6 +11,8 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
   `towers.yaml` files, written as a user would write them. `run_global_example.yaml` shows the
   target form of a 150-year global run (hypothetical; it does not run yet).
 - [`timing.md`](timing.md): timing-test results.
+- [`numerics_and_regression.md`](numerics_and_regression.md): decisions on iterative solvers,
+  differentiability, the model's round-off sensitivity, and the regression-testing policy.
 
 ---
 
@@ -893,7 +895,7 @@ Milestones for users:
 |---|---|---|
 | 1 | Minimum Python version | **3.10** |
 | 2 | Default `max_layers` | **50.** CHATS7 needs 46 layers with the default spacing: a 10 m canopy at 0.5 m gives 20 layers inside it, plus 26 above it up to the 23 m measurement height. Patches needing more fail at load time with a message naming them, and can raise `max_layers` in `model.yaml` (the Fortran limit was `nlevmlcan = 100`). **Resolved by row 9:** only CHATS7 is built in. (For reference: with default spacing, 9 of the 15 legacy towers need more than 50 (US-Ha1 60, US-Me2 64, US-UMB 92, US-MMS 96; US-ARM 300, beyond even the Fortran limit). Bonan et al. (2021) found 5–10 within-canopy layers reproduce the 50 cm benchmark, so explicit `n_layers_within`/`n_layers_above`, or coarser above-canopy spacing, may be the better default for multi-tower and global runs.) |
-| 3 | Regression tolerance | **`rtol=1e-6`** against the current JAX output |
+| 3 | Regression tolerance | **Revised in Phase 3:** bit-for-bit for refactors that should not change the arithmetic, and a **noise-twin** test for changes that alter round-off. The original `rtol=1e-6` cannot work: at the evening transition the model turns round-off-sized differences into ~1e-3 relative differences at a single step. See [`numerics_and_regression.md`](numerics_and_regression.md) §5–6. |
 | 4 | Legacy lifetime | Undecided. Default: keep `clm-ml-offline` until Phase 7, and keep the namelist converter permanently. Revisit at Phase 7. |
 | 5 | Soil model scope | Undecided. Default: soil routines go behind the same process interface, migrated last in Phase 5. Making them swappable is not a goal yet. Revisit at Phase 5. (Soil column sharing is decided separately: option A now, option B later; see §6.7.) |
 | 6 | Legacy `.out` format | **Not needed after validation.** It is kept only as long as the Fortran comparison test needs it, and is replaced by netCDF output once that test reads netCDF. `output.format` options become `netcdf` only. |

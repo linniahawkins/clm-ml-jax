@@ -1,17 +1,18 @@
 """
-Run the offline model and record its output state at full precision.
+Run the CHATS7 reference case and record its output at full precision, with noise twins.
 
-The six ``.out`` files are written with 3 decimal places, which is too coarse to
-catch refactoring mistakes. This script runs ``offline_executable.main`` exactly as
-the CLI does, but wraps ``CLMml_driver.output`` so that every field the output
-writer reads is also saved as float64 at every time step.
+The six legacy ``.out`` files hold 3 decimal places, too coarse to catch refactoring mistakes.
+This runs the case through ``clm_ml`` (the same driver as ``clm-ml-offline``; Phase 1 showed
+the two routes are bit-for-bit identical) and saves every field the output writer reads, as
+float64, at every time step.
 
-Run as a separate process (the model keeps state in module globals, so it must not
-share an interpreter with other tests)::
+It also records two **noise twins**: the same run with ``leaf_emissivity × (1 ± 1e-12)``. Their
+differences from the reference measure the model's own sensitivity to round-off, which the
+regression test uses as its tolerance for changes that alter round-off
+(docs/design/numerics_and_regression.md §5–6).
 
-    python tests/regression/record_run.py NAMELIST OUT.npz
-
-To regenerate the committed reference after an *intended* change in results::
+Regenerate the reference after an intended change in results, or after a change that alters
+only round-off and passed the noise-twin test::
 
     python tests/regression/record_run.py --update-reference
 """
@@ -23,6 +24,7 @@ import datetime
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -34,31 +36,16 @@ REFERENCE_DIR = Path(__file__).resolve().parent / "reference"
 # Reference case: CHATS7 from 2007-05-01 00Z, 50 half-hour steps (one full diurnal cycle).
 REFERENCE_NAMELIST = SRC_DIR / "offline_executable" / "nl.CHATS7.50steps"
 REFERENCE_FILE = REFERENCE_DIR / "CHATS7_50steps.npz"
+TWIN_FILES = {
+    "plus": REFERENCE_DIR / "CHATS7_50steps_twin_plus.npz",
+    "minus": REFERENCE_DIR / "CHATS7_50steps_twin_minus.npz",
+}
+TWIN_PERTURBATION = 1e-12  # relative change of leaf_emissivity in the twins
+TWIN_PFT = "broadleaf_deciduous_temperate_tree"  # CHATS7's PFT
 
-# Every mlcanopy_inst field read by CLMml_driver.output() (i.e. everything that reaches
-# the .out files), plus soil temperature. Keys in the .npz are "mlcanopy.<field>".
-# fmt: off
-MLCANOPY_FIELDS = (
-    "albcan_canopy", "anet_leaf", "apar_leaf", "beta_canopy", "btran_soil", "dpai_profile",
-    "dz_profile", "eair_profile", "etair_profile", "evveg_canopy", "fracminlwp_canopy",
-    "fracsun_profile", "gac_profile", "gppveg_canopy", "gppvegsha_canopy", "gppvegsun_canopy",
-    "gs_leaf", "gsoi_soil", "gsveg_canopy", "gsvegsha_canopy", "gsvegsun_canopy", "lai_canopy",
-    "laisha_canopy", "laisun_canopy", "lhflx_canopy", "lhleaf_leaf", "lhsoi_soil", "lhveg_canopy",
-    "lhvegsha_canopy", "lhvegsun_canopy", "lsc_profile", "lwdwn_profile", "lwp_hist_leaf",
-    "lwp_mean_profile", "lwup_canopy", "lwupw_profile", "mflx_profile", "nbot_canopy",
-    "ncan_canopy", "ntop_canopy", "pref_forcing", "psis_soil", "rhomol_forcing", "rnet_canopy",
-    "rnleaf_leaf", "rnsoi_soil", "sai_canopy", "shair_profile", "shflx_canopy", "shleaf_leaf",
-    "shsoi_soil", "shveg_canopy", "shvegsha_canopy", "shvegsun_canopy", "solar_zen_forcing",
-    "stflx_air_canopy", "stflx_veg_canopy", "swbeam_profile", "swdwn_profile", "swskyb_forcing",
-    "swskyd_forcing", "swupw_profile", "swveg_canopy", "swvegsha_canopy", "swvegsun_canopy",
-    "tair_profile", "taveg_canopy", "tavegsha_canopy", "tavegsun_canopy", "tleaf_hist_leaf",
-    "tlveg_canopy", "tlvegsha_canopy", "tlvegsun_canopy", "tref_forcing", "trveg_canopy",
-    "ustar_canopy", "vcmax25_leaf", "vcmax25sha_canopy", "vcmax25sun_canopy",
-    "vcmax25veg_canopy", "wind_profile", "windveg_canopy", "windvegsha_canopy",
-    "windvegsun_canopy", "zs_profile", "zw_profile",
-)
-# fmt: on
-TEMPERATURE_FIELDS = ("t_soisno_col",)
+# Prefixes of the recorded fields kept in the reference: every mlcanopy field the legacy
+# output writer reads, soil temperature, and the calendar day.
+RECORDED_PREFIXES = ("mlcanopy.", "temperature.", "calendar_day")
 
 
 def write_portable_namelist(source: Path, dest: Path, output_dir: Path) -> Path:
@@ -76,54 +63,63 @@ def write_portable_namelist(source: Path, dest: Path, output_dir: Path) -> Path:
     return dest
 
 
-def record(namelist: Path, out_file: Path) -> None:
-    """Run the model in this process and save the recorded fields to ``out_file``."""
-    sys.path.insert(0, str(SRC_DIR))
-    # Import main first: it enables float64 before any model module creates arrays.
-    import offline_executable.main as main_mod
+def run_case(workdir: Path, *, params: str | None = None, legacy_ascii: bool = False):
+    """Run the reference case through ``clm_ml`` in ``workdir``.
 
-    records: dict[str, list[np.ndarray]] = {}
-    calday: list[float] = []
+    Returns ``(run, outputs)``. ``params`` overrides the params file (e.g. for twins).
+    """
+    if str(SRC_DIR) not in sys.path:
+        sys.path.insert(0, str(SRC_DIR))
+    import yaml
 
-    def recording_output(original_output):
-        def wrapper(curr_calday, tower_num, *rest):
-            mlcanopy_inst, temperature_inst = rest[-2], rest[-1]
-            calday.append(float(curr_calday))
-            for name in MLCANOPY_FIELDS:
-                records.setdefault(f"mlcanopy.{name}", []).append(
-                    np.asarray(getattr(mlcanopy_inst, name))
-                )
-            for name in TEMPERATURE_FIELDS:
-                records.setdefault(f"temperature.{name}", []).append(
-                    np.asarray(getattr(temperature_inst, name))
-                )
-            return original_output(curr_calday, tower_num, *rest)
+    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.run import load_run
 
-        return wrapper
-
-    # CLMml_driver imports clm_instMod, which must not be imported before
-    # InitializeRealize (see main.py), so install the recorder right after it runs.
-    original_initialize = main_mod.InitializeRealize
-
-    def initialize_then_install_recorder(bounds):
-        original_initialize(bounds)
-        import offline_driver.CLMml_driver as driver_mod
-
-        driver_mod.output = recording_output(driver_mod.output)
-
-    main_mod.InitializeRealize = initialize_then_install_recorder
-    sys.argv = ["clm-ml-offline", str(namelist)]
-    main_mod.main()
-
-    if not calday:
-        raise RuntimeError("model ran but no output steps were recorded")
-    arrays = {key: np.stack(values) for key, values in records.items()}
-    arrays["calendar_day"] = np.asarray(calday)
-    out_file.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out_file, **arrays, **_provenance())
+    workdir = Path(workdir)
+    convert_namelist(REFERENCE_NAMELIST, workdir)
+    run_yaml = workdir / "run.yaml"
+    data = yaml.safe_load(run_yaml.read_text())
+    formats = ["netcdf", "legacy_ascii"] if legacy_ascii else ["netcdf"]
+    data["output"] = {"directory": str(workdir / "out"), "format": formats}
+    if params is not None:
+        data["params"] = params
+    run_yaml.write_text(yaml.safe_dump(data))
+    run = load_run(run_yaml)
+    return run, run.execute(quiet=True)
 
 
-def _provenance() -> dict[str, np.ndarray]:
+def recorded_fields(raw) -> dict[str, np.ndarray]:
+    return {k: np.asarray(v) for k, v in raw.items() if k.startswith(RECORDED_PREFIXES)}
+
+
+def _record_one(name: str, out_file: Path) -> str:
+    with tempfile.TemporaryDirectory() as tmp:
+        params = None
+        if name != "reference":
+            sign = 1.0 if name == "plus" else -1.0
+            params = str(_twin_params_file(Path(tmp), sign))
+        _, outputs = run_case(Path(tmp) / "case", params=params)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(out_file, **recorded_fields(outputs.raw), **_provenance(name))
+    return f"wrote {out_file}"
+
+
+def _twin_params_file(directory: Path, sign: float) -> Path:
+    if str(SRC_DIR) not in sys.path:
+        sys.path.insert(0, str(SRC_DIR))
+    from clm_ml.params import Params
+
+    emissivity = float(Params.from_yaml("chats").get(TWIN_PFT, "leaf_emissivity"))
+    path = directory / "twin_params.yaml"
+    path.write_text(
+        "extends: chats\n"
+        f"pft:\n  {TWIN_PFT}:\n"
+        f"    leaf_emissivity: {emissivity * (1.0 + sign * TWIN_PERTURBATION)!r}\n"
+    )
+    return path
+
+
+def _provenance(name: str) -> dict[str, np.ndarray]:
     import jax
 
     try:
@@ -142,40 +138,29 @@ def _provenance() -> dict[str, np.ndarray]:
         "meta.created_utc": np.asarray(
             datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
         ),
+        "meta.case": np.asarray(name),
     }
 
 
-def run_in_subprocess(namelist: Path, out_file: Path, workdir: Path) -> None:
-    """Make a portable copy of ``namelist`` in ``workdir`` and record a run in a fresh process."""
-    output_dir = workdir / "out"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    portable = write_portable_namelist(namelist, workdir / namelist.name, output_dir)
-    subprocess.run(
-        [sys.executable, str(Path(__file__).resolve()), str(portable), str(out_file)],
-        cwd=SRC_DIR,
-        check=True,
-    )
+def update_reference() -> None:
+    """Record the reference and both twins (three runs, in parallel processes)."""
+    jobs = {"reference": REFERENCE_FILE, **TWIN_FILES}
+    with ProcessPoolExecutor(max_workers=len(jobs)) as pool:
+        for message in pool.map(_record_one, jobs.keys(), jobs.values()):
+            print(message)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("namelist", nargs="?", type=Path)
-    parser.add_argument("out_file", nargs="?", type=Path)
     parser.add_argument(
         "--update-reference",
         action="store_true",
-        help=f"Regenerate {REFERENCE_FILE.relative_to(PROJECT_ROOT)} from {REFERENCE_NAMELIST.name}",
+        help="regenerate the reference and its noise twins under tests/regression/reference/",
     )
     args = parser.parse_args()
-
-    if args.update_reference:
-        with tempfile.TemporaryDirectory() as tmp:
-            run_in_subprocess(REFERENCE_NAMELIST, REFERENCE_FILE, Path(tmp))
-        print(f"Wrote {REFERENCE_FILE}")
-    elif args.namelist and args.out_file:
-        record(args.namelist, args.out_file)
-    else:
-        parser.error("give NAMELIST and OUT_FILE, or --update-reference")
+    if not args.update_reference:
+        parser.error("nothing to do; pass --update-reference")
+    update_reference()
 
 
 if __name__ == "__main__":

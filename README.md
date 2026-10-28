@@ -102,15 +102,17 @@ Golden JSON files live in `tests/fortran_validation/golden_IO/`.
 ### End-to-end regression test
 
 A 50-step CHATS7 run (one full diurnal cycle) is compared, field by field and at full
-precision, against a committed reference (`rtol=1e-6`). Any change that alters model results
-fails this test:
+precision, against a committed reference. Two checks: refactors must reproduce it bit for bit,
+and every change must stay within the model's own round-off sensitivity, measured by two
+"noise twin" runs (see `docs/design/numerics_and_regression.md`):
 
 ```bash
 python -m pytest tests/regression/ -m regression -q     # ~5 min on CPU
 ```
 
-If results change **on purpose** (a science change or bug fix), regenerate the reference
-and note it in the PR:
+If results change **on purpose** (a science change or bug fix), or a change alters only
+round-off and passes the noise-twin test, regenerate the reference and its twins and note it
+in the PR:
 
 ```bash
 python tests/regression/record_run.py --update-reference

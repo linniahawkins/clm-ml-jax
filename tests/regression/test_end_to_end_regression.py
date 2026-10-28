@@ -1,17 +1,18 @@
 """
-End-to-end regression test: the model must reproduce its own committed output.
+End-to-end regression: a 50-step CHATS7 run compared with the committed reference.
 
-This is the guardrail for the modernization refactor (docs/design/modernization_plan.md,
-Phase 0). Refactoring should not change results, so a fresh 50-step CHATS7 run is
-compared field by field against ``reference/CHATS7_50steps.npz`` at ``RTOL``.
+Two checks (docs/design/numerics_and_regression.md §6):
 
-The Fortran comparison test (2.5 % tolerance on 3-decimal ASCII output) is far too
-loose to catch refactoring mistakes; this test is not.
+- ``test_bit_identical_to_reference``: refactors that should not change the arithmetic must
+  reproduce the reference exactly.
+- ``test_within_noise_of_reference``: every change must stay within the model's own
+  sensitivity to round-off, measured by two noise twins (``leaf_emissivity × (1 ± 1e-12)``).
+  A field passes if its largest difference from the reference is at most ``NOISE_FACTOR``
+  times the twins' largest difference (plus a 1e-12 relative floor).
 
-If results change *on purpose* (a science change or bug fix), regenerate the reference
-and say so in the PR::
-
-    python tests/regression/record_run.py --update-reference
+A change that legitimately alters round-off (a traceable implementation, compilation, GPU)
+passes the noise test and fails the bit-for-bit test; regenerate the reference with
+``python tests/regression/record_run.py --update-reference`` and say so in the commit.
 """
 
 from __future__ import annotations
@@ -19,57 +20,50 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tests.regression.record_run import (
-    MLCANOPY_FIELDS,
-    REFERENCE_FILE,
-    REFERENCE_NAMELIST,
-    TEMPERATURE_FIELDS,
-    run_in_subprocess,
-)
-
-RTOL = 1e-6
+from tests.regression.record_run import REFERENCE_FILE
 
 pytestmark = pytest.mark.regression
 
+NOISE_FACTOR = 2.0
+FLOOR = 1e-12  # relative to the field's magnitude, for fields the twins leave unchanged
 
-@pytest.fixture(scope="module")
-def reference():
-    if not REFERENCE_FILE.exists():
-        pytest.fail(f"Missing {REFERENCE_FILE}; run record_run.py --update-reference")
+
+def _fields():
     with np.load(REFERENCE_FILE) as data:
-        return {key: data[key] for key in data.files}
+        return [k for k in data.files if not k.startswith("meta.")]
 
 
-@pytest.fixture(scope="module")
-def current(tmp_path_factory):
-    workdir = tmp_path_factory.mktemp("regression")
-    out_file = workdir / "current.npz"
-    run_in_subprocess(REFERENCE_NAMELIST, out_file, workdir)
-    with np.load(out_file) as data:
-        return {key: data[key] for key in data.files}
+FIELDS = _fields() if REFERENCE_FILE.exists() else []
 
 
-FIELDS = (
-    ["calendar_day"]
-    + [f"mlcanopy.{name}" for name in MLCANOPY_FIELDS]
-    + [f"temperature.{name}" for name in TEMPERATURE_FIELDS]
-)
+def _valid(values):
+    return np.isfinite(values) & (np.abs(values) < 1e30)  # skip spval (1e36) fill values
 
 
 @pytest.mark.parametrize("field", FIELDS)
-def test_field_matches_reference(field, reference, current):
-    ref = reference[field]
-    new = current[field]
-    assert new.shape == ref.shape, f"{field}: shape {new.shape} != reference {ref.shape}"
+def test_bit_identical_to_reference(field, reference, current_fields):
+    np.testing.assert_array_equal(current_fields[field], reference[field], err_msg=field)
 
-    if np.issubdtype(ref.dtype, np.integer):
+
+@pytest.mark.parametrize("field", FIELDS)
+def test_within_noise_of_reference(field, reference, twins, current_fields):
+    ref = reference[field].astype(float)
+    new = current_fields[field].astype(float)
+    assert new.shape == ref.shape, f"{field}: shape {new.shape} != reference {ref.shape}"
+    valid = _valid(ref)
+    if np.issubdtype(reference[field].dtype, np.integer):
         np.testing.assert_array_equal(new, ref, err_msg=field)
         return
-
-    # Relative tolerance, with an absolute floor scaled to the field's magnitude so that
-    # values crossing zero (e.g. night-time fluxes) are not held to an impossible bar.
-    finite = np.isfinite(ref) & (np.abs(ref) < 1e30)  # skip spval (1e36) fill values
-    scale = np.max(np.abs(ref[finite])) if finite.any() else 0.0
-    np.testing.assert_allclose(
-        new, ref, rtol=RTOL, atol=RTOL * scale, equal_nan=True, err_msg=field
+    noise = max(
+        float(np.max(np.abs(twin[field].astype(float)[valid] - ref[valid]), initial=0.0))
+        for twin in twins.values()
+    )
+    scale = float(np.max(np.abs(ref[valid]), initial=0.0))
+    allowed = NOISE_FACTOR * noise + FLOOR * scale
+    diff = float(np.max(np.abs(new[valid] - ref[valid]), initial=0.0))
+    nonfinite_mismatch = not np.array_equal(np.isfinite(new), np.isfinite(ref))
+    assert not nonfinite_mismatch, f"{field}: NaN/inf pattern differs from reference"
+    assert diff <= allowed, (
+        f"{field}: max difference {diff:.3e} exceeds {NOISE_FACTOR} x twin noise "
+        f"{noise:.3e} (+ floor {FLOOR * scale:.3e})"
     )
