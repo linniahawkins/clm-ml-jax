@@ -1280,6 +1280,16 @@ Progress:
   program **without compiling again** (`_cache_size` unchanged) and gives its own results
   within 1e-9 of each variable (measured ~1e-11: separately compiled programs round
   differently).
+- ✅ **C3/C4 as data** (decision with the maintainer: end of 5b): `CanopyParams` carries
+  `c3_photosynthesis` (from params.yaml, per PFT); `GridInfo` holds only the patch index.
+  Photosynthesis computes both pathways (the existing code for a fixed pathway, run as C3 and
+  as C4) and each patch keeps its own (`jnp.where`; exact for the selected pathway); when the
+  pathway is concrete (the eager first step) only that one is computed. The nitrogen profile
+  selects with the data flag. Cost: about twice the photosynthesis work in compiled chunks.
+  Round-off only (the larger program rounds differently); reference regenerated. Done-when
+  test extended: a C4 patch (params.yaml `c3_photosynthesis: false`) runs through the C3
+  patch's compiled program without compiling again and matches its own run; night-time leaf
+  net photosynthesis (respiration) differs between the pathways, as it should.
 - Gradient padding test (step 1 code): gradients finite for 46, 50 and 100 slots; they
   differ by up to 5e-9 relative (round-off amplified by the implicit-function derivatives
   of the solvers), so the gradient comparison uses 1e-7 (the finite-difference checks pass

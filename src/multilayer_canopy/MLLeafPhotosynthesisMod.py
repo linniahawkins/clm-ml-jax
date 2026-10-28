@@ -68,6 +68,7 @@ from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLLayersMod import layers, pad_with_top, restore_padding
 from multilayer_canopy.MLMathToolsMod import (
     bisection,  # noqa: F401
+    is_concrete,
     quadratic,
 )
 from multilayer_canopy.MLWaterVaporMod import SatVap, SatVap_py  # noqa: F401
@@ -1573,446 +1574,458 @@ def LeafPhotosynthesis(
     def _pad(x):
         return pad_with_top(lay, x)
 
-    is_c3 = grid.c3  # static: selects the C3 or C4 kernel
-    gs_type, gspot_type, colim_type = opts.gs_type, opts.gspot_type, opts.colim_type
-    acclim_type = opts.acclim_type
-    _c3psn_val = 1.0 if is_c3 else 0.0  # pftcon c3psn flag value
+    # C3 or C4 photosynthesis is data (CanopyParams.c3_photosynthesis, plan Phase 5b): both
+    # pathways are computed (the code below, for a fixed pathway) and each patch keeps its
+    # own, so patches of both pathways share one compiled program.
+    def _pathway(is_c3: bool, mlcanopy_inst):
+        gs_type, gspot_type, colim_type = opts.gs_type, opts.gspot_type, opts.colim_type
+        acclim_type = opts.acclim_type
+        _c3psn_val = 1.0 if is_c3 else 0.0  # pftcon c3psn flag value
 
-    # --- Temperature acclimation — Fortran lines 135-153 ---
-    # (Same for all ic within this patch, compute once.)
-    if acclim_type == 0:
-        vcmaxha = vcmaxha_noacclim
-        jmaxha = jmaxha_noacclim
-        vcmaxhd = vcmaxhd_noacclim
-        jmaxhd = jmaxhd_noacclim
-        vcmaxse = vcmaxse_noacclim
-        jmaxse = jmaxse_noacclim
-    elif acclim_type == 1:
-        vcmaxha = vcmaxha_acclim
-        jmaxha = jmaxha_acclim
-        vcmaxhd = vcmaxhd_acclim
-        jmaxhd = jmaxhd_acclim
-        ta_c = jnp.clip(mlcanopy_inst.tacclim_forcing[p] - tfrz, 11.0, 35.0)
-        vcmaxse = 668.39 - 1.07 * ta_c
-        jmaxse = 659.70 - 0.75 * ta_c
-    else:
-        endrun(msg=" ERROR: LeafPhotosynthesis: acclim_type not valid")
-        vcmaxha = vcmaxhd = vcmaxse = jmaxha = jmaxhd = jmaxse = 0.0
-
-    # High-temperature scaling factors — Fortran lines 155-157
-    # rdc: rdse/rdhd are module-level Python floats, so use _fth25_py
-    # (math.exp) to get a concrete Python float usable as a cache key even
-    # inside jax.checkpoint where jnp.exp would produce an abstract tracer.
-    rdc = _fth25_py(rdhd, rdse)  # Python float always (rdhd/rdse are constants)
-    # For acclim_type == 0: vcmaxse/jmaxse are Python floats (module-level
-    # constants) — use _fth25_py to get Python floats for lru_cache keys.
-    # For acclim_type == 1: vcmaxse/jmaxse are JAX traced arrays derived
-    # from tacclim_forcing; float() would fail under jax.checkpoint.
-    # Keep them as JAX arrays and use _get_vmapped_photo_kernel_acclim
-    # which accepts them as runtime broadcast args (in_axes=None).
-    if acclim_type == 0:
-        vcmaxc = _fth25_py(vcmaxhd, vcmaxse)  # Python float (vcmaxse is float)
-        jmaxc = _fth25_py(jmaxhd, jmaxse)  # Python float (jmaxse is float)
-    else:
-        # acclim_type == 1: vcmaxse/jmaxse are JAX traced — keep as JAX
-        vcmaxc = _fth25(vcmaxhd, vcmaxse)  # JAX scalar, passed as runtime arg
-        jmaxc = _fth25(jmaxhd, jmaxse)  # JAX scalar, passed as runtime arg
-
-    # --- Stomatal model parameters — same for all ic ---
-    if gs_type == 0:
-        g0_val = params.g0_medlyn
-        g1_val = params.g1_medlyn
-    elif gs_type == 1:
-        g0_val = params.g0_ball_berry
-        g1_val = params.g1_ball_berry
-    else:
-        g0_val = jnp.asarray(-999.0)
-        g1_val = jnp.asarray(-999.0)
-
-    # Per-pft constants for gs_type==2
-    if gs_type == 2:
-        _iota_pft = params.iota  # differentiable via the implicit function theorem
-        _gsmin_pft = params.gs_min
-
-    # --- Pre-extract constant input slices (JAX arrays, no D→H syncs) ---
-    _dpai_p = mlcanopy_inst.dpai_profile[p]
-    _tleaf_p = mlcanopy_inst.tleaf_leaf[p, :, il]
-    _vcmax25_p = mlcanopy_inst.vcmax25_leaf[p, :, il]
-    _jmax25_p = mlcanopy_inst.jmax25_leaf[p, :, il]
-    _rd25_p = mlcanopy_inst.rd25_leaf[p, :, il]
-    _kp25_p = mlcanopy_inst.kp25_leaf[p, :, il]
-    _eair_p = mlcanopy_inst.eair_profile[p]
-    _apar_p = mlcanopy_inst.apar_leaf[p, :, il]
-    _gbc_p = mlcanopy_inst.gbc_leaf[p, :, il]
-    _gbv_p = mlcanopy_inst.gbv_leaf[p, :, il]
-    _cair_p = mlcanopy_inst.cair_profile[p]
-    _o2ref_p = mlcanopy_inst.o2ref_forcing[p]  # JAX scalar (runtime arg of every kernel)
-    _pref_p = mlcanopy_inst.pref_forcing[p]
-
-    if gs_type in (0, 1):
-        # ---- Differentiable vmap path: no numpy accumulators ---
-        # For acclim_type == 0: vcmaxse/jmaxse/vcmaxc/jmaxc are Python
-        # floats, so use the standard lru_cache'd kernel factory.
-        # For acclim_type == 1: vcmaxse/jmaxse/vcmaxc/jmaxc are JAX traced
-        # arrays (computed from tacclim_forcing); use the acclim variant
-        # that accepts them as runtime broadcast scalars (in_axes=None)
-        # so the kernel is compatible with jax.checkpoint.
-        _sl = slice(1, None)
+        # --- Temperature acclimation — Fortran lines 135-153 ---
+        # (Same for all ic within this patch, compute once.)
         if acclim_type == 0:
-            vmapped = _get_vmapped_photo_kernel(
-                is_c3=is_c3,
-                gs_type=gs_type,
-                colim_type=colim_type,
-                c3psn_pft_val=_c3psn_val,
-                vcmaxha=vcmaxha,
-                vcmaxhd=vcmaxhd,
-                vcmaxse=vcmaxse,
-                vcmaxc=vcmaxc,
-                jmaxha=jmaxha,
-                jmaxhd=jmaxhd,
-                jmaxse=jmaxse,
-                jmaxc=jmaxc,
-                rdc=rdc,
-            )
-            layer_out = vmapped(
-                _pad(_dpai_p[_sl]),
-                _pad(_tleaf_p[_sl]),
-                _pad(_vcmax25_p[_sl]),
-                _pad(_jmax25_p[_sl]),
-                _pad(_rd25_p[_sl]),
-                _pad(_kp25_p[_sl]),
-                _pad(_eair_p[_sl]),
-                _pad(_apar_p[_sl]),
-                _pad(_gbc_p[_sl]),
-                _pad(_gbv_p[_sl]),
-                _pad(_cair_p[_sl]),
-                g0_val,
-                g1_val,  # JAX scalar broadcast — gradients flow here
-                _o2ref_p,
-            )
+            vcmaxha = vcmaxha_noacclim
+            jmaxha = jmaxha_noacclim
+            vcmaxhd = vcmaxhd_noacclim
+            jmaxhd = jmaxhd_noacclim
+            vcmaxse = vcmaxse_noacclim
+            jmaxse = jmaxse_noacclim
+        elif acclim_type == 1:
+            vcmaxha = vcmaxha_acclim
+            jmaxha = jmaxha_acclim
+            vcmaxhd = vcmaxhd_acclim
+            jmaxhd = jmaxhd_acclim
+            ta_c = jnp.clip(mlcanopy_inst.tacclim_forcing[p] - tfrz, 11.0, 35.0)
+            vcmaxse = 668.39 - 1.07 * ta_c
+            jmaxse = 659.70 - 0.75 * ta_c
         else:
-            # acclim_type == 1: vcmaxse/vcmaxc/jmaxse/jmaxc are JAX scalars
-            vmapped = _get_vmapped_photo_kernel_acclim(
-                is_c3=is_c3,
-                gs_type=gs_type,
-                colim_type=colim_type,
-                c3psn_pft_val=_c3psn_val,
-                vcmaxha=vcmaxha,
-                vcmaxhd=vcmaxhd,
-                jmaxha=jmaxha,
-                jmaxhd=jmaxhd,
-                rdc=rdc,
-            )
-            layer_out = vmapped(
-                _pad(_dpai_p[_sl]),
-                _pad(_tleaf_p[_sl]),
-                _pad(_vcmax25_p[_sl]),
-                _pad(_jmax25_p[_sl]),
-                _pad(_rd25_p[_sl]),
-                _pad(_kp25_p[_sl]),
-                _pad(_eair_p[_sl]),
-                _pad(_apar_p[_sl]),
-                _pad(_gbc_p[_sl]),
-                _pad(_gbv_p[_sl]),
-                _pad(_cair_p[_sl]),
-                g0_val,
-                g1_val,  # JAX scalar broadcast — gradients flow here
-                vcmaxse,
-                vcmaxc,
-                jmaxse,
-                jmaxc,
-                _o2ref_p,
-            )
-        # Write vmap JAX output directly (18-tuple) — skip numpy round-trip
-        _out_names = [
-            "kc_leaf",
-            "ko_leaf",
-            "cp_leaf",
-            "vcmax_leaf",
-            "jmax_leaf",
-            "rd_leaf",
-            "kp_leaf",
-            "leaf_esat_leaf",
-            "ceair_leaf",
-            "je_leaf",
-            "gs_leaf",
-            "ci_leaf",
-            "ac_leaf",
-            "aj_leaf",
-            "ap_leaf",
-            "agross_leaf",
-            "anet_leaf",
-            "cs_leaf",
-        ]
-        updates = {}
-        for idx, name in enumerate(_out_names):
-            arr = getattr(mlcanopy_inst, name)
-            updates[name] = arr.at[p, _sl, il].set(layer_out[idx])
-        updates["btran_soil"] = mlcanopy_inst.btran_soil.at[p].set(1.0)
-        updates["g0_canopy"] = mlcanopy_inst.g0_canopy.at[p].set(g0_val)
-        updates["g1_canopy"] = mlcanopy_inst.g1_canopy.at[p].set(g1_val)
-        mlcanopy_inst = mlcanopy_inst._replace(**updates)
+            endrun(msg=" ERROR: LeafPhotosynthesis: acclim_type not valid")
+            vcmaxha = vcmaxhd = vcmaxse = jmaxha = jmaxhd = jmaxse = 0.0
 
-    elif gs_type == 2:
-        # ---- vmap path for WUE stomatal optimization (unified diff/non-diff) ---
-        # For acclim_type == 0: use standard kernel (vcmaxse/jmaxse are floats).
-        # For acclim_type == 1: use acclim variant that accepts vcmaxse/vcmaxc/
-        # jmaxse/jmaxc as runtime broadcast scalars (in_axes=None) to avoid
-        # float() on JAX traced values inside jax.checkpoint.
-        _sl = slice(1, None)
+        # High-temperature scaling factors — Fortran lines 155-157
+        # rdc: rdse/rdhd are module-level Python floats, so use _fth25_py
+        # (math.exp) to get a concrete Python float usable as a cache key even
+        # inside jax.checkpoint where jnp.exp would produce an abstract tracer.
+        rdc = _fth25_py(rdhd, rdse)  # Python float always (rdhd/rdse are constants)
+        # For acclim_type == 0: vcmaxse/jmaxse are Python floats (module-level
+        # constants) — use _fth25_py to get Python floats for lru_cache keys.
+        # For acclim_type == 1: vcmaxse/jmaxse are JAX traced arrays derived
+        # from tacclim_forcing; float() would fail under jax.checkpoint.
+        # Keep them as JAX arrays and use _get_vmapped_photo_kernel_acclim
+        # which accepts them as runtime broadcast args (in_axes=None).
         if acclim_type == 0:
-            vmapped = _get_vmapped_photo_kernel_wue(
-                is_c3=is_c3,
-                gs_type=gs_type,
-                colim_type=colim_type,
-                c3psn_pft_val=_c3psn_val,
-                vcmaxha=vcmaxha,
-                vcmaxhd=vcmaxhd,
-                vcmaxse=vcmaxse,
-                vcmaxc=vcmaxc,
-                jmaxha=jmaxha,
-                jmaxhd=jmaxhd,
-                jmaxse=jmaxse,
-                jmaxc=jmaxc,
-                rdc=rdc,
-            )
-            layer_out = vmapped(
-                _pad(_dpai_p[_sl]),
-                _pad(_tleaf_p[_sl]),
-                _pad(_vcmax25_p[_sl]),
-                _pad(_jmax25_p[_sl]),
-                _pad(_rd25_p[_sl]),
-                _pad(_kp25_p[_sl]),
-                _pad(_eair_p[_sl]),
-                _pad(_apar_p[_sl]),
-                _pad(_gbc_p[_sl]),
-                _pad(_gbv_p[_sl]),
-                _pad(_cair_p[_sl]),
-                _o2ref_p,
-                _pref_p,
-                _iota_pft,
-                _gsmin_pft,  # JAX scalar broadcast — gradients flow via IFT
-            )
+            vcmaxc = _fth25_py(vcmaxhd, vcmaxse)  # Python float (vcmaxse is float)
+            jmaxc = _fth25_py(jmaxhd, jmaxse)  # Python float (jmaxse is float)
         else:
-            # acclim_type == 1: vcmaxse/vcmaxc/jmaxse/jmaxc are JAX scalars
-            vmapped = _get_vmapped_photo_kernel_wue_acclim(
-                is_c3=is_c3,
-                gs_type=gs_type,
-                colim_type=colim_type,
-                c3psn_pft_val=_c3psn_val,
-                vcmaxha=vcmaxha,
-                vcmaxhd=vcmaxhd,
-                jmaxha=jmaxha,
-                jmaxhd=jmaxhd,
-                rdc=rdc,
-            )
-            layer_out = vmapped(
-                _pad(_dpai_p[_sl]),
-                _pad(_tleaf_p[_sl]),
-                _pad(_vcmax25_p[_sl]),
-                _pad(_jmax25_p[_sl]),
-                _pad(_rd25_p[_sl]),
-                _pad(_kp25_p[_sl]),
-                _pad(_eair_p[_sl]),
-                _pad(_apar_p[_sl]),
-                _pad(_gbc_p[_sl]),
-                _pad(_gbv_p[_sl]),
-                _pad(_cair_p[_sl]),
-                _o2ref_p,
-                _pref_p,
-                _iota_pft,
-                _gsmin_pft,  # JAX scalar broadcast — gradients flow via IFT
-                vcmaxse,
-                vcmaxc,
-                jmaxse,
-                jmaxc,
-            )
-        _out_names = [
-            "kc_leaf",
-            "ko_leaf",
-            "cp_leaf",
-            "vcmax_leaf",
-            "jmax_leaf",
-            "rd_leaf",
-            "kp_leaf",
-            "leaf_esat_leaf",
-            "ceair_leaf",
-            "je_leaf",
-            "gs_leaf",
-            "ci_leaf",
-            "ac_leaf",
-            "aj_leaf",
-            "ap_leaf",
-            "agross_leaf",
-            "anet_leaf",
-            "cs_leaf",
-        ]
-        updates = {}
-        for idx, name in enumerate(_out_names):
-            arr = getattr(mlcanopy_inst, name)
-            updates[name] = arr.at[p, _sl, il].set(layer_out[idx])
-        updates["btran_soil"] = mlcanopy_inst.btran_soil.at[p].set(1.0)
-        mlcanopy_inst = mlcanopy_inst._replace(**updates)
+            # acclim_type == 1: vcmaxse/jmaxse are JAX traced — keep as JAX
+            vcmaxc = _fth25(vcmaxhd, vcmaxse)  # JAX scalar, passed as runtime arg
+            jmaxc = _fth25(jmaxhd, jmaxse)  # JAX scalar, passed as runtime arg
 
+        # --- Stomatal model parameters — same for all ic ---
+        if gs_type == 0:
+            g0_val = params.g0_medlyn
+            g1_val = params.g1_medlyn
+        elif gs_type == 1:
+            g0_val = params.g0_ball_berry
+            g1_val = params.g1_ball_berry
+        else:
+            g0_val = jnp.asarray(-999.0)
+            g1_val = jnp.asarray(-999.0)
+
+        # Per-pft constants for gs_type==2
+        if gs_type == 2:
+            _iota_pft = params.iota  # differentiable via the implicit function theorem
+            _gsmin_pft = params.gs_min
+
+        # --- Pre-extract constant input slices (JAX arrays, no D→H syncs) ---
+        _dpai_p = mlcanopy_inst.dpai_profile[p]
+        _tleaf_p = mlcanopy_inst.tleaf_leaf[p, :, il]
+        _vcmax25_p = mlcanopy_inst.vcmax25_leaf[p, :, il]
+        _jmax25_p = mlcanopy_inst.jmax25_leaf[p, :, il]
+        _rd25_p = mlcanopy_inst.rd25_leaf[p, :, il]
+        _kp25_p = mlcanopy_inst.kp25_leaf[p, :, il]
+        _eair_p = mlcanopy_inst.eair_profile[p]
+        _apar_p = mlcanopy_inst.apar_leaf[p, :, il]
+        _gbc_p = mlcanopy_inst.gbc_leaf[p, :, il]
+        _gbv_p = mlcanopy_inst.gbv_leaf[p, :, il]
+        _cair_p = mlcanopy_inst.cair_profile[p]
+        _o2ref_p = mlcanopy_inst.o2ref_forcing[p]  # JAX scalar (runtime arg of every kernel)
+        _pref_p = mlcanopy_inst.pref_forcing[p]
+
+        if gs_type in (0, 1):
+            # ---- Differentiable vmap path: no numpy accumulators ---
+            # For acclim_type == 0: vcmaxse/jmaxse/vcmaxc/jmaxc are Python
+            # floats, so use the standard lru_cache'd kernel factory.
+            # For acclim_type == 1: vcmaxse/jmaxse/vcmaxc/jmaxc are JAX traced
+            # arrays (computed from tacclim_forcing); use the acclim variant
+            # that accepts them as runtime broadcast scalars (in_axes=None)
+            # so the kernel is compatible with jax.checkpoint.
+            _sl = slice(1, None)
+            if acclim_type == 0:
+                vmapped = _get_vmapped_photo_kernel(
+                    is_c3=is_c3,
+                    gs_type=gs_type,
+                    colim_type=colim_type,
+                    c3psn_pft_val=_c3psn_val,
+                    vcmaxha=vcmaxha,
+                    vcmaxhd=vcmaxhd,
+                    vcmaxse=vcmaxse,
+                    vcmaxc=vcmaxc,
+                    jmaxha=jmaxha,
+                    jmaxhd=jmaxhd,
+                    jmaxse=jmaxse,
+                    jmaxc=jmaxc,
+                    rdc=rdc,
+                )
+                layer_out = vmapped(
+                    _pad(_dpai_p[_sl]),
+                    _pad(_tleaf_p[_sl]),
+                    _pad(_vcmax25_p[_sl]),
+                    _pad(_jmax25_p[_sl]),
+                    _pad(_rd25_p[_sl]),
+                    _pad(_kp25_p[_sl]),
+                    _pad(_eair_p[_sl]),
+                    _pad(_apar_p[_sl]),
+                    _pad(_gbc_p[_sl]),
+                    _pad(_gbv_p[_sl]),
+                    _pad(_cair_p[_sl]),
+                    g0_val,
+                    g1_val,  # JAX scalar broadcast — gradients flow here
+                    _o2ref_p,
+                )
+            else:
+                # acclim_type == 1: vcmaxse/vcmaxc/jmaxse/jmaxc are JAX scalars
+                vmapped = _get_vmapped_photo_kernel_acclim(
+                    is_c3=is_c3,
+                    gs_type=gs_type,
+                    colim_type=colim_type,
+                    c3psn_pft_val=_c3psn_val,
+                    vcmaxha=vcmaxha,
+                    vcmaxhd=vcmaxhd,
+                    jmaxha=jmaxha,
+                    jmaxhd=jmaxhd,
+                    rdc=rdc,
+                )
+                layer_out = vmapped(
+                    _pad(_dpai_p[_sl]),
+                    _pad(_tleaf_p[_sl]),
+                    _pad(_vcmax25_p[_sl]),
+                    _pad(_jmax25_p[_sl]),
+                    _pad(_rd25_p[_sl]),
+                    _pad(_kp25_p[_sl]),
+                    _pad(_eair_p[_sl]),
+                    _pad(_apar_p[_sl]),
+                    _pad(_gbc_p[_sl]),
+                    _pad(_gbv_p[_sl]),
+                    _pad(_cair_p[_sl]),
+                    g0_val,
+                    g1_val,  # JAX scalar broadcast — gradients flow here
+                    vcmaxse,
+                    vcmaxc,
+                    jmaxse,
+                    jmaxc,
+                    _o2ref_p,
+                )
+            # Write vmap JAX output directly (18-tuple) — skip numpy round-trip
+            _out_names = [
+                "kc_leaf",
+                "ko_leaf",
+                "cp_leaf",
+                "vcmax_leaf",
+                "jmax_leaf",
+                "rd_leaf",
+                "kp_leaf",
+                "leaf_esat_leaf",
+                "ceair_leaf",
+                "je_leaf",
+                "gs_leaf",
+                "ci_leaf",
+                "ac_leaf",
+                "aj_leaf",
+                "ap_leaf",
+                "agross_leaf",
+                "anet_leaf",
+                "cs_leaf",
+            ]
+            updates = {}
+            for idx, name in enumerate(_out_names):
+                arr = getattr(mlcanopy_inst, name)
+                updates[name] = arr.at[p, _sl, il].set(layer_out[idx])
+            updates["btran_soil"] = mlcanopy_inst.btran_soil.at[p].set(1.0)
+            updates["g0_canopy"] = mlcanopy_inst.g0_canopy.at[p].set(g0_val)
+            updates["g1_canopy"] = mlcanopy_inst.g1_canopy.at[p].set(g1_val)
+            mlcanopy_inst = mlcanopy_inst._replace(**updates)
+
+        elif gs_type == 2:
+            # ---- vmap path for WUE stomatal optimization (unified diff/non-diff) ---
+            # For acclim_type == 0: use standard kernel (vcmaxse/jmaxse are floats).
+            # For acclim_type == 1: use acclim variant that accepts vcmaxse/vcmaxc/
+            # jmaxse/jmaxc as runtime broadcast scalars (in_axes=None) to avoid
+            # float() on JAX traced values inside jax.checkpoint.
+            _sl = slice(1, None)
+            if acclim_type == 0:
+                vmapped = _get_vmapped_photo_kernel_wue(
+                    is_c3=is_c3,
+                    gs_type=gs_type,
+                    colim_type=colim_type,
+                    c3psn_pft_val=_c3psn_val,
+                    vcmaxha=vcmaxha,
+                    vcmaxhd=vcmaxhd,
+                    vcmaxse=vcmaxse,
+                    vcmaxc=vcmaxc,
+                    jmaxha=jmaxha,
+                    jmaxhd=jmaxhd,
+                    jmaxse=jmaxse,
+                    jmaxc=jmaxc,
+                    rdc=rdc,
+                )
+                layer_out = vmapped(
+                    _pad(_dpai_p[_sl]),
+                    _pad(_tleaf_p[_sl]),
+                    _pad(_vcmax25_p[_sl]),
+                    _pad(_jmax25_p[_sl]),
+                    _pad(_rd25_p[_sl]),
+                    _pad(_kp25_p[_sl]),
+                    _pad(_eair_p[_sl]),
+                    _pad(_apar_p[_sl]),
+                    _pad(_gbc_p[_sl]),
+                    _pad(_gbv_p[_sl]),
+                    _pad(_cair_p[_sl]),
+                    _o2ref_p,
+                    _pref_p,
+                    _iota_pft,
+                    _gsmin_pft,  # JAX scalar broadcast — gradients flow via IFT
+                )
+            else:
+                # acclim_type == 1: vcmaxse/vcmaxc/jmaxse/jmaxc are JAX scalars
+                vmapped = _get_vmapped_photo_kernel_wue_acclim(
+                    is_c3=is_c3,
+                    gs_type=gs_type,
+                    colim_type=colim_type,
+                    c3psn_pft_val=_c3psn_val,
+                    vcmaxha=vcmaxha,
+                    vcmaxhd=vcmaxhd,
+                    jmaxha=jmaxha,
+                    jmaxhd=jmaxhd,
+                    rdc=rdc,
+                )
+                layer_out = vmapped(
+                    _pad(_dpai_p[_sl]),
+                    _pad(_tleaf_p[_sl]),
+                    _pad(_vcmax25_p[_sl]),
+                    _pad(_jmax25_p[_sl]),
+                    _pad(_rd25_p[_sl]),
+                    _pad(_kp25_p[_sl]),
+                    _pad(_eair_p[_sl]),
+                    _pad(_apar_p[_sl]),
+                    _pad(_gbc_p[_sl]),
+                    _pad(_gbv_p[_sl]),
+                    _pad(_cair_p[_sl]),
+                    _o2ref_p,
+                    _pref_p,
+                    _iota_pft,
+                    _gsmin_pft,  # JAX scalar broadcast — gradients flow via IFT
+                    vcmaxse,
+                    vcmaxc,
+                    jmaxse,
+                    jmaxc,
+                )
+            _out_names = [
+                "kc_leaf",
+                "ko_leaf",
+                "cp_leaf",
+                "vcmax_leaf",
+                "jmax_leaf",
+                "rd_leaf",
+                "kp_leaf",
+                "leaf_esat_leaf",
+                "ceair_leaf",
+                "je_leaf",
+                "gs_leaf",
+                "ci_leaf",
+                "ac_leaf",
+                "aj_leaf",
+                "ap_leaf",
+                "agross_leaf",
+                "anet_leaf",
+                "cs_leaf",
+            ]
+            updates = {}
+            for idx, name in enumerate(_out_names):
+                arr = getattr(mlcanopy_inst, name)
+                updates[name] = arr.at[p, _sl, il].set(layer_out[idx])
+            updates["btran_soil"] = mlcanopy_inst.btran_soil.at[p].set(1.0)
+            mlcanopy_inst = mlcanopy_inst._replace(**updates)
+
+        else:
+            endrun(msg=" ERROR: LeafPhotosynthesis: gs_type not valid")
+
+        # ------------------------------------------------------------------
+        # Second loop: soil moisture adjustment — Fortran lines 262-212
+        # ------------------------------------------------------------------
+        _gsmin_pft2 = params.gs_min
+
+        # Pre-extract slices for second loop (JAX arrays, no D→H syncs)
+        _gs_p2 = mlcanopy_inst.gs_leaf[p, :, il]
+        _dpai_p2 = mlcanopy_inst.dpai_profile[p]
+        _gbv_p2 = mlcanopy_inst.gbv_leaf[p, :, il]
+        _eair_p2 = mlcanopy_inst.eair_profile[p]
+        _lesat_p2 = mlcanopy_inst.leaf_esat_leaf[p, :, il]
+        _gbc_p2 = mlcanopy_inst.gbc_leaf[p, :, il]
+        _vcmax_p2 = mlcanopy_inst.vcmax_leaf[p, :, il]
+        _je_p2 = mlcanopy_inst.je_leaf[p, :, il]
+        _kp_p2 = mlcanopy_inst.kp_leaf[p, :, il]
+        _rd_p2 = mlcanopy_inst.rd_leaf[p, :, il]
+        _kc_p2 = mlcanopy_inst.kc_leaf[p, :, il]
+        _ko_p2 = mlcanopy_inst.ko_leaf[p, :, il]
+        _cp_p2 = mlcanopy_inst.cp_leaf[p, :, il]
+        _o2ref_p2 = mlcanopy_inst.o2ref_forcing[p]
+        _cair_p2 = mlcanopy_inst.cair_profile[p]
+        _apar_p2 = mlcanopy_inst.apar_leaf[p, :, il]
+        _ceair_p2 = mlcanopy_inst.ceair_leaf[p, :, il]
+
+        if gspot_type == 1:
+            _lwp_p2 = mlcanopy_inst.lwp_leaf[p, :, il]
+            _psi50_pft2 = params.psi50_gs
+            _shape_pft2 = params.shape_gs
+
+        # --- Second loop: vectorized over layers (replaces per-ic Python loop) ---
+        # All operations are element-wise; gspot_type and is_c3 are static Python
+        # ints/bools so their if/else branches are resolved at trace time.
+        # Replaces 46 × ~10 scalar XLA ops with ~10 slice XLA ops — reduces
+        # trace depth and improves kernel fusion inside lax.scan.
+        _sl2 = slice(1, None)
+        _gs_sl = _pad(_gs_p2[_sl2])
+        _dpai_sl = _pad(_dpai_p2[_sl2])
+        _gbc_sl = _pad(_gbc_p2[_sl2])
+        _gbv_sl = _pad(_gbv_p2[_sl2])
+        _eair_sl = _pad(_eair_p2[_sl2])
+        _lesat_sl = _pad(_lesat_p2[_sl2])
+        _vcmax_sl = _pad(_vcmax_p2[_sl2])
+        _je_sl = _pad(_je_p2[_sl2])
+        _kp_sl = _pad(_kp_p2[_sl2])
+        _rd_sl = _pad(_rd_p2[_sl2])
+        _kc_sl = _pad(_kc_p2[_sl2])
+        _ko_sl = _pad(_ko_p2[_sl2])
+        _cp_sl = _pad(_cp_p2[_sl2])
+        _cair_sl = _pad(_cair_p2[_sl2])
+        _apar_sl = _pad(_apar_p2[_sl2])
+        _ceair_sl = _pad(_ceair_p2[_sl2])
+        active_sl = _dpai_sl > 0.0
+
+        # Water-stress factor (gspot_type is a static Python int)
+        if gspot_type == 0:
+            fpsi = jnp.ones_like(_gs_sl)
+        elif gspot_type == 1:
+            _lwp_sl = _pad(_lwp_p2[_sl2])
+            fpsi = 1.0 / (1.0 + (_lwp_sl / _psi50_pft2) ** _shape_pft2)
+        else:
+            fpsi = jnp.ones_like(_gs_sl)
+
+        gs_new_sl = jnp.maximum(_gs_sl * fpsi, _gsmin_pft2)
+
+        # Safe gleaf: prevent divide-by-zero for inactive layers.
+        # For inactive layers _gbc_sl == 0 → 1/_gbc_sl = inf → gleaf_sl = 0.
+        # But ci_sl = cair - anet_sl / gleaf_sl would then be anet_sl/0.
+        # d(ci_sl)/d(anet_sl) = 1/gleaf_sl = 1/0 = inf, and 0*inf = NaN in
+        # backward for alpha_pbot.  Guard _gbc_sl too so gleaf_sl > 0.
+        _gs_safe = jnp.maximum(gs_new_sl, 1.0e-30)
+        _gbc_safe = jnp.maximum(_gbc_sl, 1.0e-30)
+        gleaf_sl = 1.0 / (1.0 / _gbc_safe + dh2o_to_dco2 / _gs_safe)
+
+        # Photosynthesis recompute (is_c3 is a static Python bool)
+        if is_c3:
+            # Guard _ko_sl against zero for inactive layers (dpai==0) where
+            # kc/ko were zeroed out in the first loop.  For active layers
+            # _ko_sl > 0 always, so jnp.maximum does not change the value.
+            # Without the guard: _o2ref_p2 / 0 → inf, and _kc_sl * inf = 0*inf
+            # = NaN in forward; d/d(_o2ref_p2) = _kc_sl/_ko_sl = 0/0 = NaN in
+            # backward — causing NaN JAX gradient for alpha_pbot.
+            _ko_safe2 = jnp.maximum(_ko_sl, jnp.asarray(1.0e-30))
+            b0_sl = _kc_sl * (1.0 + _o2ref_p2 / _ko_safe2)
+            bq_sl = -(_cair_sl + b0_sl) - (_vcmax_sl - _rd_sl) / gleaf_sl
+            cq_sl = _vcmax_sl * (_cair_sl - _cp_sl) - _rd_sl * (_cair_sl + b0_sl)
+            r1_sl, r2_sl = quadratic(1.0 / gleaf_sl, bq_sl, cq_sl)
+            ac_sl = jnp.minimum(r1_sl, r2_sl) + _rd_sl
+            b0j_sl = 2.0 * _cp_sl
+            bqj_sl = -(_cair_sl + b0j_sl) - (_je_sl / 4.0 - _rd_sl) / gleaf_sl
+            cqj_sl = (_je_sl / 4.0) * (_cair_sl - _cp_sl) - _rd_sl * (_cair_sl + b0j_sl)
+            r1j_sl, r2j_sl = quadratic(1.0 / gleaf_sl, bqj_sl, cqj_sl)
+            aj_sl = jnp.minimum(r1j_sl, r2j_sl) + _rd_sl
+            ap_sl = jnp.zeros_like(ac_sl)
+        else:
+            ac_sl = _vcmax_sl
+            aj_sl = qe_c4 * _apar_sl
+            ap_sl = _kp_sl * (_cair_sl * gleaf_sl + _rd_sl) / (gleaf_sl + _kp_sl)
+
+        agross_sl = _RealizedRate(colim_type, _c3psn_val, ac_sl, aj_sl, ap_sl)
+        anet_sl = agross_sl - _rd_sl
+        # Use _gbc_safe (clamped from 0) so d(cs_sl)/d(anet_sl) = 1/_gbc_safe
+        # is finite for inactive layers; otherwise -1/0 → -inf and
+        # d(jnp.maximum)/d(anet_sl) = 0 * (-inf) = NaN for alpha_pbot.
+        cs_sl = jnp.maximum(_cair_sl - anet_sl / _gbc_safe, 1.0)
+        ci_sl = _cair_sl - anet_sl / gleaf_sl
+
+        # Guard hs_sl denominator against zero for inactive layers (dpai==0)
+        # where _lesat_sl == 0 and _gbv_sl == 0: denominator = gs_new_sl * 0 = 0,
+        # giving 0/0 = NaN.  d(hs_sl)/d(_eair_sl) = _gbv_sl / denom = 0/0 = NaN
+        # in backward pass.  Since _eair_sl is traced by alpha_pbot, this NaN
+        # multiplied by the jnp.where mask (0 for inactive) gives 0*NaN = NaN
+        # gradient for alpha_pbot.  Fix: clamp denominator to eps for inactive layers.
+        _hs_denom = jnp.maximum((_gbv_sl + gs_new_sl) * _lesat_sl, jnp.asarray(1.0e-30))
+        hs_sl = (_gbv_sl * _eair_sl + gs_new_sl * _lesat_sl) / _hs_denom
+        vpd_sl = jnp.maximum(_lesat_sl - hs_sl * _lesat_sl, 0.1)
+
+        # Mask inactive layers and write all outputs back in one _replace()
+        _z = jnp.zeros_like(active_sl, dtype=jnp.float64)
+        gspot_arr = mlcanopy_inst.gspot_leaf.at[p, _sl2, il].set(_gs_sl)
+        gs_arr = mlcanopy_inst.gs_leaf.at[p, _sl2, il].set(jnp.where(active_sl, gs_new_sl, _gs_sl))
+        ci_arr = mlcanopy_inst.ci_leaf.at[p, _sl2, il].set(
+            jnp.where(active_sl, ci_sl, mlcanopy_inst.ci_leaf[p, _sl2, il])
+        )
+        ac_arr = mlcanopy_inst.ac_leaf.at[p, _sl2, il].set(
+            jnp.where(active_sl, ac_sl, mlcanopy_inst.ac_leaf[p, _sl2, il])
+        )
+        aj_arr = mlcanopy_inst.aj_leaf.at[p, _sl2, il].set(
+            jnp.where(active_sl, aj_sl, mlcanopy_inst.aj_leaf[p, _sl2, il])
+        )
+        ap_arr = mlcanopy_inst.ap_leaf.at[p, _sl2, il].set(
+            jnp.where(active_sl, ap_sl, mlcanopy_inst.ap_leaf[p, _sl2, il])
+        )
+        agross_arr = mlcanopy_inst.agross_leaf.at[p, _sl2, il].set(
+            jnp.where(active_sl, agross_sl, mlcanopy_inst.agross_leaf[p, _sl2, il])
+        )
+        anet_arr = mlcanopy_inst.anet_leaf.at[p, _sl2, il].set(
+            jnp.where(active_sl, anet_sl, mlcanopy_inst.anet_leaf[p, _sl2, il])
+        )
+        cs_arr = mlcanopy_inst.cs_leaf.at[p, _sl2, il].set(
+            jnp.where(active_sl, cs_sl, mlcanopy_inst.cs_leaf[p, _sl2, il])
+        )
+        hs_arr = mlcanopy_inst.hs_leaf.at[p, _sl2, il].set(jnp.where(active_sl, hs_sl, _z))
+        vpd_arr = mlcanopy_inst.vpd_leaf.at[p, _sl2, il].set(jnp.where(active_sl, vpd_sl, _z))
+
+        mlcanopy_inst = mlcanopy_inst._replace(
+            gspot_leaf=gspot_arr,
+            gs_leaf=gs_arr,
+            ci_leaf=ci_arr,
+            ac_leaf=ac_arr,
+            aj_leaf=aj_arr,
+            ap_leaf=ap_arr,
+            agross_leaf=agross_arr,
+            anet_leaf=anet_arr,
+            cs_leaf=cs_arr,
+            hs_leaf=hs_arr,
+            vpd_leaf=vpd_arr,
+        )
+        return mlcanopy_inst
+
+    c3 = jnp.asarray(params.c3_photosynthesis) > 0.5
+    if is_concrete(c3):  # pathway known now (not traced): compute only that one
+        mlcanopy_inst = _pathway(bool(c3), mlcanopy_inst)
     else:
-        endrun(msg=" ERROR: LeafPhotosynthesis: gs_type not valid")
-
-    # ------------------------------------------------------------------
-    # Second loop: soil moisture adjustment — Fortran lines 262-212
-    # ------------------------------------------------------------------
-    _gsmin_pft2 = params.gs_min
-
-    # Pre-extract slices for second loop (JAX arrays, no D→H syncs)
-    _gs_p2 = mlcanopy_inst.gs_leaf[p, :, il]
-    _dpai_p2 = mlcanopy_inst.dpai_profile[p]
-    _gbv_p2 = mlcanopy_inst.gbv_leaf[p, :, il]
-    _eair_p2 = mlcanopy_inst.eair_profile[p]
-    _lesat_p2 = mlcanopy_inst.leaf_esat_leaf[p, :, il]
-    _gbc_p2 = mlcanopy_inst.gbc_leaf[p, :, il]
-    _vcmax_p2 = mlcanopy_inst.vcmax_leaf[p, :, il]
-    _je_p2 = mlcanopy_inst.je_leaf[p, :, il]
-    _kp_p2 = mlcanopy_inst.kp_leaf[p, :, il]
-    _rd_p2 = mlcanopy_inst.rd_leaf[p, :, il]
-    _kc_p2 = mlcanopy_inst.kc_leaf[p, :, il]
-    _ko_p2 = mlcanopy_inst.ko_leaf[p, :, il]
-    _cp_p2 = mlcanopy_inst.cp_leaf[p, :, il]
-    _o2ref_p2 = mlcanopy_inst.o2ref_forcing[p]
-    _cair_p2 = mlcanopy_inst.cair_profile[p]
-    _apar_p2 = mlcanopy_inst.apar_leaf[p, :, il]
-    _ceair_p2 = mlcanopy_inst.ceair_leaf[p, :, il]
-
-    if gspot_type == 1:
-        _lwp_p2 = mlcanopy_inst.lwp_leaf[p, :, il]
-        _psi50_pft2 = params.psi50_gs
-        _shape_pft2 = params.shape_gs
-
-    # --- Second loop: vectorized over layers (replaces per-ic Python loop) ---
-    # All operations are element-wise; gspot_type and is_c3 are static Python
-    # ints/bools so their if/else branches are resolved at trace time.
-    # Replaces 46 × ~10 scalar XLA ops with ~10 slice XLA ops — reduces
-    # trace depth and improves kernel fusion inside lax.scan.
-    _sl2 = slice(1, None)
-    _gs_sl = _pad(_gs_p2[_sl2])
-    _dpai_sl = _pad(_dpai_p2[_sl2])
-    _gbc_sl = _pad(_gbc_p2[_sl2])
-    _gbv_sl = _pad(_gbv_p2[_sl2])
-    _eair_sl = _pad(_eair_p2[_sl2])
-    _lesat_sl = _pad(_lesat_p2[_sl2])
-    _vcmax_sl = _pad(_vcmax_p2[_sl2])
-    _je_sl = _pad(_je_p2[_sl2])
-    _kp_sl = _pad(_kp_p2[_sl2])
-    _rd_sl = _pad(_rd_p2[_sl2])
-    _kc_sl = _pad(_kc_p2[_sl2])
-    _ko_sl = _pad(_ko_p2[_sl2])
-    _cp_sl = _pad(_cp_p2[_sl2])
-    _cair_sl = _pad(_cair_p2[_sl2])
-    _apar_sl = _pad(_apar_p2[_sl2])
-    _ceair_sl = _pad(_ceair_p2[_sl2])
-    active_sl = _dpai_sl > 0.0
-
-    # Water-stress factor (gspot_type is a static Python int)
-    if gspot_type == 0:
-        fpsi = jnp.ones_like(_gs_sl)
-    elif gspot_type == 1:
-        _lwp_sl = _pad(_lwp_p2[_sl2])
-        fpsi = 1.0 / (1.0 + (_lwp_sl / _psi50_pft2) ** _shape_pft2)
-    else:
-        fpsi = jnp.ones_like(_gs_sl)
-
-    gs_new_sl = jnp.maximum(_gs_sl * fpsi, _gsmin_pft2)
-
-    # Safe gleaf: prevent divide-by-zero for inactive layers.
-    # For inactive layers _gbc_sl == 0 → 1/_gbc_sl = inf → gleaf_sl = 0.
-    # But ci_sl = cair - anet_sl / gleaf_sl would then be anet_sl/0.
-    # d(ci_sl)/d(anet_sl) = 1/gleaf_sl = 1/0 = inf, and 0*inf = NaN in
-    # backward for alpha_pbot.  Guard _gbc_sl too so gleaf_sl > 0.
-    _gs_safe = jnp.maximum(gs_new_sl, 1.0e-30)
-    _gbc_safe = jnp.maximum(_gbc_sl, 1.0e-30)
-    gleaf_sl = 1.0 / (1.0 / _gbc_safe + dh2o_to_dco2 / _gs_safe)
-
-    # Photosynthesis recompute (is_c3 is a static Python bool)
-    if is_c3:
-        # Guard _ko_sl against zero for inactive layers (dpai==0) where
-        # kc/ko were zeroed out in the first loop.  For active layers
-        # _ko_sl > 0 always, so jnp.maximum does not change the value.
-        # Without the guard: _o2ref_p2 / 0 → inf, and _kc_sl * inf = 0*inf
-        # = NaN in forward; d/d(_o2ref_p2) = _kc_sl/_ko_sl = 0/0 = NaN in
-        # backward — causing NaN JAX gradient for alpha_pbot.
-        _ko_safe2 = jnp.maximum(_ko_sl, jnp.asarray(1.0e-30))
-        b0_sl = _kc_sl * (1.0 + _o2ref_p2 / _ko_safe2)
-        bq_sl = -(_cair_sl + b0_sl) - (_vcmax_sl - _rd_sl) / gleaf_sl
-        cq_sl = _vcmax_sl * (_cair_sl - _cp_sl) - _rd_sl * (_cair_sl + b0_sl)
-        r1_sl, r2_sl = quadratic(1.0 / gleaf_sl, bq_sl, cq_sl)
-        ac_sl = jnp.minimum(r1_sl, r2_sl) + _rd_sl
-        b0j_sl = 2.0 * _cp_sl
-        bqj_sl = -(_cair_sl + b0j_sl) - (_je_sl / 4.0 - _rd_sl) / gleaf_sl
-        cqj_sl = (_je_sl / 4.0) * (_cair_sl - _cp_sl) - _rd_sl * (_cair_sl + b0j_sl)
-        r1j_sl, r2j_sl = quadratic(1.0 / gleaf_sl, bqj_sl, cqj_sl)
-        aj_sl = jnp.minimum(r1j_sl, r2j_sl) + _rd_sl
-        ap_sl = jnp.zeros_like(ac_sl)
-    else:
-        ac_sl = _vcmax_sl
-        aj_sl = qe_c4 * _apar_sl
-        ap_sl = _kp_sl * (_cair_sl * gleaf_sl + _rd_sl) / (gleaf_sl + _kp_sl)
-
-    agross_sl = _RealizedRate(colim_type, _c3psn_val, ac_sl, aj_sl, ap_sl)
-    anet_sl = agross_sl - _rd_sl
-    # Use _gbc_safe (clamped from 0) so d(cs_sl)/d(anet_sl) = 1/_gbc_safe
-    # is finite for inactive layers; otherwise -1/0 → -inf and
-    # d(jnp.maximum)/d(anet_sl) = 0 * (-inf) = NaN for alpha_pbot.
-    cs_sl = jnp.maximum(_cair_sl - anet_sl / _gbc_safe, 1.0)
-    ci_sl = _cair_sl - anet_sl / gleaf_sl
-
-    # Guard hs_sl denominator against zero for inactive layers (dpai==0)
-    # where _lesat_sl == 0 and _gbv_sl == 0: denominator = gs_new_sl * 0 = 0,
-    # giving 0/0 = NaN.  d(hs_sl)/d(_eair_sl) = _gbv_sl / denom = 0/0 = NaN
-    # in backward pass.  Since _eair_sl is traced by alpha_pbot, this NaN
-    # multiplied by the jnp.where mask (0 for inactive) gives 0*NaN = NaN
-    # gradient for alpha_pbot.  Fix: clamp denominator to eps for inactive layers.
-    _hs_denom = jnp.maximum((_gbv_sl + gs_new_sl) * _lesat_sl, jnp.asarray(1.0e-30))
-    hs_sl = (_gbv_sl * _eair_sl + gs_new_sl * _lesat_sl) / _hs_denom
-    vpd_sl = jnp.maximum(_lesat_sl - hs_sl * _lesat_sl, 0.1)
-
-    # Mask inactive layers and write all outputs back in one _replace()
-    _z = jnp.zeros_like(active_sl, dtype=jnp.float64)
-    gspot_arr = mlcanopy_inst.gspot_leaf.at[p, _sl2, il].set(_gs_sl)
-    gs_arr = mlcanopy_inst.gs_leaf.at[p, _sl2, il].set(jnp.where(active_sl, gs_new_sl, _gs_sl))
-    ci_arr = mlcanopy_inst.ci_leaf.at[p, _sl2, il].set(
-        jnp.where(active_sl, ci_sl, mlcanopy_inst.ci_leaf[p, _sl2, il])
-    )
-    ac_arr = mlcanopy_inst.ac_leaf.at[p, _sl2, il].set(
-        jnp.where(active_sl, ac_sl, mlcanopy_inst.ac_leaf[p, _sl2, il])
-    )
-    aj_arr = mlcanopy_inst.aj_leaf.at[p, _sl2, il].set(
-        jnp.where(active_sl, aj_sl, mlcanopy_inst.aj_leaf[p, _sl2, il])
-    )
-    ap_arr = mlcanopy_inst.ap_leaf.at[p, _sl2, il].set(
-        jnp.where(active_sl, ap_sl, mlcanopy_inst.ap_leaf[p, _sl2, il])
-    )
-    agross_arr = mlcanopy_inst.agross_leaf.at[p, _sl2, il].set(
-        jnp.where(active_sl, agross_sl, mlcanopy_inst.agross_leaf[p, _sl2, il])
-    )
-    anet_arr = mlcanopy_inst.anet_leaf.at[p, _sl2, il].set(
-        jnp.where(active_sl, anet_sl, mlcanopy_inst.anet_leaf[p, _sl2, il])
-    )
-    cs_arr = mlcanopy_inst.cs_leaf.at[p, _sl2, il].set(
-        jnp.where(active_sl, cs_sl, mlcanopy_inst.cs_leaf[p, _sl2, il])
-    )
-    hs_arr = mlcanopy_inst.hs_leaf.at[p, _sl2, il].set(jnp.where(active_sl, hs_sl, _z))
-    vpd_arr = mlcanopy_inst.vpd_leaf.at[p, _sl2, il].set(jnp.where(active_sl, vpd_sl, _z))
-
-    mlcanopy_inst = mlcanopy_inst._replace(
-        gspot_leaf=gspot_arr,
-        gs_leaf=gs_arr,
-        ci_leaf=ci_arr,
-        ac_leaf=ac_arr,
-        aj_leaf=aj_arr,
-        ap_leaf=ap_arr,
-        agross_leaf=agross_arr,
-        anet_leaf=anet_arr,
-        cs_leaf=cs_arr,
-        hs_leaf=hs_arr,
-        vpd_leaf=vpd_arr,
-    )
+        inst_c3 = _pathway(True, mlcanopy_inst)
+        inst_c4 = _pathway(False, mlcanopy_inst)
+        mlcanopy_inst = jax.tree.map(lambda a, b: jnp.where(c3, a, b), inst_c3, inst_c4)
 
     return restore_padding(lay, p, _inst_in, mlcanopy_inst, il)

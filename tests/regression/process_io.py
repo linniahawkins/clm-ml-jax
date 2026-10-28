@@ -176,16 +176,27 @@ def replay(out_json: Path) -> None:
 
 class _Unpickler(pickle.Unpickler):
     """Reads recordings made before Phase 5b, whose ``GridInfo`` also held the layer counts
-    ``(p, ncan, ntop, nbot, c3)``: those are data in the container now."""
+    and the C3/C4 flag ``(p, ncan, ntop, nbot, c3)``: those are data now."""
 
     def find_class(self, module, name):
         cls = super().find_class(module, name)
+        if name == "CanopyParams":  # recorded before c3_photosynthesis was a parameter
+
+            class OldCanopyParams(cls):
+                def __new__(klass, *fields):
+                    if len(fields) == len(cls._fields) - 1:
+                        values = dict(zip([f for f in cls._fields if f != "c3_photosynthesis"],
+                                          fields))  # fmt: skip
+                        return cls(**values, c3_photosynthesis=1.0)  # CHATS7: C3
+                    return cls(*fields)
+
+            return OldCanopyParams
         if name != "GridInfo":
             return cls
 
         class OldGridInfo(cls):
             def __new__(klass, *fields):
-                return cls(p=fields[0], c3=fields[-1]) if len(fields) == 5 else cls(*fields)
+                return cls(p=fields[0])
 
         return OldGridInfo
 
