@@ -20,6 +20,7 @@ CANOPY_FIELDS = {
     "leaf_water_potential": ("mlcanopy", "lwp_leaf"),
     "intercepted_water": ("mlcanopy", "h2ocan_profile"),
     "ground_temperature": ("mlcanopy", "tg_soil"),
+    "acclimation_temperature": ("temperature", "t_a10_patch"),
 }
 SOIL_FIELDS = {
     "temperature": ("temperature", "t_soisno_col"),

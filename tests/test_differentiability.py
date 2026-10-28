@@ -397,3 +397,28 @@ def test_parameter_gradient_matches_finite_difference(initialized_model):
     assert (
         rel_err < 0.05
     ), f"d(loss)/d(vcmax25): analytic={g_analytic:.6e}, fd={g_fd:.6e}, rel_err={rel_err:.3%}"
+
+
+@pytest.mark.slow
+def test_forcing_gradient_matches_finite_difference(initialized_model):
+    """d(loss)/d(air temperature of the next forcing record) from jax.grad agrees with a
+    centred finite difference (the forcing is time-interpolated within the step)."""
+    forward_fn, mlcanopy_inst, info = initialized_model
+    params, forcing_bef, forcing_next = forward_fn.__defaults__
+    p = info["evp_list"][0]
+
+    grads = jax.grad(forward_fn, argnums=3)(mlcanopy_inst, params, forcing_bef, forcing_next)
+    g_analytic = float(grads.tref[p])
+    assert g_analytic != 0.0, "loss does not depend on the next record's air temperature"
+
+    eps = 0.01  # K
+
+    def loss_at(dt):
+        shifted = forcing_next._replace(tref=forcing_next.tref.at[p].add(dt))
+        return float(forward_fn(mlcanopy_inst, params, forcing_bef, shifted))
+
+    g_fd = (loss_at(eps) - loss_at(-eps)) / (2.0 * eps)
+    rel_err = abs(g_analytic - g_fd) / abs(g_fd)
+    assert (
+        rel_err < 0.05
+    ), f"d(loss)/d(tref_next): analytic={g_analytic:.6e}, fd={g_fd:.6e}, rel_err={rel_err:.3%}"

@@ -1999,9 +1999,15 @@ def make_clm_ml_forward(
     # mlcanopy_inst inside forward() is abstract under jax.grad tracing.
     _o2ref_py_fwd: float = float(mlcanopy_inst_template.o2ref_forcing[_p])
 
-    def forward(mlcanopy_inst: mlcanopy_type, params: CanopyParams = default_params) -> jnp.ndarray:
+    def forward(
+        mlcanopy_inst: mlcanopy_type,
+        params: CanopyParams = default_params,
+        forcing_bef: AtmForcingRecord = forcing_bef,
+        forcing_next: AtmForcingRecord = forcing_next,
+    ) -> jnp.ndarray:
         """Differentiable CLM-ML forward pass. Returns scalar loss. Differentiate with
-        respect to the state (``argnums=0``) or the parameters (``argnums=1``)."""
+        respect to the state (``argnums=0``), the parameters (``argnums=1``), or the forcing
+        at the previous or next step (``argnums=2, 3``; used by the time interpolation)."""
         inst = MLCanopyFluxes(
             bounds=bounds,
             num_exposedvegp=num_exposedvegp,

@@ -775,9 +775,10 @@ Progress:
   against finite differences). `clm_ml.state.State` ✅ (canopy air temperature, vapor
   pressure, CO₂, leaf temperature and water potential, intercepted water, ground and soil
   temperature): the time loop rebuilds each step from a fixed template plus `State`, bit for bit
-  (fields found by NaN-poisoning each field before a step). Remaining: `Model.step` in
-  `clm_ml`, `Params` from `params.yaml` into `CanopyParams`, acclimation temperature in `State`,
-  gradients with respect to forcing.
+  (fields found by NaN-poisoning each field before a step). Acclimation temperature in `State`
+  ✅ (still the whole-run mean; Phase 4b). Gradients with respect to state, parameters and
+  forcing ✅, each checked against a finite difference. Remaining: `Model.step` in `clm_ml`,
+  `Params` from `params.yaml` into `CanopyParams`.
 
 ### Phase 4: Chunked, compiled runs (one patch)
 
