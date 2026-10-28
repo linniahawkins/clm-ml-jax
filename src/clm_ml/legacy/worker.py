@@ -57,7 +57,8 @@ TEMPERATURE_FIELDS = ("t_soisno_col",)
 
 def prepare_process(spec: dict) -> None:
     """Steps 1-4 above: configure this (fresh) process for ``spec``. The legacy modules keep
-    options and tables in module globals, so a process can be prepared for one run only."""
+    tables and the tower table in module state; it can be prepared again for another model
+    of the same tower (each model holds its own options and parameters after setup)."""
     import jax
 
     jax.config.update("jax_enable_x64", True)

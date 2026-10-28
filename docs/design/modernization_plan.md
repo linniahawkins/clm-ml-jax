@@ -1142,6 +1142,14 @@ Progress:
   new process takes **20 s instead of 58 s** and compiles nothing. Bit for bit.
 - ✅ The Runge–Kutta increment arrays have room for the largest method (`MAX_RK_STAGES` = 4),
   so the container no longer depends on the option.
+- ✅ **Several models of the same tower in one process**: the run holds its patch's
+  `CanopyParams` (read from the PFT tables at setup; `LegacyRun.canopy_params`) and uses them
+  for every step; tower values are read from the tower table when called, not copied at
+  import; `worker.prepare_process` can run again for another model; `Model.from_run` accepts
+  a second model of the same tower (and soil layer structure) and refuses another tower.
+  Test (`tests/regression/test_models_in_one_process.py`): a WUE model, then a Medlyn model,
+  then the WUE model again in one process: the WUE results are bit for bit unchanged, the
+  Medlyn results equal those of a Medlyn model alone in its process, and the schemes differ.
 - **Scope decided (after measuring):** "same tower, many models". The time step also reads
   CLM's subgrid structure from module state (`PatchType.patch`, `ColumnType.col` soil layers,
   `GridcellType.grc` latitude/longitude, soil-colour albedo tables), set up per tower; making

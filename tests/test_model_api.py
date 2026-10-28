@@ -16,7 +16,6 @@ SCRIPT = """
 import json, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
-import yaml
 import jax
 from clm_ml.legacy.namelist import convert_namelist
 from clm_ml.run import load_run
@@ -39,17 +38,7 @@ g = float(jax.grad(loss)(params).vcmax25)
 eps = 1e-3 * float(params.vcmax25)
 fd = (float(loss(params._replace(vcmax25=params.vcmax25 + eps)))
       - float(loss(params._replace(vcmax25=params.vcmax25 - eps)))) / (2 * eps)
-
-refused = False
-other = tmp / "other"; other.mkdir()
-convert_namelist(Path({namelist!r}), other)
-d = yaml.safe_load((other / "run.yaml").read_text()); d["time"]["steps"] = 10
-(other / "run.yaml").write_text(yaml.safe_dump(d))
-try:
-    Model.from_run(load_run(other / "run.yaml"))
-except RuntimeError:
-    refused = True
-print("RESULT" + json.dumps({{"grad": g, "fd": fd, "refused": refused}}))
+print("RESULT" + json.dumps({{"grad": g, "fd": fd}}))
 """
 
 
@@ -64,6 +53,5 @@ def test_model_chunk_gradient_matches_finite_difference():
     assert run.returncode == 0, run.stderr[-3000:]
     line = next(ln for ln in run.stdout.splitlines() if ln.startswith("RESULT"))
     result = json.loads(line[len("RESULT") :])
-    assert result["refused"], "a second, different run in the same process must be refused"
     assert result["grad"] != 0.0
     assert abs(result["grad"] - result["fd"]) <= 0.05 * abs(result["fd"]), result

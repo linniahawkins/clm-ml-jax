@@ -164,6 +164,7 @@ class LegacyRun:
     acclimation: str = "running_mean"  # running_mean (decision 15) | run_mean (Fortran)
     acclimation_days: float = 10.0
     opts: MLOptions = DEFAULT_OPTIONS  # multilayer canopy options (static; decision 20)
+    canopy_params: object = None  # the patch's CanopyParams, from the PFT tables at setup
 
 
 @dataclasses.dataclass
@@ -297,6 +298,12 @@ def setup_run(nml: dict, opts: Optional[MLOptions] = None) -> LegacyRun:
     from clm_src_main import filterMod as _filterMod
 
     InitializeRealize(bounds)
+    # The patch's parameters, read from the PFT tables now: later steps use these, not the
+    # tables (which another model in this process may replace).
+    from clm_src_main.PatchType import patch
+    from multilayer_canopy.MLCanopyParamsMod import canopy_params_from_tables
+
+    canopy_params = canopy_params_from_tables(int(np.asarray(patch.itype)[bounds.begp]))
 
     # clm_instMod is now safe to import (nlevgrnd correctly set)
     from clm_src_main import clm_instMod
@@ -471,6 +478,7 @@ def setup_run(nml: dict, opts: Optional[MLOptions] = None) -> LegacyRun:
         acclimation=acclimation,
         acclimation_days=acclimation_days,
         opts=opts,
+        canopy_params=canopy_params,
         ntimes=ntimes,
         tower_num=tower_num,
         iyear=iyear,
@@ -529,7 +537,7 @@ def advance(run: LegacyRun, insts, filt, inputs: StepInputs, initialize: bool, p
         inputs.forcing_bef,
         inputs.forcing_next,
         initialize=initialize,
-        params=params,
+        params=run.canopy_params if params is None else params,
         opts=run.opts,
     )
     # Fortran's conservation checks (recorded in the step, plan §6.8): checked here when the
@@ -618,9 +626,7 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers
             return state, state
         return state, (state, insts.mlcanopy, insts.temperature)
 
-    from multilayer_canopy.MLCanopyParamsMod import patch_setup
-
-    _, default_params = patch_setup(int(np.asarray(filt.exposedvegp)[0]), template.mlcanopy)
+    default_params = run.canopy_params
 
     def run_chunk(state, xs, params=default_params):
         return jax.lax.scan(lambda s, x: body(s, x, params), state, xs)
@@ -647,11 +653,10 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
     from clm_ml import output_streams as S
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
     from clm_src_main.clm_varpar import nlevgrnd
-    from multilayer_canopy.MLCanopyParamsMod import patch_setup
 
     dtime = run.time_of(0).dtime
     names = sorted({n for spec in streams for n in spec.variables})
-    _, default_params = patch_setup(int(np.asarray(filt.exposedvegp)[0]), template.mlcanopy)
+    default_params = run.canopy_params
 
     def variables(insts) -> dict:
         m = insts.mlcanopy

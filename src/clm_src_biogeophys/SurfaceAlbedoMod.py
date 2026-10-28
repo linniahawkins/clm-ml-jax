@@ -18,7 +18,7 @@ from clm_src_biogeophys.WaterStateBulkType import waterstatebulk_type  # noqa: F
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varpar import inir, ivis, numrad  # noqa: F401
 from clm_src_main.decompMod import bounds_type  # noqa: F401
-from offline_driver.TowerDataMod import tower_isoicol, tower_num  # noqa: F401
+from offline_driver import TowerDataMod  # tower table, read when called (not copied at import)
 
 # ---------------------------------------------------------------------------
 # Module-level private data (Fortran lines 22-25)
@@ -62,7 +62,8 @@ def SurfaceAlbedoInitTimeConst(bounds: bounds_type) -> None:
 
     # Assign soil color class for every column — Fortran lines 45-48
     n_col = endc - begc + 1
-    isoicol = jnp.full((n_col,), int(tower_isoicol[tower_num]), dtype=jnp.int32)
+    soil_color = int(TowerDataMod.tower_isoicol[TowerDataMod.tower_num])
+    isoicol = jnp.full((n_col,), soil_color, dtype=jnp.int32)
 
     # Saturated and dry soil albedo tables — Fortran lines 51-88
     mxsoil_color = 20

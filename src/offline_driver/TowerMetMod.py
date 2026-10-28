@@ -36,7 +36,7 @@ from clm_src_main.wateratm2lndBulkType import wateratm2lndbulk_type  # noqa: F40
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLclm_varcon import mmdry, mmh2o  # noqa: F401
 from multilayer_canopy.MLWaterVaporMod import SatVap  # noqa: F401
-from offline_driver.TowerDataMod import tower_ht, tower_lat, tower_lon  # noqa: F401
+from offline_driver import TowerDataMod  # tower table, read when called (not copied at import)
 
 # ---------------------------------------------------------------------------
 # Private: atmospheric CO2 concentration
@@ -385,8 +385,8 @@ def set_tower_location(it: int, begp: int, endp: int) -> None:
     _gridcell = np.asarray(patch.gridcell)
     for p in range(begp, endp + 1):
         g = int(_gridcell[p])
-        latdeg = latdeg.at[g].set(float(tower_lat[it]))
-        londeg = londeg.at[g].set(float(tower_lon[it]))
+        latdeg = latdeg.at[g].set(float(TowerDataMod.tower_lat[it]))
+        londeg = londeg.at[g].set(float(TowerDataMod.tower_lon[it]))
     GridcellType.grc = GridcellType.grc._replace(latdeg=latdeg, londeg=londeg)
 
 

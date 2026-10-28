@@ -23,10 +23,8 @@ from clm_src_main.filterMod import allocFilters, filter  # noqa: F401
 from clm_src_main.GridcellType import gridcell_type_Init  # noqa: F401
 from clm_src_main.initGridCellsMod import initGridCells  # noqa: F401
 from clm_src_main.PatchType import patch  # noqa: F401
-from clm_src_main.pftconMod import pftcon  # noqa: F401
 from multilayer_canopy import MLpftconMod  # noqa: F401
 from multilayer_canopy.MLCanopyTurbulenceMod import LookupPsihatINI
-from multilayer_canopy.MLpftconMod import Init, MLpftcon  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Public: phase one initialization

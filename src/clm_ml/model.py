@@ -23,9 +23,12 @@ exposes the pieces a calibration or sensitivity study needs::
 
 ``run_chunk`` is differentiable with respect to the state, the parameters and the forcing.
 
-The legacy code keeps options and tables in module globals, so a process holds **one**
-model: :meth:`Model.from_run` refuses a second run. One patch per model for now (Phase 6
-batches patches).
+Options and parameters are held by each model (Phase 5a), so a process can hold several
+models of the **same tower**, e.g. to compare schemes or parameter sets. The CLM subgrid
+structure (soil layers, latitude and longitude) is still set up per tower in module state,
+so models of different towers need separate processes until Phase 6 (and so do soil layer
+structures: ``soil.layer_structure``). One patch per model for now (Phase 6 batches
+patches).
 """
 
 from __future__ import annotations
@@ -34,7 +37,7 @@ import os
 import warnings
 from typing import Optional, Sequence
 
-_PREPARED: Optional[str] = None  # the run this process was set up for
+_PREPARED: Optional[tuple] = None  # (tower, soil layer structure) this process is set up for
 
 # Gradients over a compiled chunk crash (segmentation fault) in XLA's newer CPU runtime
 # (the "thunk" runtime, default in JAX 0.6.2): reproduced with a 2-step chunk; the older
@@ -73,18 +76,20 @@ class Model:
         its first (initializing) step."""
         global _PREPARED
         spec = run.legacy_spec(None)
-        key = f"{run.source}:{run.start}:{run.n_steps}"
+        key = (spec["tower_name"], spec["namelist"]["clm_phys"])
         if _PREPARED is not None and _PREPARED != key:
             raise RuntimeError(
-                f"this process already holds a model ({_PREPARED}); the legacy code keeps "
-                "options and tables in module globals, so start a new Python process for "
-                "another run (or use Run.execute(), which runs in a separate process)"
+                f"this process holds models of tower {_PREPARED[0]} ({_PREPARED[1]} soil "
+                f"layers); {key[0]} ({key[1]}) needs a new Python process: the CLM subgrid "
+                "structure is set up per tower in module state until Phase 6 (or use "
+                "Run.execute(), which runs in a separate process)"
             )
         from clm_ml.legacy import worker
 
-        if _PREPARED is None:
-            worker.prepare_process(spec)
-            _PREPARED = key
+        # Each model installs its own tables and tower values before its setup; afterwards
+        # it uses only what it holds (options, parameters, state).
+        worker.prepare_process(spec)
+        _PREPARED = key
         import offline_executable.main as M
         from clm_ml.legacy.state import state_from_instances
 
