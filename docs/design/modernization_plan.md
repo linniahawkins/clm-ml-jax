@@ -188,19 +188,21 @@ execution:
 forcing:                          # streams; each has its own time axis, interpolated to the model step
   meteorology:
     files: input_files/tower-forcing/{tower}/{year}-{month:02d}.nc   # may be split in time
-    interpolation: three_point    # none | linear | three_point (CLM-ml v2, centered)
-    shortwave: coszen             # spread within an interval: coszen | interpolate | constant
-    precipitation: constant       # fluxes held constant over the interval (conserves totals)
+    interpolation: three_point    # within a step's sub-steps: none | three_point (CLM-ml v2)
+    shortwave: coszen             # coarser data -> model step: coszen | linear | constant
+    precipitation: constant       # constant (conserves totals) | linear
+  clm_history:                    # initial conditions; LAI/SAI/soil water with source clm_history
+    file: input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    start: 2007-04-01T00:00
   vegetation:                     # LAI, SAI per patch
     source: clm_history           # clm_history | file
-    files: input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    files: null                   # with source: file, e.g. data/lai_{year}.nc
     interpolation: linear         # for daily/monthly data
   soil_water:
     source: clm_history
-    files: input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
     interpolation: linear
     adjustment:
-      files: input_files/clm5_0/{tower}/CHATS_soil_moisture_correction_29Jul25.nc
+      file: input_files/clm5_0/{tower}/CHATS_soil_moisture_correction_29Jul25.nc
       levels: 3                   # was nlev_soil_adjust
 initial_conditions:
   source: clm_history             # clm_history | restart
@@ -904,6 +906,35 @@ Progress:
 - ✅ **Timing test (CPU)**, `timing/results.jsonl`: the 50-step run takes 56 s (Phase 0:
   246 s), 39 s per simulated day (Phase 0: 214 s); this path still writes the legacy text
   output. A compiled step takes ~15 ms; a 31-day run with a daily stream takes 82 s.
+
+- ✅ **Forcing split in time and the §4.1 `forcing:` layout** (follow-up, after Phase 4b):
+  - `forcing.meteorology: {files, interpolation, shortwave, precipitation}`.
+    `interpolation` is CLM-ml v2's rule within a step's sub-steps (`none` | `three_point`,
+    met_type 0 / 3); `shortwave` (`coszen` | `linear` | `constant`) and `precipitation`
+    (`constant` | `linear`) choose how a coarser data interval is brought to the model step
+    (the other variables are always linear between interval midpoints).
+  - `forcing.vegetation` / `forcing.soil_water: {source, files, interpolation}`; the CHATS
+    adjustment moved to `forcing.soil_water.adjustment: {file, levels}`.
+  - `files` is one path or a list. `{tower}`, `{year}` and `{month}` (e.g.
+    `{year}-{month:02d}.nc`) are expanded for every month from one month before the run to
+    one month after it; the files of months inside the run must exist (an error names the
+    missing month), the neighbouring months' files are used if present (halo records).
+  - Tower files are read as one series (`TowerMetMod.TowerFiles`): each file must start one
+    interval after the previous one ends, or the run stops naming the gap. Land-data files
+    are merged by time (records must not repeat; their intervals may be irregular).
+  - **Deviation from the §4.1 sketch:** the CLM history file keeps its own key,
+    `forcing.clm_history: {file, start}`, instead of being given as `vegetation.files` /
+    `soil_water.files` with `source: clm_history`, because it also supplies the initial
+    conditions and the code reads one history file for all three. The adjustment file is
+    `file` (one file, indexed by CLM history time slice), not `files`.
+  - The earlier keys (`forcing.meteorology` as a path, `forcing.interpolation`,
+    `forcing.soil_moisture_adjustment`, `vegetation.file`) are rejected with a message naming
+    the replacement; `clm-ml convert` writes the new layout.
+  - Tests: daily-split CHATS7 tower files read the same records as the single file; a missing
+    day is rejected; land-data files split in time read as one series; config errors; end to
+    end, the CLM-history LAI/SAI as monthly files named by a `{year}-{month:02d}` template plus
+    meteorology split into 31 daily files reproduce the default run (within 1e-6). CHATS7 is
+    unchanged (bit for bit).
 
 **Phase 4 status: done, except GPU timing** (done-when 3, GPU part; deferred, no GPU here).
 Done-when 1 (a chunked run is bit for bit identical to one chunk: two chunks of 4 vs one of 8,

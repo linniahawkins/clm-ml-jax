@@ -4,6 +4,9 @@ Prescribed land data from user files (decision 14), end to end on CHATS7:
 1. LAI, SAI and soil water written from the CLM history file itself, stamped at the start of
    each half-hour interval, reproduce the default run exactly (each step's midpoint is a
    record's midpoint, so the interpolation returns the record).
+   That run also reads its files split in time (plan §4.1): LAI/SAI from monthly files named
+   by a ``{year}-{month:02d}`` template (April is read for the halo), and the meteorology
+   from daily tower files.
 2. A monthly LAI file gives the leaf area index interpolated between monthly midpoints.
 """
 
@@ -25,20 +28,41 @@ VARIABLES = ["leaf_area_index", "stem_area_index", "latent_heat_flux", "sensible
              "gpp", "soil_water_stress", "soil_water_potential"]  # fmt: skip
 
 
-def _from_history(path: Path, names) -> None:
+def _from_history(path: Path, names, records=slice(None)) -> None:
     import netCDF4 as nc
 
     with nc.Dataset(HISTORY) as src, nc.Dataset(path, "w") as dst:
-        n = src.dimensions["time"].size
+        time = src["time"][records]
+        n = len(time)
         dst.createDimension("time", n)
         dst.createDimension("levsoi", src.dimensions["levsoi"].size)
         t = dst.createVariable("time", "f8", ("time",))
         t.units = src["time"].units
-        t[:] = src["time"][:] - 1.0 / 48  # history stamps end the interval; files start it
+        t[:] = time - 1.0 / 48  # history stamps end the interval; files start it
         for name, src_name in names.items():
-            v = src[src_name][:]
+            v = src[src_name][records]
             dims = ("time", "levsoi") if v.ndim == 3 else ("time",)
             dst.createVariable(name, "f8", dims)[:] = v.reshape((n,) + v.shape[1:-1])
+
+
+def _daily_tower_files(out_dir: Path) -> list[str]:
+    import netCDF4 as nc
+
+    tower = ROOT / "src" / "input_files" / "tower-forcing" / "CHATS7" / "2007-05.nc"
+    out_dir.mkdir()
+    paths = []
+    with nc.Dataset(tower) as src:
+        for day, lo in enumerate(range(0, src.dimensions["time"].size, 48)):
+            path = out_dir / f"day{day:02d}.nc"
+            with nc.Dataset(path, "w") as dst:
+                for name, dim in src.dimensions.items():
+                    dst.createDimension(name, 48 if name == "time" else dim.size)
+                for name, var in src.variables.items():
+                    v = dst.createVariable(name, var.dtype, var.dimensions)
+                    v.setncatts({a: var.getncattr(a) for a in var.ncattrs()})
+                    v[:] = var[lo : lo + 48] if "time" in var.dimensions else var[:]
+            paths.append(str(path))
+    return paths
 
 
 def _monthly_lai(path: Path) -> None:
@@ -64,7 +88,8 @@ def _run(workdir: Path, forcing: dict):
     convert_namelist(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day", workdir)
     run_yaml = workdir / "run.yaml"
     data = yaml.safe_load(run_yaml.read_text())
-    data["forcing"].update(forcing)
+    for key, section in forcing.items():  # merge: keep e.g. soil_water.adjustment
+        data["forcing"].setdefault(key, {}).update(section)
     data["output"] = {
         "directory": str(workdir / "out"),
         "streams": [{"name": "step", "frequency": "step", "statistic": "mean",
@@ -75,18 +100,22 @@ def _run(workdir: Path, forcing: dict):
 
 
 def test_land_data_files(tmp_path):
-    _from_history(tmp_path / "veg.nc", {"LAI": "ELAI", "SAI": "ESAI"})
+    april = 30 * 48  # the history file starts on 1 April (half-hourly)
+    veg = {"LAI": "ELAI", "SAI": "ESAI"}
+    _from_history(tmp_path / "veg_2007-04.nc", veg, slice(0, april))
+    _from_history(tmp_path / "veg_2007-05.nc", veg, slice(april, None))
     _from_history(tmp_path / "soil.nc", {"H2OSOI": "H2OSOI"})
     _monthly_lai(tmp_path / "monthly.nc")
     base = _run(tmp_path / "base", {})
     files = _run(
         tmp_path / "files",
-        {"vegetation": {"source": "file", "file": str(tmp_path / "veg.nc")},
-         "soil_water": {"source": "file", "file": str(tmp_path / "soil.nc")}},
+        {"vegetation": {"source": "file", "files": str(tmp_path / "veg_{year}-{month:02d}.nc")},
+         "soil_water": {"source": "file", "files": str(tmp_path / "soil.nc")},
+         "meteorology": {"files": _daily_tower_files(tmp_path / "met")}},
     )  # fmt: skip
     monthly = _run(
         tmp_path / "monthly",
-        {"vegetation": {"source": "file", "file": str(tmp_path / "monthly.nc")}},
+        {"vegetation": {"source": "file", "files": str(tmp_path / "monthly.nc")}},
     )
 
     # 1. the history data as user files reproduce the default run: the inputs to round-off

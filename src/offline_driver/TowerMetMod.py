@@ -16,6 +16,7 @@ Original Fortran module: TowerMetMod
 Fortran lines 1-290
 """
 
+import dataclasses
 import datetime
 from typing import List, NamedTuple, Sequence, Tuple
 
@@ -248,6 +249,72 @@ def tower_first_record(ncfilename: str, start: datetime.datetime, step_seconds: 
     if abs(record * step_seconds - days * 86400.0) > 1.0 or not 0 <= record < n_file:
         endrun(msg=f" TowerMet error: {start} is not a record time in {ncfilename}")
     return record
+
+
+@dataclasses.dataclass(frozen=True)
+class TowerFiles:
+    """Tower forcing split in time over several files (e.g. one per month), read as one
+    series of records. Record 0 is the first record of the first file; each file must
+    start one interval after the previous one ends (no gaps, no overlap)."""
+
+    paths: tuple[str, ...]
+    offsets: tuple[int, ...]  # series index of each file's first record
+    n_records: int
+    origin: datetime.datetime  # time of record 0
+    step_seconds: int
+
+    @classmethod
+    def open(cls, paths: Sequence[str], step_seconds: int) -> "TowerFiles":
+        paths = tuple(str(p) for p in paths)
+        if not paths:
+            endrun(msg=" TowerMet error: no tower forcing files")
+        offsets, total, origin = [], 0, None
+        for path in paths:
+            with nc.Dataset(path, "r") as ds:
+                time = ds.variables["time"]
+                base = datetime.datetime.fromisoformat(time.units.split("since")[1].strip())
+                first = base + datetime.timedelta(days=float(time[0]))
+                size = ds.dimensions["time"].size
+            if origin is None:
+                origin = first
+            expected = origin + datetime.timedelta(seconds=total * step_seconds)
+            if abs((first - expected).total_seconds()) > 1.0:
+                endrun(
+                    msg=f" TowerMet error: {path} starts at {first}, but the previous file "
+                    f"ends at {expected} (files must follow each other without gaps)"
+                )
+            offsets.append(total)
+            total += size
+        return cls(paths, tuple(offsets), total, origin, step_seconds)
+
+    def first_record(self, start: datetime.datetime) -> int:
+        """Series record at date-time ``start``."""
+        seconds = (start - self.origin).total_seconds()
+        record = round(seconds / self.step_seconds)
+        if abs(record * self.step_seconds - seconds) > 1.0 or not 0 <= record < self.n_records:
+            endrun(msg=f" TowerMet error: {start} is not a record time in {self.paths[0]} ...")
+        return record
+
+    def read(self, records: Sequence[int]) -> List[TowerMetRaw]:
+        """The given series records, each read from the file holding it."""
+        out: dict = {}
+        bounds = list(self.offsets) + [self.n_records]
+        for r in records:
+            if not 0 <= r < self.n_records:
+                endrun(msg=f" TowerMet error: record {r} outside the forcing files")
+        for i, path in enumerate(self.paths):
+            mine = [r for r in records if bounds[i] <= r < bounds[i + 1]]
+            if mine:
+                raws = read_tower_met_series(path, [r - bounds[i] for r in mine])
+                out.update(zip(mine, raws))
+        return [out[r] for r in records]
+
+
+def as_tower_files(files, step_seconds: int = 1800) -> TowerFiles:
+    """A :class:`TowerFiles` from one path, a list of paths, or a ``TowerFiles``."""
+    if isinstance(files, TowerFiles):
+        return files
+    return TowerFiles.open([files] if isinstance(files, (str, bytes)) else files, step_seconds)
 
 
 def derive_tower_met(raw: TowerMetRaw, tower_height: float) -> TowerMet:

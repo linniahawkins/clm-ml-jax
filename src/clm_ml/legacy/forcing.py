@@ -17,11 +17,11 @@ from clm_ml.forcing import ClmHistoryForcing, Forcing, TowerForcing, chunk_run_s
 from clm_src_main.clm_varpar import inir, ivis, numrad
 from multilayer_canopy.MLGetAtmForcingMod import AtmForcingRecord, clm_forcing_to_ml
 from offline_driver.clmDataMod import ClmHistoryRecord, read_clm_history_series
-from offline_driver.TowerMetMod import TowerMet, derive_tower_met, read_tower_met_series
+from offline_driver.TowerMetMod import TowerMet, as_tower_files, derive_tower_met
 
 
 def load_forcing(
-    tower_file: str,
+    tower_file,
     clm_history_file: str,
     soil_adjust_file: str,
     *,
@@ -35,7 +35,8 @@ def load_forcing(
     """Read and derive one chunk of forcing for one tower (one gridcell).
 
     Args:
-        tower_file, clm_history_file, soil_adjust_file: Input files.
+        tower_file, clm_history_file, soil_adjust_file: Input files (``tower_file``: a
+            path, or a :class:`TowerMetMod.TowerFiles` series split in time).
         first_record: 0-based record of ``tower_file`` at the run's first step
             (``TowerMetMod.tower_first_record``).
         run_n_steps: Steps in the whole run (to know where the run ends).
@@ -44,7 +45,7 @@ def load_forcing(
         tower_height: Forcing height from the tower table (m).
     """
     run_steps = chunk_run_steps(run_n_steps, first_step, n_steps)
-    raws = read_tower_met_series(tower_file, [first_record + k for k in run_steps])
+    raws = as_tower_files(tower_file).read([first_record + k for k in run_steps])
     mets = [derive_tower_met(raw, tower_height) for raw in raws]
     slices = [history_index(k) for k in run_steps]
     return _forcing(mets, slices, clm_history_file, soil_adjust_file, first_step)
@@ -93,7 +94,7 @@ class TowerForcingSource:
     the CLM history file (leaf/stem area, soil water), read chunk by chunk with
     :func:`load_forcing`."""
 
-    tower_file: str
+    tower_file: object  # a path or a TowerMetMod.TowerFiles series
     clm_history_file: str
     soil_adjust_file: str
     first_record: int  # 0-based tower-file record at the run's first step
@@ -111,6 +112,9 @@ class TowerForcingSource:
     # daily or monthly records, linear between interval midpoints. None: CLM history.
     vegetation_file: Optional[str] = None  # LAI, SAI (m2 m-2)
     soil_water_file: Optional[str] = None  # H2OSOI (m3 m-3), the model's soil layers
+    # (several files split in time may be given as a tuple, for both)
+    shortwave: str = "coszen"  # data interval -> model step: coszen | linear | constant
+    precipitation: str = "constant"  # constant | linear
 
     def chunk(self, first_step: int, n_steps: int) -> Forcing:
         forcing = self._chunk(first_step, n_steps)
@@ -137,13 +141,6 @@ class TowerForcingSource:
 _COSZ_FUNCTIONS: dict = {}  # (lat, lon, year) -> mean_cosz function
 
 
-def _file_records(path: str) -> int:
-    import netCDF4 as nc
-
-    with nc.Dataset(path) as ds:
-        return ds.dimensions["time"].size
-
-
 def _interpolated_chunk(self: TowerForcingSource, first_step: int, n_steps: int) -> Forcing:
     """The chunk at the model step, interpolated from the data records
     (:mod:`clm_ml.forcing_interpolation`), then derived step by step."""
@@ -158,9 +155,10 @@ def _interpolated_chunk(self: TowerForcingSource, first_step: int, n_steps: int)
     per = self.record_seconds // self.step_seconds
     # records covering the steps, plus one on each side for linear interpolation
     lo = max(min(run_steps) // per - 1, -self.first_record)
-    hi = min(max(run_steps) // per + 1, _file_records(self.tower_file) - 1 - self.first_record)
+    files = as_tower_files(self.tower_file, self.record_seconds)
+    hi = min(max(run_steps) // per + 1, files.n_records - 1 - self.first_record)
     records = list(range(lo, hi + 1))
-    raws = read_tower_met_series(self.tower_file, [self.first_record + j for j in records])
+    raws = files.read([self.first_record + j for j in records])
     rec = dt.timedelta(seconds=self.record_seconds)
     rec_starts = [self.run_start + j * rec for j in records]
     values = {f: np.array([getattr(r, f) for r in raws], dtype=float) for f in TowerMetRaw._fields}
@@ -170,7 +168,13 @@ def _interpolated_chunk(self: TowerForcingSource, first_step: int, n_steps: int)
             math.radians(self.lat), math.radians(self.lon), self.run_start.year
         )
     at_step = interpolate_records(
-        values, rec_starts, self.record_seconds, starts, self.step_seconds, _COSZ_FUNCTIONS[key]
+        values,
+        rec_starts,
+        self.record_seconds,
+        starts,
+        self.step_seconds,
+        _COSZ_FUNCTIONS[key],
+        rules={"fsdsbot": self.shortwave, "prect": self.precipitation},
     )
     mets = [
         derive_tower_met(

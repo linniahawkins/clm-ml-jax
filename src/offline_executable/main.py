@@ -78,6 +78,13 @@ def _resolve_path(raw: str) -> str:
     return raw
 
 
+def _path_list(value) -> list[str]:
+    """A namelist value holding one path or a list of paths -> resolved paths (blanks
+    dropped)."""
+    values = [value] if isinstance(value, str) or value is None else list(value)
+    return [_resolve_path(str(v).strip()) for v in values if v is not None and str(v).strip()]
+
+
 def read_namelist(source) -> dict:
     """
     Parse a Fortran-style namelist from a file path or stdin.
@@ -180,16 +187,17 @@ def setup_run(nml: dict) -> LegacyRun:
     imonth = (start_ymd // 100) % 100
 
     fin_tower = _resolve_path(str(params.get("fin_tower", "")))
+    # Forcing split in time (run.yaml files with {year}/{month}): fin_tower_files lists the
+    # tower files in order; without it, fin_tower is the only file.
+    tower_files = _path_list(params.get("fin_tower_files")) or [fin_tower]
     fin_clm = _resolve_path(str(params.get("fin_clm", "")))
     fin_soil_adjust = _resolve_path(str(params.get("fin_soil_adjust", "")))
-    fin_vegetation = str(params.get("fin_vegetation", "")).strip()
-    fin_soil_water = str(params.get("fin_soil_water", "")).strip()
+    fin_vegetation = _path_list(params.get("fin_vegetation"))
+    fin_soil_water = _path_list(params.get("fin_soil_water"))
     dirout_raw = str(params.get("dirout", "")).strip()
     dirout = _resolve_path(dirout_raw) if dirout_raw else ""
 
-    # fin1 = tower forcing file (used by TowerMet* and init_acclim)
     # fin2 = CLM history file   (used by clmData inside clm_driver)
-    fin1 = fin_tower
     fin2 = fin_clm
 
     print(f"Site: {tower_name}  Year: {iyear}  Month: {imonth}", flush=True)
@@ -292,7 +300,7 @@ def setup_run(nml: dict) -> LegacyRun:
         TowerVeg,
         init_acclim,
     )
-    from offline_driver.TowerMetMod import tower_first_record
+    from offline_driver.TowerMetMod import TowerFiles
 
     # 6-pre. Time axis of the run, and the matching time slice of the CLM history file
     #     for every step. Fortran CLMml_drv computed the history file's first calendar day
@@ -334,13 +342,14 @@ def setup_run(nml: dict) -> LegacyRun:
     run_start = datetime.datetime.strptime(str(start_ymd), "%Y%m%d") + datetime.timedelta(
         seconds=run_start_tod
     )
-    first_record = tower_first_record(fin1, run_start, record_sec)
+    tower_series = TowerFiles.open(tower_files, record_sec)
+    first_record = tower_series.first_record(run_start)
     tower_height = float(TowerDataMod.tower_ht[tower_num])
 
     from clm_ml.legacy.forcing import TowerForcingSource
 
     source = TowerForcingSource(
-        tower_file=fin1,
+        tower_file=tower_series,
         clm_history_file=fin2,
         soil_adjust_file=fin_soil_adjust,
         first_record=first_record,
@@ -352,8 +361,10 @@ def setup_run(nml: dict) -> LegacyRun:
         run_start=run_start,
         lat=float(TowerDataMod.tower_lat[tower_num]),
         lon=float(TowerDataMod.tower_lon[tower_num]),
-        vegetation_file=_resolve_path(fin_vegetation) if fin_vegetation else None,
-        soil_water_file=_resolve_path(fin_soil_water) if fin_soil_water else None,
+        vegetation_file=tuple(fin_vegetation) or None,
+        soil_water_file=tuple(fin_soil_water) or None,
+        shortwave=str(params.get("met_shortwave", "coszen")).strip(),
+        precipitation=str(params.get("met_precipitation", "constant")).strip(),
     )
 
     def load_chunk(first_step: int, n_steps: int) -> ForcingChunk:

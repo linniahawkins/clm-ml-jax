@@ -25,16 +25,19 @@ forcing:
   # The CHATS7 data are already at the model step (30 min), so no time interpolation
   # beyond CLM-ml v2's three-point rule is applied.
   meteorology:
-    files: ../../../src/input_files/tower-forcing/{tower}/2007-05.nc   # was fin_tower
-    interpolation: three_point     # none | linear | three_point (was met_type 0 / 3)
+    files: ../../../src/input_files/tower-forcing/{tower}/{year}-{month:02d}.nc   # was fin_tower
+    interpolation: three_point     # within each step's sub-steps: none | three_point (met_type 0 / 3)
+    shortwave: coszen              # only if the data interval exceeds the model step
+    precipitation: constant        # (coszen | linear | constant; constant | linear)
+  clm_history:                     # initial conditions; LAI, SAI, soil water with source clm_history
+    file: ../../../src/input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    start: 2007-04-01T00:00        # was clm_start_ymd / clm_start_tod
   vegetation:
-    source: clm_history            # LAI/SAI from the CLM history file (was fin_clm)
-    files: ../../../src/input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    source: clm_history            # LAI/SAI from the CLM history file (file: user files)
   soil_water:
     source: clm_history
-    files: ../../../src/input_files/clm5_0/{tower}/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
-    adjustment:
-      files: ../../../src/input_files/clm5_0/{tower}/CHATS_soil_moisture_correction_29Jul25.nc
+    adjustment:                    # CHATS: soil water adjusted to observations
+      file: ../../../src/input_files/clm5_0/{tower}/CHATS_soil_moisture_correction_29Jul25.nc
       levels: 3                    # was nlev_soil_adjust
 
 initial_conditions:

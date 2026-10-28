@@ -21,14 +21,21 @@ execution:
 
 forcing:
   meteorology:
-    files: data/met/6hourly_{year}.nc
-    interpolation: linear          # 6-hourly -> 30-minute model step
-    shortwave: coszen              # diurnal cycle from the solar zenith angle; conserves means
+    files: data/met/6hourly_{year}.nc   # one file per year; {month:02d} also works
+    interpolation: three_point     # within each step's sub-steps (CLM-ml v2)
+    shortwave: coszen              # 6-hourly -> 30-minute step: diurnal cycle from the solar
+                                   # zenith angle, conserves interval means
     precipitation: constant        # held over each 6-hour interval; conserves totals
+                                   # (other variables: linear between interval midpoints)
+  clm_history:                     # initial conditions
+    file: data/clm/initial_{tower}.nc
+    start: 2000-01-01T00:00
   vegetation:
+    source: file
     files: data/lai/monthly_lai_sai.nc
     interpolation: linear          # between monthly midpoints
   soil_water:
+    source: file
     files: data/soil/daily_h2osoi_{year}.nc
     interpolation: linear          # between daily midpoints
 

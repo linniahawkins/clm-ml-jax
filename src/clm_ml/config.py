@@ -138,7 +138,7 @@ class ModelConfig:
     def to_fortran_codes(self, interpolation: str) -> dict:
         """Values for the legacy ``MLclm_varctl`` module variables.
 
-        ``interpolation`` comes from ``run.yaml`` (``forcing.interpolation``), because it
+        ``interpolation`` comes from ``run.yaml`` (``forcing.meteorology.interpolation``), because it
         describes the forcing data rather than the physics.
         """
         p, n, c = self.physics, self.numerics, self.canopy_layers

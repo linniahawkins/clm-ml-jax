@@ -57,30 +57,56 @@ class ClmHistorySection:
     start: str  # first record of the history file (was clm_start_ymd / clm_start_tod)
 
 
+#: A ``files`` entry: one path or a list; ``{tower}``, ``{year}`` and ``{month}`` (e.g.
+#: ``{year}-{month:02d}.nc``) are expanded over the run's months (see :meth:`Run.files`).
+Files = tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class MeteorologySection:
+    files: Files  # tower forcing netCDF, may be split in time
+    # Within a model step (CLM-ml v2 sub-steps): three_point = met_type 3, none = met_type 0
+    interpolation: Literal["none", "three_point"] = "three_point"
+    # From a coarser data interval to the model step (decision 13; other variables linear)
+    shortwave: Literal["coszen", "linear", "constant"] = "coszen"
+    precipitation: Literal["constant", "linear"] = "constant"
+
+
 @dataclasses.dataclass(frozen=True)
 class SoilMoistureAdjustmentSection:
-    file: str
+    file: str  # factors per CLM history time slice (CHATS)
     levels: int = 3  # was nlev_soil_adjust
 
 
 @dataclasses.dataclass(frozen=True)
 class LandDataSection:
-    """Prescribed land data (decision 14): from the CLM history file, or from a user file
+    """Prescribed land data (decision 14): from the CLM history file, or from user files
     with daily or monthly records interpolated linearly between interval midpoints."""
 
     source: Literal["clm_history", "file"] = "clm_history"
-    file: Optional[str] = None  # netCDF: time ("days since ..."); LAI, SAI or H2OSOI
+    files: Files = ()  # netCDF: time ("days since ..."); LAI, SAI or H2OSOI
     interpolation: Literal["linear"] = "linear"
 
 
 @dataclasses.dataclass(frozen=True)
+class SoilWaterSection(LandDataSection):
+    adjustment: Optional[SoilMoistureAdjustmentSection] = None
+
+
+@dataclasses.dataclass(frozen=True)
 class ForcingSection:
-    meteorology: str  # tower forcing netCDF; {tower} is replaced by the tower name
+    meteorology: MeteorologySection
+    # The CLM history file: initial conditions, and LAI/SAI/soil water with source clm_history
     clm_history: ClmHistorySection
-    soil_moisture_adjustment: Optional[SoilMoistureAdjustmentSection] = None
-    interpolation: Literal["none", "three_point"] = "three_point"  # met_type 0 / 3
     vegetation: LandDataSection = LandDataSection()  # LAI, SAI
-    soil_water: LandDataSection = LandDataSection()  # volumetric soil water
+    soil_water: SoilWaterSection = SoilWaterSection()  # volumetric soil water
+
+
+#: Earlier forcing keys and what replaced them (plan §4.1)
+_OLD_FORCING_KEYS = {
+    "interpolation": "forcing.meteorology.interpolation",
+    "soil_moisture_adjustment": "forcing.soil_water.adjustment",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -178,6 +204,41 @@ class Run:
         path = Path(text).expanduser()
         return path if path.is_absolute() else (self.base_dir / path).resolve()
 
+    def files(self, entry, tower: str, key: str = "files") -> list[Path]:
+        """The files of a ``files`` entry, in order. ``{year}`` and ``{month}`` are
+        expanded for every month from one month before the run to one month after it (the
+        neighbouring records interpolation needs); files for months inside the run must
+        exist, the others are used when they exist."""
+        entries = [entry] if isinstance(entry, str) else list(entry)
+        end = self.start + dt.timedelta(seconds=(self.n_steps - 1) * self.step_seconds)  # last step
+        months, (y, m) = [], (self.start.year, self.start.month)
+        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+        while (y, m) <= ((end.year, end.month + 1) if end.month < 12 else (end.year + 1, 1)):
+            months.append((y, m))
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        run_months = set(months[1:-1])
+        out = []
+        for text in entries:
+            if "{year" not in text and "{month" not in text:
+                path = self.path(text.replace("{tower}", tower))
+                if not path.exists():
+                    raise ConfigError(f"{self.source}: {key}: file not found: {path}")
+                out.append(path)
+                continue
+            for y, m in months:
+                try:
+                    name = text.format(tower=tower, year=y, month=m)
+                except (KeyError, IndexError, ValueError) as err:
+                    raise ConfigError(f"{self.source}: {key}: {text!r}: {err}") from None
+                path = self.path(name)
+                if path.exists():
+                    out.append(path)
+                elif (y, m) in run_months:
+                    raise ConfigError(
+                        f"{self.source}: {key}: file not found for {y}-{m:02d}: {path}"
+                    )
+        return list(dict.fromkeys(out))
+
     @property
     def output_directory(self) -> Path:
         return self.path(self.run_file.output.directory)
@@ -263,7 +324,16 @@ class Run:
         tower_name = self.domain.gridcells.names[0]
         f = self.run_file.forcing
         clm_start = _parse_datetime(f.clm_history.start, "forcing.clm_history.start")
-        adjust = f.soil_moisture_adjustment
+        adjust = f.soil_water.adjustment
+        met = f.meteorology
+        tower_files = [str(p) for p in self.files(met.files, tower_name, "forcing.meteorology")]
+
+        def land_files(key):
+            section = getattr(f, key)
+            if section.source != "file":
+                return " "
+            return [str(p) for p in self.files(section.files, tower_name, f"forcing.{key}")]
+
         namelist = {
             "tower_name": tower_name,
             "start_ymd": int(f"{self.start:%Y%m%d}"),
@@ -272,22 +342,17 @@ class Run:
             "stop_n": self.n_steps,
             "clm_start_ymd": int(f"{clm_start:%Y%m%d}"),
             "clm_start_tod": clm_start.hour * 3600 + clm_start.minute * 60,
-            "fin_tower": str(self.path(f.meteorology, tower_name)),
+            "fin_tower": tower_files[0],
+            "fin_tower_files": tower_files,
+            "met_shortwave": met.shortwave,
+            "met_precipitation": met.precipitation,
             "fin_clm": str(self.path(f.clm_history.file, tower_name)),
             "clm_phys": {"clm5_0": "CLM5_0", "clm4_5": "CLM4_5"}[self.config.soil.layer_structure],
             "fin_soil_adjust": str(self.path(adjust.file, tower_name)) if adjust else " ",
-            "fin_vegetation": (
-                str(self.path(f.vegetation.file, tower_name))
-                if f.vegetation.source == "file"
-                else " "
-            ),
-            "fin_soil_water": (
-                str(self.path(f.soil_water.file, tower_name))
-                if f.soil_water.source == "file"
-                else " "
-            ),
+            "fin_vegetation": land_files("vegetation"),
+            "fin_soil_water": land_files("soil_water"),
             "nlev_soil_adjust": adjust.levels if adjust else 0,
-            "met_type": 3 if f.interpolation == "three_point" else 0,
+            "met_type": 3 if met.interpolation == "three_point" else 0,
             "dpai_min": self.config.canopy_layers.min_plant_area_per_layer,
             "pftcon_val": 0,
             "dtstep_seconds": self.step_seconds,
@@ -296,7 +361,7 @@ class Run:
         }
         return {
             "namelist": namelist,
-            "varctl": self.config.to_fortran_codes(f.interpolation),
+            "varctl": self.config.to_fortran_codes(met.interpolation),
             "params": {k: v.tolist() for k, v in self.params.values.items()},
             "params_source": self.params.source,
             "tower_name": tower_name,
@@ -373,6 +438,7 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
             f"{path.name}: output: "
             + "; ".join(f"{k} was replaced by {_OLD_OUTPUT_KEYS[k]}" for k in old)
         )
+    _check_forcing_keys(data.get("forcing"), path.name)
     run_file = from_dict(RunFile, data, source=path.name)
     base_dir = path.parent
 
@@ -415,18 +481,17 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
     start, n_steps = _resolve_time(run_file.time, path.name, model_step)
     run = Run(run_file, base_dir, config, params, domain, start, n_steps, source=path.name)
     tower = domain.gridcells.names[0]
-    files = {"forcing.meteorology": run_file.forcing.meteorology,
-             "forcing.clm_history.file": run_file.forcing.clm_history.file}  # fmt: skip
+    forcing = run_file.forcing
+    run.files(forcing.meteorology.files, tower, "forcing.meteorology.files")
     for key in ("vegetation", "soil_water"):
-        section = getattr(run_file.forcing, key)
+        section = getattr(forcing, key)
         if section.source == "file":
-            if not section.file:
-                raise ConfigError(f"{path.name}: forcing.{key}.file: required with source file")
-            files[f"forcing.{key}.file"] = section.file
-    if run_file.forcing.soil_moisture_adjustment:
-        files["forcing.soil_moisture_adjustment.file"] = (
-            run_file.forcing.soil_moisture_adjustment.file
-        )
+            if not section.files:
+                raise ConfigError(f"{path.name}: forcing.{key}.files: required with source file")
+            run.files(section.files, tower, f"forcing.{key}.files")
+    files = {"forcing.clm_history.file": forcing.clm_history.file}
+    if forcing.soil_water.adjustment:
+        files["forcing.soil_water.adjustment.file"] = forcing.soil_water.adjustment.file
     for key, text in files.items():
         if not run.path(text, tower).exists():
             raise ConfigError(f"{path.name}: {key}: file not found: {run.path(text, tower)}")
@@ -437,6 +502,33 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
             f"divide the model step ({model_step} s)"
         )
     return run
+
+
+def _check_forcing_keys(forcing, source: str) -> None:
+    """Reject the earlier forcing layout with the replacement, and let ``files`` be one
+    path (normalized to a list, in place)."""
+    if not isinstance(forcing, dict):
+        return
+    if isinstance(forcing.get("meteorology"), str):
+        raise ConfigError(
+            f"{source}: forcing.meteorology is now a section: "
+            f"meteorology: {{files: {forcing['meteorology']}}}"
+        )
+    old = sorted(set(forcing) & set(_OLD_FORCING_KEYS))
+    if old:
+        raise ConfigError(
+            f"{source}: forcing: "
+            + "; ".join(f"{k} was replaced by {_OLD_FORCING_KEYS[k]}" for k in old)
+        )
+    for key in ("meteorology", "vegetation", "soil_water"):
+        section = forcing.get(key)
+        if isinstance(section, dict):
+            if "file" in section:
+                raise ConfigError(f"{source}: forcing.{key}.file was replaced by files")
+            if isinstance(section.get("files"), str):
+                section["files"] = [section["files"]]
+            elif "files" in section and section["files"] is None:
+                section["files"] = []
 
 
 def _domain_meta(domain) -> dict:

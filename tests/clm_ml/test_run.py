@@ -69,27 +69,32 @@ def test_overrides(chats_run_dir):
 
 @pytest.mark.parametrize(
     "change, message",
-    [
+    [  # fmt: skip
         (lambda d: d["time"].update(days=1), "exactly one of end, days, steps"),
         (lambda d: d["time"].update(step_seconds=3600), "forcing_step_minutes 30"),
         (lambda d: d["domain"].update(towers=["CHATS7", "CHATS7"]), "one tower per run"),
         (lambda d: d["domain"].update(type="grid"), "not yet supported"),
-        (lambda d: d["forcing"].update(meteorology="nope.nc"), "file not found"),
         (lambda d: d["initial_conditions"].update(source="restart"), "restart_file: required"),
         (lambda d: d.update(execution={"chunk": "5 days"}), "only '1 month'"),
         (lambda d: d.update(execution={"restart_every": "weekly"}), "expected e.g."),
         (lambda d: d.update(colour="blue"), "unknown key(s) ['colour']"),
         (lambda d: d["time"].update(start="May 1"), "is not a date-time"),
-        (
-            lambda d: d["forcing"].update(vegetation={"source": "file"}),
-            "forcing.vegetation.file: required",
-        ),
-        (
-            lambda d: d["forcing"].update(soil_water={"source": "file", "file": "nope.nc"}),
-            "file not found",
-        ),
+        # forcing (plan §4.1 layout)
+        (lambda d: d["forcing"]["meteorology"].update(files="nope.nc"), "file not found"),
+        (lambda d: d["forcing"].update(meteorology="met.nc"), "meteorology is now a section"),
+        (lambda d: d["forcing"].update(interpolation="none"), "forcing.meteorology.interpolation"),
+        (lambda d: d["forcing"]["meteorology"].update(files="met_{year}-{month:02d}.nc"),
+         "file not found for 2007-05"),
+        (lambda d: d["forcing"]["meteorology"].update(shortwave="cloudy"), "cloudy"),
+        (lambda d: d["forcing"].update(vegetation={"source": "file"}),
+         "forcing.vegetation.files: required"),
+        (lambda d: d["forcing"].update(soil_water={"source": "file", "files": "nope.nc"}),
+         "file not found"),
+        (lambda d: d["forcing"].update(vegetation={"source": "file", "file": "x.nc"}),
+         "replaced by files"),
         (lambda d: d["forcing"].update(vegetation={"source": "monthly"}), "monthly"),
-    ],
+    ]
+    ,
 )
 def test_invalid_run_files(chats_run_dir, change, message):
     with pytest.raises(ConfigError) as exc:

@@ -89,8 +89,10 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
     if met_type not in (0, 3):
         raise ConfigError(f"{namelist_path.name}: met_type {met_type} is not supported (0 or 3)")
     forcing = {
-        "meteorology": rel(g["fin_tower"]),
-        "interpolation": "three_point" if met_type == 3 else "none",
+        "meteorology": {
+            "files": rel(g["fin_tower"]),
+            "interpolation": "three_point" if met_type == 3 else "none",
+        },
         "clm_history": {
             "file": rel(g["fin_clm"]),
             "start": _datetime(g.get("clm_start_ymd"), g.get("clm_start_tod", 0)).isoformat(
@@ -100,7 +102,8 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
     }
     adjust = rel(g.get("fin_soil_adjust", ""))
     if adjust:
-        forcing["soil_moisture_adjustment"] = {
+        forcing["soil_water"] = {"source": "clm_history"}
+        forcing["soil_water"]["adjustment"] = {
             "file": adjust,
             "levels": int(g.get("nlev_soil_adjust", 0)),
         }

@@ -49,12 +49,19 @@ def interpolate_records(
     step_starts: Sequence[dt.datetime],
     step_seconds: int,
     mean_cosz: Callable[[dt.datetime, int], float],
+    rules: Optional[Mapping[str, str]] = None,
 ) -> dict[str, np.ndarray]:
     """``values[name]`` at consecutive records -> values at the model steps.
 
     ``record_starts`` must cover every step's interval; ``mean_cosz(start, seconds)`` is the
-    mean of ``max(cos(zenith), 0)`` over ``[start, start + seconds]``.
+    mean of ``max(cos(zenith), 0)`` over ``[start, start + seconds]``. ``rules`` changes the
+    rule of some variables (run.yaml ``forcing.meteorology.shortwave`` / ``precipitation``):
+    ``linear``, ``constant`` or ``coszen``.
     """
+    rules = {**RULES, **(rules or {})}
+    unknown = set(rules.values()) - {"linear", "constant", "coszen"}
+    if unknown:
+        raise ValueError(f"unknown interpolation rule(s) {sorted(unknown)}")
     if record_seconds % step_seconds:
         raise ValueError(f"model step {step_seconds} s must divide the data interval")
     per_record = record_seconds // step_seconds
@@ -78,7 +85,7 @@ def interpolate_records(
         return cosz_cache[start]
 
     out = {}
-    for name, rule in RULES.items():
+    for name, rule in rules.items():
         if name not in values:
             continue
         v = np.asarray(values[name], dtype=float)
@@ -161,26 +168,44 @@ def linear_between_midpoints(
 
 
 def read_land_data(
-    path: str, names: Sequence[str], first: dt.datetime, last: dt.datetime
+    paths, names: Sequence[str], first: dt.datetime, last: dt.datetime
 ) -> tuple[list, dict, Optional[dt.datetime]]:
-    """``(record_starts, {name: values}, last_end)`` from a daily/monthly land-data file, for the
-    records whose midpoints bracket ``[first, last]`` (one record beyond each end, so
-    memory does not depend on the file's length). The file has a ``time`` variable in
-    ``days since <date>`` (each record starts its interval) and the named variables with
-    time first (extra axes of size 1, e.g. a single gridcell, are dropped). ``last_end``
-    is the start of the record after the window (None at the end of the file)."""
+    """``(record_starts, {name: values}, last_end)`` from daily/monthly land-data files (one
+    path, or several split in time), for the records whose midpoints bracket ``[first,
+    last]`` (one record beyond each end, so memory does not depend on the files' length).
+    Each file has a ``time`` variable in ``days since <date>`` (each record starts its
+    interval) and the named variables with time first (extra axes of size 1, e.g. a single
+    gridcell, are dropped). ``last_end`` is the start of the record after the window (None
+    at the end of the data)."""
     import netCDF4 as nc
 
-    with nc.Dataset(path) as ds:
-        time = ds.variables["time"]
-        origin = dt.datetime.fromisoformat(time.units.split("since")[1].strip())
-        starts = [origin + dt.timedelta(days=float(d)) for d in np.asarray(time[:])]
-        lo = max(sum(1 for t in starts if t <= first) - 2, 0)
-        hi = min(sum(1 for t in starts if t <= last) + 1, len(starts))
-        out = {}
-        for name in names:
-            if name not in ds.variables:
-                raise ValueError(f"{path}: variable {name} not found")
-            v = np.asarray(ds.variables[name][lo:hi], dtype=float)
-            out[name] = v.reshape((v.shape[0],) + tuple(n for n in v.shape[1:] if n != 1))
+    paths = [paths] if isinstance(paths, str) else list(paths)
+    index = []  # (record start, path, record in file), all files
+    for path in paths:
+        with nc.Dataset(path) as ds:
+            time = ds.variables["time"]
+            origin = dt.datetime.fromisoformat(time.units.split("since")[1].strip())
+            for k, d in enumerate(np.asarray(time[:])):
+                index.append((origin + dt.timedelta(days=float(d)), path, k))
+    index.sort(key=lambda r: r[0])
+    starts = [r[0] for r in index]
+    if any(b <= a for a, b in zip(starts, starts[1:])):
+        raise ValueError(f"{paths[0]} ...: record times repeat across the files")
+    lo = max(sum(1 for t in starts if t <= first) - 2, 0)
+    hi = min(sum(1 for t in starts if t <= last) + 1, len(starts))
+    window = index[lo:hi]
+    runs = [p for i, (_, p, _) in enumerate(window) if i == 0 or window[i - 1][1] != p]
+    if len(runs) != len(set(runs)):
+        raise ValueError(f"{paths[0]} ...: the files' time ranges overlap")
+    out = {}
+    for name in names:
+        parts = []
+        for path in dict.fromkeys(p for _, p, _ in window):
+            ks = [k for _, p, k in window if p == path]
+            with nc.Dataset(path) as ds:
+                if name not in ds.variables:
+                    raise ValueError(f"{path}: variable {name} not found")
+                v = np.asarray(ds.variables[name][min(ks) : max(ks) + 1], dtype=float)
+            parts.append(v.reshape((v.shape[0],) + tuple(n for n in v.shape[1:] if n != 1)))
+        out[name] = np.concatenate(parts)
     return starts[lo:hi], out, (starts[hi] if hi < len(starts) else None)

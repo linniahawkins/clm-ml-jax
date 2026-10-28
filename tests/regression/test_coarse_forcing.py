@@ -63,7 +63,7 @@ def _run(workdir: Path, six_hourly: bool):
         (workdir / "towers.yaml").write_text(yaml.safe_dump({"CHATS7_6H": tower}))
         _six_hourly_file(workdir / "six_hourly.nc")
         data["domain"].update(towers=["CHATS7_6H"], towers_file="towers.yaml")
-        data["forcing"]["meteorology"] = str(workdir / "six_hourly.nc")
+        data["forcing"]["meteorology"]["files"] = str(workdir / "six_hourly.nc")
         data["time"]["step_seconds"] = 21600  # the forcing data interval
         model_yaml = workdir / data["model"]
         model = yaml.safe_load(model_yaml.read_text()) or {}
