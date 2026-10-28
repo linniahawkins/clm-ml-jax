@@ -39,21 +39,26 @@ def InitializeRealize(bounds: bounds_type) -> None:
 
 def ModelAdvance(
     bounds: bounds_type,
+    insts,
+    filter,
     clm_record,
     step_time,
     forcing_bef,
     forcing_next,
-) -> None:
+):
     """
     Advance the CLM model by one time step.
 
     Mirrors Fortran subroutine ``ModelAdvance`` (lines 46-68).
     Delegates entirely to ``clm_drv``, which orchestrates the full
-    physics sequence for a single driver time step. Model state is
-    modified through global module-level instances in ``clm_instMod``.
+    physics sequence for a single driver time step. The model state is
+    passed in and the updated state returned (Fortran modified module-level
+    instances in place).
 
     Args:
         bounds: Decomposition bounds for the local MPI task.
+        insts: Model state containers (``clm_instMod.ClmInstances``).
+        filter: Patch/column filters (``filterMod.clumpfilter``).
         clm_record: CLM history values for this time step
             (``clmDataMod.ClmHistoryRecord``). Replaces the Fortran
             arguments ``time_indx``, ``fin1`` and ``fin2``: input files are
@@ -62,7 +67,10 @@ def ModelAdvance(
             (``clm_time_manager.StepTime``).
         forcing_bef, forcing_next: Multilayer canopy forcing at the previous
             and next CLM steps (``MLGetAtmForcingMod.AtmForcingRecord``).
+
+    Returns:
+        ``(insts, filter)``: the updated state containers and filters.
     """
     from clm_src_main.clm_driver import clm_drv  # noqa: F401
 
-    clm_drv(bounds, clm_record, step_time, forcing_bef, forcing_next)
+    return clm_drv(bounds, insts, filter, clm_record, step_time, forcing_bef, forcing_next)

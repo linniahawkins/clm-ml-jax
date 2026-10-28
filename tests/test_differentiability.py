@@ -103,9 +103,6 @@ def _build_initialized_model():
 
     _new_filter = _filterMod.setFilters(_filterMod.filter)
     _filterMod.filter = _new_filter
-    import clm_src_main.clm_driver as _clm_driver_mod
-
-    _clm_driver_mod.filter = _new_filter
 
     from clm_ml.legacy.forcing import (
         atm_record_current,
@@ -209,10 +206,17 @@ def _build_initialized_model():
     forcing_next = atm_record_next(forcing, t_next, n_patch)
 
     # Run 1 warm-up timestep
-    ModelAdvance(bounds, clm_record_at(forcing, t_curr), times[0], forcing_bef, forcing_next)
+    st, filt = ModelAdvance(
+        bounds,
+        clm_instMod.get_instances(),
+        _new_filter,
+        clm_record_at(forcing, t_curr),
+        times[0],
+        forcing_bef,
+        forcing_next,
+    )
 
-    mlcanopy_inst = clm_instMod.mlcanopy_inst
-    filt = _clm_driver_mod.filter
+    mlcanopy_inst = st.mlcanopy
     num_evp = filt.num_exposedvegp
     evp_list = [int(v) for v in filt.exposedvegp[:num_evp]]
 
@@ -223,18 +227,18 @@ def _build_initialized_model():
         bounds=bounds,
         num_exposedvegp=num_evp,
         filter_exposedvegp=evp_list,
-        atm2lnd_inst=clm_instMod.atm2lnd_inst,
-        canopystate_inst=clm_instMod.canopystate_inst,
-        soilstate_inst=clm_instMod.soilstate_inst,
-        temperature_inst=clm_instMod.temperature_inst,
-        waterstatebulk_inst=clm_instMod.waterstatebulk_inst,
-        waterfluxbulk_inst=clm_instMod.waterfluxbulk_inst,
-        energyflux_inst=clm_instMod.energyflux_inst,
-        frictionvel_inst=clm_instMod.frictionvel_inst,
-        surfalb_inst=clm_instMod.surfalb_inst,
-        solarabs_inst=clm_instMod.solarabs_inst,
-        wateratm2lndbulk_inst=clm_instMod.wateratm2lndbulk_inst,
-        waterdiagnosticbulk_inst=clm_instMod.waterdiagnosticbulk_inst,
+        atm2lnd_inst=st.atm2lnd,
+        canopystate_inst=st.canopystate,
+        soilstate_inst=st.soilstate,
+        temperature_inst=st.temperature,
+        waterstatebulk_inst=st.waterstatebulk,
+        waterfluxbulk_inst=st.waterfluxbulk,
+        energyflux_inst=st.energyflux,
+        frictionvel_inst=st.frictionvel,
+        surfalb_inst=st.surfalb,
+        solarabs_inst=st.solarabs,
+        wateratm2lndbulk_inst=st.wateratm2lndbulk,
+        waterdiagnosticbulk_inst=st.waterdiagnosticbulk,
         step_time=times[0],
         forcing_bef=forcing_bef,
         forcing_next=forcing_next,

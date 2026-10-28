@@ -221,17 +221,11 @@ def main():
     # clm_instMod is now safe to import (nlevgrnd correctly set)
     from clm_src_main import clm_instMod
 
-    # setFilters returns a new NamedTuple — capture it and update every
-    # module that holds a direct binding to the old filter object.
-    _new_filter = _filterMod.setFilters(_filterMod.filter)
-    _filterMod.filter = _new_filter
-
-    # clm_driver.py imports filter at module level via
-    # "from clm_src_main.filterMod import filter", so we must patch
-    # that binding too; otherwise clm_drv() sees the stale zero-count filter.
-    import clm_src_main.clm_driver as _clm_driver_mod
-
-    _clm_driver_mod.filter = _new_filter
+    # Filters and model state are created once here and then carried explicitly
+    # through the time loop (ModelAdvance takes and returns them).
+    filt = _filterMod.setFilters(_filterMod.filter)
+    _filterMod.filter = filt
+    st = clm_instMod.get_instances()
 
     print("Initialization complete.", flush=True)
 
@@ -294,23 +288,24 @@ def main():
     # 6a. Acclimation temperature: mean over the whole run (Fortran CLM-ml v2 definition,
     #     which needs every step's forcing up front; plan Phase 4b replaces it with a
     #     10-day running mean). Array index t + 1 skips the chunk's leading halo record.
-    (
-        clm_instMod.atm2lnd_inst,
-        clm_instMod.wateratm2lndbulk_inst,
-        clm_instMod.temperature_inst,
-        clm_instMod.frictionvel_inst,
-        clm_instMod.mlcanopy_inst,
-    ) = init_acclim(
+    atm2lnd, wateratm2lndbulk, temperature, frictionvel, mlcanopy = init_acclim(
         [tower_met_at(forcing, t + 1) for t in range(ntimes)],
         tower_num,
         ntimes,
         bounds.begp,
         bounds.endp,
-        clm_instMod.atm2lnd_inst,
-        clm_instMod.wateratm2lndbulk_inst,
-        clm_instMod.temperature_inst,
-        clm_instMod.frictionvel_inst,
-        clm_instMod.mlcanopy_inst,
+        st.atm2lnd,
+        st.wateratm2lndbulk,
+        st.temperature,
+        st.frictionvel,
+        st.mlcanopy,
+    )
+    st = st._replace(
+        atm2lnd=atm2lnd,
+        wateratm2lndbulk=wateratm2lndbulk,
+        temperature=temperature,
+        frictionvel=frictionvel,
+        mlcanopy=mlcanopy,
     )
 
     # 6aa. Orbital parameters for this year — mirrors CLMml_drv lines 80-81
@@ -324,24 +319,26 @@ def main():
     _clm_varorb.mvelpp = _mvelpp
 
     # 6b. Tower vegetation properties
-    clm_instMod.canopystate_inst, clm_instMod.mlcanopy_inst = TowerVeg(
+    canopystate, mlcanopy = TowerVeg(
         tower_num,
         bounds.begp,
         bounds.endp,
-        clm_instMod.canopystate_inst,
-        clm_instMod.mlcanopy_inst,
+        st.canopystate,
+        st.mlcanopy,
     )
+    st = st._replace(canopystate=canopystate, mlcanopy=mlcanopy)
 
     # 6d. Soil temperature and moisture initialisation
-    clm_instMod.waterstatebulk_inst, clm_instMod.temperature_inst = SoilInit(
+    waterstatebulk, temperature = SoilInit(
         fin2,
         soil_init_time_indx,
         bounds.begc,
         bounds.endc,
-        clm_instMod.soilstate_inst,
-        clm_instMod.waterstatebulk_inst,
-        clm_instMod.temperature_inst,
+        st.soilstate,
+        st.waterstatebulk,
+        st.temperature,
     )
+    st = st._replace(waterstatebulk=waterstatebulk, temperature=temperature)
 
     # ------------------------------------------------------------------
     # 7. Open output files  (mirrors CLMml_drv lines 123-153)
@@ -387,18 +384,17 @@ def main():
 
             # Install current-step tower meteorology
             t_met0 = time.perf_counter()
-            (
-                clm_instMod.atm2lnd_inst,
-                clm_instMod.wateratm2lndbulk_inst,
-                clm_instMod.frictionvel_inst,
-            ) = TowerMetCurr(
+            atm2lnd, wateratm2lndbulk, frictionvel = TowerMetCurr(
                 tower_met_at(forcing, t_curr),
                 tower_num,
                 bounds.begp,
                 bounds.endp,
-                clm_instMod.atm2lnd_inst,
-                clm_instMod.wateratm2lndbulk_inst,
-                clm_instMod.frictionvel_inst,
+                st.atm2lnd,
+                st.wateratm2lndbulk,
+                st.frictionvel,
+            )
+            st = st._replace(
+                atm2lnd=atm2lnd, wateratm2lndbulk=wateratm2lndbulk, frictionvel=frictionvel
             )
 
             # Forcing at the previous and next steps, for the multilayer canopy's
@@ -410,7 +406,9 @@ def main():
 
             # Advance physics
             t_adv0 = time.perf_counter()
-            ModelAdvance(bounds, clm_record_at(forcing, t_curr), now, forcing_bef, forcing_next)
+            st, filt = ModelAdvance(
+                bounds, st, filt, clm_record_at(forcing, t_curr), now, forcing_bef, forcing_next
+            )
             t_adv = time.perf_counter() - t_adv0
 
             # Write output
@@ -424,8 +422,8 @@ def main():
                 fout4,
                 fout5,
                 fout6,
-                clm_instMod.mlcanopy_inst,
-                clm_instMod.temperature_inst,
+                st.mlcanopy,
+                st.temperature,
             )
             t_out = time.perf_counter() - t_out0
 

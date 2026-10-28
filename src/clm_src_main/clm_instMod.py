@@ -10,6 +10,8 @@ Original Fortran module: clm_instMod
 Fortran lines 1-105
 """
 
+from typing import NamedTuple
+
 from clm_src_biogeophys.CanopyStateType import (
     canopystate_type,
 )  # noqa: F401
@@ -108,6 +110,52 @@ frictionvel_inst: frictionvel_type = None  # type: ignore[assignment]
 surfalb_inst: surfalb_type = None  # type: ignore[assignment]
 solarabs_inst: solarabs_type = None  # type: ignore[assignment]
 mlcanopy_inst: mlcanopy_type = None  # type: ignore[assignment]  # CLMml
+
+
+class ClmInstances(NamedTuple):
+    """All model state containers, passed explicitly through the time step.
+
+    The module-level ``*_inst`` singletons above are filled once by
+    :func:`clm_instInit`; after initialization the driver takes them with
+    :func:`get_instances` and carries them as this one value, which
+    ``ModelAdvance``/``clm_drv`` take and return. No routine in the time loop
+    reads or writes the singletons.
+    """
+
+    atm2lnd: atm2lnd_type
+    wateratm2lndbulk: wateratm2lndbulk_type
+    soilstate: soilstate_type
+    water: water_type
+    waterstatebulk: waterstatebulk_type
+    waterfluxbulk: waterfluxbulk_type
+    waterdiagnosticbulk: waterdiagnosticbulk_type
+    canopystate: canopystate_type
+    temperature: temperature_type
+    energyflux: energyflux_type
+    frictionvel: frictionvel_type
+    surfalb: surfalb_type
+    solarabs: solarabs_type
+    mlcanopy: mlcanopy_type
+
+
+def get_instances() -> ClmInstances:
+    """The state containers created by :func:`clm_instInit`, as one value."""
+    return ClmInstances(
+        atm2lnd=atm2lnd_inst,
+        wateratm2lndbulk=wateratm2lndbulk_inst,
+        soilstate=soilstate_inst,
+        water=water_inst,
+        waterstatebulk=waterstatebulk_inst,
+        waterfluxbulk=waterfluxbulk_inst,
+        waterdiagnosticbulk=waterdiagnosticbulk_inst,
+        canopystate=canopystate_inst,
+        temperature=temperature_inst,
+        energyflux=energyflux_inst,
+        frictionvel=frictionvel_inst,
+        surfalb=surfalb_inst,
+        solarabs=solarabs_inst,
+        mlcanopy=mlcanopy_inst,
+    )
 
 
 # ---------------------------------------------------------------------------

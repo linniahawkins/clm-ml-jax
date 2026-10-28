@@ -13,15 +13,15 @@ Fortran lines 1-110
 import jax.numpy as jnp
 from jax import Array
 
-import clm_src_main.clm_instMod as clm_instMod  # noqa: F401
 from clm_src_biogeophys.SoilWaterMovementMod import SoilWater  # noqa: F401
 from clm_src_biogeophys.SurfaceAlbedoMod import SoilAlbedo  # noqa: F401
 from clm_src_biogeophys.SurfaceResistanceMod import calc_soilevap_resis  # noqa: F401
 from clm_src_main.abortutils import endrun  # noqa: F401
+from clm_src_main.clm_instMod import ClmInstances
 from clm_src_main.clm_varpar import nlevgrnd, nlevsno  # noqa: F401
 from clm_src_main.ColumnType import col  # noqa: F401
 from clm_src_main.decompMod import bounds_type  # noqa: F401
-from clm_src_main.filterMod import filter, setExposedvegpFilter  # noqa: F401
+from clm_src_main.filterMod import clumpfilter, setExposedvegpFilter  # noqa: F401
 from clm_src_utils.clm_time_manager import StepTime
 from multilayer_canopy.MLCanopyFluxesMod import MLCanopyFluxes  # noqa: F401
 from multilayer_canopy.MLGetAtmForcingMod import AtmForcingRecord
@@ -35,11 +35,13 @@ from offline_driver.clmDataMod import ClmHistoryRecord, clmData  # noqa: F401
 
 def clm_drv(
     bounds: bounds_type,
+    insts: ClmInstances,
+    filter: clumpfilter,
     clm_record: ClmHistoryRecord,
     step_time: StepTime,
     forcing_bef: AtmForcingRecord,
     forcing_next: AtmForcingRecord,
-) -> None:
+) -> tuple[ClmInstances, clumpfilter]:
     """
     Main CLM model driver to calculate surface fluxes.
 
@@ -71,6 +73,11 @@ def clm_drv(
     Args:
         bounds: CLM decomposition bounds for the local MPI task,
             supplying ``begp``, ``endp``, ``begc``, and ``endc``.
+        insts: The model state containers (``clm_instMod.ClmInstances``).
+            Fortran updated module-level instances in place; here the
+            updated containers are returned.
+        filter: Patch/column filters; the exposed-vegetation filter is
+            rebuilt each step and returned.
         clm_record: CLM history values for this time step (see
             ``clmDataMod.read_clm_history_series``). Replaces the Fortran
             arguments ``time_indx``, ``fin1`` and ``fin2``: the history
@@ -83,24 +90,23 @@ def clm_drv(
             and next CLM steps, for time interpolation (see ``MLCanopyFluxes``).
     """
     # ------------------------------------------------------------------
-    # Read all state instances live from clm_instMod to avoid stale
-    # module-level aliases (singletons are rebound during initialize2)
+    # Unpack the model state (passed in explicitly; no module globals)
     # ------------------------------------------------------------------
 
-    canopystate_inst = clm_instMod.canopystate_inst
-    waterdiagnosticbulk_inst = clm_instMod.waterdiagnosticbulk_inst
-    water_inst = clm_instMod.water_inst
-    waterstatebulk_inst = clm_instMod.waterstatebulk_inst
-    soilstate_inst = clm_instMod.soilstate_inst
-    temperature_inst = clm_instMod.temperature_inst
-    atm2lnd_inst = clm_instMod.atm2lnd_inst
-    waterfluxbulk_inst = clm_instMod.waterfluxbulk_inst
-    energyflux_inst = clm_instMod.energyflux_inst
-    frictionvel_inst = clm_instMod.frictionvel_inst
-    surfalb_inst = clm_instMod.surfalb_inst
-    solarabs_inst = clm_instMod.solarabs_inst
-    mlcanopy_inst = clm_instMod.mlcanopy_inst
-    wateratm2lndbulk_inst = clm_instMod.wateratm2lndbulk_inst
+    canopystate_inst = insts.canopystate
+    waterdiagnosticbulk_inst = insts.waterdiagnosticbulk
+    water_inst = insts.water
+    waterstatebulk_inst = insts.waterstatebulk
+    soilstate_inst = insts.soilstate
+    temperature_inst = insts.temperature
+    atm2lnd_inst = insts.atm2lnd
+    waterfluxbulk_inst = insts.waterfluxbulk
+    energyflux_inst = insts.energyflux
+    frictionvel_inst = insts.frictionvel
+    surfalb_inst = insts.surfalb
+    solarabs_inst = insts.solarabs
+    mlcanopy_inst = insts.mlcanopy
+    wateratm2lndbulk_inst = insts.wateratm2lndbulk
 
     # ------------------------------------------------------------------
     # Unpack associate aliases (Fortran lines 47-54)
@@ -149,11 +155,8 @@ def clm_drv(
     for p in range(bounds.begp, bounds.endp + 1):  # Fortran: do p = bounds%begp, bounds%endp
         frac_veg_nosno = frac_veg_nosno.at[p].set(1)
 
-    # setExposedvegpFilter returns a new NamedTuple; capture it so
-    # the rest of clm_drv() sees num_exposedvegp = 1.
-    # Using `global filter` avoids Python's UnboundLocalError (assigning to
-    # a name in a function makes it local *throughout* the function).
-    global filter
+    # setExposedvegpFilter returns a new filter; it is returned to the caller
+    # with the updated state.
     filter = setExposedvegpFilter(filter, frac_veg_nosno)
 
     # ------------------------------------------------------------------
@@ -273,18 +276,22 @@ def clm_drv(
     )
 
     # ------------------------------------------------------------------
-    # Write all mutated state back to clm_instMod so changes persist
-    # across timesteps (local variables are copies of the module refs)
+    # Return the updated state (Fortran updated module-level instances)
     # ------------------------------------------------------------------
-    clm_instMod.canopystate_inst = canopystate_inst
-    clm_instMod.waterdiagnosticbulk_inst = waterdiagnosticbulk_inst
-    clm_instMod.water_inst = water_inst
-    clm_instMod.waterstatebulk_inst = waterstatebulk_inst
-    clm_instMod.soilstate_inst = soilstate_inst
-    clm_instMod.temperature_inst = temperature_inst
-    clm_instMod.waterfluxbulk_inst = waterfluxbulk_inst
-    clm_instMod.energyflux_inst = energyflux_inst
-    clm_instMod.frictionvel_inst = frictionvel_inst
-    clm_instMod.surfalb_inst = surfalb_inst
-    clm_instMod.solarabs_inst = solarabs_inst
-    clm_instMod.mlcanopy_inst = mlcanopy_inst
+    return (
+        insts._replace(
+            canopystate=canopystate_inst,
+            waterdiagnosticbulk=waterdiagnosticbulk_inst,
+            water=water_inst,
+            waterstatebulk=waterstatebulk_inst,
+            soilstate=soilstate_inst,
+            temperature=temperature_inst,
+            waterfluxbulk=waterfluxbulk_inst,
+            energyflux=energyflux_inst,
+            frictionvel=frictionvel_inst,
+            surfalb=surfalb_inst,
+            solarabs=solarabs_inst,
+            mlcanopy=mlcanopy_inst,
+        ),
+        filter,
+    )
