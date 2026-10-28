@@ -829,7 +829,8 @@ Progress:
 - ✅ A whole CLM step traces (structural lookups as NumPy constants, no globals written in the
   step, time and O₂ as data, orbital functions on traced calendar days).
 - ✅ **Compiled chunks are the run loop**: after the first (initializing) step, `chunk_steps`
-  steps (namelist, default 48 = one day; 0 = step by step) run as one `jit(scan)`. 50 CHATS7
+  steps (namelist; 0 = step by step; calendar months by default since decision 17, first
+  implemented as 48 = one day) run as one `jit(scan)`. 50 CHATS7
   steps: 47 s including compilation (was ~135 s); a compiled step takes ~15 ms (was ~2.7 s). A
   short last chunk is padded to reuse the compiled scan. Two chunks of 4 equal one chunk of 8
   bit for bit (done-when 1). Compiled vs step by step: ≤ 6.6e-11 relative (round-off, within

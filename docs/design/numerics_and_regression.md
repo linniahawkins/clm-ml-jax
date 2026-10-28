@@ -288,3 +288,21 @@ up to ~9% at a single step.) The other checks remain:
 
 A change that alters round-off is accepted only when it passes **both** the noise-twin test and
 an identical-input check of every routine it touches.
+
+### 6.1 When to run which tests
+
+Each end-to-end test runs the whole CHATS7 model in a fresh process, which costs ~40–60 s
+(mostly fixed costs: starting Python and JAX, compiling, the initializing step), and the
+`tests/regression` folder holds about 13 such runs (~10 min). The policy above needs only one
+of them, so the suites are run in three tiers:
+
+| When | Tests | Time |
+|---|---|---|
+| After each edit | `tests/clm_ml` and `tests/fortran_validation -m "not slow"`, plus the test being written | ~10 s |
+| Before each commit | the bit-for-bit and noise-twin tests (`test_end_to_end_regression.py`, `test_clm_ml_equivalence.py`; one shared run), plus the changed feature's own end-to-end test | ~2–3 min |
+| At the end of a phase, before merging to `main` | all of `tests/regression -m regression`, and the slow tests (`test_differentiability.py`, `test_model_api.py`, `test_fortran_python_comparison.py`) | ~15–20 min |
+
+The feature tests (restarts, ensembles, output streams, coarse forcing, land-data files,
+parameters from YAML, per-routine process IO) check behaviour that a change elsewhere rarely
+touches; a change that does touch it runs that test before committing. New end-to-end tests
+simulate as little as they need (usually one day) with as few separate runs as possible.
