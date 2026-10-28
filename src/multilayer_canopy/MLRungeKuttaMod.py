@@ -20,6 +20,7 @@ from clm_src_main.clm_varctl import iulog  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
+from multilayer_canopy.MLLayersMod import keep, layers
 
 # ---------------------------------------------------------------------------
 # Public: Runge-Kutta state update
@@ -95,23 +96,37 @@ def RungeKuttaUpdate(
         x_new = x_bef + jnp.where(j < k, dx_prev * w_prev, 0.0).sum(axis=-1) + w_curr * dx_new
         return jnp.where(do_update, x_new, x_cur), dx_new
 
-    # Canopy layers 1..ncan (Fortran: do ic = 1, ncan(p)); the arrays are 1-based.
-    p, n = grid.p, grid.ncan
+    # Canopy layers 1..ncan (Fortran: do ic = 1, ncan(p)); the arrays are 1-based. All
+    # layer slots are computed and layers above ncan (padding) are left unchanged
+    # (MLLayersMod); their inputs are zeroed first so no fill values enter the arithmetic.
+    p = grid.p
+    lay = layers(mlcanopy_inst, p)
     updates = {}
-    for state, delta, bef, sl in (
-        ("tair_profile", "dtair_profile", "tair_bef_profile", (p, slice(1, n + 1))),
-        ("eair_profile", "deair_profile", "eair_bef_profile", (p, slice(1, n + 1))),
-        ("h2ocan_profile", "dh2ocan_profile", "h2ocan_bef_profile", (p, slice(1, n + 1))),
-        ("tleaf_leaf", "dtleaf_leaf", "tleaf_bef_leaf", (p, slice(1, n + 1), slice(None))),
-        ("lwp_leaf", "dlwp_leaf", "lwp_bef_leaf", (p, slice(1, n + 1), slice(None))),
-        ("tg_soil", "dtg_soil", "tg_bef_soil", (p,)),
+    for state, delta, bef, sl, by_layer in (
+        ("tair_profile", "dtair_profile", "tair_bef_profile", (p, slice(1, None)), True),
+        ("eair_profile", "deair_profile", "eair_bef_profile", (p, slice(1, None)), True),
+        ("h2ocan_profile", "dh2ocan_profile", "h2ocan_bef_profile", (p, slice(1, None)), True),
+        ("tleaf_leaf", "dtleaf_leaf", "tleaf_bef_leaf", (p, slice(1, None), slice(None)), True),
+        ("lwp_leaf", "dlwp_leaf", "lwp_bef_leaf", (p, slice(1, None), slice(None)), True),
+        ("tg_soil", "dtg_soil", "tg_bef_soil", (p,), False),
     ):
         x_arr = getattr(mlcanopy_inst, state)
         dx_arr = getattr(mlcanopy_inst, delta)
-        x_new, dx_new = _advance(getattr(mlcanopy_inst, bef)[sl], x_arr[sl], dx_arr[sl])
+        x_bef, x_cur, dx = getattr(mlcanopy_inst, bef)[sl], x_arr[sl], dx_arr[sl]
+        if by_layer:
+            x_bef, x_cur_in, dx = (
+                keep(lay.in_use, a, jnp.zeros_like(a)) for a in (x_bef, x_cur, dx)
+            )
+        else:
+            x_cur_in = x_cur
+        x_new, dx_new = _advance(x_bef, x_cur_in, dx)
         dx_col = dx_arr[sl + (k,)]
+        dx_new = jnp.where(do_update, dx_new, dx_col)
+        if by_layer:
+            x_new = keep(lay.in_use, x_new, x_cur)
+            dx_new = keep(lay.in_use, dx_new, dx_col)
         updates[state] = x_arr.at[sl].set(x_new)
-        updates[delta] = dx_arr.at[sl + (k,)].set(jnp.where(do_update, dx_new, dx_col))
+        updates[delta] = dx_arr.at[sl + (k,)].set(dx_new)
 
     # ------------------------------------------------------------------
     # Write all updated arrays back into the immutable state container

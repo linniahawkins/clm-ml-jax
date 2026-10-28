@@ -65,6 +65,7 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
     vpd_min_MED,
 )
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
+from multilayer_canopy.MLLayersMod import layers, pad_with_top, restore_padding
 from multilayer_canopy.MLMathToolsMod import (
     bisection,  # noqa: F401
     quadratic,
@@ -1564,7 +1565,14 @@ def LeafPhotosynthesis(
     # First loop: temperature responses + photosynthesis
     # ------------------------------------------------------------------
     p = grid.p  # Fortran loops over the filter; the patch is the unit of computation
-    _ncan_p = grid.ncan
+    # All layer slots are computed; padding (above ncan) gets the top layer's inputs and is
+    # restored on return (MLLayersMod).
+    lay = layers(mlcanopy_inst, p)
+    _inst_in = mlcanopy_inst
+
+    def _pad(x):
+        return pad_with_top(lay, x)
+
     is_c3 = grid.c3  # static: selects the C3 or C4 kernel
     gs_type, gspot_type, colim_type = opts.gs_type, opts.gspot_type, opts.colim_type
     acclim_type = opts.acclim_type
@@ -1649,7 +1657,7 @@ def LeafPhotosynthesis(
         # arrays (computed from tacclim_forcing); use the acclim variant
         # that accepts them as runtime broadcast scalars (in_axes=None)
         # so the kernel is compatible with jax.checkpoint.
-        _sl = slice(1, _ncan_p + 1)
+        _sl = slice(1, None)
         if acclim_type == 0:
             vmapped = _get_vmapped_photo_kernel(
                 is_c3=is_c3,
@@ -1667,17 +1675,17 @@ def LeafPhotosynthesis(
                 rdc=rdc,
             )
             layer_out = vmapped(
-                _dpai_p[_sl],
-                _tleaf_p[_sl],
-                _vcmax25_p[_sl],
-                _jmax25_p[_sl],
-                _rd25_p[_sl],
-                _kp25_p[_sl],
-                _eair_p[_sl],
-                _apar_p[_sl],
-                _gbc_p[_sl],
-                _gbv_p[_sl],
-                _cair_p[_sl],
+                _pad(_dpai_p[_sl]),
+                _pad(_tleaf_p[_sl]),
+                _pad(_vcmax25_p[_sl]),
+                _pad(_jmax25_p[_sl]),
+                _pad(_rd25_p[_sl]),
+                _pad(_kp25_p[_sl]),
+                _pad(_eair_p[_sl]),
+                _pad(_apar_p[_sl]),
+                _pad(_gbc_p[_sl]),
+                _pad(_gbv_p[_sl]),
+                _pad(_cair_p[_sl]),
                 g0_val,
                 g1_val,  # JAX scalar broadcast — gradients flow here
                 _o2ref_p,
@@ -1696,17 +1704,17 @@ def LeafPhotosynthesis(
                 rdc=rdc,
             )
             layer_out = vmapped(
-                _dpai_p[_sl],
-                _tleaf_p[_sl],
-                _vcmax25_p[_sl],
-                _jmax25_p[_sl],
-                _rd25_p[_sl],
-                _kp25_p[_sl],
-                _eair_p[_sl],
-                _apar_p[_sl],
-                _gbc_p[_sl],
-                _gbv_p[_sl],
-                _cair_p[_sl],
+                _pad(_dpai_p[_sl]),
+                _pad(_tleaf_p[_sl]),
+                _pad(_vcmax25_p[_sl]),
+                _pad(_jmax25_p[_sl]),
+                _pad(_rd25_p[_sl]),
+                _pad(_kp25_p[_sl]),
+                _pad(_eair_p[_sl]),
+                _pad(_apar_p[_sl]),
+                _pad(_gbc_p[_sl]),
+                _pad(_gbv_p[_sl]),
+                _pad(_cair_p[_sl]),
                 g0_val,
                 g1_val,  # JAX scalar broadcast — gradients flow here
                 vcmaxse,
@@ -1751,7 +1759,7 @@ def LeafPhotosynthesis(
         # For acclim_type == 1: use acclim variant that accepts vcmaxse/vcmaxc/
         # jmaxse/jmaxc as runtime broadcast scalars (in_axes=None) to avoid
         # float() on JAX traced values inside jax.checkpoint.
-        _sl = slice(1, _ncan_p + 1)
+        _sl = slice(1, None)
         if acclim_type == 0:
             vmapped = _get_vmapped_photo_kernel_wue(
                 is_c3=is_c3,
@@ -1769,17 +1777,17 @@ def LeafPhotosynthesis(
                 rdc=rdc,
             )
             layer_out = vmapped(
-                _dpai_p[_sl],
-                _tleaf_p[_sl],
-                _vcmax25_p[_sl],
-                _jmax25_p[_sl],
-                _rd25_p[_sl],
-                _kp25_p[_sl],
-                _eair_p[_sl],
-                _apar_p[_sl],
-                _gbc_p[_sl],
-                _gbv_p[_sl],
-                _cair_p[_sl],
+                _pad(_dpai_p[_sl]),
+                _pad(_tleaf_p[_sl]),
+                _pad(_vcmax25_p[_sl]),
+                _pad(_jmax25_p[_sl]),
+                _pad(_rd25_p[_sl]),
+                _pad(_kp25_p[_sl]),
+                _pad(_eair_p[_sl]),
+                _pad(_apar_p[_sl]),
+                _pad(_gbc_p[_sl]),
+                _pad(_gbv_p[_sl]),
+                _pad(_cair_p[_sl]),
                 _o2ref_p,
                 _pref_p,
                 _iota_pft,
@@ -1799,17 +1807,17 @@ def LeafPhotosynthesis(
                 rdc=rdc,
             )
             layer_out = vmapped(
-                _dpai_p[_sl],
-                _tleaf_p[_sl],
-                _vcmax25_p[_sl],
-                _jmax25_p[_sl],
-                _rd25_p[_sl],
-                _kp25_p[_sl],
-                _eair_p[_sl],
-                _apar_p[_sl],
-                _gbc_p[_sl],
-                _gbv_p[_sl],
-                _cair_p[_sl],
+                _pad(_dpai_p[_sl]),
+                _pad(_tleaf_p[_sl]),
+                _pad(_vcmax25_p[_sl]),
+                _pad(_jmax25_p[_sl]),
+                _pad(_rd25_p[_sl]),
+                _pad(_kp25_p[_sl]),
+                _pad(_eair_p[_sl]),
+                _pad(_apar_p[_sl]),
+                _pad(_gbc_p[_sl]),
+                _pad(_gbv_p[_sl]),
+                _pad(_cair_p[_sl]),
                 _o2ref_p,
                 _pref_p,
                 _iota_pft,
@@ -1883,30 +1891,30 @@ def LeafPhotosynthesis(
     # ints/bools so their if/else branches are resolved at trace time.
     # Replaces 46 × ~10 scalar XLA ops with ~10 slice XLA ops — reduces
     # trace depth and improves kernel fusion inside lax.scan.
-    _sl2 = slice(1, _ncan_p + 1)
-    _gs_sl = _gs_p2[_sl2]
-    _dpai_sl = _dpai_p2[_sl2]
-    _gbc_sl = _gbc_p2[_sl2]
-    _gbv_sl = _gbv_p2[_sl2]
-    _eair_sl = _eair_p2[_sl2]
-    _lesat_sl = _lesat_p2[_sl2]
-    _vcmax_sl = _vcmax_p2[_sl2]
-    _je_sl = _je_p2[_sl2]
-    _kp_sl = _kp_p2[_sl2]
-    _rd_sl = _rd_p2[_sl2]
-    _kc_sl = _kc_p2[_sl2]
-    _ko_sl = _ko_p2[_sl2]
-    _cp_sl = _cp_p2[_sl2]
-    _cair_sl = _cair_p2[_sl2]
-    _apar_sl = _apar_p2[_sl2]
-    _ceair_sl = _ceair_p2[_sl2]
+    _sl2 = slice(1, None)
+    _gs_sl = _pad(_gs_p2[_sl2])
+    _dpai_sl = _pad(_dpai_p2[_sl2])
+    _gbc_sl = _pad(_gbc_p2[_sl2])
+    _gbv_sl = _pad(_gbv_p2[_sl2])
+    _eair_sl = _pad(_eair_p2[_sl2])
+    _lesat_sl = _pad(_lesat_p2[_sl2])
+    _vcmax_sl = _pad(_vcmax_p2[_sl2])
+    _je_sl = _pad(_je_p2[_sl2])
+    _kp_sl = _pad(_kp_p2[_sl2])
+    _rd_sl = _pad(_rd_p2[_sl2])
+    _kc_sl = _pad(_kc_p2[_sl2])
+    _ko_sl = _pad(_ko_p2[_sl2])
+    _cp_sl = _pad(_cp_p2[_sl2])
+    _cair_sl = _pad(_cair_p2[_sl2])
+    _apar_sl = _pad(_apar_p2[_sl2])
+    _ceair_sl = _pad(_ceair_p2[_sl2])
     active_sl = _dpai_sl > 0.0
 
     # Water-stress factor (gspot_type is a static Python int)
     if gspot_type == 0:
         fpsi = jnp.ones_like(_gs_sl)
     elif gspot_type == 1:
-        _lwp_sl = _lwp_p2[_sl2]
+        _lwp_sl = _pad(_lwp_p2[_sl2])
         fpsi = 1.0 / (1.0 + (_lwp_sl / _psi50_pft2) ** _shape_pft2)
     else:
         fpsi = jnp.ones_like(_gs_sl)
@@ -2007,4 +2015,4 @@ def LeafPhotosynthesis(
         vpd_leaf=vpd_arr,
     )
 
-    return mlcanopy_inst
+    return restore_padding(lay, p, _inst_in, mlcanopy_inst, il)
