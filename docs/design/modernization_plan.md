@@ -1692,7 +1692,7 @@ vegetated patches on 15 896 gridcells at 1°; open decisions listed there).
 **Goal (decision 26):** run CLM-ml-JAX on real 1° (f09) global input, first on a region and then
 globally, with the machinery of Phase 6. It shows what real domains need (patch mix, memory,
 compile time, land-data volume, failure rates) before the Phase 7 restructure. The
-maintainer provides the input files: the PFT parameters, a CLM surface dataset (0.5°), CRUJRA
+maintainer provides the input files: the PFT parameters, a CLM surface dataset (1°, f09), CRUJRA
 forcing and prescribed soil moisture. Not part of 6b: validation against observations, long
 runs, non-vegetated land units.
 
