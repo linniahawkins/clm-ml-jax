@@ -114,6 +114,7 @@ chunk inputs), `clm_ml/params.py` (`clm_parameters`).
 | G16 | Organic matter | Capped at CLM-ml's `organic_max` (130 kg m⁻³): CLM caps the organic fraction at 1, CLM-ml's formula has no cap, and 4 021 patches' soils exceed it (up to 318) | `SoilStateInitTimeConstMod.F90` |
 | G17 | Root biomass | Not in CLM (satellite phenology has no fine-root biomass): 500 g m⁻² for every patch (`domain.grid.root_biomass`), the value of every CLM-ml forest tower | — |
 | G18 | `min_patch_weight` | Applied to the fraction of the gridcell's *vegetated* area, then renormalized (towers: the weights as given, which sum to 1); a gridcell keeps at least its largest patch | — |
+| G20 | No plant area | A patch CLM would treat as not vegetated (`elai + esai < 0.05`: CLM's bare-ground fluxes for that step) keeps a stem area of 0.05 m² m⁻² (CLM's vegetated threshold): CLM-ml has no bare-ground path, and zero plant area gives undefined sunlit fractions (the patch failed and was excluded for the rest of the run). 2 926 patches (4 %) are in this state in February, 141 in August (mostly crops and arctic grass) | `SatellitePhenologyMod.F90` (`frac_veg_nosno_alb`) |
 | G19 | Gridcell output | Area-weighted mean over the vegetated patches (bare ground and other land units left out, decision 29) | — |
 
 ## Open issues (not fixed; for the maintainer)
@@ -143,3 +144,29 @@ chunk inputs), `clm_ml/params.py` (`clm_parameters`).
    height), but misleading if output.
 9. **Tiny canopies**: grass and crop tops go down to 5 mm (surface-data heights with 10 + 10
    layers); not filtered.
+10. **Round-off amplification in real patches**: a 1e-15 relative change of LAI moves a
+    July day of some 1° patches by up to ~8 W m⁻² in latent heat within hours of sunrise
+    (largest for a needleleaf patch with CLM6's `dleaf` = 0.65 mm; `test_grid_setup.py`).
+    CHATS7's noise twins differ by ≤ 4e-11, so these patches sit on a discrete switch
+    (numerics doc §5 describes a similar earlier solver defect). It limits bit-level
+    regression tests of grid runs to the night and will matter for gradients: locate the
+    switch (compare routines on perturbed vs unperturbed inputs, numerics doc §1).
+11. **CPU compilation cache**: loading the cached batched first step of some batches back
+    from the on-disk cache crashes in LLVM's object loader (JAX 0.9.2, deterministic; the
+    same program compiled afresh runs). That program is now compiled without the cache on
+    CPU (`main.without_persistent_cache_on_cpu`). The earlier "intermittent" CPU
+    segmentation faults of Phase 6 (`test_c3_c4_groups`, `test_devices`) may have been the
+    same bug.
+12. **CLM-ml's canopy energy balance check below freezing** (`CanopyFluxesDiagnostics 3`,
+    Fortran CLM-ml v2): the canopy-top latent heat is `etflx × LatVap(tref)` (air
+    temperature), the leaf and soil latent heats use the latent heat at their own
+    temperatures, and `LatVap` jumps from vaporization to sublimation (+13 %) at 0 °C. When
+    air, leaves and ground straddle freezing the check fails by ~0.1-2 W m⁻² (56 of 61
+    patches in two January days over Illinois; with a single latent heat 0 failed). The
+    state's energy is unaffected; the *reported* total latent heat uses the air temperature's
+    value. CLM sums the components (`eflx_lh_tot = hvap·qflx_evap_veg + htvp·qflx_evap_soi`).
+    Grid runs list the check in `numerics.ignore_checks` (reported every chunk, no
+    exclusion). Fixing the diagnostic (sum the components, as CLM) is a science change
+    for the maintainer (CHATS7 never freezes, so its results would not change).
+13. **Bare-ground patches** (G20): a CLM-ml bare-ground path (or leaving the patch out of
+    its gridcell for those steps) would copy CLM exactly.

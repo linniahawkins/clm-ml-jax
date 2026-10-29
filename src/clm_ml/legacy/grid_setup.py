@@ -88,14 +88,15 @@ def write_tower_files(
     # vegetation and soil water at every step, as the compiled chunk forms them
     m1, m2, w1, w2 = inputs.vegetation_weights(0, n_steps)
     h, lb, f1, f2 = inputs.soil_window(0, n_steps, n_records=None)
-    from clm_ml.grid_forcing import ELAI_MIN
+    from clm_ml.grid_forcing import exposed_area
 
     elai, esai, h2o = [], [], []
     for k in range(n_steps):  # as land_record (no legacy import here: see setup_grid_batch)
-        lai = max(w1[k] * inputs.lai[m1[k], p] + w2[k] * inputs.lai[m2[k], p], 0.0)
-        sai = max(w1[k] * inputs.sai[m1[k], p] + w2[k] * inputs.sai[m2[k], p], 0.0)
-        elai.append(0.0 if lai < ELAI_MIN else lai)
-        esai.append(0.0 if sai < ELAI_MIN else sai)
+        lai = w1[k] * inputs.lai[m1[k], p] + w2[k] * inputs.lai[m2[k], p]
+        sai = w1[k] * inputs.sai[m1[k], p] + w2[k] * inputs.sai[m2[k], p]
+        e_l, e_s = exposed_area(np.array(lai), np.array(sai))
+        elai.append(float(e_l))
+        esai.append(float(e_s))
         h2o.append(h[lb[k], g] * f1[k] + h[lb[k] + 1, g] * f2[k])
     tsoi = inputs.soil_at_first_step("TSOI")[g]
     hist = out_dir / f"history_g{g}_p{p}.nc"

@@ -65,6 +65,12 @@ class NumericsOptions:
     # stop the run naming it (Fortran), or exclude it from then on (global runs)
     on_patch_error: Literal["stop", "exclude"] = "stop"
     max_failed_patch_fraction: float = 0.01  # with exclude: stop when more patches fail
+    # Fortran conservation checks that neither stop the run nor exclude a patch (each
+    # chunk's largest error is still reported), by (part of) their name in
+    # MLCanopyFluxesType.BALANCE_CHECKS, e.g. "CanopyFluxesDiagnostics 3" for grid runs:
+    # CLM-ml's diagnostic canopy latent heat uses the air temperature's latent heat, the
+    # leaves and soil their own, so the check fails when they straddle 0 C (Phase 6b)
+    ignore_checks: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)

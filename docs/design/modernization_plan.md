@@ -1710,7 +1710,7 @@ from `clm5_defaults.yaml`); 10 + 10 canopy layers.
 
 **Steps:**
 1. ✅ **Inventory** (`docs/design/global_input.md`).
-2. **Grid domain loader** (`domain.type: grid` in run.yaml: surface-data file, the CLM
+2. ✅ **Grid domain loader** (done 2026-10-29, `clm_ml/grid.py`; `domain.type: grid` in run.yaml: surface-data file, the CLM
    history file whose `landmask` defines the domain, an optional region box,
    `min_patch_weight`): gridcells (lat/lon), vegetated PFT patches (PFTs 1-16) with weights
    renormalized over the vegetated land units, per-patch canopy top and bottom (from
@@ -1721,14 +1721,14 @@ from `clm5_defaults.yaml`); 10 + 10 canopy layers.
    straight into the vectorized setup (`vector_setup.setup_arrays`). Test: the loader's
    patches, weights and soil values against the surface data for a few gridcells; a small
    region set up.
-3. **Setup without tower files:** the prototypes are set up with the legacy code, which
+3. ✅ **Setup without tower files** (done 2026-10-29, `clm_ml/legacy/grid_setup.py`; test `tests/regression/test_grid_setup.py`, bit for bit): the prototypes are set up with the legacy code, which
    reads tower forcing and a CLM history file at setup (initial soil temperature and water,
    the first record's acclimation temperature, the first step's air profiles). Identify every
    setup field that depends on the forcing and land data (as in Phase 6 step 6: vary them one
    at a time) and compute them from the gridded data per gridcell, so the prototypes only
    provide structure. Test: equal to the legacy setup for a tower whose files hold one
    gridcell's gridded data.
-4. **Gridded forcing and land-data streams:** CRUJRA 2000 (three streams), bilinear from
+4. ✅ **Gridded forcing and land-data streams** (done 2026-10-29, `clm_ml/grid_forcing.py`; copies CDEPS datm and CTSM's streams, decisions G1-G11 in `global_input.md`; a grid day equals tower runs of its data, inputs identical): CRUJRA 2000 (three streams), bilinear from
    0.5° to f09 on the valid source points (as CLM; documented where it differs from ESMF's
    mesh-based bilinear), wind speed as `u` (`v = 0`), direct/diffuse shortwave split into
    visible/near-infrared as CLM's data atmosphere does; interpolated to the model step with
@@ -1737,7 +1737,7 @@ from `clm5_defaults.yaml`); 10 + 10 canopy layers.
    levels, per gridcell) as monthly records interpolated in the scan (midpoint-linear,
    decision 14), in place of the per-patch CLM-history record at every step. Read per chunk
    with halo records.
-5. **Canopy bottom:** how MONTHLY_HEIGHT_BOT enters CLM-ml's leaf-area profile (today the
+5. ✅ **Canopy bottom** (2026-10-29, as CLM-ml v2 and CLM: read but not used, decision G13; a science option for the maintainer): how MONTHLY_HEIGHT_BOT enters CLM-ml's leaf-area profile (today the
    profile is a beta distribution from the ground to the top, with layers below `dpai_min`
    removed): decided with the maintainer at this step.
 6. **Regional test** (a few hundred gridcells, e.g. a box over North America): set up, run
@@ -1746,6 +1746,9 @@ from `clm5_defaults.yaml`); 10 + 10 canopy layers.
 7. **Global 1° run, year 2000** on one 4-GPU node (`execution.devices: 4`): timing,
    memory, failure statistics; the ~15-minute compiles at this size (and why the compilation
    cache does not store these programs) addressed as needed.
+
+**Implementation decisions and open issues** (copying CLM wherever a choice came up, as the
+maintainer asked): `docs/design/global_input.md` (G1-G19, open issues 1-11).
 
 **Done when:** a regional and a global 1° run complete from the provided inputs, with their
 timing, memory and failure statistics recorded, and the requirements they reveal written down

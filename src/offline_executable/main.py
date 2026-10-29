@@ -1411,6 +1411,41 @@ def gridcell_variables(names, level) -> tuple:
     )
 
 
+def ignored_check_indices(names) -> list:
+    """Indices into ``BALANCE_CHECKS`` of model.yaml ``numerics.ignore_checks`` (each name
+    must be part of exactly one check's name)."""
+    out = []
+    for name in names:
+        hits = [i for i, (full, _) in enumerate(BALANCE_CHECKS) if name in full]
+        if len(hits) != 1:
+            raise ValueError(
+                f"model.yaml numerics.ignore_checks: {name!r} matches {len(hits)} checks; "
+                f"checks: {[full for full, _ in BALANCE_CHECKS]}"
+            )
+        out += hits
+    return out
+
+
+def report_ignored_checks(errors, ignored, alive, batch: PatchBatch, where: str):
+    """``errors`` with the ignored checks set to 0, after printing how many patches exceeded
+    each one's tolerance in the chunk and the largest error."""
+    if not ignored:
+        return errors
+    errors = np.array(errors, dtype=float).reshape(batch.n_patches, len(BALANCE_CHECKS))
+    real = np.zeros(batch.n_patches, dtype=bool)
+    real[np.asarray(batch.real_index)] = True
+    use = real & np.asarray(alive, dtype=bool)
+    for i in ignored:
+        name, tol = BALANCE_CHECKS[i]
+        e = errors[use, i]
+        n_over = int(np.sum(e > tol))
+        if n_over:
+            print(f"ignored check ({where}): {name}: {n_over} patches above {tol:g}, "
+                  f"largest {e.max():.3g}", flush=True)  # fmt: skip
+        errors[:, i] = 0.0
+    return errors
+
+
 def batch_failures(errors, state, template_state, batch: PatchBatch, alive=None) -> dict:
     """``{patch: [problem, ...]}`` for the patches (of those ``alive``) that fail a
     conservation check or whose state is unhealthy."""
@@ -1610,6 +1645,7 @@ def run_streams(
     levels=None,
     on_patch_error: str = "stop",
     max_failed_patch_fraction: float = 0.01,
+    ignore_checks=(),
 ) -> None:
     """Run the model with output streams (plan §6.9): the first step step by step, then one
     compiled chunk per calendar month accumulating every stream inside the scan. After each
@@ -1654,6 +1690,7 @@ def run_streams(
         params = batch.params()
     if on_patch_error not in ("stop", "exclude"):
         raise ValueError(f"on_patch_error must be stop or exclude, got {on_patch_error!r}")
+    ignored = ignored_check_indices(ignore_checks)
     alive = np.ones(n_p, dtype=bool)
 
     def step_end(k):
@@ -1775,6 +1812,7 @@ def run_streams(
                   f"({batch.n_real * n / secs:.0f} patch-steps/s)", flush=True)  # fmt: skip
         end = step_end(first_step + n - 1)
         where = f"the chunk {starts[0]} to {end}"
+        errors = report_ignored_checks(errors, ignored, alive, batch, where)
         if on_patch_error == "stop":
             check_batch(errors, state, template_state, batch, where)
         else:

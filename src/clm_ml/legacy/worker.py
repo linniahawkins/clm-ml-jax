@@ -282,6 +282,7 @@ def run_spec(spec: dict, out_file: Path) -> None:
         levels=levels,
         on_patch_error=spec.get("on_patch_error", "stop"),
         max_failed_patch_fraction=spec.get("max_failed_patch_fraction", 0.01),
+        ignore_checks=tuple(spec.get("ignore_checks", ())),
     )
     if writers is not None:
         for w in writers:

@@ -37,7 +37,8 @@ CLM's satellite phenology, and CLM's prescribed soil-moisture stream.
 **Vegetation**: the surface data's monthly ``MONTHLY_LAI``/``MONTHLY_SAI`` per PFT and
 gridcell, interpolated as CLM's satellite phenology does (:func:`clm_ml.grid.clm_monthly_weights`
 at the end of the step plus one step), then ``elai = tlai`` and ``esai = tsai`` (no snow
-burial: this model has no snow), set to 0 below 0.05 (CLM).
+burial: this model has no snow), set to 0 below 0.05 (CLM); a patch left with no plant
+area keeps a stem area of 0.05 (:data:`MIN_PLANT_AREA`).
 
 **Soil water**: ``H2OSOI`` from monthly CLM history files per gridcell (the CLM run's
 ``landmask`` grid), **linear** between the files' time stamps (the middle of each month in
@@ -72,6 +73,11 @@ PSTD = 101325.0  # SHR_CONST_PSTD
 SOLZEN_MIN = 0.001  # dshr_tInterp_mod solZenMin
 O2_MOLAR = 0.209  # CLM o2_molar_const
 ELAI_MIN = 0.05  # SatellitePhenologyMod: lai/sai below this are set to 0
+#: Stem area (m2 m-2) given to a patch CLM would treat as not vegetated (elai + esai < 0.05,
+#: frac_veg_nosno = 0: CLM's bare-ground fluxes). CLM-ml has no bare-ground path and needs
+#: some plant area (zero gives undefined sunlit fractions), so the patch keeps CLM's
+#: vegetated threshold as stems, a nearly transparent canopy (decision G20).
+MIN_PLANT_AREA = 0.05
 
 #: datm stream -> (variables, time interpolation)
 STREAMS = {
@@ -622,6 +628,18 @@ class GridInputs:
         return m1, m2, w1, w2
 
 
+def exposed_area(tlai, tsai, xp=np):
+    """``(elai, esai)`` from the interpolated LAI and SAI: CLM's satellite phenology without
+    snow burial (``max(., 0)``, then 0 below 0.05), and :data:`MIN_PLANT_AREA` of stems where
+    nothing is left (``xp``: ``numpy`` or ``jax.numpy``, same operations)."""
+    elai = xp.maximum(tlai, 0.0)
+    esai = xp.maximum(tsai, 0.0)
+    elai = xp.where(elai < ELAI_MIN, 0.0, elai)
+    esai = xp.where(esai < ELAI_MIN, 0.0, esai)
+    esai = xp.where(elai + esai < ELAI_MIN, MIN_PLANT_AREA, esai)
+    return elai, esai
+
+
 def land_record(xw, land, gidx, nlevgrnd: int):
     """The CLM history record of every patch at one step, inside the compiled chunk:
     vegetation from the monthly records with CLM's satellite-phenology weights (``xw``: m1,
@@ -636,10 +654,7 @@ def land_record(xw, land, gidx, nlevgrnd: int):
     lai, sai, h2osoi = land
     tlai = w1 * jnp.take(lai, m1, axis=0) + w2 * jnp.take(lai, m2, axis=0)
     tsai = w1 * jnp.take(sai, m1, axis=0) + w2 * jnp.take(sai, m2, axis=0)
-    elai = jnp.maximum(tlai, 0.0)
-    esai = jnp.maximum(tsai, 0.0)
-    elai = jnp.where(elai < ELAI_MIN, 0.0, elai)
-    esai = jnp.where(esai < ELAI_MIN, 0.0, esai)
+    elai, esai = exposed_area(tlai, tsai, jnp)
     h = jnp.take(h2osoi, lb, axis=0) * f1 + jnp.take(h2osoi, lb + 1, axis=0) * f2  # (G, lev)
     h = jnp.take(h, gidx, axis=0)
     n_p = elai.shape[0]
@@ -658,9 +673,7 @@ def land_record_np(lai_t, sai_t, h2osoi_g, nlevgrnd: int):
     from clm_src_main.clm_varcon import spval
     from offline_driver.clmDataMod import ClmHistoryRecord
 
-    elai, esai = np.maximum(lai_t, 0.0), np.maximum(sai_t, 0.0)
-    elai = np.where(elai < ELAI_MIN, 0.0, elai)
-    esai = np.where(esai < ELAI_MIN, 0.0, esai)
+    elai, esai = exposed_area(lai_t, sai_t)
     return ClmHistoryRecord(
         elai=elai,
         esai=esai,

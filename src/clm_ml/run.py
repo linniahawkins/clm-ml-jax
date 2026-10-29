@@ -444,6 +444,7 @@ class Run:
             "file_prefix": self.name,
             "on_patch_error": self.config.numerics.on_patch_error,
             "max_failed_patch_fraction": self.config.numerics.max_failed_patch_fraction,
+            "ignore_checks": list(self.config.numerics.ignore_checks),
             "params": {k: v.tolist() for k, v in self.params.values.items()},
             "params_source": self.params.source,
             "legacy_ascii_dir": str(legacy_ascii_dir) if legacy_ascii_dir else None,

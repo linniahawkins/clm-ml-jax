@@ -154,6 +154,28 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
 - Inventory done (`docs/design/global_input.md`); input decisions recorded there and in the
   plan's Phase 6b section (1°, year 2000, CLM land mask: 14 346 gridcells, 72 575 patches).
 
+### 2026-10-29: Phase 6b steps 2-5 (maintainer: work through 6b, copy CLM, document)
+
+- Committed `b8d975d`: `domain.type: grid` (`clm_ml/grid.py`), `clm_parameters` in
+  params.yaml (CLM6 file), gridded forcing as CDEPS/CTSM handle it (`clm_ml/grid_forcing.py`),
+  grid setup and chunk reader (`clm_ml/legacy/grid_setup.py`). Every choice that came up
+  copies CLM (CTSM 5.4 / CDEPS source in `/glade/work/linnia/ctsm5.4.004`); decisions G1-G19
+  and open issues 1-11 in `global_input.md`.
+- Setup fields that depend on the forcing and land data: found by perturbing each CHATS7
+  input one at a time (probe `probe/6b/setup_deps.py`): the forcing containers, `t_a10`,
+  `pref_forcing`, soil temperature and water, canopy-air/leaf profiles, first-step inputs.
+- Tests (`tests/regression/test_grid_setup.py`): the grid setup equals the legacy setup of
+  tower files holding each gridcell's gridded data, bit for bit; a July day: chunk inputs
+  identical, outputs round-off through the night, then up to ~10 W m-2 apart after sunrise
+  because these patches amplify round-off (1e-15 in LAI -> ~8 W m-2; open issue 10).
+- First grid run (CPU, 12 gridcells, 61 patches, 1 July 2000): 140 s, all finite, gridcell
+  latent heat 104 W m-2, GPP 12.8 umol m-2 s-1 (day means).
+- Found: loading the cached batched first step crashes on CPU (open issue 11); now compiled
+  without the cache on CPU.
+- Before-commit tests, fast tier (267), coarse forcing, vector setup, land data: pass.
+- Running: regional test (step 6) on one A100, job 8004270 (`jobs/regional.log`, outputs in
+  `runs/regional/`).
+
 ## Next (resume here in a new session)
 
 1. **Check the end-of-Phase-6 job** `endphase` (PBS job 8001129, CPU, project P93300041;
