@@ -136,7 +136,20 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   5/5 clean compilations (about 140-155 s each for the reproducer). Rerun of the failing tests
   and the before-commit tests: job `s6d`.
 
+### 2026-10-29: end of Phase 6 checks; Phase 6b agreed
+
+- Fortran comparison (job `fortran_compare`, commit `2205796`): max 0.068 %, mean 0.0078 %,
+  the same 2 columns below r = 0.9999 as at the end of Phase 5.
+- Global timing (`jobs/global.log`, 4 A100s): 65 536 patches: setup 53 s, first step 838 s,
+  chunk compile 1 019 s, steady 51 000 patch-steps/s, all finite; 262 144 patches: setup
+  111 s, first step 809 s, then out of GPU memory in the chunk. The compilation cache could
+  not store these programs (`SerializeExecutable proto serialization failed`).
+- Full regression + slow tests on the final code: job `endphase` (queued at the time of
+  writing).
+- Maintainer agreed Phase 6b (plan, decisions 26-29): real global input before Phase 7; the
+  maintainer provides parameters, surface data, CRUJRA and soil moisture files.
+
 ## Next
 
-Commit step 6 when `s6c` passes; record the global timing; end-of-phase tests (all of
-`tests/regression`, the slow tests, Fortran comparison), CLAUDE.md update, final report.
+Report the `endphase` job. Phase 6b step 1 (inventory) when the maintainer gives the input
+file locations.

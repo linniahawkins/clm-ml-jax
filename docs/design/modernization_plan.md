@@ -46,6 +46,10 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 23 | Design target of Phase 6 | **Global runs at about 0.5° with several patches per gridcell** (roughly 6×10⁴ land gridcells and a few ×10⁵ patches), not collections of different towers. Tower runs stay supported as a special case (a domain of one or a few gridcells), but where the two pull apart the global run decides. Steps 2–5 are revisited after the step 1b `vmap` measurements (maintainer, Phase 6 on Derecho). |
 | 24 | Time in a run with many gridcells | **One clock for the whole run**: all gridcells share the calendar, start, model step and chunking, as in a global run. What differs between gridcells (latitude, longitude, hence solar geometry and local time) is per-gridcell data. Towers with different periods are separate runs. (`StepTime` values can already be traced, so per-gridcell calendars stay possible later, but nothing is designed for them.) |
 | 25 | A patch that fails a conservation check | **Recorded per patch** (patch, gridcell, check, step), not as one largest error per run. Default: stop and name the failing patches, as Fortran does. Option (`numerics.on_patch_error: exclude`, for global runs): the patch is excluded from then on (fill values in its output, left out of gridcell sums with the remaining weights renormalized, zero gradient contribution through a safe `where`), and the run stops only if more than a set fraction of patches fail. A NaN in one patch must never reach a gridcell sum or a shared PFT-parameter gradient. Provisional until step 3. |
+| 26 | Phase 6b before Phase 7 | **Real global input first** (maintainer, 2026-10-29): a `domain.type: grid` loader and real 0.5° inputs, tested regionally then globally, before the Phase 7 restructure, so that Phase 7 is designed against real requirements (patch mix, memory, land-data streams). Inputs are provided by the maintainer: parameters, CLM surface dataset, CRUJRA forcing, soil moisture. Validation against observations and long runs are not part of 6b. |
+| 27 | Parameters for global runs | **CLM5 defaults for every PFT** (`params: clm5_defaults` or the maintainer's parameter file); the CHATS overrides stay for CHATS (`params: chats`). |
+| 28 | Canopy layers in global runs | **Constant layer counts** (model.yaml `canopy_layers.n_layers_within`/`n_layers_above`, the same for every patch); **canopy top and bottom heights from the surface dataset** (per PFT and gridcell). |
+| 29 | Non-vegetated land | **Skipped for now**: bare ground (and the other non-vegetated land units) are left out; each gridcell's vegetated patch weights are renormalized to sum to 1, and gridcells without vegetation are left out of the domain. |
 
 Smaller decisions: see §8.
 
@@ -1679,6 +1683,55 @@ GPU node.
 - After a round-off-only change: noise-twin test + identical-input replay
   (`tests/regression/test_process_io.py`, threshold 1e-10) + padding test, then
   `python tests/regression/record_run.py --update-reference` and say so in the commit.
+
+### Phase 6b: Real global input (before Phase 7)
+
+**Goal (decision 26):** run CLM-ml-JAX on real 0.5° global input, first on a region and then
+globally, with the machinery of Phase 6. It shows what real domains need (patch mix, memory,
+compile time, land-data volume, failure rates) before the Phase 7 restructure. The
+maintainer provides the input files: the PFT parameters, a CLM surface dataset (0.5°), CRUJRA
+forcing and prescribed soil moisture. Not part of 6b: validation against observations, long
+runs, non-vegetated land units.
+
+**Decisions (§0, 26-29):** CLM5 default parameters for every PFT (CHATS overrides only for
+CHATS); constant layer counts with canopy top and bottom from the surface dataset; bare ground
+and other non-vegetated land skipped, vegetated weights renormalized.
+
+**Steps:**
+1. **Inventory of the provided files** (read-only): variables, units, grids and masks,
+   time axes and calendars, missing-value conventions, which surface-dataset fields CLM-ml
+   needs (PFT fractions `PCT_NAT_PFT`, `PCT_CROP`/crop PFTs, land fraction, soil texture
+   `PCT_SAND`/`PCT_CLAY` and organic matter, soil colour, bedrock depth, monthly canopy top
+   and bottom heights and LAI/SAI), how CRUJRA maps to the tower forcing variables (6-hourly
+   temperature, humidity, pressure, wind, shortwave, longwave, precipitation; forcing height),
+   and the soil moisture file's layers. Written up in `docs/design/global_input.md`.
+2. **Grid domain loader** (`domain.type: grid` in run.yaml): the surface dataset → gridcells
+   (latitude, longitude, soil column properties) and vegetated PFT patches with renormalized
+   weights (decision 29); a region selection (bounding box or mask) for tests; per-patch
+   canopy heights from the surface dataset and the constant layer counts (decision 28). The
+   patches go straight into the vectorized setup (`vector_setup.setup_arrays`), not through
+   one spec per patch.
+3. **Forcing and land-data streams** for gridded input: CRUJRA (6-hourly) per gridcell,
+   interpolated to the model step with the existing rules (coszen for shortwave); LAI/SAI
+   (monthly, surface dataset) and soil moisture as daily/monthly records interpolated inside
+   the scan, in place of today's CLM-history record per patch at every model step (~3 GB per
+   simulated day for 2.6×10^5 patches, Phase 6 step 6 limits). Read per chunk with the halo
+   record, per device's gridcells (§6.9).
+4. **Canopy structure from the surface dataset:** canopy top and bottom per PFT patch.
+   CLM-ml fixes the layer structure at setup from the canopy height; which month's (or what
+   summary of the monthly) heights to use, and how the canopy bottom enters the leaf-area
+   profile (today it follows from the beta profile and `dpai_min`), is to be decided at this
+   step with the maintainer.
+5. **Regional test** (a few hundred gridcells): setup, a month's run, outputs written per
+   gridcell and patch; failure rates with `on_patch_error: exclude`; memory and compile time.
+6. **Global run** (0.5°, ~6×10^4 land gridcells): on two or more GPU nodes (one 4-GPU node
+   ran out of memory at 2.6×10^5 patches in step 6); a few days to a month; timing, memory,
+   failures recorded. Addresses the compile time at global sizes (~15 min per program, not
+   stored by the compilation cache in Phase 6) as far as needed to run.
+
+**Done when:** a regional and a global 0.5° run complete from the provided inputs, with their
+timing, memory and failure statistics recorded, and the requirements they reveal written down
+for Phase 7.
 
 ### Phase 7: Restructure and cleanup
 
