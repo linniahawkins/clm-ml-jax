@@ -97,7 +97,13 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
 - New tests: `test_patches_batched`, `test_model_patches` (slow part: PFT gradient vs finite
   difference), `test_patch_exclusion`, `test_patch_padding`.
 
+- Committed: `2e219dd` (pbeta fix), `d9e6470` (steps 3 and 4; full regression 110 passed on
+  the snapshot, slow PFT-gradient test passed; reference regenerated).
+
 ## Next
 
-Commit step 3 (after the full regression on snapshot `trees/s3`; regenerate the reference:
-vmap round-off), run the slow PFT-gradient test; then step 4 (C3/C4 groups in one program).
+Step 5 (several devices): `PatchBatch` block layout per device (prototype and random-domain
+check: `probe/layout.py`), `jax.shard_map` over a `patch` mesh axis (classic `Mesh`, Auto axes;
+gradients of replicated inputs are summed across devices), outputs mapped back by
+`real_index`; test on CPU with `--xla_force_host_platform_device_count=4`; timing on 4 A100s.
+Then step 6 (batched setup at global scale).
