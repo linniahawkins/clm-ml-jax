@@ -37,6 +37,9 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=8)
     parser.add_argument("--grad", action="store_true")
     parser.add_argument("--label", default="")
+    parser.add_argument(
+        "--devices", type=int, default=1, help="split the patches over devices (shard_map)"
+    )
     args = parser.parse_args()
 
     import jax
@@ -83,17 +86,39 @@ def main() -> None:
     def stack(tree):
         return jax.tree.map(lambda x: jnp.broadcast_to(x, (npatch,) + jnp.shape(x)).copy(), tree)
 
-    batched = jax.jit(jax.vmap(one_patch, in_axes=(0, 0, 0, None)))
     xs = (stack(state), stack(forcing), stack(insts))
-    jax.block_until_ready(xs)
+    if args.devices == 1:
+        batched = jax.jit(jax.vmap(one_patch, in_axes=(0, 0, 0, None)))
 
-    def forward(p):
-        return batched(*xs, p)
+        def forward(p):
+            return batched(*xs, p)
+
+    else:  # step 5: the patches split over devices, as make_batch_runner does
+        from jax.sharding import Mesh, NamedSharding
+        from jax.sharding import PartitionSpec as Pspec
+
+        mesh = Mesh(np.array(jax.devices()[: args.devices]), ("patch",))
+        lead = Pspec("patch")
+        sharded = jax.jit(
+            jax.shard_map(
+                jax.vmap(one_patch),
+                mesh=mesh,
+                in_specs=(lead, lead, lead, lead),
+                out_specs=(lead, lead),
+                check_vma=False,
+            )
+        )
+        xs = jax.device_put(xs, NamedSharding(mesh, lead))
+
+        def forward(p):  # the parameters per patch (their gradients sum outside the shard_map)
+            return sharded(*xs, stack(p))
+
+    jax.block_until_ready(xs)
 
     def loss(p):
         return forward(p)[0].mean(axis=0).sum()  # sum over patches of the chunk-mean flux
 
-    result = {"label": args.label, "patches": npatch, "steps": n}
+    result = {"label": args.label, "patches": npatch, "steps": n, "devices": args.devices}
     fns = [("forward", forward)] + ([("gradient", jax.jit(jax.grad(loss)))] if args.grad else [])
     for name, fn in fns:
         times = []
