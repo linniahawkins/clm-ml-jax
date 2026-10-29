@@ -163,6 +163,25 @@ class MLOptions(NamedTuple):
     # the parameter nlevmlcan = 100). Patches use 1..ncan; the rest is padding.
     max_layers: int = 50
 
+    #: Fields used only to set up the canopy layers (``initVerticalStructure``, and
+    #: ``max_layers`` for the array shapes), never by the time step.
+    SETUP_ONLY = (
+        "dz_tall",
+        "dz_short",
+        "dz_param",
+        "nlayer_above",
+        "nlayer_within",
+        "dpai_min",
+        "max_layers",
+    )
+
+    def step_options(self) -> "MLOptions":
+        """These options with the setup-only fields (:attr:`SETUP_ONLY`) at their defaults:
+        what the time step receives (Phase 6 step 2). Compiled functions take the options as a
+        static argument, so patches and models that differ only in their layer settings share
+        one compiled program."""
+        return self._replace(**{f: self._field_defaults[f] for f in self.SETUP_ONLY})
+
     @property
     def nrk(self) -> int:
         """Number of Runge-Kutta stages — Fortran: runge_kutta_type/10."""

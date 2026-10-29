@@ -48,3 +48,7 @@ EXAMPLE-MIXED:
       root_biomass: null
       leaf_area_profile_beta: null
       stem_area_profile_beta: null
+      # A 0.5 m grass under a 30 m tower needs 300 layers at the default spacing; explicit
+      # counts instead (Bonan et al. 2021: 5-10 layers within the canopy are enough)
+      n_layers_within: 5
+      n_layers_above: 10

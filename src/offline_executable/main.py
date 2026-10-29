@@ -547,7 +547,10 @@ def advance(
         inputs.forcing_next,
         initialize=initialize,
         params=run.canopy_params if params is None else params,
-        opts=run.opts,
+        # the first step sets up the layers (all options); later steps get only the options
+        # that select physics code (setup-only fields at defaults: one program for patches
+        # with different layer settings)
+        opts=run.opts if initialize else run.opts.step_options(),
         grid=grid,
     )
     # Fortran's conservation checks (recorded in the step, plan §6.8): checked here when the

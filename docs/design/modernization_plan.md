@@ -339,6 +339,9 @@ CHATS7:
 - Patch weights on a gridcell must sum to 1, which validation checks.
 - With option A, every patch gets its own soil column with the tower's soil properties.
 - `null` means "use the default", replacing the Fortran `-999` sentinel.
+- A patch can set explicit canopy-air layer counts, `n_layers_within` and `n_layers_above`
+  (both or neither), in place of model.yaml's `canopy_layers` (Phase 6 step 2), e.g. for a
+  short canopy under a tall tower.
 
 See [`examples/towers_example.yaml`](examples/towers_example.yaml), which includes a
 hypothetical two-patch tower.
@@ -1425,8 +1428,23 @@ login node; slow and end-of-phase tests as PBS jobs (CPU: project P93300041; GPU
 - 0c. The XLA CPU-runtime flag (`clm_ml.model`) only for JAX < 0.7: JAX 0.9.2 ignores it, and
   gradients over chunks do not crash with 0.9.2.
 
-**Step 2, per-patch data: one compiled program for any patch.** The time step still reads
-module state that is set up once per tower (audit at the end of Phase 5b):
+**Step 2, per-patch data: one compiled program for any patch.** ✅ Done (2026-10-28):
+- 2a: `clm_src_main.SiteType.site_type` (soil `z`/`dz`/`zi`, bedrock index, soil colour class,
+  latitude/longitude) in `ClmInstances.site`, set at the end of setup and passed to the
+  time-step routines; the bedrock depth is a soil-layer mask. Soil colour stays a class index
+  into the `albsat`/`albdry` tables, gathered with a traced index (same values as looking the
+  albedos up at setup). Round-off only (XLA no longer folds divisions by the constant `dz`).
+- 2b: `MLOptions.step_options()` (setup-only fields at defaults) is what the time step
+  receives; per-patch `n_layers_within`/`n_layers_above` in `towers.yaml`; a process holds
+  models of any towers with one soil layer structure (`clm_ml.model`).
+- Test: `tests/regression/test_sites_one_program.py` (a second site differing in latitude,
+  longitude, bedrock depth, soil colour and layer counts runs through the first site's
+  compiled program without recompiling and equals its own run).
+- Not data: the snow-layer count `snl` (always 0) and the patch/column/gridcell index maps
+  (structure), the orbital parameters (per year; one clock, decision 24), and the
+  soil layer structure (array sizes; one per process).
+
+The audit at the end of Phase 5b (module state the time step read, set up once per tower):
 
 | State | Read by | Varies between patches? | Change |
 |---|---|---|---|
@@ -1526,7 +1544,7 @@ GPU node.
   before and after Phase 5b. Its tridiagonal solve is also still unrolled.
 - **CO₂ profile reset** covers levels 0..ncan−1 instead of Fortran's 1..ncan (no effect while
   `cair` is constant): numerics doc §4.5.
-- **`MLOptions` mixes run-time options and setup-only fields** (`dz_tall`, `dz_short`,
+- ✅ *Resolved in Phase 6 step 2b (`MLOptions.step_options()`).* **`MLOptions` mixes run-time options and setup-only fields** (`dz_tall`, `dz_short`,
   `dz_param`, `nlayer_within/above`, `dpai_min`, `max_layers`). Compiled functions take the
   whole `MLOptions` as a static argument, so two models that differ only in layer settings
   compile separate programs, although the time step does not read those fields (seen in

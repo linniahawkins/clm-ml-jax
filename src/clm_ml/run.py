@@ -319,6 +319,16 @@ class Run:
             stdout=subprocess.DEVNULL if quiet else None,
         )
 
+    def patch_fortran_codes(self, patch: int, interpolation: str) -> dict:
+        """model.yaml's Fortran option codes, with patch ``patch``'s explicit layer counts
+        (towers.yaml ``n_layers_within``/``n_layers_above``) in place of model.yaml's when set."""
+        codes = self.config.to_fortran_codes(interpolation)
+        within = int(self.domain.patches.n_layers_within[patch])
+        if within > 0:
+            codes["nlayer_within"] = within
+            codes["nlayer_above"] = int(self.domain.patches.n_layers_above[patch])
+        return codes
+
     def legacy_spec(self, legacy_ascii_dir: Optional[Path]) -> dict:
         """Everything the legacy worker needs, as JSON-serializable values."""
         tower_name = self.domain.gridcells.names[0]
@@ -361,7 +371,7 @@ class Run:
         }
         return {
             "namelist": namelist,
-            "varctl": self.config.to_fortran_codes(met.interpolation),
+            "varctl": self.patch_fortran_codes(0, met.interpolation),
             "params": {k: v.tolist() for k, v in self.params.values.items()},
             "params_source": self.params.source,
             "tower_name": tower_name,

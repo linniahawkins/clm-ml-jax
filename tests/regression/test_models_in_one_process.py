@@ -2,8 +2,9 @@
 Several models of the same tower in one Python process (plan Phase 5a, decision 20): each
 model holds its own options and parameters, so a model with Medlyn stomatal conductance
 created after a WUE model does not change the WUE model's results, and gives the same
-results as when it is alone in its process. A model of another tower is refused (the CLM
-subgrid structure is still module state until Phase 6).
+results as when it is alone in its process. A model of another tower (a copy of CHATS7
+under another name) is accepted since Phase 6 step 2 (per-site data in the containers): it
+gives CHATS7's results and leaves the first model's results unchanged.
 """
 
 from __future__ import annotations
@@ -41,9 +42,11 @@ def run(model):
     return {{k: [float(x) for x in v.ravel()] for k, v in out["s"].items()}}
 
 result = {{}}
+models = {{}}
 for name in {models!r}:
     overrides = ["model.physics.stomatal_conductance=" + name]
-    result[name] = run(Model.from_run(load_run(tmp / "run.yaml", overrides)))
+    models[name] = Model.from_run(load_run(tmp / "run.yaml", overrides))
+    result[name] = run(models[name])
 if len({models!r}) > 1:
     result["wue_again"] = run(Model.from_run(load_run(tmp / "run.yaml")))
     towers = yaml.safe_load(open({towers!r}))
@@ -51,11 +54,8 @@ if len({models!r}) > 1:
     d = yaml.safe_load((tmp / "run.yaml").read_text())
     d["domain"].update(towers=["OTHER"], towers_file="towers.yaml")
     (tmp / "other.yaml").write_text(yaml.safe_dump(d))
-    try:
-        Model.from_run(load_run(tmp / "other.yaml"))
-        result["other_tower_refused"] = False
-    except RuntimeError:
-        result["other_tower_refused"] = True
+    result["other_tower"] = run(Model.from_run(load_run(tmp / "other.yaml")))
+    result["wue_after_other"] = run(models["wue"])
 print("RESULT" + json.dumps(result))
 """
 
@@ -84,4 +84,8 @@ def test_two_models_of_one_tower_in_one_process():
     # the options are the models' own: the schemes differ
     assert not np.allclose(together["medlyn"]["latent_heat_flux"],
                            together["wue"]["latent_heat_flux"])  # fmt: skip
-    assert together["other_tower_refused"]
+    for var in ("latent_heat_flux", "gpp"):
+        # another tower in the process: a copy of CHATS7 gives CHATS7's results, and the first
+        # model's results do not change
+        np.testing.assert_array_equal(together["other_tower"][var], together["wue"][var])
+        np.testing.assert_array_equal(together["wue_after_other"][var], together["wue"][var])

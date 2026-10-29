@@ -23,12 +23,12 @@ exposes the pieces a calibration or sensitivity study needs::
 
 ``run_chunk`` is differentiable with respect to the state, the parameters and the forcing.
 
-Options and parameters are held by each model (Phase 5a), so a process can hold several
-models of the **same tower**, e.g. to compare schemes or parameter sets. The CLM subgrid
-structure (soil layers, latitude and longitude) is still set up per tower in module state,
-so models of different towers need separate processes until Phase 6 (and so do soil layer
-structures: ``soil.layer_structure``). One patch per model for now (Phase 6 batches
-patches).
+Options and parameters are held by each model (Phase 5a), and the per-site data the time
+step reads (soil geometry, bedrock depth, soil colour, latitude and longitude) are in its
+containers (Phase 6 step 2), so a process can hold several models, of the same or different
+towers, e.g. to compare schemes, parameter sets or sites. The soil layer structure
+(``soil.layer_structure``) is still fixed per process (array sizes chosen when the modules
+are imported).
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ import os
 import warnings
 from typing import Optional, Sequence
 
-_PREPARED: Optional[tuple] = None  # (tower, soil layer structure) this process is set up for
+_PREPARED: Optional[str] = None  # soil layer structure this process is set up for
 
 # Gradients over a compiled chunk crash (segmentation fault) in XLA's newer CPU runtime
 # (the "thunk" runtime, default in JAX 0.6.2): reproduced with a 2-step chunk; the older
@@ -86,13 +86,12 @@ class Model:
         its first (initializing) step."""
         global _PREPARED
         spec = run.legacy_spec(None)
-        key = (spec["tower_name"], spec["namelist"]["clm_phys"])
+        key = spec["namelist"]["clm_phys"]
         if _PREPARED is not None and _PREPARED != key:
             raise RuntimeError(
-                f"this process holds models of tower {_PREPARED[0]} ({_PREPARED[1]} soil "
-                f"layers); {key[0]} ({key[1]}) needs a new Python process: the CLM subgrid "
-                "structure is set up per tower in module state until Phase 6 (or use "
-                "Run.execute(), which runs in a separate process)"
+                f"this process holds models with {_PREPARED} soil layers; {key} needs a new "
+                "Python process: the soil layer structure fixes array sizes when the modules "
+                "are imported (or use Run.execute(), which runs in a separate process)"
             )
         from clm_ml.legacy import worker
 

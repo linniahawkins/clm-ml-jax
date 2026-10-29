@@ -50,6 +50,10 @@ class PatchSpec:
     root_biomass: Optional[float] = None  # g m-2 (null: PFT default)
     leaf_area_profile_beta: Optional[tuple[float, float]] = None  # null: PFT default profile
     stem_area_profile_beta: Optional[tuple[float, float]] = None
+    # Explicit canopy-air layer counts for this patch (null: model.yaml canopy_layers), e.g. a
+    # short canopy under a tall tower (Bonan et al. 2021: 5-10 layers within the canopy)
+    n_layers_within: Optional[int] = None
+    n_layers_above: Optional[int] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -77,7 +81,16 @@ def load_towers(path: Path) -> dict[str, TowerSpec]:
         if abs(total - 1.0) > 1e-6:
             raise ConfigError(f"{path.name}: {name}.patches: weights sum to {total:g}, not 1")
         for i, patch in enumerate(tower.patches):
-            pft_index(patch.pft, f"{path.name}: {name}.patches[{i}].pft")
+            where = f"{path.name}: {name}.patches[{i}]"
+            pft_index(patch.pft, f"{where}.pft")
+            if (patch.n_layers_within is None) != (patch.n_layers_above is None):
+                raise ConfigError(
+                    f"{where}: n_layers_within and n_layers_above must be set together"
+                )
+            if patch.n_layers_within is not None and (
+                patch.n_layers_within < 1 or patch.n_layers_above < 1
+            ):
+                raise ConfigError(f"{where}: n_layers_within and n_layers_above must be >= 1")
         towers[str(name)] = tower
     return towers
 
@@ -106,6 +119,8 @@ class Patches:
     root_biomass: np.ndarray  # (np,) g m-2, NaN = PFT default
     leaf_area_profile_beta: np.ndarray  # (np, 2), NaN = PFT default
     stem_area_profile_beta: np.ndarray  # (np, 2)
+    n_layers_within: np.ndarray  # (np,) int, 0 = model.yaml canopy_layers
+    n_layers_above: np.ndarray  # (np,) int, 0 = model.yaml canopy_layers
 
 
 @dataclasses.dataclass(frozen=True)
@@ -193,6 +208,8 @@ class Domain:
             root_biomass=np.array([nan(p.root_biomass) for _, p, _ in p_rows]),
             leaf_area_profile_beta=np.array([pair(p.leaf_area_profile_beta) for _, p, _ in p_rows]),
             stem_area_profile_beta=np.array([pair(p.stem_area_profile_beta) for _, p, _ in p_rows]),
+            n_layers_within=np.array([p.n_layers_within or 0 for _, p, _ in p_rows]),
+            n_layers_above=np.array([p.n_layers_above or 0 for _, p, _ in p_rows]),
         )
         columns = SoilColumns(
             texture_class=tuple(s.texture_class for s in c_rows),
@@ -219,7 +236,8 @@ class Domain:
     def layer_counts(self, config: ModelConfig) -> list[int]:
         """Number of canopy-air layers per patch (ground to measurement height).
 
-        Same rule as the legacy ``initVerticalStructure``. Patches whose canopy height comes
+        Same rule as the legacy ``initVerticalStructure``, with the patch's explicit counts
+        (``towers.yaml``) in place of model.yaml's when set. Patches whose canopy height comes
         from the CLM history file (NaN here) are counted when the run starts instead, and
         reported as 0.
 
@@ -232,6 +250,8 @@ class Domain:
             zref = 30.0 if np.isnan(zref) else zref  # legacy default for tower_ht = -999
             if np.isnan(htop):
                 counts.append(0)
+            elif self.patches.n_layers_within[i] > 0:
+                counts.append(int(self.patches.n_layers_within[i] + self.patches.n_layers_above[i]))
             elif c.n_layers_within is not None:
                 counts.append(c.n_layers_within + c.n_layers_above)
             else:
