@@ -43,6 +43,9 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 20 | Configuration in the code | **Passed explicitly** (Phase 5a), not module globals: options static, tunable numbers in the differentiable parameters. Allows several models per process and in-process tests. |
 | 21 | Process interface (§6.6) | **Deferred to Phase 7** (not needed for batching). |
 | 22 | C3/C4 photosynthesis with mixed patches | **A static choice per group of patches**, not per-patch data. Phase 6 sorts patches into a C3 group and a C4 group *inside one compiled program* (group sizes are known when the run is set up), so each patch computes only its own pathway. Computing both pathways for every patch (tried in Phase 5b) wastes about half the photosynthesis work and memory on a GPU, where patches in a batch run in lockstep. Masks remain the choice for layer counts, which take many values; C3/C4 takes two. Extends to other per-PFT code switches as long as their combinations stay few. |
+| 23 | Design target of Phase 6 | **Global runs at about 0.5° with several patches per gridcell** (roughly 6×10⁴ land gridcells and a few ×10⁵ patches), not collections of different towers. Tower runs stay supported as a special case (a domain of one or a few gridcells), but where the two pull apart the global run decides. Steps 2–5 are revisited after the step 1b `vmap` measurements (maintainer, Phase 6 on Derecho). |
+| 24 | Time in a run with many gridcells | **One clock for the whole run**: all gridcells share the calendar, start, model step and chunking, as in a global run. What differs between gridcells (latitude, longitude, hence solar geometry and local time) is per-gridcell data. Towers with different periods are separate runs. (`StepTime` values can already be traced, so per-gridcell calendars stay possible later, but nothing is designed for them.) |
+| 25 | A patch that fails a conservation check | **Recorded per patch** (patch, gridcell, check, step), not as one largest error per run. Default: stop and name the failing patches, as Fortran does. Option (`numerics.on_patch_error: exclude`, for global runs): the patch is excluded from then on (fill values in its output, left out of gridcell sums with the remaining weights renormalized, zero gradient contribution through a safe `where`), and the run stops only if more than a set fraction of patches fail. A NaN in one patch must never reach a gridcell sum or a shared PFT-parameter gradient. Provisional until step 3. |
 
 Smaller decisions: see §8.
 
@@ -1346,8 +1349,84 @@ below for setup and for the open items carried over from the CPU sessions.
   step (before 5b: 15.6 ms), compiled step 3.3 → 3.2 ms; the forward padding test takes
   3 min instead of 10. (The Norman solar solver, not the default, is still unrolled.)
 
-**Step 2, per-patch "static" data (next).** The time step still reads module state that is set
-up once per tower (audit at the end of Phase 5b):
+**Goal (decision 23):** global runs at about 0.5° with several patches per gridcell, one clock
+for all gridcells (decision 24). Steps 0 and 2–6 below were revised for that goal after step
+1b and agreed with the maintainer. Progress log: `docs/design/phase6_progress.md`.
+
+**Step 1b, `vmap` throughput (measure before refactoring).** The design rests on one bet: that
+one-patch physics batched with `vmap` keeps a GPU busy. A single patch does not: on an A100 the
+compiled CHATS7 step takes 366 ms forward and 2.0 s for the gradient (8-step chunk), against
+3.2 ms and 16.5 ms on the laptop CPU. The step is thousands of small operations in sequence
+(scans over 50 layer slots, 25 Obukhov iterations, 20 bisection iterations, 6 sub-steps), so a
+GPU waits on launch overhead. `timing/time_vmap.py` runs the existing compiled chunk on N
+identical CHATS7 copies stacked along a new axis (no physics change) and records patch-steps
+per second, compile time and peak device memory for forward and gradient
+(`timing/results_vmap.jsonl`).
+
+Results (one A100 40 GB, JAX 0.9.2, 8-step chunk, forward; every batched patch equals the
+unbatched run exactly):
+
+| Patches | Step (s) | Patch-steps/s | Peak device memory (GB) |
+|---|---|---|---|
+| 1 | 0.37 | 2.7 | 0.02 |
+| 64 | 0.40 | 160 | 0.04 |
+| 512 | 0.42 | 1 222 | 0.16 |
+| 4 096 | 0.51 | 8 067 | 1.3 |
+| 16 384 | 0.91 | 17 974 | 5.4 |
+| 65 536 | 2.30 | 28 456 | 21.5 |
+
+- The batching bet holds: up to ~4 000 patches cost almost nothing extra, and memory is
+  ~0.33 MB per patch (~10⁵ patches fit on one A100).
+- Two costs: a fixed ~0.37 s per step (a chain of thousands of small GPU kernels, each with
+  launch overhead) and ~33 µs per extra patch-step, so a full A100 approaches ~30 000
+  patch-steps/s. One laptop CPU core does ~300 for one patch, so one A100 is worth roughly one
+  100-core CPU node. Estimated FP64 use is a few percent of the A100's peak: the step is
+  bound by many small unfused operations, not arithmetic.
+- A 0.5° global run (a few ×10⁵ patches, 30-min step, ~5×10⁹ patch-steps per year) would take
+  ~2 GPU-days per simulated year at this rate.
+- Compile time grows with N (110 s at N = 1, 460 s at N = 512); compiled programs are per
+  patch count, so global runs pad the patch count to a fixed size per device.
+- Conclusion: keep the design (`vmap` over patches, masks, one program); the cost is the
+  number and size of the operations inside one step, which is step 1c.
+
+**Step 1c, GPU performance of the step (measured; optimization deferred).** Arithmetic-
+preserving changes only (round-off at most); science-adjacent changes (fewer solver iterations,
+fewer sub-steps, another time integrator) are excluded by the maintainer. The maintainer
+deferred the optimization itself ("modernize first, optimize the GPU later"); the
+measurements below are the recorded starting point (`docs/design/phase6_progress.md` has the
+details and file locations).
+- Profile (`nsys`, one patch, one step): ~31 600 kernel launches per step, 2.3 µs of GPU work
+  each on average; the GPU is busy 16 % of the wall time. The host cost is in about equal parts
+  kernel launches, ~25 000 small device-to-device copies (loop-carried values of the scans and
+  solver loops) and small CUDA-graph launches. XLA already captures straight-line code in CUDA
+  graphs; loops are not captured.
+- CUDA graphs over loops (`--xla_gpu_enable_command_buffer=...,CONDITIONAL,WHILE`,
+  `--xla_gpu_graph_min_graph_size=1`) are *slower* with JAX 0.9.2 (N = 1: 530 ms per step
+  against 367 ms; N = 4 096: 632 against 508 ms). Adding
+  `--xla_gpu_command_buffer_unroll_loops=true` brings N = 1 back to the default (368 ms). No
+  gain from flags alone.
+- When the optimization resumes: fewer, larger operations inside the loops (a parallel
+  tridiagonal solve: ~6 rounds instead of 50 sequential rows; fusing the per-layer leaf loops),
+  guided by the profile.
+
+**Agreed plan for steps 0 and 2–6 (maintainer, after step 1b).** Memory is not the obstacle
+for a global run (~0.33 MB per patch: ~300 000 patches are ~25 GB per GPU on a 4-GPU node),
+so the slim carried state stays in Phase 7. The obstacle is setup: 14–26 s per patch in the
+legacy Python code with module state. Testing on Derecho: fast and before-commit tests on the
+login node; slow and end-of-phase tests as PBS jobs (CPU: project P93300041; GPU: UCLB0069).
+
+**Step 0, housekeeping (separate commits).**
+- 0a. Regenerate the regression reference on Derecho: JAX 0.9.2 and the Derecho CPU change
+  results by ~1e-16 (noise-twin passes, bit-for-bit fails on 65 fields), so the bit-for-bit
+  test is only useful with a Derecho reference. The laptop (JAX 0.6.2) no longer matches bit
+  for bit (accepted by the maintainer).
+- 0b. float32 inputs to float64 (open issue below): a precision fix towards Fortran, ~1e-8;
+  regenerated reference and a Fortran comparison run.
+- 0c. The XLA CPU-runtime flag (`clm_ml.model`) only for JAX < 0.7: JAX 0.9.2 ignores it, and
+  gradients over chunks do not crash with 0.9.2.
+
+**Step 2, per-patch data: one compiled program for any patch.** The time step still reads
+module state that is set up once per tower (audit at the end of Phase 5b):
 
 | State | Read by | Varies between patches? | Change |
 |---|---|---|---|
@@ -1357,46 +1436,62 @@ up once per tower (audit at the end of Phase 5b):
 | Index maps `PatchType.patch.column`, `.gridcell`, `.itype` | several | structure | identity per patch once each patch is a batch entry; the PFT is in the parameters, C3/C4 in the group (step 4) |
 | Tower table `TowerDataMod` (soil texture, organic matter, etc.) | setup only (`SoilStateInitTimeConstMod`, `CLMml_driver`) | yes | read per patch at setup (already only at setup) |
 
-Move these into an explicit per-patch record passed to the step (as `MLOptions` in Phase 5a),
-next to `Domain` (Phase 7 retires the CLM subgrid modules). Single-tower results must stay
-bit for bit (or round-off with the usual checks). Also needed: **explicit layer counts per
-tower/patch.** `n_layers_within`/`n_layers_above` are model-wide `model.yaml` settings today
-(`MLOptions.nlayer_within/above`, read by `initVerticalStructure`); the plan and `CLAUDE.md`
-describe them per tower in `towers.yaml`, which is not implemented. For multi-tower runs they
-must come from the tower (or patch) entry.
+- A per-patch record (pytree) with what the step reads and is fixed for a site: soil
+  geometry with a **soil-layer mask** from the bedrock depth (as the canopy layers in 5b;
+  float64, fixing the float32 cast in `MLPlantHydraulicsMod`), latitude/longitude (per
+  gridcell, gathered to patches), and the soil's saturated/dry albedos looked up from the
+  colour class at setup (the step no longer sees the class).
+- `MLOptions` split: options that select code (static) and setup-only settings (layer spacing
+  and counts, `dpai_min`, `max_layers`), so patches with different layer settings share one
+  program.
+- Explicit layer counts per patch (`n_layers_within`/`n_layers_above` in `towers.yaml`, later
+  from the grid input), with the model-wide `model.yaml` values as defaults.
+- Test: one compiled program runs two test patches that differ in bedrock depth, latitude,
+  longitude, soil colour and layer counts, each equal to its own single run; CHATS7 alone
+  stays bit for bit.
 
-**Step 3, `vmap` over patches.** Set up each tower once (the legacy setup runs per tower),
-stack the patches' containers and per-patch records along a patch axis, run one compiled
-chunk over all patches; forcing gathered from each patch's gridcell; gridcell output is the
-area-weighted `segment_sum` of patches. Remove the one-patch restriction from Phase 1 and the
-"one tower per process" restriction of `clm_ml.model.Model` (Phase 5a). Load forcing for several
-towers (the `{tower}` placeholders in file paths).
+**Step 3, many gridcells and patches in one run (`vmap`).**
+- Setup: each patch with the existing legacy code in a Python loop, stacked along a patch
+  axis (enough for tests and up to ~10³ patches; step 6 replaces it).
+- Forcing with a gridcell axis, gathered to patches; one clock (decision 24).
+- Parameters: a table with one row per PFT, gathered per patch; gradients per PFT add up over
+  its patches.
+- Output: patch streams as now; gridcell streams as the area-weighted sum of patches formed at
+  every step inside the scan (so min, max and instantaneous are right); profiles patch-level only.
+- Errors per patch (decision 25): default stop naming the patches; option `exclude`.
+- The patch count padded to a fixed size with zero-weight copies, so a new domain does not
+  recompile; restarts with the patch axis.
+- Remove the one-patch, one-tower and one-tower-per-process restrictions (`run.py`,
+  `clm_ml.model._PREPARED`).
+- Tests: 2 gridcells × 2 patches, every per-patch field different, equal to each patch run
+  alone (round-off); permuting patches permutes outputs only; gridcell output equals the
+  weighted sum for every statistic; gradient with respect to patch weights.
 
-**Step 4, C3/C4 groups inside one compiled program** (decision 22): the C3 patches and the C4
-patches form two groups of fixed size (known at setup), each batched with `vmap` and running
-only its own pathway's code (`GridInfo.c3` static per group); forcing is gathered and outputs
-aggregated for both groups, and gradients with respect to the PFT parameters add up across
-them. Test: a gridcell with a C3 and a C4 patch matches each patch run alone. Layer counts
-need no grouping (masks, Phase 5b).
+**Step 4, C3/C4 groups in one program** (decision 22): the C3 patches and the C4 patches form
+two groups of fixed size, each batched with `vmap` and running only its own pathway
+(`GridInfo.c3` static per group); outputs are combined and PFT-parameter gradients add up
+across groups. Test: a gridcell with a C3 and a C4 patch matches each patch run alone. The same
+group mechanism can later bucket `max_layers` sizes if padding waste matters.
 
-**Step 5, sharding:** `jax.sharding` over the patch axis so large patch counts spread across
-GPUs (Derecho GPU nodes have 4 A100s). Each process reads only the forcing for its own
-gridcells (§6.9). Timing test: patches per second on one GPU, and scaling over 4.
+**Step 5, several devices:** patches sorted by gridcell, no gridcell split between devices (so
+gridcell sums need no communication); the patch axis is split across devices with
+`jax.sharding`, PFT-parameter gradients summed across them. Test on CPU with simulated devices
+(`--xla_force_host_platform_device_count`); timing on 4 A100s.
 
-**Tests:**
-- **Multi-tower:** CHATS7 and another tower together match each run alone (only CHATS7 data
-  are in the repository: a second tower can be CHATS7 copied under another name with other
-  settings, e.g. explicit layer counts, as in `test_models_in_one_process.py` and
-  `test_one_program_any_layers.py`, or a tower whose data are added).
-- **Multi-patch:** a two-patch gridcell matches each patch run alone, with the gridcell output
-  equal to the weighted sum.
-- **Weights:** gradients with respect to patch weights work.
-- Document how a gridded/global run will plug in: a `domain.type: grid` loader that builds the
-  `Domain` (gridcells, PFT patches and weights from a CLM surface dataset) and `Forcing` from
-  gridded data. Implementing it is the follow-on project.
+**Step 6, setup at global scale (new):** a batched (`vmap`) initialization over all patches
+(vertical structure from canopy height and layer counts, soil initialization, the first
+initializing step) in place of the per-patch legacy setup. Test: a synthetic global-size
+domain built from CHATS7 (~3×10⁵ patches, varied latitude/longitude, soils and layer counts)
+is set up in minutes and runs on one Derecho GPU node; memory and timing recorded.
 
-**Done when:** multi-tower and multi-patch runs match single-patch runs, and sharding works on a
-multi-GPU machine (or on CPU with simulated devices in CI).
+**Follow-on, not Phase 6:** a loader for real global input (`domain.type: grid`: gridcells,
+PFT patches and weights from a CLM surface dataset; gridded forcing, LAI and soil water). It
+needs science choices: parameters for every PFT (only the CHATS7 walnut set is validated), the
+layer rule for global canopies, and the datasets. Phase 6 documents how it plugs in.
+
+**Done when:** multi-gridcell and multi-patch runs match single-patch runs; runs work across
+4 GPUs and with simulated CPU devices; the synthetic global-size domain sets up and runs on a
+GPU node.
 
 #### Handoff to Derecho (written at the end of the CPU sessions)
 
@@ -1415,19 +1510,15 @@ multi-GPU machine (or on CPU with simulated devices in CI).
   NCAR's documentation for current queue names and limits). First compilations take minutes
   (gradients ~5 min on CPU).
 
-**Deferred to Derecho (from the CPU sessions):**
-1. **GPU timing** (Phase 4 done-when 3, GPU part): `python timing/time_model.py` (forward and
-   8-step gradient; `--steps`, `--no-grad`, `--set key=value`) and `python timing/time_offline.py`;
-   results append to `timing/results_model.jsonl` / `timing/results.jsonl`.
-2. **Gradient padding test** `tests/regression/test_padding.py::test_padding_gives_finite_equal_gradients`
-   (`-m slow`): not run after Phase 5b (out of memory on the 17 GB laptop, before the scan
-   solvers). Compares 46 and 60 slots, one process each; with the scan solvers 100 slots may
-   fit again (`GRADIENT_SIZES`).
-3. **XLA CPU "thunk" runtime bug** (gradients over a chunk of ≥ 2 steps segfault, JAX 0.6.2):
-   `clm_ml.model` sets `XLA_FLAGS=--xla_cpu_use_thunk_runtime=false` on import (CPU only).
-   Re-test with a newer JAX; on GPU the flag has no effect.
-4. **Compile time:** gradient compilation of an 8-step chunk is ~4.5 min on CPU (after step 1);
-   measure on GPU.
+**Deferred to Derecho (from the CPU sessions), with results (2026-10-28, A100, JAX 0.9.2):**
+1. ✅ **GPU timing:** one patch, forward 366–384 ms per step, gradient 2.0 s per step (8-step
+   chunk; laptop CPU 3.2 and 16.5 ms); legacy offline run 3.05 s per step (laptop 0.17 s).
+   Many patches: step 1b.
+2. ✅ **Gradient padding test** (46 vs 60 slots): passes on the A100 (18 min).
+3. ✅ **XLA CPU "thunk" runtime bug:** JAX 0.9.2 no longer supports the workaround flag (the
+   new runtime is the only one), and a 2-step CPU gradient runs without crashing (step 0c).
+4. ✅ **Compile time on GPU:** empty cache 100 s forward and 430 s gradient (8-step chunk);
+   from the cache 13 s and 83 s.
 
 **Open issues found during Phases 4–5 (not fixed; listed so they are not lost):**
 - **Norman solar radiation** (`solar_radiation: norman`, not the CHATS default, never
@@ -1446,6 +1537,14 @@ multi-GPU machine (or on CPU with simulated devices in CI).
 - **Fortran comparison test** skips the files with several rows per step (`fsun`, `profile`,
   `fluxprofile`: 6 tests skipped) because it matches rows by time only.
 - `offline_driver/controlMod.control` is not used by the run path (Phase 7 cleanup).
+- **float32 inputs in a float64 model** (found on Derecho, Phase 6): `CanopyStateType`
+  creates `elai_patch`, `esai_patch`, `htop_patch`, `frac_veg_nosno_patch` as float32, and
+  `SurfaceAlbedoType` the albedos and `coszen_col`. LAI and SAI from the forcing are written into
+  them each step (`clmDataMod`, JAX warns "cannot safely cast value from float64 to float32")
+  and read by `MLCanopyFluxes` (`elai_patch[p]`); ground albedo enters the radiation. Fortran
+  uses double precision. Effect ~1e-8 relative on these inputs, beyond the noise-twin band,
+  and lower gradient precision with respect to LAI. Fix (float64) as its own commit with a
+  regenerated reference.
 
 **JAX lessons from these sessions (for writing tests and code):**
 - **Never add host callbacks** (`jax.debug.callback`, `jax.debug.print`) to compiled code: a
