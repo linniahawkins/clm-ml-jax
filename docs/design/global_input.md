@@ -170,19 +170,42 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
     for the maintainer (CHATS7 never freezes, so its results would not change).
 13. **Bare-ground patches** (G20): a CLM-ml bare-ground path (or leaving the patch out of
     its gridcell for those steps) would copy CLM exactly.
-14. **NaN in a stems-only canopy at sunrise** (regional test, January 2000): 5 of 2 902
-    patches, all `broadleaf_deciduous_temperate_shrub` in Wyoming (42-45 N, 108.75 W, 0.5 m
-    tall), become NaN at the first daylight step with LAI = 0 and SAI = 0.108 (above CLM's
-    0.05, so CLM treats the patch as vegetated: stems only). Reproduce: region
-    `{lat: [41.5, 42.5], lon: [-109.0, -108.5]}`, January 2000, patch 1; step 607 (13 January
-    15:00 UTC) is the first non-finite step (`probe/6b/nan_hunt_stems.py <run.yaml> 1`).
-    No input is non-finite; the step gives NaN eagerly (uncompiled) too, so it is the
-    model's arithmetic, not XLA. `jax_debug_nans` cannot locate it: the model carries benign
-    NaNs in unused array slots and the check stops at those first (sub-step averaging). Next
-    step: check each sub-step routine's outputs for this patch on this step (numerics doc
-    §1); a division by the leaf area (sunlit/shaded leaf area, LAI = 0) is the first
-    suspect. With `on_patch_error: exclude` the patch is left
-    out from that month on. Deciduous trees with LAI = 0 and SAI > 0 elsewhere did not fail.
+14. **Diffuse transmittance above 1 in thin layers (diagnosed 2026-10-29; not fixed).**
+    Seen as NaN in 5 of 2 902 regional patches in January (deciduous shrubs in Wyoming,
+    LAI 0, SAI 0.108). Diagnosis (probes in `probe/issue14/`, no code changed):
+    - CLM-ml v2 computes a layer's diffuse transmittance with a 9-angle midpoint rule
+      (`MLSolarRadiationMod.F90` lines 203-210; the JAX translation is the same):
+      `td = 2·Δθ·Σ exp(-G(θ)/cosθ·dpai·Ω)·sinθ·cosθ`. At `dpai -> 0` it gives 1.00510, not 1
+      (the midpoints' weights are not normalized), so **`td > 1` for layers with less than
+      ~0.005 m² m⁻² of plant area** (0.0050-0.0058 depending on the leaf angle).
+    - Layers are fixed at setup as fractions of the canopy's plant area (`dpai_min` = 0.01
+      applies to the unit-LAI profile in `initVerticalStructure`, Fortran too), and each
+      step's layer plant area is fraction × (LAI + SAI). The thinnest of the 10 layers holds
+      1.2-1.5 % of the plant area, so any patch with LAI + SAI below ~0.33-0.41 has a
+      `td > 1` layer.
+    - With `1 - td < 0`, the Norman longwave equations (`refld = (1 - td)·ρ`, emission
+      `εσT⁴(1 - td)`, absorption containing `-2·src`) give the layer net longwave that
+      *increases* with its temperature: about `2(td - 1)/dpai · 4εσT³` (~24 W m⁻² K⁻¹ for the
+      shrub's bottom layer, `dpai` 0.0013, `td` 1.0039), against a sensible-heat loss of
+      ~`2·cp·gbh` (~33 W m⁻² K⁻¹). In calm conditions the feedback wins: on 13 January at
+      sunrise the bottom layer went 275 K -> 310 K -> 440 K -> 1e147 K -> NaN, while the 12
+      earlier sunrises (windier) stayed stable. The shortwave also uses `(1 - td)` (energy
+      created, not absorbed, in those layers).
+    - **Extent** (global domain, monthly LAI/SAI): 21 727 of 72 575 patches have a `td > 1`
+      layer in some month: 32 % of the vegetated area in January-February, 8 % in
+      July-August. Most do not diverge, but their radiation is not conserving energy, so
+      their fluxes are biased. CHATS7 never reaches it (thinnest layer 0.011 m² m⁻²).
+    - **Causal test**: the same January with `td` normalized (divided by 1.00510, probe
+      only): all 5 patches of the gridcell finite and physical, the shrub included. Capping
+      `td` at exactly 1 is not a fix: `refld = 0` makes the Norman equations singular, which
+      also shows they are ill-conditioned as a layer's plant area goes to 0.
+    - **For the maintainer** (science choices, each changes results, CHATS7 included for the
+      first two): (a) normalize the quadrature weights so `td(0) = 1` (changes `td` by -0.5 %
+      everywhere); (b) a more accurate integration of the diffuse transmittance; (c) keep
+      layers with too little plant area out of the radiation (an absolute minimum plant area
+      per layer each step, as `dpai_min` was in CLM-ml v1); (d) a radiation formulation that
+      stays well conditioned as `dpai -> 0`. CLM (big leaf) has no layers, so it has nothing
+      to copy here.
 15. **Wet needleleaf canopies** (observation): CLM6's `dleaf` for needleleaf trees is 0.65 mm
     (CLM5: 4 cm), and CLM-ml's leaf boundary-layer conductance grows as `dleaf` shrinks.
     Needleleaf evergreen temperate patches in the south-eastern US have January latent heat
