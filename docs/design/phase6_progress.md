@@ -100,6 +100,24 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
 - Committed: `2e219dd` (pbeta fix), `d9e6470` (steps 3 and 4; full regression 110 passed on
   the snapshot, slow PFT-gradient test passed; reference regenerated).
 
+### 2026-10-29: step 5 in progress
+
+- CPU node (AMD EPYC 7763, job `cpu_node`, `timing/results_vmap.jsonl` "Derecho CPU node"):
+  one JAX process levels at ~170-200 patch-steps/s (N = 1: 81; 16: 199; 128: 173; 1 024:
+  171): XLA CPU runs these small operations essentially on one core. An A100 (~28 500) is
+  ~140 such processes. (The job's 8-step `time_model` run used the working tree during the
+  step 5 edits and recorded nothing; rerun later.)
+- Step 5 code (uncommitted while debugging): `PatchBatch.blocked`, `layout`, `source`,
+  `real_index`, `runner_gidx`; `_sharded` (`jax.shard_map`, `check_vma=False`);
+  `execution.devices`; restart `layout`. `test_devices.py` (4 simulated CPU devices).
+- **Bug found (open):** with C3 and C4 patches on one device, the grouped path (gather
+  `[0, 2, 3]` / `[1]`) gives wrong C3 results from the second compiled step (leaf temperature
+  state off by up to 0.4 K after one step while that step's fluxes agree); the 4-device run
+  (contiguous groups per device) matches a C3-only domain to 1e-10. `test_c3_c4_groups`
+  missed it (C3 group = patch 0 only). Diagnostics: `probe/devices_diag*.py`, job
+  `jobs/diag.pbs`. A segfault on the login node running three models in one process (maybe
+  memory) moved the diagnostics to a compute node.
+
 ## Next
 
 Step 5 (several devices): `PatchBatch` block layout per device (prototype and random-domain
