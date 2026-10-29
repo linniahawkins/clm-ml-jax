@@ -1331,41 +1331,159 @@ timing results are recorded.
 
 ### Phase 6: Many patches and gridcells
 
-**Before Phase 6:** get access to a GPU. (Maintainer, after Phase 5: Phase 6 goes ahead on
-CPU; GPU timing and the gradient padding test are re-run on GPU after Phase 6.) Whether the padding cost of masks and the gradient
-memory are acceptable is mostly a GPU question, and the Phase 4 GPU timing is still deferred.
+**Where:** Phase 6 continues on NCAR **Derecho** with GPUs (maintainer's decision after
+Phase 5, branch `phase6/patches`). The batching choices (patch-axis layout, acceptable padding
+waste, C3/C4 group sizes, sharding) are made from GPU measurements. See "Handoff to Derecho"
+below for setup and for the open items carried over from the CPU sessions.
 
-- Turn on `vmap` over the patch axis, with forcing gathered from gridcells and outputs
-  aggregated back (`segment_sum`). Remove the one-patch restriction from Phase 1.
-- ✅ Tridiagonal solves as `lax.scan` (from Phase 5b): the longwave system (rows built as
-  arrays, solved by `MLMathToolsMod.tridiag_scan`) and the coupled flux–profile solve
+**Status:**
+- ✅ **Step 1, tridiagonal solves as `lax.scan`** (from Phase 5b): the longwave system (rows
+  built as arrays, solved by `MLMathToolsMod.tridiag_scan`) and the coupled flux–profile solve
   (`tridiag_2eq`: elimination and back substitution as scans; its custom gradient rule as
   array operations) no longer unroll over the layer slots. Same arithmetic per row; round-off
   only (noise-twin and identical-input replay pass); reference regenerated. Effect (CHATS7,
   CPU, 8-step gradient): gradient compilation 694 s → 273 s, gradient 21.6 → 16.5 ms per
   step (before 5b: 15.6 ms), compiled step 3.3 → 3.2 ms; the forward padding test takes
   3 min instead of 10. (The Norman solar solver, not the default, is still unrolled.)
-- **Group patches by photosynthetic pathway inside one compiled program** (decision 22): the
-  C3 patches and the C4 patches form two groups of fixed size (known at setup), each
-  batched with `vmap` and running only its own pathway's code (`GridInfo.c3` static per
-  group); forcing is gathered and outputs aggregated for both groups, and gradients with
-  respect to the PFT parameters add up across them. Test: a gridcell with a C3 and a C4 patch
-  matches each patch run alone. Layer counts need no grouping (masks, Phase 5b).
-- Load forcing for several towers (the `{tower}` placeholders in file paths).
-- Tests:
-  - **Multi-tower:** running CHATS7 and US-UMB together must match running each alone.
-  - **Multi-patch:** a two-patch tower must match each patch run alone, with the gridcell output
-    equal to the weighted sum.
-  - **Weights:** gradients with respect to patch weights work.
-- Device sharding over the patch axis (`jax.sharding`) so large patch counts spread across GPUs.
-  Each process reads only the forcing for its own gridcells (§6.9). Timing test: patches per
-  second on one GPU.
+
+**Step 2, per-patch "static" data (next).** The time step still reads module state that is set
+up once per tower (audit at the end of Phase 5b):
+
+| State | Read by | Varies between patches? | Change |
+|---|---|---|---|
+| Soil column geometry `ColumnType.col`: `z`, `dz`, `zi`, `nbedrock`, `snl` | `MLSoilTemperatureMod`, `MLPlantHydraulicsMod` (root/soil resistance), `SurfaceResistanceMod`, `SoilWaterMovementMod`, `clmDataMod`, `clm_driver` | yes (bedrock depth per site) | per-patch data; `nbedrock` is a Python loop bound today, so it becomes a **soil-layer mask** (as the canopy layers in 5b) |
+| Gridcell latitude/longitude `GridcellType.grc` (set by `TowerMetMod.set_tower_location`) | solar geometry | yes (per gridcell) | per-gridcell data, gathered to patches |
+| Soil colour `SurfaceAlbedoMod.isoicol` (the tables `albsat`/`albdry` are constants) | `SoilAlbedo` | yes | per-patch data |
+| Index maps `PatchType.patch.column`, `.gridcell`, `.itype` | several | structure | identity per patch once each patch is a batch entry; the PFT is in the parameters, C3/C4 in the group (step 4) |
+| Tower table `TowerDataMod` (soil texture, organic matter, etc.) | setup only (`SoilStateInitTimeConstMod`, `CLMml_driver`) | yes | read per patch at setup (already only at setup) |
+
+Move these into an explicit per-patch record passed to the step (as `MLOptions` in Phase 5a),
+next to `Domain` (Phase 7 retires the CLM subgrid modules). Single-tower results must stay
+bit for bit (or round-off with the usual checks). Also needed: **explicit layer counts per
+tower/patch.** `n_layers_within`/`n_layers_above` are model-wide `model.yaml` settings today
+(`MLOptions.nlayer_within/above`, read by `initVerticalStructure`); the plan and `CLAUDE.md`
+describe them per tower in `towers.yaml`, which is not implemented. For multi-tower runs they
+must come from the tower (or patch) entry.
+
+**Step 3, `vmap` over patches.** Set up each tower once (the legacy setup runs per tower),
+stack the patches' containers and per-patch records along a patch axis, run one compiled
+chunk over all patches; forcing gathered from each patch's gridcell; gridcell output is the
+area-weighted `segment_sum` of patches. Remove the one-patch restriction from Phase 1 and the
+"one tower per process" restriction of `clm_ml.model.Model` (Phase 5a). Load forcing for several
+towers (the `{tower}` placeholders in file paths).
+
+**Step 4, C3/C4 groups inside one compiled program** (decision 22): the C3 patches and the C4
+patches form two groups of fixed size (known at setup), each batched with `vmap` and running
+only its own pathway's code (`GridInfo.c3` static per group); forcing is gathered and outputs
+aggregated for both groups, and gradients with respect to the PFT parameters add up across
+them. Test: a gridcell with a C3 and a C4 patch matches each patch run alone. Layer counts
+need no grouping (masks, Phase 5b).
+
+**Step 5, sharding:** `jax.sharding` over the patch axis so large patch counts spread across
+GPUs (Derecho GPU nodes have 4 A100s). Each process reads only the forcing for its own
+gridcells (§6.9). Timing test: patches per second on one GPU, and scaling over 4.
+
+**Tests:**
+- **Multi-tower:** CHATS7 and another tower together match each run alone (only CHATS7 data
+  are in the repository: a second tower can be CHATS7 copied under another name with other
+  settings, e.g. explicit layer counts, as in `test_models_in_one_process.py` and
+  `test_one_program_any_layers.py`, or a tower whose data are added).
+- **Multi-patch:** a two-patch gridcell matches each patch run alone, with the gridcell output
+  equal to the weighted sum.
+- **Weights:** gradients with respect to patch weights work.
 - Document how a gridded/global run will plug in: a `domain.type: grid` loader that builds the
   `Domain` (gridcells, PFT patches and weights from a CLM surface dataset) and `Forcing` from
   gridded data. Implementing it is the follow-on project.
 
 **Done when:** multi-tower and multi-patch runs match single-patch runs, and sharding works on a
 multi-GPU machine (or on CPU with simulated devices in CI).
+
+#### Handoff to Derecho (written at the end of the CPU sessions)
+
+**Setup:**
+- Clone/pull the repository, branch `phase6/patches` (everything is pushed).
+- `CLAUDE.md` is local and gitignored: copy it from the laptop
+  (`~/Desktop/LEAP/clm-ml-jax/CLAUDE.md`) into the Derecho checkout. It holds the working
+  rules and the handoff notes; this plan holds the full status and decisions.
+- Python environment with JAX for CUDA (e.g. `jax[cuda12]` at the version used so far, 0.6.2,
+  or newer), `pip install -e ".[dev]"` (black, ruff, pytest, pytest-cov). Float64 is enabled
+  by the model (A100 float64 is fine).
+- Compilation cache: `export JAX_COMPILATION_CACHE_DIR=<scratch>/jax_compile_cache` (default
+  `~/.cache/jax_compile_cache`; home quotas are small). Install `filelock` so the cache is
+  capped at 2 GB (least recently used removed).
+- Work in an interactive GPU job (e.g. `qsub -I -q develop -l select=1:ngpus=1 ...`; check
+  NCAR's documentation for current queue names and limits). First compilations take minutes
+  (gradients ~5 min on CPU).
+
+**Deferred to Derecho (from the CPU sessions):**
+1. **GPU timing** (Phase 4 done-when 3, GPU part): `python timing/time_model.py` (forward and
+   8-step gradient; `--steps`, `--no-grad`, `--set key=value`) and `python timing/time_offline.py`;
+   results append to `timing/results_model.jsonl` / `timing/results.jsonl`.
+2. **Gradient padding test** `tests/regression/test_padding.py::test_padding_gives_finite_equal_gradients`
+   (`-m slow`): not run after Phase 5b (out of memory on the 17 GB laptop, before the scan
+   solvers). Compares 46 and 60 slots, one process each; with the scan solvers 100 slots may
+   fit again (`GRADIENT_SIZES`).
+3. **XLA CPU "thunk" runtime bug** (gradients over a chunk of ≥ 2 steps segfault, JAX 0.6.2):
+   `clm_ml.model` sets `XLA_FLAGS=--xla_cpu_use_thunk_runtime=false` on import (CPU only).
+   Re-test with a newer JAX; on GPU the flag has no effect.
+4. **Compile time:** gradient compilation of an 8-step chunk is ~4.5 min on CPU (after step 1);
+   measure on GPU.
+
+**Open issues found during Phases 4–5 (not fixed; listed so they are not lost):**
+- **Norman solar radiation** (`solar_radiation: norman`, not the CHATS default, never
+  validated in the JAX translation) stops at the first CHATS7 step with a conservation error,
+  before and after Phase 5b. Its tridiagonal solve is also still unrolled.
+- **CO₂ profile reset** covers levels 0..ncan−1 instead of Fortran's 1..ncan (no effect while
+  `cair` is constant): numerics doc §4.5.
+- **`MLOptions` mixes run-time options and setup-only fields** (`dz_tall`, `dz_short`,
+  `dz_param`, `nlayer_within/above`, `dpai_min`, `max_layers`). Compiled functions take the
+  whole `MLOptions` as a static argument, so two models that differ only in layer settings
+  compile separate programs, although the time step does not read those fields (seen in
+  `test_one_program_any_layers.py`). Split the setup-only fields off before batching patches
+  with different layer settings.
+- **The `HF2008` warning** (`eta >= eta_max`, a Fortran warning, not a stop) is printed only
+  when values are concrete; it is silent in compiled chunks.
+- **Fortran comparison test** skips the files with several rows per step (`fsun`, `profile`,
+  `fluxprofile`: 6 tests skipped) because it matches rows by time only.
+- `offline_driver/controlMod.control` is not used by the run path (Phase 7 cleanup).
+
+**JAX lessons from these sessions (for writing tests and code):**
+- **Never add host callbacks** (`jax.debug.callback`, `jax.debug.print`) to compiled code: a
+  program that contains one is never stored in the compilation cache. Record errors in
+  `mlcanopy.balance_error` (`MLCanopyFluxesType.record_balance_error`, `BALANCE_CHECKS`) and
+  check them on the host (`check_balance`).
+- A compiled function retraces when the **call signature** changes: passing an argument
+  explicitly vs. letting it default, or a **weakly typed** value (`jnp.asarray(0.0)`) where a
+  regular float64 array was passed before. Build replacement values with the original's dtype
+  (`jnp.zeros_like(x)`).
+- Under `vmap` (and on a GPU in general) a per-patch branch computes **both** branches; select
+  on the outputs only, never on whole containers (the C3/C4 experiment: 25× slower gradients).
+- Masked computations must feed unused entries finite inputs (`MLLayersMod.pad_with_top`):
+  arithmetic on fill values (1e36) gives NaN gradients even when the result is discarded.
+- Avoid Python loops over layers or rows in traced code (they unroll: compile time and memory
+  grow with the loop length); use `lax.scan` or array operations.
+
+**How to validate (commands that are only in this session's history):**
+- Fortran comparison (end of a phase, after science-relevant changes): run May 2007 with the
+  Fortran acclimation definition and compare the legacy `.out` files:
+
+  ```python
+  # write a namelist with absolute paths and the Fortran acclimation
+  from tests.regression.record_run import write_portable_namelist
+  nl = write_portable_namelist(Path("src/offline_executable/nl.CHATS7.05.2007"), out / "nl", out)
+  # then add  acclimation = 'run_mean'  to the clmML_inparm group (f90nml)
+  ```
+
+  then `cd src && clm-ml-offline <out>/nl` (~4 min on CPU) and
+  `CLM_ML_COMPARE_DIR=<out> python -m pytest tests/test_fortran_python_comparison.py -m slow`.
+  Report max/mean relative error and the number of columns with correlation < 0.9999 over the
+  112 columns, excluding `aux` column 2 (fraction at minimum leaf water potential, a metric
+  artifact). Last result (end of Phase 5): max 0.074 %, mean 0.0075 %, 2 columns below 0.9999
+  (`flux` col 15 r = 0.9968, `aux` col 3 r = 0.99990); Phase 4: 0.16 %, 0.012 %, 7. The two
+  correlation tests fail on these columns (they did in Phase 4 too).
+- After a round-off-only change: noise-twin test + identical-input replay
+  (`tests/regression/test_process_io.py`, threshold 1e-10) + padding test, then
+  `python tests/regression/record_run.py --update-reference` and say so in the commit.
 
 ### Phase 7: Restructure and cleanup
 
