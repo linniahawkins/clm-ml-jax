@@ -288,6 +288,12 @@ The policy has two checks:
    --update-reference`. Say in the commit that the step changes round-off only, and why.
 3. The bit-for-bit test then guards the next refactors again.
 
+**Where the reference is recorded.** The last bits depend on the machine and the JAX version.
+Since Phase 6 (2026-10-28) the reference is recorded on NCAR Derecho (CPU, JAX 0.9.2);
+moving there from the laptop (JAX 0.6.2) changed 65 fields by ~1e-16 and passed the
+noise-twin test. On another machine or JAX version, rely on the noise-twin test and expect the
+bit-for-bit test to fail.
+
 **How tight it is.** Since the solver fix (§5), the twin noise is at most about 4e-11 relative,
 so the noise-twin test detects any change larger than about 1e-10. (Before the fix it allowed
 up to ~9% at a single step.) The other checks remain:
