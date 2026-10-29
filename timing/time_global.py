@@ -11,7 +11,7 @@ weights. Records setup time, first-step time, forcing read time, chunk compile a
 times, patch-steps per second and peak device memory in ``timing/results_global.jsonl``.
 
     python timing/time_global.py [--patches 262144] [--per-gridcell 4] [--devices 4]
-                                 [--steps 48] [--label ...]
+                                 [--steps 24] [--label ...]
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def main() -> None:
     parser.add_argument("--patches", type=int, default=262144)
     parser.add_argument("--per-gridcell", type=int, default=4)
     parser.add_argument("--devices", type=int, default=1)
-    parser.add_argument("--steps", type=int, default=48)
+    parser.add_argument("--steps", type=int, default=24)
     parser.add_argument("--label", default="")
     args = parser.parse_args()
 
