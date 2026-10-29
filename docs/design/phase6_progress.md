@@ -44,6 +44,31 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   deferred by the maintainer.
 - Plan revised and agreed (decisions 23–25; steps 0, 2–6).
 
+- Step 1c CUDA-graph results (`timing/results_vmap.jsonl`, labels "1c ..."): loops captured
+  (`CB`) slower (N = 1: 530 ms/step, N = 4 096: 632 ms; default 367 and 508 ms); with
+  `--xla_gpu_command_buffer_unroll_loops=true` (`CBU`) N = 1 368 ms, N = 4 096 456 ms (10 %
+  faster). nsys: with command buffers the kernels move into ~20 000 graph launches per step,
+  and ~22 600 device-to-device copies per step remain (loop-carried values). Profiles:
+  `prof/{base,CB}_N{1,4096}*` (`*_cuda_gpu_kern_sum.csv`, `*_cuda_api_sum.csv`).
+
+### 2026-10-28: step 0 done, step 2a
+
+- 0a (`98921b6`): reference recorded on Derecho. 0b (`3248b2b`): float64 inputs, ≤ 7e-9.
+  0c (`d9a2019`): CPU-runtime flag only for JAX < 0.7.
+- Fortran comparison after 0b (job `fortran_compare`, May 2007, `acclimation = run_mean`,
+  from a git worktree of `3248b2b`): max rel. error 0.068 %, mean 0.0078 % over 42 columns
+  (flux, aux, soiltemp; `aux` col 2 excluded; fsun/profile/fluxprofile skipped as before);
+  2 columns below r = 0.9999 (flux col 15 r = 0.9968, aux col 3 r = 0.99984), as at the end of
+  Phase 5. Summary script: `probe/fortran_compare_summary.py`; job `jobs/fortran_compare.pbs`
+  (env `REV`).
+- 2a (`8c1606b`): `clm_src_main.SiteType.site_type` in `ClmInstances.site` (soil z/dz/zi,
+  bedrock index, soil colour, lat/lon), passed to the time-step routines; bedrock as a mask.
+  Round-off only (XLA no longer folds divisions by the constant `dz`; identical-input check
+  1e-15; run ≤ 1.4e-11); reference regenerated. Full `tests/regression` job `reg_2a`
+  (`jobs/run_tests.pbs`, env `REV TESTS MARK TAG`, runs on a worktree snapshot).
+
 ## Next
 
-Step 0a (regenerate the reference on Derecho), then 0b, 0c, then step 2.
+Step 2b: split `MLOptions` (setup-only layer settings out of the static options) and per-patch
+layer counts (`towers.yaml` `n_layers_within`/`n_layers_above`); then the step 2 test (one
+program, two patches differing in every per-patch field).
