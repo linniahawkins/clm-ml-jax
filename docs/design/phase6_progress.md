@@ -51,6 +51,12 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   and ~22 600 device-to-device copies per step remain (loop-carried values). Profiles:
   `prof/{base,CB}_N{1,4096}*` (`*_cuda_gpu_kern_sum.csv`, `*_cuda_api_sum.csv`).
 
+- Step 1b gradients (A100, 8-step chunk, gradient of the summed chunk-mean latent heat with
+  respect to the shared parameters): N = 1: 1.30 s/step, 0.10 GB; 64: 1.35 s, 0.14 GB; 512:
+  1.48 s, 1.1 GB; 4 096: 1.95 s/step (2 100 patch-steps/s, 3.8x the forward), 9.0 GB (~2.2 MB
+  per patch). Compile time grows with N: 391 s (N = 1) to 1 568 s (N = 4 096) for the
+  gradient, 110-460 s forward. One-patch 47-step chunk: 383 ms/step (as 8 steps).
+
 ### 2026-10-28: step 0 done, step 2a
 
 - 0a (`98921b6`): reference recorded on Derecho. 0b (`3248b2b`): float64 inputs, ≤ 7e-9.
@@ -67,8 +73,15 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   1e-15; run ≤ 1.4e-11); reference regenerated. Full `tests/regression` job `reg_2a`
   (`jobs/run_tests.pbs`, env `REV TESTS MARK TAG`, runs on a worktree snapshot).
 
+### 2026-10-28: step 2 done
+
+- 2b (`96fbeac`): `MLOptions.step_options()`; per-patch `n_layers_within/above` in
+  towers.yaml; models of any towers in one process; `test_sites_one_program.py` (site B with
+  different lat/lon, bedrock, soil colour, layer counts through site A's program, no
+  recompilation, equal to B's own run and B alone). Bit for bit.
+
 ## Next
 
-Step 2b: split `MLOptions` (setup-only layer settings out of the static options) and per-patch
+Step 3 (many gridcells and patches, vmap). (Old note: step 2b: split `MLOptions` (setup-only layer settings out of the static options) and per-patch
 layer counts (`towers.yaml` `n_layers_within`/`n_layers_above`); then the step 2 test (one
 program, two patches differing in every per-patch field).
