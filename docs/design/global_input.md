@@ -168,10 +168,35 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
     Grid runs list the check in `numerics.ignore_checks` (reported every chunk, no
     exclusion). Fixing the diagnostic (sum the components, as CLM) is a science change
     for the maintainer (CHATS7 never freezes, so its results would not change).
-13. **Bare-ground patches**: where CLM treats a patch as not vegetated (`elai + esai < 0.05`:
-    bare-ground fluxes), this model keeps a sparse canopy (0.01 m² m⁻² of stems per leafy
-    layer, G20). A CLM-ml bare-ground path (or leaving the patch out of its gridcell for those
-    steps) would copy CLM exactly.
+13. **Bare-ground patches** (discussed with the maintainer 2026-10-29). **What CLM does**
+    (CTSM 5.4): at every albedo step (every 30-min step here) `UpdateSatellitePhenologyCanopy`
+    sets `elai`/`esai` below 0.05 to 0 and `frac_veg_nosno = 1` only if `elai + esai >= 0.05`;
+    `setExposedvegpFilter` (`filterMod.F90`) then sends the patch to `CanopyFluxes` or, for
+    that step only, to `BareGroundFluxes`. The patch keeps its PFT, weight and state and
+    returns to the vegetation filter when its plant area rises (snow burial can do the same).
+    **What this model does**: no bare-ground path; the per-variable cutoff is removed
+    (decision 31) and every leafy layer keeps 0.01 m² m⁻² (decision 30), so a patch CLM
+    treats as bare keeps a sparse canopy (at least 0.1 m² m⁻² of stems): a small bias
+    (radiation absorbed, drag, interception by the stems).
+    **Options if this is revisited** (in order of preference):
+    1. *A canopy model that behaves correctly as plant area goes to 0*, with no floor and no
+       switch: a multilayer canopy with vanishing plant area is bare ground under an air
+       column, and CLM-ml already solves the ground's energy balance beneath the canopy. Needs
+       radiation that stays accurate and well conditioned as a layer's plant area -> 0 (the
+       Norman longwave's `refld = (1 - td)·ρ` divides by ~0; the diffuse transmittance
+       quadrature, issue 14) and a check that the roughness-sublayer turbulence (Harman &
+       Finnigan; CLM-ml's sparse-canopy option) tends to the right limit. Keeps state and
+       differentiability; to be validated against a bare-soil reference.
+    2. *A bare-soil routine blended continuously*: fluxes = f·canopy + (1 - f)·bare soil with
+       f -> 0 smoothly as plant area -> 0. Differentiable and without jumps, but needs a rule
+       for the canopy state as f -> 0, and the blending function is a modelling choice.
+    3. *The current floor* (decisions 30-31): stable, fixed layer structure, CHATS7 unchanged,
+       differentiable except for the floor's kink (issue 17b); minimum-stem bias.
+    *Not recommended*: CLM's per-step on/off switch. Cheap in CLM's big-leaf model (little
+    canopy state), but CLM-ml carries per-layer state (canopy air, leaf temperature and water
+    potential, intercepted water) that would be orphaned and re-initialized at each switch,
+    with jumps in the fluxes and no gradient at the switch (the problems that ruled out
+    switching layers on and off, issue 14).
 14. **Diffuse transmittance above 1 in thin layers (diagnosed and fixed 2026-10-29: decision 30, G20).**
     Seen as NaN in 5 of 2 902 regional patches in January (deciduous shrubs in Wyoming,
     LAI 0, SAI 0.108). Diagnosis (probes in `probe/issue14/`, no code changed):
