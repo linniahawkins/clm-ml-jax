@@ -19,8 +19,8 @@ from clm_src_biogeophys.WaterStateBulkType import waterstatebulk_type  # noqa: F
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import denh2o, denice  # noqa: F401
 from clm_src_main.clm_varpar import nlevsno  # noqa: F401
-from clm_src_main.ColumnType import col  # noqa: F401
 from clm_src_main.decompMod import bounds_type  # noqa: F401
+from clm_src_main.SiteType import site_or_modules
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -34,6 +34,7 @@ def calc_soilevap_resis(
     soilstate_inst: soilstate_type,
     waterstatebulk_inst: waterstatebulk_type,
     temperature_inst: temperature_type,
+    site=None,
 ) -> soilstate_type:
     """
     Compute resistance for soil evaporation.
@@ -52,6 +53,8 @@ def calc_soilevap_resis(
             ``soilresis_col`` are updated and returned in a new instance.
         waterstatebulk_inst: Bulk water state container (read-only).
         temperature_inst: Temperature state container (read-only).
+        site: Per-site data (``SiteType.site_type``: ``dz``); default: the subgrid modules'
+            values.
 
     Returns:
         Updated :class:`soilstate_type` with ``dsl_col`` and
@@ -64,6 +67,7 @@ def calc_soilevap_resis(
         soilstate_inst,
         waterstatebulk_inst,
         temperature_inst,
+        site=site,
     )
 
 
@@ -79,6 +83,7 @@ def calc_soil_resistance_sl14(
     soilstate_inst: soilstate_type,
     waterstatebulk_inst: waterstatebulk_type,
     temperature_inst: temperature_type,
+    site=None,
 ) -> soilstate_type:
     """
     Compute soil dry surface layer thickness and evaporative resistance.
@@ -109,6 +114,8 @@ def calc_soil_resistance_sl14(
             ``dsl_col`` and ``soilresis_col`` written to new instance).
         waterstatebulk_inst: Bulk water state container (read-only).
         temperature_inst: Temperature state container (read-only).
+        site: Per-site data (``SiteType.site_type``: ``dz``); default: the subgrid modules'
+            values.
 
     Returns:
         Updated :class:`soilstate_type` with ``dsl_col`` and
@@ -121,7 +128,7 @@ def calc_soil_resistance_sl14(
     t_soisno = temperature_inst.t_soisno_col  # Soil temperature (K)
     h2osoi_ice = waterstatebulk_inst.h2osoi_ice_col  # Soil layer ice lens (kg H2O/m2)
     h2osoi_liq = waterstatebulk_inst.h2osoi_liq_col  # Soil layer liquid water (kg H2O/m2)
-    dz = col.dz  # Soil layer thickness (m)
+    dz = site_or_modules(site).dz_col  # Soil layer thickness (m)
 
     dsl = soilstate_inst.dsl_col  # Dry surface layer thickness (mm)
     soilresis = soilstate_inst.soilresis_col  # Soil evaporative resistance (s/m)

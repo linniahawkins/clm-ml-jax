@@ -23,6 +23,7 @@ from clm_src_main.clm_varpar import nlevgrnd, nlevsno  # noqa: F401
 from clm_src_main.ColumnType import col  # noqa: F401
 from clm_src_main.decompMod import bounds_type  # noqa: F401
 from clm_src_main.filterMod import clumpfilter, setExposedvegpFilter  # noqa: F401
+from clm_src_main.SiteType import site_or_modules
 from clm_src_utils.clm_time_manager import StepTime
 from multilayer_canopy.MLCanopyFluxesMod import MLCanopyFluxes  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import SOIL_TEMPERATURE, record_balance_error
@@ -116,6 +117,9 @@ def clm_drv(
     solarabs_inst = insts.solarabs
     mlcanopy_inst = insts.mlcanopy
     wateratm2lndbulk_inst = insts.wateratm2lndbulk
+    # Per-site data (soil geometry, soil colour, location; Phase 6 step 2): in the containers
+    # after setup, so traced (per-patch data) in compiled chunks
+    site = site_or_modules(insts.site)
 
     # ------------------------------------------------------------------
     # Unpack associate aliases (Fortran lines 47-54)
@@ -156,6 +160,7 @@ def clm_drv(
         waterstatebulk_inst,
         canopystate_inst,
         surfalb_inst,
+        site=site,
     )
 
     # ------------------------------------------------------------------
@@ -181,6 +186,7 @@ def clm_drv(
         filter.nourbanc,
         waterstatebulk_inst,
         surfalb_inst,
+        site=site,
     )
 
     # ------------------------------------------------------------------
@@ -194,6 +200,7 @@ def clm_drv(
         soilstate_inst,
         waterstatebulk_inst,
         temperature_inst,
+        site=site,
     )
 
     # ------------------------------------------------------------------
@@ -227,6 +234,7 @@ def clm_drv(
         waterstatebulk_inst,
         water_inst,
         soilstate_inst,
+        site=site,
     )
 
     # ------------------------------------------------------------------
@@ -239,6 +247,7 @@ def clm_drv(
         filter.hydrologyc,
         soilstate_inst,
         waterstatebulk_inst,
+        site=site,
     )
 
     # ------------------------------------------------------------------
@@ -271,6 +280,7 @@ def clm_drv(
         params=params,
         opts=opts,
         grid=grid,
+        site=site,
     )
 
     # ------------------------------------------------------------------
@@ -289,6 +299,7 @@ def clm_drv(
         water_inst,
         mlcanopy_inst,
         step_time.dtime,
+        site=site,
     )
     for p, err in soil_energy_error.items():  # Fortran stops; recorded, checked on the host
         mlcanopy_inst = record_balance_error(mlcanopy_inst, p, SOIL_TEMPERATURE, err)

@@ -19,8 +19,8 @@ from clm_src_biogeophys.TemperatureType import temperature_type
 from clm_src_biogeophys.WaterDiagnosticBulkType import waterdiagnosticbulk_type
 from clm_src_biogeophys.WaterStateBulkType import waterstatebulk_type
 from clm_src_biogeophys.WaterType import water_type
-from clm_src_main.ColumnType import col
 from clm_src_main.decompMod import bounds_type
+from clm_src_main.SiteType import site_or_modules
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type
 from multilayer_canopy.MLMathToolsMod import tridiag
 
@@ -44,6 +44,7 @@ def SoilTemperature(
     water_inst: water_type,
     mlcanopy_inst: mlcanopy_type,
     dtime: float,
+    site=None,
 ) -> tuple:
     """
     Compute soil temperature via implicit tridiagonal solver.
@@ -99,7 +100,8 @@ def SoilTemperature(
     # ------------------------------------------------------------------
     # Aliases — mirror Fortran associate block (lines 76-80)
     # ------------------------------------------------------------------
-    z = col.z  # (nc, nlevsno+nlevgrnd) using direct index
+    site = site_or_modules(site)
+    z = site.z_col  # (nc, nlevsno+nlevgrnd) using direct index
     t_soisno = temperature_inst.t_soisno_col  # JAX array — updated immutably with .at[].set()
     gsoi = mlcanopy_inst.gsoi_soil  # (nc,)
 
@@ -139,6 +141,7 @@ def SoilTemperature(
         waterstatebulk_inst,
         water_inst,
         soilstate_inst,
+        site=site,
     )
 
     # ------------------------------------------------------------------
@@ -236,6 +239,7 @@ def SoilThermProp(
     waterstatebulk_inst: waterstatebulk_type,
     water_inst: water_type,
     soilstate_inst: soilstate_type,
+    site=None,
 ) -> tuple:
     """
     Compute thermal conductivities and heat capacities of snow/soil layers.
@@ -335,19 +339,19 @@ def SoilThermProp(
     # ------------------------------------------------------------------
     # Aliases — mirror Fortran associate block (lines 175-203)
     # ------------------------------------------------------------------
-    # Re-read col from the ColumnType module so we always get the version
-    # updated by initVertical (the module-level import binding is stale).
+    # Soil geometry and bedrock depth: per-site data (Phase 6 step 2); the snow-layer count
+    # snl is structure (always 0 here), read from the ColumnType module.
     from clm_src_main.ColumnType import col as _fresh_col
 
-    nbedrock = _fresh_col.nbedrock
+    site = site_or_modules(site)
+    nbedrock = site.nbedrock_col  # data: the bedrock overrides below are masks
     snl = _fresh_col.snl
     # Structure: static indices (NumPy), so the routine can be traced
     _filter_nolakec_np = np.asarray(filter_nolakec)
-    _nbedrock_np = np.asarray(nbedrock)
     _snl_np = np.asarray(snl)
-    dz = _fresh_col.dz
-    zi = _fresh_col.zi
-    z = _fresh_col.z
+    dz = site.dz_col
+    zi = site.zi_col
+    z = site.z_col
     t_soisno = temperature_inst.t_soisno_col
     h2osfc = waterstatebulk_inst.h2osfc_col
     h2osno = water_inst.h2osno_col
@@ -417,9 +421,8 @@ def SoilThermProp(
             # Select wet or dry path based on satw
             thk_val = jnp.where(satw > 1.0e-7, thk_wet, thk_dry)
 
-            # Bedrock override (static Python comparison — j and nbedrock[c] are concrete)
-            if j > int(_nbedrock_np[c]):
-                thk_val = jnp.asarray(thk_bedrock)
+            # Bedrock override (the bedrock depth is data: a mask)
+            thk_val = jnp.where(j > nbedrock[c], thk_bedrock, thk_val)
 
             thk = thk.at[c, j].set(thk_val)
 
@@ -480,9 +483,8 @@ def SoilThermProp(
                 + h2osoi_liq[c, j - 1] * cpliq
             )
 
-            # Bedrock override (static Python comparison)
-            if j > int(_nbedrock_np[c]):
-                cv_val = jnp.asarray(csol_bedrock) * dz[c, j]
+            # Bedrock override (the bedrock depth is data: a mask)
+            cv_val = jnp.where(j > nbedrock[c], csol_bedrock * dz[c, j], cv_val)
 
             # Top layer: add snow heat capacity if no active snow layers
             if j == 1:

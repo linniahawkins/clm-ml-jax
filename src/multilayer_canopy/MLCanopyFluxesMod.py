@@ -157,6 +157,7 @@ def MLCanopyFluxes(
     params: "CanopyParams | None" = None,
     *,
     opts: MLOptions,
+    site=None,
 ) -> mlcanopy_type:
     """
     Compute all multilayer canopy fluxes for one CLM timestep.
@@ -378,6 +379,7 @@ def MLCanopyFluxes(
         surfalb_inst,
         wateratm2lndbulk_inst,
         mlcanopy_inst,
+        site=site,
     )
     # ------------------------------------------------------------------
     # Forcing window for time interpolation — replaces the Fortran
@@ -440,7 +442,13 @@ def MLCanopyFluxes(
     # Plant hydraulics and leaf heat capacity — Fortran lines 245-257
     # ------------------------------------------------------------------
     mlcanopy_inst = SoilResistance(
-        num_mlcan, filter_mlcan, soilstate_inst, waterstatebulk_inst, mlcanopy_inst, params
+        num_mlcan,
+        filter_mlcan,
+        soilstate_inst,
+        waterstatebulk_inst,
+        mlcanopy_inst,
+        params,
+        site=site,
     )
     mlcanopy_inst = PlantResistance(num_mlcan, filter_mlcan, mlcanopy_inst, params)
     mlcanopy_inst = LeafHeatCapacity(num_mlcan, filter_mlcan, mlcanopy_inst, params)
@@ -739,6 +747,7 @@ def _GetCLMVar(
     surfalb_inst: Any,
     wateratm2lndbulk_inst: Any,
     mlcanopy_inst: mlcanopy_type,
+    site=None,
 ) -> "tuple[mlcanopy_type, AtmForcingRecord]":
     """
     Copy CLM variables into the multilayer canopy container.
@@ -838,8 +847,8 @@ def _GetCLMVar(
         nlevsno,  # noqa: F401
     )
     from clm_src_main.ColumnType import col  # noqa: F401
-    from clm_src_main.GridcellType import grc  # noqa: F401
     from clm_src_main.PatchType import patch  # noqa: F401
+    from clm_src_main.SiteType import site_or_modules
     from clm_src_utils.clm_varorb import eccen, lambm0, mvelpp, obliqr  # noqa: F401
 
     # ------------------------------------------------------------------
@@ -863,9 +872,10 @@ def _GetCLMVar(
     thk = soilstate_inst.thk_col
     t_a10_patch = temperature_inst.t_a10_patch
     t_soisno = temperature_inst.t_soisno_col
-    snl = col.snl
-    z = col.z
-    zi = col.zi
+    snl = col.snl  # structure (always 0 here)
+    site = site_or_modules(site)  # soil geometry and location: per-site data
+    z = site.z_col
+    zi = site.zi_col
 
     # Pre-materialise snl as numpy so int(snl[c]) is always concrete
     # (snl is a JAX array; tracing would make it abstract inside jit/grad).
@@ -973,18 +983,17 @@ def _GetCLMVar(
     # Orbital declination for caldaym1 — Fortran line 105
     declinm1, eccf = shr_orb_decl(caldaym1, eccen, mvelpp, lambm0, obliqr)
 
-    # Pre-materialise grc lat/lon as numpy — these are JAX arrays set via
-    # TowerMetMod, so indexing them during jax.grad tracing would fail.
-    _latdeg_np = np.asarray(grc.latdeg)
-    _londeg_np = np.asarray(grc.londeg)
+    # Latitude and longitude: per-site data (Phase 6 step 2), traced in compiled chunks
+    latdeg = site.latdeg_grc
+    londeg = site.londeg_grc
 
     for fp in range(1, num_filter + 1):  # Fortran: do fp = 1, num_filter
         p = int(filter[fp - 1])
         g = int(_patch_gridcell_np[p])  # use pre-materialised numpy copy
 
         # Latitude and longitude in radians — Fortran lines 107-108
-        lat = float(_latdeg_np[g]) * pi / 180.0
-        lon = float(_londeg_np[g]) * pi / 180.0
+        lat = latdeg[g] * pi / 180.0
+        lon = londeg[g] * pi / 180.0
 
         # Cosine of solar zenith angle — Fortran line 109
         coszen = shr_orb_cosz(caldaym1, lat, lon, declinm1)

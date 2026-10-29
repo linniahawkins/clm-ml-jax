@@ -10,7 +10,7 @@ Original Fortran module: clm_instMod
 Fortran lines 1-105
 """
 
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 from clm_src_biogeophys.CanopyStateType import (
     canopystate_type,
@@ -77,6 +77,7 @@ from clm_src_main.atm2lndType import atm2lnd_type  # noqa: F401
 from clm_src_main.decompMod import bounds_type  # noqa: F401
 from clm_src_main.initVerticalMod import initVertical  # noqa: F401
 from clm_src_main.ncdio_pio import file_desc_t  # noqa: F401
+from clm_src_main.SiteType import site_type  # noqa: F401
 from clm_src_main.wateratm2lndBulkType import (
     Init as _wateratm2lndbulk_Init,
 )
@@ -136,6 +137,9 @@ class ClmInstances(NamedTuple):
     surfalb: surfalb_type
     solarabs: solarabs_type
     mlcanopy: mlcanopy_type
+    # Per-site data the time step reads (soil geometry, soil colour, location; Phase 6 step 2),
+    # set at the end of setup (offline_executable.main.setup_run); None before.
+    site: Optional[site_type] = None
 
 
 def get_instances() -> ClmInstances:

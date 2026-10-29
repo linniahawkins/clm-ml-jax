@@ -469,6 +469,12 @@ def setup_run(nml: dict, opts: Optional[MLOptions] = None) -> LegacyRun:
     )
     st = st._replace(waterstatebulk=waterstatebulk, temperature=temperature)
 
+    # 6e. Per-site data the time step reads (Phase 6 step 2): from the subgrid modules, now
+    #     final, into the containers (so into the template, an input of the compiled chunk)
+    from clm_src_main.SiteType import site_from_modules
+
+    st = st._replace(site=site_from_modules())
+
     return LegacyRun(
         params=params,
         bounds=bounds,

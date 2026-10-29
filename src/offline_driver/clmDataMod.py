@@ -16,7 +16,6 @@ from typing import Dict, Iterable, NamedTuple, Optional
 
 import jax.numpy as jnp
 import netCDF4 as nc  # noqa: F401
-import numpy as np
 from jax import Array
 
 from clm_src_biogeophys.CanopyStateType import canopystate_type  # noqa: F401
@@ -26,7 +25,7 @@ from clm_src_biogeophys.WaterStateBulkType import waterstatebulk_type  # noqa: F
 from clm_src_main.abortutils import handle_err  # noqa: F401
 from clm_src_main.clm_varcon import denh2o, spval  # noqa: F401
 from clm_src_main.clm_varpar import nlevgrnd, nlevsoi  # noqa: F401
-from clm_src_main.ColumnType import col  # noqa: F401
+from clm_src_main.SiteType import site_or_modules
 from offline_driver.clmSoilOptionMod import clm_phys, nlev_soil_adjust  # noqa: F401
 
 
@@ -80,6 +79,7 @@ def clmData(
     waterstatebulk_inst: waterstatebulk_type,
     canopystate_inst: canopystate_type,
     surfalb_inst: surfalb_type,
+    site=None,
 ) -> tuple[waterstatebulk_type, canopystate_type, surfalb_type]:
     """
     Read variables from a CLM netCDF history file for the current time
@@ -116,14 +116,17 @@ def clmData(
             ``esai_patch`` are updated and returned in a new instance.
         surfalb_inst: Surface albedo container (passed through
             unchanged; included for interface parity with Fortran).
+        site: Per-site data (``SiteType.site_type``: ``dz``, ``nbedrock``); default: the
+            subgrid modules' values.
 
     Returns:
         Tuple of updated ``(waterstatebulk_inst, canopystate_inst,
         surfalb_inst)``.
     """
     # Unpack inputs (Fortran associate block, lines 72-84)
-    dz = col.dz  # Soil layer thickness (m)
-    nbedrock = col.nbedrock  # Depth to bedrock index
+    site = site_or_modules(site)
+    dz = site.dz_col  # Soil layer thickness (m)
+    nbedrock = site.nbedrock_col  # Depth to bedrock index (data: a soil-layer mask)
     watsat = soilstate_inst.watsat_col  # Porosity
 
     elai = canopystate_inst.elai_patch  # Leaf area index (m2/m2)
@@ -173,10 +176,17 @@ def clmData(
                 h2osoi_vol = h2osoi_vol.at[ci, j].set(h2osoi_vol[ci, j] * h2osoi_factor)
 
         # Cap soil moisture at porosity for CLM5.0 — Fortran lines 117-121
+        # (Fortran: do j = 1, nbedrock(c); the bedrock depth is data, so every soil layer is
+        # visited and layers below bedrock keep their value; nbedrock <= nlevsoi)
         if clm_phys == "CLM5_0":
-            nb = int(np.asarray(nbedrock)[c])  # structure: static
-            for j in range(1, nb + 1):  # Fortran: do j = 1, nbedrock(c)
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(jnp.minimum(h2osoi_vol[ci, j], watsat[c, j]))
+            for j in range(1, nlevsoi + 1):
+                h2osoi_vol = h2osoi_vol.at[ci, j].set(
+                    jnp.where(
+                        j <= nbedrock[c],
+                        jnp.minimum(h2osoi_vol[ci, j], watsat[c, j]),
+                        h2osoi_vol[ci, j],
+                    )
+                )
 
         # Set liquid water and ice — Fortran lines 123-126
         for j in range(1, nlevgrnd + 1):  # Fortran: do j = 1, nlevgrnd

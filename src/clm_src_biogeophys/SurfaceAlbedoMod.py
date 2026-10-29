@@ -223,6 +223,7 @@ def SoilAlbedo(
     filter_nourbanc: np.ndarray,
     waterstatebulk_inst: waterstatebulk_type,
     surfalb_inst: surfalb_type,
+    site=None,
 ) -> surfalb_type:
     """
     Compute ground surface (soil) albedo for non-urban columns.
@@ -250,6 +251,8 @@ def SoilAlbedo(
             ``h2osoi_vol_col`` (read-only).
         surfalb_inst: Surface albedo container; ``albgrd_col`` and
             ``albgri_col`` are updated and returned in a new instance.
+        site: Per-site data (``SiteType.site_type``: the soil colour class ``isoicol``, data
+            that index the ``albsat``/``albdry`` tables); default: this module's ``isoicol``.
 
     Returns:
         Updated :class:`surfalb_type` with direct-beam and diffuse
@@ -260,6 +263,7 @@ def SoilAlbedo(
 
     albsoib = surfalb_inst.albgrd_col  # Direct beam albedo of ground (soil)
     albsoid = surfalb_inst.albgri_col  # Diffuse albedo of ground (soil)
+    soil_color = site.isoicol_col if site is not None else isoicol
 
     begc = bounds.begc
 
@@ -269,7 +273,7 @@ def SoilAlbedo(
             c = int(np.asarray(filter_nourbanc)[f])  # structure: static
             ci = c - begc  # 0-based offset into isoicol
 
-            soilcol = int(np.asarray(isoicol)[ci])  # Soil color class (1-based into albsat/albdry)
+            soilcol = soil_color[ci]  # Soil color class (1-based into albsat/albdry; data)
 
             # Soil water correction — Fortran line 125
             # h2osoi_vol_col uses j=1..nlevgrnd indexing (SoilInit/clmDataMod),

@@ -44,8 +44,8 @@ from clm_src_main.clm_varcon import denh2o, grav
 from clm_src_main.clm_varcon import rpi as pi  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
 from clm_src_main.clm_varpar import nlevsoi  # noqa: F401
-from clm_src_main.ColumnType import col  # noqa: F401
 from clm_src_main.PatchType import patch  # noqa: F401
+from clm_src_main.SiteType import site_or_modules
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 from multilayer_canopy.MLclm_varcon import mmh2o  # noqa: F401
@@ -124,6 +124,7 @@ def SoilResistance(
     waterstatebulk_inst: waterstatebulk_type,
     mlcanopy_inst: mlcanopy_type,
     params: CanopyParams,
+    site=None,
 ) -> mlcanopy_type:
     """
     Calculate soil hydraulic resistance and fractional water uptake
@@ -165,6 +166,9 @@ def SoilResistance(
         waterstatebulk_inst: Bulk water state container (read-only).
         mlcanopy_inst: Canopy container; ``psis_soil``,
             ``rsoil_soil``, and ``soil_et_loss_soil`` are updated.
+        params: The patch's PFT parameters.
+        site: Per-site data (``SiteType.site_type``: ``dz``, ``nbedrock``); default: the
+            subgrid modules' values.
 
     Returns:
         Updated :class:`mlcanopy_type`.
@@ -172,8 +176,9 @@ def SoilResistance(
     minlwp_SPA = -2.0  # Fortran local parameter (line 95)
     head = denh2o * grav * 1.0e-6  # MPa/m  (Python float)
 
-    dz_col = col.dz
-    nbedrock = col.nbedrock
+    site = site_or_modules(site)  # soil geometry and bedrock depth: per-site data
+    dz_col = site.dz_col
+    nbedrock = site.nbedrock_col
     smp_l = soilstate_inst.smp_l_col
     hk_l = soilstate_inst.hk_l_col
     rootfr = soilstate_inst.rootfr_patch

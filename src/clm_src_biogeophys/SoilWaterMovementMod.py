@@ -17,8 +17,8 @@ from clm_src_biogeophys.SoilStateType import soilstate_type  # noqa: F401
 from clm_src_biogeophys.WaterStateBulkType import waterstatebulk_type  # noqa: F401
 from clm_src_main.clm_varcon import denh2o  # noqa: F401
 from clm_src_main.clm_varpar import nlevsoi  # noqa: F401
-from clm_src_main.ColumnType import col  # noqa: F401
 from clm_src_main.decompMod import bounds_type  # noqa: F401
+from clm_src_main.SiteType import site_or_modules
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -31,6 +31,7 @@ def SoilWater(
     filter_hydrologyc: np.ndarray,
     soilstate_inst: soilstate_type,
     waterstatebulk_inst: waterstatebulk_type,
+    site=None,
 ) -> soilstate_type:
     """
     Couple soil and root water interactions.
@@ -46,6 +47,8 @@ def SoilWater(
         soilstate_inst: Soil state container; hydraulic properties are
             written and returned in a new instance.
         waterstatebulk_inst: Bulk water state container (read-only).
+        site: Per-site data (``SiteType.site_type``: ``dz``, ``nbedrock``); default: the
+            subgrid modules' values.
 
     Returns:
         Updated :class:`soilstate_type` with hydraulic conductivity and
@@ -57,6 +60,7 @@ def SoilWater(
         filter_hydrologyc,
         soilstate_inst,
         waterstatebulk_inst,
+        site=site,
     )
 
 
@@ -71,6 +75,7 @@ def soilwater_moisture_form(
     filter_hydrologyc: np.ndarray,
     soilstate_inst: soilstate_type,
     waterstatebulk_inst: waterstatebulk_type,
+    site=None,
 ) -> soilstate_type:
     """
     Compute liquid volumetric water content and call hydraulic property
@@ -101,8 +106,9 @@ def soilwater_moisture_form(
         Updated :class:`soilstate_type`.
     """
     # Unpack inputs (Fortran associate block, lines 83-87)
-    nbedrock = col.nbedrock  # Depth to bedrock index
-    dz = col.dz  # Soil layer thickness (m)
+    site = site_or_modules(site)
+    nbedrock = site.nbedrock_col  # Depth to bedrock index (data: a soil-layer mask)
+    dz = site.dz_col  # Soil layer thickness (m)
     h2osoi_liq = waterstatebulk_inst.h2osoi_liq_col  # Soil layer liquid water (kg H2O/m2)
 
     n_col = bounds.endc - bounds.begc + 1
@@ -115,21 +121,28 @@ def soilwater_moisture_form(
         c = int(np.asarray(filter_hydrologyc)[fc])  # structure: static
         ci = c - bounds.begc  # 0-based offset into local arrays
 
-        # Number of active layers — Fortran line 92
-        nlayers = int(np.asarray(nbedrock)[c])
+        # Number of active layers — Fortran line 92: nlayers = nbedrock(c). The bedrock
+        # depth is data, so all nlevsoi layers are computed and those below bedrock keep
+        # their values (Fortran leaves them untouched).
+        active = jnp.arange(1, nlevsoi + 1) <= nbedrock[c]
 
         # Liquid volumetric water content — Fortran lines 95-97
-        for j in range(1, nlayers + 1):  # Fortran: do j = 1, nlayers
+        for j in range(1, nlevsoi + 1):  # Fortran: do j = 1, nlayers
             vwc_liq = vwc_liq.at[ci, j - 1].set(
-                jnp.maximum(h2osoi_liq[ci, j - 1], 1.0e-6) / (dz[c, j] * denh2o)
+                jnp.where(
+                    active[j - 1],
+                    jnp.maximum(h2osoi_liq[ci, j - 1], 1.0e-6) / (dz[c, j] * denh2o),
+                    vwc_liq[ci, j - 1],
+                )
             )
 
         # Hydraulic conductivity and matric potential — Fortran lines 100-102
         soilstate_inst = compute_hydraulic_properties(
             c,
-            nlayers,
+            nlevsoi,
             soilstate_inst,
-            vwc_liq[ci, :nlayers],
+            vwc_liq[ci, :],
+            active=active,
         )
 
     return soilstate_inst
@@ -145,6 +158,7 @@ def compute_hydraulic_properties(
     nlayers: int,
     soilstate_inst: soilstate_type,
     vwc_liq: Array,
+    active: Array | None = None,
 ) -> soilstate_type:
     """
     Compute hydraulic conductivity and matric potential for each soil
@@ -170,6 +184,9 @@ def compute_hydraulic_properties(
         vwc_liq: Liquid volumetric water content per layer (m3/m3),
             shape ``(nlayers,)``.
             Fortran: ``real(r8), intent(in) :: vwc_liq(1:nlayers)``.
+        active: Optional mask, shape ``(nlayers,)``: layers where it is False keep their
+            ``hk_l``/``smp_l`` values (soil layers below bedrock, when the bedrock depth is
+            data). Their inputs are replaced by the first layer's, so they stay finite.
 
     Returns:
         Updated :class:`soilstate_type` with ``hk_l_col`` and
@@ -186,21 +203,29 @@ def compute_hydraulic_properties(
 
     for j in range(1, nlayers + 1):  # Fortran: do j = 1, nlayers
 
+        on = True if active is None else active[j - 1]
+        # Inputs of inactive layers: the first layer's (finite values, finite gradients)
+        vwc_j = jnp.where(on, vwc_liq[j - 1], vwc_liq[0])
+        watsat_j = jnp.where(on, watsat[c, j], watsat[c, 1])
+        hksat_j = jnp.where(on, hksat[c, j], hksat[c, 1])
+        sucsat_j = jnp.where(on, sucsat[c, j], sucsat[c, 1])
+        bsw_j = jnp.where(on, bsw[c, j], bsw[c, 1])
+
         # Relative saturation, clamped to [0.01, 1] — Fortran lines 147-150
-        s = vwc_liq[j - 1] / watsat[c, j]
+        s = vwc_j / watsat_j
         s = jnp.minimum(s, 1.0)
         s = jnp.maximum(s, 0.01)
 
         # Hydraulic conductivity (mm H2O/s) — Fortran line 151
-        hk_j = hksat[c, j] * s ** (2.0 * bsw[c, j] + 3.0)
+        hk_j = hksat_j * s ** (2.0 * bsw_j + 3.0)
 
         # Matric potential (mm), bounded below at -1e8 — Fortran lines 152-153
-        smp_j = -sucsat[c, j] * s ** (-bsw[c, j])
+        smp_j = -sucsat_j * s ** (-bsw_j)
         smp_j = jnp.maximum(smp_j, -1.0e8)
 
         # Write to output arrays — Fortran lines 155-156
-        hk_l = hk_l.at[c, j].set(hk_j)
-        smp_l = smp_l.at[c, j].set(smp_j)
+        hk_l = hk_l.at[c, j].set(jnp.where(on, hk_j, hk_l[c, j]))
+        smp_l = smp_l.at[c, j].set(jnp.where(on, smp_j, smp_l[c, j]))
 
     return soilstate_inst._replace(
         hk_l_col=hk_l,
