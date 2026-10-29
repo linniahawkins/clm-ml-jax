@@ -1740,7 +1740,7 @@ from `clm5_defaults.yaml`); 10 + 10 canopy layers.
 5. ✅ **Canopy bottom** (2026-10-29, as CLM-ml v2 and CLM: read but not used, decision G13; a science option for the maintainer): how MONTHLY_HEIGHT_BOT enters CLM-ml's leaf-area profile (today the
    profile is a beta distribution from the ground to the top, with layers below `dpai_min`
    removed): decided with the maintainer at this step.
-6. **Regional test** (a few hundred gridcells, e.g. a box over North America): set up, run
+6. ✅ **Regional test** (done 2026-10-29: results in `global_input.md`) (a few hundred gridcells, e.g. a box over North America): set up, run
    January and July 2000, write patch and gridcell output; failure rates with
    `on_patch_error: exclude`; memory and compile time.
 7. **Global 1° run, year 2000** on one 4-GPU node (`execution.devices: 4`): timing,

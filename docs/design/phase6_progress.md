@@ -176,6 +176,20 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
 - Running: regional test (step 6) on one A100, job 8004270 (`jobs/regional.log`, outputs in
   `runs/regional/`).
 
+### 2026-10-29: Phase 6b step 6 (regional) and the winter fixes
+
+- `6c1b66f`: zero plant area keeps 0.05 of stems (G20); `numerics.ignore_checks` (CLM-ml's
+  canopy check 3 fails below freezing: mixed latent heats, issue 12).
+- Regional test done (results table in `global_input.md`): January and July 2000, 522
+  gridcells, one A100, ~33-44 min per month; 5 shrub patches NaN in January (issue 14,
+  reproduction recipe there).
+- Recheck of the end-of-Phase-6 failures (job `recheck_dev`, commit `6c1b66f`):
+  `test_c3_c4_groups` and `test_devices` pass now (they were the cache-load crash, issue 11);
+  the CHATS7 50-step CPU gradient test still segfaults while running (issue 16, pre-existing).
+- Running: global 1° run, year 2000, 4 A100s (job 8005591, `jobs/global6b.pbs`, log
+  `jobs/global6b.log`, outputs `runs/global2000/`, a restart every month; to continue after
+  the walltime: `qsub -v REV=...,RESTART=<runs/global2000/restart/domain_restart.pkl>`).
+
 ## Next (resume here in a new session)
 
 1. **Check the end-of-Phase-6 job** `endphase` (PBS job 8001129, CPU, project P93300041;

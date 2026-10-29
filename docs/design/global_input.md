@@ -170,3 +170,48 @@ chunk inputs), `clm_ml/params.py` (`clm_parameters`).
     for the maintainer (CHATS7 never freezes, so its results would not change).
 13. **Bare-ground patches** (G20): a CLM-ml bare-ground path (or leaving the patch out of
     its gridcell for those steps) would copy CLM exactly.
+14. **NaN in a stems-only canopy at sunrise** (regional test, January 2000): 5 of 2 902
+    patches, all `broadleaf_deciduous_temperate_shrub` in Wyoming (42-45 N, 108.75 W, 0.5 m
+    tall), become NaN at the first daylight step with LAI = 0 and SAI = 0.108 (above CLM's
+    0.05, so CLM treats the patch as vegetated: stems only). Reproduce: region
+    `{lat: [41.5, 42.5], lon: [-109.0, -108.5]}`, January 2000, patch 1; step 607 (13 January
+    15:00 UTC) is the first non-finite step (`probe/6b/nan_hunt_stems.py <run.yaml> 1`).
+    No input is non-finite and no eagerly run operation produces the NaN
+    (`jax_debug_nans`/`jax_debug_infs` stop only at the sub-step averaging), so it is made
+    inside compiled code; the next step is to compare the sub-step routines of this patch
+    on this step one by one (numerics doc §1). With `on_patch_error: exclude` the patch is left
+    out from that month on. Deciduous trees with LAI = 0 and SAI > 0 elsewhere did not fail.
+15. **Wet needleleaf canopies** (observation): CLM6's `dleaf` for needleleaf trees is 0.65 mm
+    (CLM5: 4 cm), and CLM-ml's leaf boundary-layer conductance grows as `dleaf` shrinks.
+    Needleleaf evergreen temperate patches in the south-eastern US have January latent heat
+    16 W m⁻² on average (other PFTs 6.9) with single wet days of 150-226 W m⁻² fed by
+    sensible heat of -150 to -225 W m⁻². To be compared with CLM.
+16. **CPU gradient crash** (not Phase 6b): `tests/test_model_api.py::
+    test_model_chunk_gradient_matches_finite_difference` (CHATS7, 50 steps) segfaults while
+    *running* the compiled CPU gradient (`xla::cpu::SmallKernelThunk::Execute`), with an empty
+    compilation cache too, on Derecho (JAX 0.9.2); it failed the same way in the end-of-Phase-6
+    job on the commit before Phase 6b. Resembles the JAX 0.6.2 CPU runtime bug of Phase 4
+    (gradients over chunks of several steps). Gradients ran on the A100 (Phase 6 step 1b).
+
+## Regional test (Phase 6b step 6, 2026-10-29)
+
+30-50 N, 110-80 W: 522 gridcells, 2 902 patches (396 C4), January and July 2000, one A100
+(job `regional_dev`, commit `6c1b66f`; daily patch and gridcell output in
+`/glade/derecho/scratch/linnia/clm-ml-jax/runs/regional/`).
+
+| | January | July |
+|---|---|---|
+| setup | 71 s | 41 s |
+| first step (compiled) | 683 s | 34 s (program from the cache) |
+| month chunk, 1 487 steps, incl. its compilation | 1 879 s | 1 893 s |
+| patch-steps/s (incl. compilation) | 2 296 | 2 279 |
+| peak GPU memory | 1.6 GB | 1.6 GB |
+| patches excluded | 5 (0.17 %, issue 14) | 0 |
+| canopy check 3 above tolerance (ignored, issue 12) | most patches | — |
+| gridcell latent heat, mean (min, max of daily means) | 7.8 (-4.3, 92) W m⁻² | 93 (14, 196) W m⁻² |
+| gridcell GPP, mean | 0.47 µmol m⁻² s⁻¹ | 8.7 µmol m⁻² s⁻¹ |
+| canopy-top air temperature, mean | 269 K | 295 K |
+
+All gridcell values finite. `soil_water_stress` (`btran`) is 1 everywhere: CLM-ml's WUE
+stomatal scheme sets it to 1 and applies water stress through leaf water potential (as the
+Fortran); use the leaf water potential outputs instead.
