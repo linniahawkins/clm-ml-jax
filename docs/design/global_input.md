@@ -176,10 +176,12 @@ chunk inputs), `clm_ml/params.py` (`clm_parameters`).
     0.05, so CLM treats the patch as vegetated: stems only). Reproduce: region
     `{lat: [41.5, 42.5], lon: [-109.0, -108.5]}`, January 2000, patch 1; step 607 (13 January
     15:00 UTC) is the first non-finite step (`probe/6b/nan_hunt_stems.py <run.yaml> 1`).
-    No input is non-finite and no eagerly run operation produces the NaN
-    (`jax_debug_nans`/`jax_debug_infs` stop only at the sub-step averaging), so it is made
-    inside compiled code; the next step is to compare the sub-step routines of this patch
-    on this step one by one (numerics doc §1). With `on_patch_error: exclude` the patch is left
+    No input is non-finite; the step gives NaN eagerly (uncompiled) too, so it is the
+    model's arithmetic, not XLA. `jax_debug_nans` cannot locate it: the model carries benign
+    NaNs in unused array slots and the check stops at those first (sub-step averaging). Next
+    step: check each sub-step routine's outputs for this patch on this step (numerics doc
+    §1); a division by the leaf area (sunlit/shaded leaf area, LAI = 0) is the first
+    suspect. With `on_patch_error: exclude` the patch is left
     out from that month on. Deciduous trees with LAI = 0 and SAI > 0 elsewhere did not fail.
 15. **Wet needleleaf canopies** (observation): CLM6's `dleaf` for needleleaf trees is 0.65 mm
     (CLM5: 4 cm), and CLM-ml's leaf boundary-layer conductance grows as `dleaf` shrinks.
