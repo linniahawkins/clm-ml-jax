@@ -503,8 +503,10 @@ def create_mlcanopy(begp: int, endp: int, max_layers: int) -> mlcanopy_type:
         lai_canopy=_r(np_),
         sai_canopy=_r(np_),
         root_biomass_canopy=_r(np_),
-        pbeta_lai_canopy=_r(np_, 3),
-        pbeta_sai_canopy=_r(np_, 3),
+        # -spval, as Fortran InitAllocate: a negative value marks "not set by the tower", so
+        # getPADparameters gives the PFT default profile (with +spval it never did)
+        pbeta_lai_canopy=-_r(np_, 3),
+        pbeta_sai_canopy=-_r(np_, 3),
         # Atmospheric forcing
         zref_forcing=_r(np_),
         tref_forcing=_r(np_),
