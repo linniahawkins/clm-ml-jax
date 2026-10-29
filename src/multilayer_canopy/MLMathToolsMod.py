@@ -870,94 +870,48 @@ def _tridiag_2eq_bwd_rule(residuals, g):
     """
     a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, _t, _q = residuals
     g_t, g_q = g  # cotangents for t and q outputs (JAX arrays of length n)
+    a1, b11, b12, c1, a2, b21, b22, c2 = (
+        _as_array(x) for x in (a1, b11, b12, c1, a2, b21, b22, c2)
+    )
+    zero = jnp.zeros(1, dtype=a1.dtype)
 
-    n = len(d1)
-
-    # Build explicit arrays for A^T coefficients.
     # A^T block structure (0-based, row i):
-    #   lower  (a^T): at row i it's the (i, i-1) block of A^T
-    #                 = (i-1, i) block of A = diag(c1[i-1], c2[i-1])
-    #                 → a1T[i] = c1[i-1],  a2T[i] = c2[i-1],  with a1T[0]=a2T[0]=0
-    #   main   (b^T): B_i^T = [[b11[i], b21[i]], [b12[i], b22[i]]]
-    #   upper  (c^T): at row i it's the (i, i+1) block of A^T
-    #                 = (i+1, i) block of A = diag(a1[i+1], a2[i+1])
-    #                 → c1T[i] = a1[i+1], c2T[i] = a2[i+1],  with c1T[n-1]=c2T[n-1]=0
+    #   lower: the (i-1, i) block of A = diag(c1[i-1], c2[i-1]); 0 in row 0
+    #   main:  B_i^T = [[b11[i], b21[i]], [b12[i], b22[i]]]
+    #   upper: the (i+1, i) block of A = diag(a1[i+1], a2[i+1]); 0 in row n-1
+    a1T, a2T = jnp.concatenate([zero, c1[:-1]]), jnp.concatenate([zero, c2[:-1]])
+    c1T, c2T = jnp.concatenate([a1[1:], zero]), jnp.concatenate([a2[1:], zero])
 
-    # lower diagonal of A^T
-    a1T = [jnp.zeros(())] * n
-    a2T = [jnp.zeros(())] * n
-    for i in range(1, n):
-        a1T[i] = c1[i - 1]
-        a2T[i] = c2[i - 1]
+    # Solve A^T λ = g with the same algorithm as the forward solve.
+    z1, z2 = _tridiag_2eq_solve(
+        a1T, b11, b21, c1T, _as_array(g_t), a2T, b12, b22, c2T, _as_array(g_q), None
+    )
 
-    # main diagonal of A^T (transposed 2x2 blocks)
-    # b11T[i] = b11[i], b12T[i] = b21[i], b21T[i] = b12[i], b22T[i] = b22[i]
-    b11T = [b11[i] for i in range(n)]
-    b12T = [b21[i] for i in range(n)]
-    b21T = [b12[i] for i in range(n)]
-    b22T = [b22[i] for i in range(n)]
-
-    # upper diagonal of A^T
-    c1T = [jnp.zeros(())] * n
-    c2T = [jnp.zeros(())] * n
-    for i in range(n - 1):
-        c1T[i] = a1[i + 1]
-        c2T[i] = a2[i + 1]
-
-    # RHS of A^T system = g = [g_t; g_q]
-    g1 = [g_t[i] for i in range(n)]
-    g2 = [g_q[i] for i in range(n)]
-
-    # Solve A^T λ = g using the same Thomas algorithm as _tridiag_2eq_fwd.
-    z1_list, z2_list = _tridiag_2eq_solve(a1T, b11T, b12T, c1T, g1, a2T, b21T, b22T, c2T, g2, n)
-
-    # Gradient w.r.t. d1 and d2 is the adjoint λ = [z1; z2].
-    g_d1 = jnp.stack(z1_list)
-    g_d2 = jnp.stack(z2_list)
-
-    # Gradients w.r.t. matrix coefficients: dL/dA[i,j] = -λ[i] * y[j]
-    # where y = (t, q) is the primal solution.
-    # Boundary ghost values: t[-1] = t[n] = q[-1] = q[n] = 0.
-    _zero = jnp.zeros(())
-    g_a1_list = []
-    g_b11_list = []
-    g_b12_list = []
-    g_c1_list = []
-    g_a2_list = []
-    g_b21_list = []
-    g_b22_list = []
-    g_c2_list = []
-    for i in range(n):
-        t_prev = _t[i - 1] if i > 0 else _zero
-        t_curr = _t[i]
-        t_next = _t[i + 1] if i < n - 1 else _zero
-        q_prev = _q[i - 1] if i > 0 else _zero
-        q_curr = _q[i]
-        q_next = _q[i + 1] if i < n - 1 else _zero
-
-        g_a1_list.append(-z1_list[i] * t_prev)
-        g_b11_list.append(-z1_list[i] * t_curr)
-        g_b12_list.append(-z1_list[i] * q_curr)
-        g_c1_list.append(-z1_list[i] * t_next)
-        g_a2_list.append(-z2_list[i] * q_prev)
-        g_b21_list.append(-z2_list[i] * t_curr)
-        g_b22_list.append(-z2_list[i] * q_curr)
-        g_c2_list.append(-z2_list[i] * q_next)
+    # Gradients w.r.t. matrix coefficients: dL/dA[i,j] = -λ[i] * y[j], with y = (t, q)
+    # the primal solution and ghost values t[-1] = t[n] = q[-1] = q[n] = 0.
+    t, q = _as_array(_t), _as_array(_q)
+    t_prev, t_next = jnp.concatenate([zero, t[:-1]]), jnp.concatenate([t[1:], zero])
+    q_prev, q_next = jnp.concatenate([zero, q[:-1]]), jnp.concatenate([q[1:], zero])
 
     # Cotangents must match the primal input pytree structure.
     return (
-        jnp.stack(g_a1_list),  # grad a1
-        jnp.stack(g_b11_list),  # grad b11
-        jnp.stack(g_b12_list),  # grad b12
-        jnp.stack(g_c1_list),  # grad c1
-        g_d1,  # grad d1  =  λ_t
-        jnp.stack(g_a2_list),  # grad a2
-        jnp.stack(g_b21_list),  # grad b21
-        jnp.stack(g_b22_list),  # grad b22
-        jnp.stack(g_c2_list),  # grad c2
-        g_d2,  # grad d2  =  λ_q
+        -z1 * t_prev,  # grad a1
+        -z1 * t,  # grad b11
+        -z1 * q,  # grad b12
+        -z1 * t_next,  # grad c1
+        z1,  # grad d1  =  λ_t
+        -z2 * q_prev,  # grad a2
+        -z2 * t,  # grad b21
+        -z2 * q,  # grad b22
+        -z2 * q_next,  # grad c2
+        z2,  # grad d2  =  λ_q
         None,  # grad n (static int)
     )
+
+
+def _as_array(x):
+    """A list of scalars or an array -> a 1-D array."""
+    return jnp.stack(x) if isinstance(x, (list, tuple)) else jnp.asarray(x)
 
 
 def _tridiag_2eq_solve(
@@ -975,57 +929,80 @@ def _tridiag_2eq_solve(
 ):
     """Core Thomas algorithm for the block-2x2 tridiagonal system.
 
-    Accepts arbitrary list-like inputs (Python lists or slices thereof).
-    Returns (t_list, q_list) as Python lists of JAX scalars.
+    Accepts lists of scalars or 1-D arrays (0-based rows); returns ``(t, q)`` arrays. The
+    forward elimination and the back substitution are ``lax.scan`` loops (the per-row
+    arithmetic as before), so the compiled program does not grow with the number of rows.
     """
-    # n may be a JAX tracer if called inside a traced context; use len(d1)
-    # to always get a concrete Python int for list allocation and range().
-    n = len(d1)
-    e11 = [jnp.zeros(())] * n
-    e12 = [jnp.zeros(())] * n
-    e21 = [jnp.zeros(())] * n
-    e22 = [jnp.zeros(())] * n
-    f1 = [jnp.zeros(())] * n
-    f2 = [jnp.zeros(())] * n
-
-    e11_prev = jnp.zeros(())
-    e12_prev = jnp.zeros(())
-    e21_prev = jnp.zeros(())
-    e22_prev = jnp.zeros(())
-    f1_prev = jnp.zeros(())
-    f2_prev = jnp.zeros(())
-
+    rows = tuple(_as_array(x) for x in (a1, b11, b12, c1, d1, a2, b21, b22, c2, d2))
     _eps_det = jnp.asarray(1.0e-10)
-    for i in range(n):
-        ainv = b11[i] - a1[i] * e11_prev
-        binv = b12[i] - a1[i] * e12_prev
-        cinv = b21[i] - a2[i] * e21_prev
-        dinv = b22[i] - a2[i] * e22_prev
+
+    def _eliminate(prev, row):
+        e11_prev, e12_prev, e21_prev, e22_prev, f1_prev, f2_prev = prev
+        a1_i, b11_i, b12_i, c1_i, d1_i, a2_i, b21_i, b22_i, c2_i, d2_i = row
+        ainv = b11_i - a1_i * e11_prev
+        binv = b12_i - a1_i * e12_prev
+        cinv = b21_i - a2_i * e21_prev
+        dinv = b22_i - a2_i * e22_prev
         det = ainv * dinv - binv * cinv
         _abs_det = jnp.abs(det)
         det_safe = jnp.where(_abs_det > _eps_det, det, _eps_det)
 
-        e11[i] = dinv * c1[i] / det_safe
-        e12[i] = -binv * c2[i] / det_safe
-        e21[i] = -cinv * c1[i] / det_safe
-        e22[i] = ainv * c2[i] / det_safe
+        e11 = dinv * c1_i / det_safe
+        e12 = -binv * c2_i / det_safe
+        e21 = -cinv * c1_i / det_safe
+        e22 = ainv * c2_i / det_safe
 
-        f1[i] = (dinv * (d1[i] - a1[i] * f1_prev) - binv * (d2[i] - a2[i] * f2_prev)) / det_safe
-        f2[i] = (-cinv * (d1[i] - a1[i] * f1_prev) + ainv * (d2[i] - a2[i] * f2_prev)) / det_safe
+        f1 = (dinv * (d1_i - a1_i * f1_prev) - binv * (d2_i - a2_i * f2_prev)) / det_safe
+        f2 = (-cinv * (d1_i - a1_i * f1_prev) + ainv * (d2_i - a2_i * f2_prev)) / det_safe
+        out = (e11, e12, e21, e22, f1, f2)
+        return out, out
 
-        e11_prev, e12_prev = e11[i], e12[i]
-        e21_prev, e22_prev = e21[i], e22[i]
-        f1_prev, f2_prev = f1[i], f2[i]
+    zero = jnp.zeros((), dtype=rows[0].dtype)
+    _, (e11, e12, e21, e22, f1, f2) = jax.lax.scan(_eliminate, (zero,) * 6, rows)
 
-    t = [jnp.zeros(())] * n
-    q = [jnp.zeros(())] * n
-    t[n - 1] = f1[n - 1]
-    q[n - 1] = f2[n - 1]
-    for i in range(n - 2, -1, -1):
-        t[i] = f1[i] - e11[i] * t[i + 1] - e12[i] * q[i + 1]
-        q[i] = f2[i] - e21[i] * t[i + 1] - e22[i] * q[i + 1]
+    # Back substitution from the top row: t = f1 - e11 t_next - e12 q_next (the top row has
+    # no row above: t = f1, q = f2)
+    def _substitute(nxt, row):
+        t_next, q_next = nxt
+        e11_i, e12_i, e21_i, e22_i, f1_i, f2_i = row
+        t = f1_i - e11_i * t_next - e12_i * q_next
+        q = f2_i - e21_i * t_next - e22_i * q_next
+        return (t, q), (t, q)
 
-    return t, q
+    top = (f1[-1], f2[-1])
+    _, (t, q) = jax.lax.scan(
+        _substitute,
+        top,
+        (e11[:-1], e12[:-1], e21[:-1], e22[:-1], f1[:-1], f2[:-1]),
+        reverse=True,
+    )
+    return jnp.concatenate([t, f1[-1:]]), jnp.concatenate([q, f2[-1:]])
+
+
+def tridiag_scan(a, b, c, r):
+    """Thomas algorithm for a tridiagonal system, as ``lax.scan`` loops (0-based rows; ``a[0]``
+    and ``c[-1]`` unused). The same arithmetic per row as Fortran ``tridiag``, without
+    growing the compiled program with the number of rows (plan Phase 6)."""
+
+    def _forward(carry, row):
+        bet, u_prev, c_prev = carry
+        a_j, b_j, c_j, r_j = row
+        gam = c_prev / bet
+        bet = b_j - a_j * gam
+        u = (r_j - a_j * u_prev) / bet
+        return (bet, u, c_j), (gam, u)
+
+    one, zero = jnp.ones((), dtype=b.dtype), jnp.zeros((), dtype=b.dtype)
+    # First row: gam = 0 / 1 = 0, bet = b[0] - a[0] * 0, u = (r[0] - a[0] * 0) / b[0]
+    _, (gam, u) = jax.lax.scan(_forward, (one, zero, zero), (a.at[0].set(0.0), b, c, r))
+
+    def _back(u_next, row):
+        u_j, gam_next = row
+        u_j = u_j - gam_next * u_next
+        return u_j, u_j
+
+    _, u_head = jax.lax.scan(_back, u[-1], (u[:-1], gam[1:]), reverse=True)
+    return jnp.concatenate([u_head, u[-1:]])
 
 
 tridiag_2eq.defvjp(_tridiag_2eq_fwd_rule, _tridiag_2eq_bwd_rule)

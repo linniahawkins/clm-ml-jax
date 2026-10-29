@@ -1337,9 +1337,14 @@ memory are acceptable is mostly a GPU question, and the Phase 4 GPU timing is st
 
 - Turn on `vmap` over the patch axis, with forcing gathered from gridcells and outputs
   aggregated back (`segment_sum`). Remove the one-patch restriction from Phase 1.
-- Tridiagonal solves as `lax.scan` (from Phase 5b): the longwave and flux–profile solves are
-  unrolled over every layer slot, so compile time and gradient memory grow with
-  `max_layers`; rewrite them as scans (same arithmetic order) before batching patches.
+- ✅ Tridiagonal solves as `lax.scan` (from Phase 5b): the longwave system (rows built as
+  arrays, solved by `MLMathToolsMod.tridiag_scan`) and the coupled flux–profile solve
+  (`tridiag_2eq`: elimination and back substitution as scans; its custom gradient rule as
+  array operations) no longer unroll over the layer slots. Same arithmetic per row; round-off
+  only (noise-twin and identical-input replay pass); reference regenerated. Effect (CHATS7,
+  CPU, 8-step gradient): gradient compilation 694 s → 273 s, gradient 21.6 → 16.5 ms per
+  step (before 5b: 15.6 ms), compiled step 3.3 → 3.2 ms; the forward padding test takes
+  3 min instead of 10. (The Norman solar solver, not the default, is still unrolled.)
 - **Group patches by photosynthetic pathway inside one compiled program** (decision 22): the
   C3 patches and the C4 patches form two groups of fixed size (known at setup), each
   batched with `vmap` and running only its own pathway's code (`GridInfo.c3` static per

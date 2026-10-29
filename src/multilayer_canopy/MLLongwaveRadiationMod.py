@@ -13,11 +13,9 @@ Differentiability notes
 * All ``np.asarray()`` calls removed — JAX arrays used directly.
 * All ``np.`` array operations replaced by ``jnp.``.
 * ``float()`` wrappers on JAX scalars removed.
-* The tridiagonal system is assembled using Python lists of JAX scalars
-  (Thomas algorithm in ``_tridiag_py``).  The list-based Python loop
-  runs at trace time, so all values inside the lists are JAX traced
-  scalars and the solver is fully differentiable.  TODO: replace with
-  ``jax.lax.scan`` for a fully JIT-compilable version.
+* The tridiagonal system is assembled as arrays over every layer slot and solved with
+  ``MLMathToolsMod.tridiag_scan`` (``lax.scan`` loops), so the compiled program does not
+  grow with ``max_layers`` (plan Phase 6).
 """
 
 from __future__ import annotations
@@ -27,22 +25,6 @@ from typing import Sequence
 
 import jax
 import jax.numpy as jnp
-
-
-def _tridiag_py(a, b, c, r, n):
-    """Thomas algorithm using pure Python lists — no JAX, no numpy."""
-    gam = [0.0] * (n + 1)
-    u = [0.0] * (n + 1)
-    bet = b[1]
-    u[1] = r[1] / bet
-    for j in range(2, n + 1):
-        gam[j] = c[j - 1] / bet
-        bet = b[j] - a[j] * gam[j]
-        u[j] = (r[j] - a[j] * u[j - 1]) / bet
-    for j in range(n - 1, 0, -1):
-        u[j] = u[j] - gam[j + 1] * u[j + 1]
-    return u
-
 
 from clm_src_main.abortutils import endrun  # noqa: E402, F401
 from clm_src_main.clm_varcon import sb  # noqa: E402, F401
@@ -59,7 +41,7 @@ from multilayer_canopy.MLclm_varcon import emg  # noqa: E402, F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions  # noqa: E402
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: E402, F401
 from multilayer_canopy.MLLayersMod import layers  # noqa: E402
-from multilayer_canopy.MLMathToolsMod import tridiag  # noqa: E402, F401
+from multilayer_canopy.MLMathToolsMod import tridiag, tridiag_scan  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
 # Public driver
@@ -159,34 +141,25 @@ def _Norman_patch(
 
     m_max = 2 * nlevmlcan + 2
     sky_row = 2 * n_leafy + 2  # 1-based
-    zero, one = jnp.zeros(()), jnp.ones(())
-    atri = [zero] * (m_max + 1)
-    btri = [one] * (m_max + 1)
-    ctri = [zero] * (m_max + 1)
-    dtri = [zero] * (m_max + 1)
-
-    # Soil row (m = 1)
-    ctri[1] = -(1.0 - emg) * one
-    dtri[1] = emg * sb * _tg_p**4
-    # Layer rows: layer j's "a" row at m = 2 + 2j, its "f" row at m = 3 + 2j
-    for jj in range(nlevmlcan):
-        ma, mf = 2 + 2 * jj, 3 + 2 * jj
-        v = valid[jj]
-        atri[ma] = jnp.where(v, -aic[jj], 0.0)
-        ctri[ma] = jnp.where(v, -bic[jj], 0.0)
-        dtri[ma] = jnp.where(v, (1.0 - bic[jj]) * src[jj], 0.0)
-        atri[mf] = jnp.where(v, -eic[jj], 0.0)
-        ctri[mf] = jnp.where(v, -fic[jj], 0.0)
-        dtri[mf] = jnp.where(v, (1.0 - eic[jj]) * src[jj], 0.0)
+    # Rows as arrays (0-based index = row - 1): soil row, then layer j's "a" row (row 2 + 2j)
+    # and "f" row (row 3 + 2j); unused slots are identity rows (a = c = d = 0, b = 1)
+    z = jnp.zeros(nlevmlcan)
+    atri = jnp.zeros(m_max).at[1 : 2 * nlevmlcan + 1 : 2].set(jnp.where(valid, -aic, z))
+    atri = atri.at[2 : 2 * nlevmlcan + 2 : 2].set(jnp.where(valid, -eic, z))
+    ctri = jnp.zeros(m_max).at[0].set(-(1.0 - emg))
+    ctri = ctri.at[1 : 2 * nlevmlcan + 1 : 2].set(jnp.where(valid, -bic, z))
+    ctri = ctri.at[2 : 2 * nlevmlcan + 2 : 2].set(jnp.where(valid, -fic, z))
+    dtri = jnp.zeros(m_max).at[0].set(emg * sb * _tg_p**4)
+    dtri = dtri.at[1 : 2 * nlevmlcan + 1 : 2].set(jnp.where(valid, (1.0 - bic) * src, z))
+    dtri = dtri.at[2 : 2 * nlevmlcan + 2 : 2].set(jnp.where(valid, (1.0 - eic) * src, z))
+    btri = jnp.ones(m_max)
     # Sky row right after the last real row (overrides that slot's identity row)
-    for m in range(4, m_max + 1, 2):
-        is_sky = m == sky_row
-        atri[m] = jnp.where(is_sky, 0.0, atri[m])
-        ctri[m] = jnp.where(is_sky, 0.0, ctri[m])
-        dtri[m] = jnp.where(is_sky, _lwsky_p, dtri[m])
+    is_sky = jnp.arange(1, m_max + 1) == sky_row
+    atri = jnp.where(is_sky, 0.0, atri)
+    ctri = jnp.where(is_sky, 0.0, ctri)
+    dtri = jnp.where(is_sky, _lwsky_p, dtri)
 
-    utri = _tridiag_py(atri, btri, ctri, dtri, m_max)
-    u = jnp.stack(utri[1:])  # rows 1..m_max
+    u = tridiag_scan(atri, btri, ctri, dtri)  # rows 1..m_max
 
     # Unknowns: up(0), dn(0), then up(ic_j), dn(ic_j) for each leafy layer
     ics_out = jnp.where(valid, ics, nlevmlcan + 1)  # unused slots write a dropped entry
