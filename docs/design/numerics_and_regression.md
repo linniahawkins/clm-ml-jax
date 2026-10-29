@@ -305,6 +305,12 @@ bit-for-bit test to fail.
   temperatures) 1.1e-10 relative with JAX 0.9.2 on Derecho against the JAX 0.6.2 recording,
   before any Phase 6 change; the solved temperatures agree to < 1e-13. That field alone is
   allowed 3e-10.
+- **Do not scatter into a scan's carry with array indices** (observed with JAX 0.9.2 on CPU,
+  Phase 6 step 4/5, not reduced to a minimal reproducer): gathering patch groups with
+  `jnp.take` and writing their results back into the carried state with `.at[idx].set` inside
+  the chunk's `lax.scan` gave wrong states for groups of two or more patches and intermittent
+  segmentation faults, while the identical operations outside a scan were right. The patch
+  groups are contiguous slot ranges taken by slicing and joined by concatenation instead.
 
 **How tight it is.** Since the solver fix (§5), the twin noise is at most about 4e-11 relative,
 so the noise-twin test detects any change larger than about 1e-10. (Before the fix it allowed

@@ -96,9 +96,8 @@ class Model:
         self._runners: dict = {}
         pfts = [PFT_NAMES[int(i)] for i in run.domain.patches.pft_index]
         self.pft_names: tuple = tuple(dict.fromkeys(pfts))
-        rows = [self.pft_names.index(n) for n in pfts]
-        rows += [rows[-1]] * (batch.n_patches - len(rows))  # padding patches
-        self._pft_rows = np.array(rows)
+        rows = np.array([self.pft_names.index(n) for n in pfts])
+        self._pft_rows = rows[batch.source]  # the batch's order (padding: the patch copied)
 
     @classmethod
     def from_run(cls, run) -> "Model":
@@ -153,8 +152,8 @@ class Model:
         return jax.tree.map(lambda x: jnp.take(x, rows, axis=0), params)
 
     def weights(self):
-        """The patches' area fractions of their gridcells (domain order; padding patches,
-        ``execution.patch_count``, have 0)."""
+        """The patches' area fractions of their gridcells, in the batch's order (domain order,
+        then padding patches with 0; device blocks with ``execution.devices``)."""
         import jax.numpy as jnp
 
         return jnp.asarray(self._batch.weight, dtype=jnp.float64)
@@ -255,7 +254,7 @@ class Model:
             self.patch_params(params),
             weights,
             alive,
-            jnp.asarray(self._batch.gridcell_index),
+            jnp.asarray(self._batch.runner_gidx),
             self._template,
         )
         from multilayer_canopy.MLMathToolsMod import is_concrete

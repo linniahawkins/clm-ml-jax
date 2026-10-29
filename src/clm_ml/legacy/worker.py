@@ -133,6 +133,17 @@ def setup_batch(spec: dict):
         grids,
         firsts,
     )
+    devices = int(batch.get("devices") or 1)
+    mixed = len({g.c3 for g in grids}) > 1
+    if devices > 1 or mixed:
+        # step 5: the same block of patches and gridcells on every device; C3 and C4 patches
+        # always in contiguous groups (step 4), also on one device
+        if batch.get("patch_count") or batch.get("gridcell_count"):
+            raise ValueError(
+                "execution.patch_count/gridcell_count: not supported with several devices or "
+                "with C3 and C4 patches in one run (the blocks are padded automatically)"
+            )
+        return domain_batch.blocked(devices)
     return domain_batch.padded(batch.get("patch_count"), batch.get("gridcell_count"))
 
 

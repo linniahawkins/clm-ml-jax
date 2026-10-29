@@ -1514,20 +1514,29 @@ Plan:
   alone (round-off); permuting patches permutes outputs only; gridcell output equals the
   weighted sum for every statistic; gradient with respect to patch weights.
 
-**Step 4, C3/C4 groups in one program** ✅ Done (2026-10-28): `PatchBatch.groups` (the C3
-patches, then the C4 patches, from each patch's `GridInfo`); `make_batch_runner` runs each
-group's own pathway vmapped over its patches (state, forcing and parameters gathered per
-step, the groups' templates once per chunk) and puts the results back in patch order; one
-group (the usual case) runs as before, without gathering. Test:
-`tests/regression/test_c3_c4_groups.py` (a walnut and a C4 grass on one gridcell match each
-patch run alone; the gridcell value is the weighted sum).
+**Step 4, C3/C4 groups in one program** ✅ Done (2026-10-28, corrected 2026-10-29): the C3
+patches and the C4 patches occupy contiguous slot ranges (the block layout of step 5, also on
+one device: `PatchBatch.blocked`); `make_batch_runner` runs each group's own pathway vmapped
+over its slice and concatenates the results; one group (the usual case) runs as before.
+Outputs go back to domain order (`real_index`). The first version gathered each group with
+`jnp.take` and scattered its results into the scan's state with `.at[idx].set`: with a C3
+group of two or more patches next to a C4 group this gave wrong C3 states (leaf temperature
+off by up to 0.4 K after one step while that step's fluxes were right) and intermittent
+segmentation faults on CPU (JAX 0.9.2), while the same operations outside a scan were right
+(numerics doc §6). Test: `tests/regression/test_c3_c4_groups.py` (a walnut, a C4 grass and a
+needleleaf tree on one gridcell match each patch run alone; the gridcell value is the
+weighted sum).
 Original plan: the C3 patches and the C4 patches form
 two groups of fixed size, each batched with `vmap` and running only its own pathway
 (`GridInfo.c3` static per group); outputs are combined and PFT-parameter gradients add up
 across groups. Test: a gridcell with a C3 and a C4 patch matches each patch run alone. The same
 group mechanism can later bucket `max_layers` sizes if padding waste matters.
 
-**Step 5, several devices** (design, 2026-10-28): every device runs the same program
+**Step 5, several devices** (implemented 2026-10-29: `execution.devices`;
+`PatchBatch.blocked`, `layout`, `source`, `real_index`, `runner_gidx`; `_sharded` wraps the
+chunk in `jax.shard_map` with `check_vma=False` (the physics has scans whose carry starts as a
+constant and becomes per-device); restarts record the layout; test
+`tests/regression/test_devices.py`, 4 simulated CPU devices). Design (2026-10-28): every device runs the same program
 (`jax.shard_map` over a `patch` mesh axis), so every device gets the same block layout:
 `Gd` gridcells (consecutive gridcells of the domain, padded) and their patches in `N3` C3
 slots followed by `N4` C4 slots (`N3`, `N4`: the largest counts over the devices), the empty

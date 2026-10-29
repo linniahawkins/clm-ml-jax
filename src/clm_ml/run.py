@@ -119,6 +119,8 @@ class ExecutionSection:
     # domains of different sizes share one compiled program; null: the domain's own counts
     patch_count: Optional[int] = None
     gridcell_count: Optional[int] = None
+    # Devices to spread the patches over (step 5: jax.shard_map; e.g. 4 on a Derecho GPU node)
+    devices: int = 1
 
 
 def parse_every(text: Optional[str], key: str):
@@ -414,6 +416,7 @@ class Run:
                 "n_gridcells": self.domain.n_gridcells,
                 "patch_count": self.run_file.execution.patch_count,
                 "gridcell_count": self.run_file.execution.gridcell_count,
+                "devices": self.run_file.execution.devices,
             },
             "file_prefix": self.name,
             "on_patch_error": self.config.numerics.on_patch_error,
@@ -527,6 +530,13 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
         raise ConfigError(
             f"{path.name}: execution.patch_count pads the patches: set gridcell_count above "
             f"{domain.n_gridcells} too (padding patches go on a padding gridcell)"
+        )
+    if ex.devices < 1:
+        raise ConfigError(f"{path.name}: execution.devices must be at least 1")
+    if ex.devices > 1 and (ex.patch_count or ex.gridcell_count):
+        raise ConfigError(
+            f"{path.name}: execution.patch_count/gridcell_count with devices > 1 is not "
+            "supported (the device blocks are padded automatically)"
         )
     if run_file.output.legacy_ascii and domain.n_patches > 1:
         raise ConfigError(

@@ -778,12 +778,21 @@ class PatchBatch:
     # weight 0 on padding gridcells, :meth:`padded`), dropped from the outputs
     n_real: Optional[int] = None
     n_real_gridcells: Optional[int] = None
+    # The domain patch each slot holds (padding: the patch it copies); blocked layouts
+    # (:meth:`blocked`): the slot of each domain patch, and the per-device sizes
+    source: Optional[np.ndarray] = None
+    real_index: Optional[np.ndarray] = None
+    layout: Optional[tuple] = None  # (devices, gridcells per device, C3 slots, C4 slots)
 
     def __post_init__(self):
         if self.n_real is None:
             self.n_real = len(self.runs)
         if self.n_real_gridcells is None:
             self.n_real_gridcells = self.n_gridcells
+        if self.source is None:
+            self.source = np.arange(len(self.runs))
+        if self.real_index is None:
+            self.real_index = np.arange(self.n_real)
 
     @classmethod
     def single(cls, run: LegacyRun) -> "PatchBatch":
@@ -809,10 +818,21 @@ class PatchBatch:
         each present only if it has patches. The patch index ``GridInfo.p`` is the same for
         every patch (each is a one-patch legacy run)."""
         out = []
+        if self.layout is not None:  # blocked: the same slot ranges on every device
+            _, _, n3, n4 = self.layout
+            for start, n in ((0, n3), (n3, n4)):
+                if n:
+                    out.append((self.grids[start], np.arange(start, start + n)))
+            return out
         for c3 in (True, False):
             idx = np.array([p for p, g in enumerate(self.grids) if g.c3 == c3], dtype=int)
             if idx.size:
                 out.append((self.grids[int(idx[0])], idx))
+        if len(out) > 1:
+            raise ValueError(
+                "C3 and C4 patches need the block layout (contiguous groups): "
+                "PatchBatch.blocked(n_devices), also for one device"
+            )
         return out
 
     @property
@@ -848,6 +868,74 @@ class PatchBatch:
             firsts=None if self.firsts is None else self.firsts + [self.firsts[-1]] * k,
             n_real=self.n_patches,
             n_real_gridcells=self.n_gridcells,
+            source=np.concatenate([self.source, np.full(k, self.source[-1])]),
+        )
+
+    @property
+    def n_devices(self) -> int:
+        return 1 if self.layout is None else self.layout[0]
+
+    @property
+    def runner_gidx(self) -> np.ndarray:
+        """The gridcell of each patch as the compiled chunk sees it: within its device's
+        block of gridcells (the whole domain on one device)."""
+        if self.layout is None:
+            return self.gridcell_index
+        n_dev, gd, n3, n4 = self.layout
+        device = np.arange(self.n_patches) // (n3 + n4)
+        return self.gridcell_index - device * gd
+
+    def blocked(self, n_devices: int) -> "PatchBatch":
+        """This (domain-order, unpadded) batch laid out for ``n_devices`` devices (step 5):
+        every device gets the same block, ``Gd`` consecutive gridcells (padded) and their
+        patches in ``N3`` C3 slots followed by ``N4`` C4 slots (the largest counts over the
+        devices), so every device runs the same program and the forcing gather and gridcell
+        sums stay on the device. Empty slots hold weight-0 copies of a patch of the same
+        pathway on the block's last gridcell; padding gridcells read the last real
+        gridcell's forcing. Outputs are put back in domain order (``real_index``)."""
+        if self.n_real != self.n_patches or self.n_real_gridcells != self.n_gridcells:
+            raise ValueError("blocked(): start from the domain's own patches (no padding)")
+        gidx, c3 = self.gridcell_index, np.array([g.c3 for g in self.grids])
+        n_g, d_n = self.n_gridcells, n_devices
+        gd = -(-n_g // d_n)
+        blocks = []
+        for d in range(d_n):
+            on = [p for p in range(self.n_patches) if d * gd <= gidx[p] < (d + 1) * gd]
+            blocks.append(([p for p in on if c3[p]], [p for p in on if not c3[p]]))
+        n3 = max(len(b[0]) for b in blocks)
+        n4 = max(len(b[1]) for b in blocks)
+        any3 = int(np.flatnonzero(c3)[0]) if c3.any() else None
+        any4 = int(np.flatnonzero(~c3)[0]) if (~c3).any() else None
+        src, real, gi, names = [], [], [], []
+        real_index = np.zeros(self.n_patches, dtype=int)
+        for d, (p3, p4) in enumerate(blocks):
+            for plist, n, fallback in ((p3, n3, any3), (p4, n4, any4)):
+                for k in range(n):
+                    if k < len(plist):
+                        real_index[plist[k]] = len(src)
+                        src.append(plist[k])
+                        real.append(True)
+                        gi.append(int(gidx[plist[k]]))
+                    else:
+                        src.append(plist[-1] if plist else fallback)
+                        real.append(False)
+                        gi.append(d * gd + gd - 1)
+                    names.append(self.names[src[-1]] if real[-1] else f"padding {len(src) - 1}")
+        src, real = np.array(src), np.array(real)
+        return dataclasses.replace(
+            self,
+            runs=[self.runs[p] for p in src],
+            gridcell_index=np.array(gi),
+            weight=np.where(real, self.weight[src], 0.0),
+            n_gridcells=d_n * gd,
+            names=names,
+            grids=[self.grids[p] for p in src],
+            firsts=None if self.firsts is None else [self.firsts[p] for p in src],
+            n_real=self.n_patches,
+            n_real_gridcells=n_g,
+            source=src,
+            real_index=real_index,
+            layout=(d_n, gd, n3, n4),
         )
 
     def params(self):
@@ -909,23 +997,25 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
     # patches; one group (the usual case) runs over all patches without gathering
     groups = batch.groups
     group_steps = [_patch_step(batch.run, filt, grid, names, max_layers) for grid, _ in groups]
-    n_p, n_g = batch.n_patches, batch.n_gridcells
+    # sizes the chunk works on: the whole batch, or one device's block (step 5)
+    if batch.layout is None:
+        n_p, n_g = batch.n_patches, batch.n_gridcells
+    else:
+        n_p, n_g = batch.layout[2] + batch.layout[3], batch.layout[1]
 
     def batched_step(templates, state, x_patch, params):
-        """The step of every patch: per group, vmapped; results back in patch order."""
+        """The step of every patch: per group (contiguous slot ranges), vmapped; the groups'
+        results joined in patch order. Slices and concatenation only: scattering the groups'
+        results into the scan's carry (``.at[idx].set``) gave wrong states and intermittent
+        segmentation faults on CPU (JAX 0.9.2; Phase 6 step 5)."""
         if len(groups) == 1:
             return jax.vmap(group_steps[0])(templates[0], state, x_patch, params)
-        out_state, out_values, out_errors = state, None, None
+        outs = []
         for (_, idx), step_g, tmpl in zip(groups, group_steps, templates):
-            take = lambda t: jax.tree.map(lambda a: jnp.take(a, idx, 0), t)  # noqa: E731
-            st, vals, err = jax.vmap(step_g)(tmpl, take(state), take(x_patch), take(params))
-            if out_values is None:  # patch-order arrays of the right shapes
-                out_values = {k: jnp.zeros((n_p,) + v.shape[1:], v.dtype) for k, v in vals.items()}
-                out_errors = jnp.zeros((n_p,) + err.shape[1:], err.dtype)
-            out_state = jax.tree.map(lambda a, b: a.at[idx].set(b), out_state, st)
-            out_values = {k: out_values[k].at[idx].set(v) for k, v in vals.items()}
-            out_errors = out_errors.at[idx].set(err)
-        return out_state, out_values, out_errors
+            lo, hi = int(idx[0]), int(idx[-1]) + 1
+            cut = lambda t: jax.tree.map(lambda a: a[lo:hi], t)  # noqa: E731
+            outs.append(jax.vmap(step_g)(tmpl, cut(state), cut(x_patch), cut(params)))
+        return jax.tree.map(lambda *parts: jnp.concatenate(parts), *outs)
 
     def gridcell_sum(v, weight, alive, gidx):  # (P, ...) -> (G, ...): area-weighted sum
         def per(a):  # (P,) -> broadcast over v's trailing axes
@@ -976,11 +1066,10 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
             lambda p: jnp.broadcast_to(p, (n,) + p.shape), (params, weight, alive, gidx)
         )
         errors = jnp.zeros((n_p, len(BALANCE_CHECKS)))
-        # the groups' templates, gathered once per chunk (not at every step)
-        templates = (
-            (template,)
-            if len(groups) == 1
-            else tuple(jax.tree.map(lambda a: jnp.take(a, idx, 0), template) for _, idx in groups)
+        # the groups' templates, cut once per chunk (not at every step)
+        templates = tuple(
+            jax.tree.map(lambda a, lo=int(idx[0]), hi=int(idx[-1]) + 1: a[lo:hi], template)
+            for _, idx in groups
         )
         (state, buffers, errors), _ = jax.lax.scan(
             lambda c, x: checkpointed_step(templates, c, x),
@@ -989,7 +1078,56 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
         )
         return state, buffers, errors
 
-    return jax.jit(run_chunk)
+    if batch.n_devices == 1:
+        return jax.jit(run_chunk)
+    return jax.jit(_sharded(run_chunk, batch.n_devices, template))
+
+
+def _sharded(run_chunk, n_devices: int, default_template):
+    """``run_chunk`` run on ``n_devices`` devices with ``jax.shard_map`` (step 5): every
+    array with a patch or gridcell axis is split into the devices' blocks along that axis
+    (axis 0, or axis 1 behind a time/record axis); each device runs the chunk on its block.
+    The parameters come per patch (gathered from the PFT table before), so their gradients
+    are summed over the devices by the gather's transpose outside the shard_map."""
+    from jax.sharding import Mesh
+    from jax.sharding import PartitionSpec as Pspec
+
+    devices = jax.devices()
+    if len(devices) < n_devices:
+        raise RuntimeError(f"execution.devices is {n_devices} but JAX sees {len(devices)}")
+    mesh = Mesh(np.array(devices[:n_devices]), ("patch",))
+    lead, behind, whole = Pspec("patch"), Pspec(None, "patch"), Pspec()
+
+    def wrapper(state, xg, xp, slots, buffers, params, weight, alive, gidx, template=None):
+        template = default_template if template is None else template
+
+        def spec_tree(tree, spec):
+            return jax.tree.map(lambda _: spec, tree)
+
+        buffer_specs = jax.tree.map(lambda x: behind if x.ndim >= 2 else whole, buffers)
+        in_specs = (
+            spec_tree(state, lead),
+            spec_tree(xg, behind),
+            spec_tree(xp, behind),
+            spec_tree(slots, whole),
+            buffer_specs,
+            spec_tree(params, lead),
+            lead,
+            lead,
+            lead,
+            spec_tree(template, lead),
+        )
+        out_specs = (spec_tree(state, lead), buffer_specs, lead)
+        # check_vma off: the physics has scans whose carry starts as a constant and becomes
+        # per-device; every input with a patch axis is split explicitly (the parameters are
+        # gathered per patch before), and the replicated outputs (record counts) are the same
+        # on every device by construction
+        f = jax.shard_map(
+            run_chunk, mesh=mesh, in_specs=in_specs, out_specs=out_specs, check_vma=False
+        )
+        return f(state, xg, xp, slots, buffers, params, weight, alive, gidx, template)
+
+    return wrapper
 
 
 def read_batch_inputs(batch: PatchBatch, first_step: int, n_steps: int):
@@ -1269,11 +1407,17 @@ def fill_patches(buffers, alive):
 def real_part(buffers, batch: PatchBatch):
     """Stream buffers without the padding patches and gridcells (:meth:`PatchBatch.padded`)."""
     if batch.n_real == batch.n_patches and batch.n_real_gridcells == batch.n_gridcells:
-        return buffers
+        if batch.layout is None:
+            return buffers
+    real = jnp.asarray(batch.real_index)
 
     def cut(values: dict) -> dict:
         return {
-            k: v[:, : batch.n_real_gridcells if k.startswith("gridcell:") else batch.n_real]
+            k: (
+                v[:, : batch.n_real_gridcells]
+                if k.startswith("gridcell:")
+                else jnp.take(v, real, axis=1)
+            )
             for k, v in values.items()
         }
 
@@ -1390,6 +1534,11 @@ def run_streams(
                 f"restart time {restart['time']} is not a step of this run "
                 f"({run_start} + {run.ntimes} steps of {step_seconds} s)"
             )
+        if restart.get("layout") != batch.layout:
+            raise ValueError(
+                f"restart written with device layout {restart.get('layout')}, this run has "
+                f"{batch.layout} (execution.devices must be the same)"
+            )
         state = jax.tree.map(jnp.asarray, restart["state"])
         for (where, a), b in zip(
             jax.tree_util.tree_leaves_with_path(state), jax.tree.leaves(template_state)
@@ -1428,7 +1577,7 @@ def run_streams(
         )
         slots = tuple(jnp.asarray(rc.index) for rc in records)
         weight = jnp.asarray(batch.weight, dtype=jnp.float64)
-        gidx = jnp.asarray(batch.gridcell_index)
+        gidx = jnp.asarray(batch.runner_gidx)
         chunk_start_state = state
         state, buffers, errors = runner(
             state, xg, xp, slots, buffers, params, weight, jnp.asarray(alive), gidx
@@ -1442,7 +1591,7 @@ def run_streams(
             for p, problems in failed.items():
                 print(f"excluding {batch.names[p]} after {where}: " + "; ".join(problems))
                 alive[p] = False
-            n_out = int((~alive[: batch.n_real]).sum())
+            n_out = int((~alive[batch.real_index]).sum())
             if n_out > max_failed_patch_fraction * batch.n_real:
                 from clm_src_main.abortutils import endrun
 
@@ -1465,6 +1614,7 @@ def run_streams(
                     "state": jax.tree.map(np.asarray, state),
                     "collectors": [c._pending for c in collectors],
                     "alive": alive.copy(),
+                    "layout": batch.layout,
                     "extra": save_extra() if save_extra is not None else None,
                 },
             )
