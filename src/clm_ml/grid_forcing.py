@@ -37,9 +37,11 @@ CLM's satellite phenology, and CLM's prescribed soil-moisture stream.
 **Vegetation**: the surface data's monthly ``MONTHLY_LAI``/``MONTHLY_SAI`` per PFT and
 gridcell, interpolated as CLM's satellite phenology does (:func:`clm_ml.grid.clm_monthly_weights`
 at the end of the step plus one step), then ``elai = tlai`` and ``esai = tsai`` (no snow
-burial: this model has no snow), set to 0 below 0.05 (CLM). (A patch left with little or no
-plant area still has a canopy: the model keeps a minimum plant area in every leafy layer,
-model.yaml ``canopy_layers.min_layer_plant_area``.)
+burial: this model has no snow), not below 0. Unlike CLM, values below 0.05 are *not* set to
+0 (decision 31): CLM does it to protect its big-leaf canopy from very small plant area, which
+the minimum plant area of every leafy layer (model.yaml
+``canopy_layers.min_layer_plant_area``, decision 30) does here; without the cutoff LAI and SAI
+enter continuously, so the model is differentiable with respect to them.
 
 **Soil water**: ``H2OSOI`` from monthly CLM history files per gridcell (the CLM run's
 ``landmask`` grid), **linear** between the files' time stamps (the middle of each month in
@@ -73,7 +75,6 @@ TKFRZ = 273.15  # SHR_CONST_TKFRZ
 PSTD = 101325.0  # SHR_CONST_PSTD
 SOLZEN_MIN = 0.001  # dshr_tInterp_mod solZenMin
 O2_MOLAR = 0.209  # CLM o2_molar_const
-ELAI_MIN = 0.05  # SatellitePhenologyMod: lai/sai below this are set to 0
 
 #: datm stream -> (variables, time interpolation)
 STREAMS = {
@@ -626,13 +627,12 @@ class GridInputs:
 
 def exposed_area(tlai, tsai, xp=np):
     """``(elai, esai)`` from the interpolated LAI and SAI: CLM's satellite phenology without
-    snow burial (``max(., 0)``, then 0 below 0.05) (``xp``: ``numpy`` or ``jax.numpy``, same
-    operations)."""
-    elai = xp.maximum(tlai, 0.0)
-    esai = xp.maximum(tsai, 0.0)
-    elai = xp.where(elai < ELAI_MIN, 0.0, elai)
-    esai = xp.where(esai < ELAI_MIN, 0.0, esai)
-    return elai, esai
+    snow burial, ``max(., 0)``, and without CLM's cutoff of values below 0.05 (decision 31;
+    module docstring) (``xp``: ``numpy`` or ``jax.numpy``, same operations).
+
+    Fortran reference: CTSM SatellitePhenologyMod.F90 (UpdateSatellitePhenologyCanopy), whose
+    ``if (elai(p) < 0.05_r8) elai(p) = 0._r8`` (and the same for esai) is left out."""
+    return xp.maximum(tlai, 0.0), xp.maximum(tsai, 0.0)
 
 
 def land_record(xw, land, gidx, nlevgrnd: int):

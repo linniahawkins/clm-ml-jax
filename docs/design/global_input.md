@@ -104,7 +104,7 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
 | G6 | Rain and snow | datm ramp `frac_rain = (T − 273.15)/2` in [0, 1], then CLM's repartition with its defaults (all snow at 0 °C, all rain at 2 °C: the same ramp). Snowfall reaches CLM-ml's canopy interception (`forc_snow`; towers: 0, as Fortran) | `shr_precip_mod.F90`, `atm2lndMod.F90` (`partition_precip`) |
 | G7 | Wind | datm sets `u = v = WIND/√2`; the model only uses `√(u² + v²)`, so `u = WIND, v = 0` (same speed, no round-off) | `datm_datamode_clmncep_mod.F90` |
 | G8 | CO2 | TRENDY `fco2_datm_global_simyr_1700-2025_TRENDY_c260722.nc` (annual global, mid-year stamps), linear in time at the step start (datm `co2tseries` uses linear); or a constant (`co2: {ppm: ...}`). O2 = 0.209 × pressure | `stream_definition_datm.xml` (`co2tseries`) |
-| G9 | LAI, SAI | Surface-data `MONTHLY_LAI/SAI` per PFT and gridcell with CLM's satellite-phenology weights (`interpMonthlyVeg`: daily, at the end of the step plus one step, no-leap month lengths), interpolated inside the compiled chunk; `elai = tlai`, `esai = tsai` (no snow burial: no snow model), set to 0 below 0.05 | `SatellitePhenologyMod.F90` |
+| G9 | LAI, SAI | Surface-data `MONTHLY_LAI/SAI` per PFT and gridcell with CLM's satellite-phenology weights (`interpMonthlyVeg`: daily, at the end of the step plus one step, no-leap month lengths), interpolated inside the compiled chunk; `elai = tlai`, `esai = tsai` (no snow burial: no snow model), not below 0. **Not copied** (decision 31): CLM's cutoff of LAI and SAI below 0.05 to 0, a numerical guard for CLM's big-leaf canopy that the per-layer minimum plant area (G20) provides here; without it LAI and SAI enter continuously (differentiable). It affected LAI in 7.7 % of patch-months (mean value 0.0096; up to 27 % of the vegetated area in February) and SAI in 8.9 % (mean 0.022) | `SatellitePhenologyMod.F90` |
 | G10 | Soil water | `H2OSOI` (20 levels) from the monthly h0a files, linear between the file stamps (mid-month in CTSM 5.4 history) at the step end (`get_curr_date`); interpolated inside the compiled chunk. The CLM run's 25 ground / 20 soil levels equal CLM-ml's `clm5_0` structure (checked) | `SoilMoistureStreamMod.F90` (`soilm_tintalgo = linear`) |
 | G11 | Initial soil temperature and water | `TSOI`/`H2OSOI` with the G10 interpolation at the end of the first step (what a tower setup reads from its CLM history slice), then CLM-ml's `SoilInit` (capped at porosity). CLM would start from a spun-up restart | — |
 | G12 | Canopy height | `MONTHLY_HEIGHT_TOP` with the G9 weights at the first step; constant in this file, and CLM-ml's layers are fixed at setup | `SatellitePhenologyMod.F90` |
@@ -259,8 +259,8 @@ All gridcell values finite. `soil_water_stress` (`btran`) is 1 everywhere: CLM-m
 stomatal scheme sets it to 1 and applies water stress through leaf water potential (as the
 Fortran); use the leaf water potential outputs instead.
 17. **LAI is not everywhere differentiable** (raise again: maintainer, 2026-10-29). Two places
-    in the vegetation data path: (a) CLM's satellite-phenology cutoff (G9) sets LAI and SAI to
-    exactly 0 below 0.05: a *jump* in the data (zero gradient below 0.05, a step at 0.05);
+    in the vegetation data path: (a) ~~CLM's satellite-phenology cutoff (G9) sets LAI and SAI
+    to exactly 0 below 0.05: a *jump* in the data~~ removed (decision 31, 2026-10-29);
     (b) the per-layer minimum plant area (G20) is a *kink*: in a floored layer the leaf area
     still follows LAI (d leaf area / d LAI = the layer's fraction) but the layer's total plant
     area is pinned at 0.01 (d total / d LAI = 0), and the slope changes where a layer crosses

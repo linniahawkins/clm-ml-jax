@@ -214,6 +214,13 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
 - New open issue 17: LAI non-differentiability (CLM's 0.05 cutoff, the floor's kink); raise
   again later (maintainer).
 
+### 2026-10-29: CLM's 0.05 LAI/SAI cutoff removed (decision 31)
+
+- Grid runs use the interpolated monthly LAI/SAI as given (not below 0); the cutoff's job is
+  done by the per-layer floor (decision 30), and it was a jump that blocked LAI gradients
+  (issue 17a resolved; 17b, the floor's kink, remains). Towers are unaffected (CHATS7 reads
+  CLM's history ELAI/ESAI).
+
 ## Next (resume here in a new session)
 
 1. **Check the end-of-Phase-6 job** `endphase` (PBS job 8001129, CPU, project P93300041;
