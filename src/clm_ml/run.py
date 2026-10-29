@@ -4,10 +4,10 @@ A run: the contents of ``run.yaml`` and everything it references, loaded and val
 ``run.yaml`` replaces the Fortran namelist. It names the model and params files, the
 towers, the dates, the forcing files, the initial conditions and the output.
 
-In this phase (modernization plan, Phase 1) ``Run.execute()`` runs the legacy driver in a
-separate process (:mod:`clm_ml.legacy.worker`), so results are identical to
-``clm-ml-offline``. Supported for now: one tower with one patch, initial conditions from the
-CLM history file, output every time step.
+``Run.execute()`` runs the legacy (Fortran-translated) physics in a separate process
+(:mod:`clm_ml.legacy.worker`). A run holds any number of towers (gridcells) and patches
+(Phase 6): every patch is set up as a one-patch legacy tower, and the time steps run batched
+over the patches in one compiled program, with one clock for all gridcells (decision 24).
 """
 
 from __future__ import annotations
@@ -115,6 +115,10 @@ class ExecutionSection:
 
     chunk: str = "1 month"  # decision 17: one compiled chunk per calendar month
     restart_every: Optional[str] = None  # "N month(s)" / "N year(s)"; null: end of run only
+    # Pad the domain to this many patches / gridcells (weight-0 copies, not in the output), so
+    # domains of different sizes share one compiled program; null: the domain's own counts
+    patch_count: Optional[int] = None
+    gridcell_count: Optional[int] = None
 
 
 def parse_every(text: Optional[str], key: str):
@@ -251,8 +255,7 @@ class Run:
     @property
     def restart_path(self) -> Path:
         """Where this run writes its restart (the previous one is kept as ``.prev``)."""
-        tower = self.domain.gridcells.names[0]
-        return self.output_directory / "restart" / f"{tower}_restart.pkl"
+        return self.output_directory / "restart" / f"{self.name}_restart.pkl"
 
     # -- running -----------------------------------------------------------------------
 
@@ -329,9 +332,27 @@ class Run:
             codes["nlayer_above"] = int(self.domain.patches.n_layers_above[patch])
         return codes
 
-    def legacy_spec(self, legacy_ascii_dir: Optional[Path]) -> dict:
-        """Everything the legacy worker needs, as JSON-serializable values."""
-        tower_name = self.domain.gridcells.names[0]
+    @property
+    def name(self) -> str:
+        """The run's name in file names: its tower, or ``domain`` for several gridcells."""
+        names = self.domain.gridcells.names
+        return names[0] if len(names) == 1 else "domain"
+
+    def legacy_tower_name(self, patch: int) -> str:
+        """Patch ``patch``'s entry in the legacy tower table: its gridcell's name, with
+        ``#k`` (its place on the gridcell) when the gridcell has several patches."""
+        gidx = self.domain.patches.gridcell_index
+        g = int(gidx[patch])
+        name = self.domain.gridcells.names[g]
+        if int(np.sum(gidx == g)) == 1:
+            return name
+        return f"{name}#{int(np.sum(gidx[:patch] == g))}"
+
+    def _patch_spec(self, patch: int) -> dict:
+        """The per-patch part of the legacy spec: patch ``patch`` set up as a one-patch
+        legacy tower (its gridcell's forcing files, its own tower values and layer counts)."""
+        g = int(self.domain.patches.gridcell_index[patch])
+        tower_name = self.domain.gridcells.names[g]
         f = self.run_file.forcing
         clm_start = _parse_datetime(f.clm_history.start, "forcing.clm_history.start")
         adjust = f.soil_water.adjustment
@@ -345,7 +366,7 @@ class Run:
             return [str(p) for p in self.files(section.files, tower_name, f"forcing.{key}")]
 
         namelist = {
-            "tower_name": tower_name,
+            "tower_name": self.legacy_tower_name(patch),
             "start_ymd": int(f"{self.start:%Y%m%d}"),
             "start_tod": self.start.hour * 3600 + self.start.minute * 60 + self.start.second,
             "stop_option": "nsteps",
@@ -371,11 +392,34 @@ class Run:
         }
         return {
             "namelist": namelist,
-            "varctl": self.patch_fortran_codes(0, met.interpolation),
+            "varctl": self.patch_fortran_codes(patch, met.interpolation),
+            "tower_name": namelist["tower_name"],
+            "tower": _legacy_tower_values(self.domain, patch),
+        }
+
+    def legacy_spec(self, legacy_ascii_dir: Optional[Path], patch: int = 0) -> dict:
+        """Everything the legacy worker needs, as JSON-serializable values: patch ``patch``'s
+        setup at the top level (one-patch models, ``clm_ml.model``), every patch's in
+        ``patches``, and the domain's patch-gridcell map and weights in ``batch``."""
+        tower_name = self.domain.gridcells.names[0]
+        spec = self._patch_spec(patch)
+        return {
+            **spec,
+            "patches": [
+                spec if p == patch else self._patch_spec(p) for p in range(self.domain.n_patches)
+            ],
+            "batch": {
+                "gridcell_index": self.domain.patches.gridcell_index.tolist(),
+                "weight": self.domain.patches.weight.tolist(),
+                "n_gridcells": self.domain.n_gridcells,
+                "patch_count": self.run_file.execution.patch_count,
+                "gridcell_count": self.run_file.execution.gridcell_count,
+            },
+            "file_prefix": self.name,
+            "on_patch_error": self.config.numerics.on_patch_error,
+            "max_failed_patch_fraction": self.config.numerics.max_failed_patch_fraction,
             "params": {k: v.tolist() for k, v in self.params.values.items()},
             "params_source": self.params.source,
-            "tower_name": tower_name,
-            "tower": _legacy_tower_values(self.domain),
             "legacy_ascii_dir": str(legacy_ascii_dir) if legacy_ascii_dir else None,
             "max_layers": self.config.canopy_layers.max_layers,
             "streams": [
@@ -470,17 +514,33 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
         config=config,
         min_patch_weight=run_file.domain.min_patch_weight,
     )
-    if domain.n_patches != 1:
+    ex = run_file.execution
+    for key, count, own in (
+        ("patch_count", ex.patch_count, domain.n_patches),
+        ("gridcell_count", ex.gridcell_count, domain.n_gridcells),
+    ):
+        if count is not None and count < own:
+            raise ConfigError(f"{path.name}: execution.{key} ({count}) is less than {own}")
+    if (ex.patch_count or domain.n_patches) > domain.n_patches and not (
+        (ex.gridcell_count or domain.n_gridcells) > domain.n_gridcells
+    ):
         raise ConfigError(
-            f"{path.name}: this version runs one patch per run; "
-            f"{run_file.domain.towers} has {domain.n_patches} (multi-patch runs: Phase 6)"
+            f"{path.name}: execution.patch_count pads the patches: set gridcell_count above "
+            f"{domain.n_gridcells} too (padding patches go on a padding gridcell)"
         )
-    step_minutes = int(domain.gridcells.forcing_step_minutes[0])
-    if run_file.time.step_seconds != step_minutes * 60:
+    if run_file.output.legacy_ascii and domain.n_patches > 1:
         raise ConfigError(
-            f"{path.name}: time.step_seconds is {run_file.time.step_seconds} but tower "
-            f"{domain.gridcells.names[0]} has forcing_step_minutes {step_minutes}"
+            f"{path.name}: output.legacy_ascii: the legacy .out files (validation) hold one "
+            f"patch; this domain has {domain.n_patches}"
         )
+    # One clock for the whole run (decision 24): every gridcell's forcing has the run's step
+    for g, name in enumerate(domain.gridcells.names):
+        step_minutes = int(domain.gridcells.forcing_step_minutes[g])
+        if run_file.time.step_seconds != step_minutes * 60:
+            raise ConfigError(
+                f"{path.name}: time.step_seconds is {run_file.time.step_seconds} but tower "
+                f"{name} has forcing_step_minutes {step_minutes}"
+            )
 
     model_step = config.numerics.step_seconds or run_file.time.step_seconds
     if model_step <= 0 or run_file.time.step_seconds % model_step:
@@ -490,21 +550,23 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
         )
     start, n_steps = _resolve_time(run_file.time, path.name, model_step)
     run = Run(run_file, base_dir, config, params, domain, start, n_steps, source=path.name)
-    tower = domain.gridcells.names[0]
     forcing = run_file.forcing
-    run.files(forcing.meteorology.files, tower, "forcing.meteorology.files")
-    for key in ("vegetation", "soil_water"):
-        section = getattr(forcing, key)
-        if section.source == "file":
-            if not section.files:
-                raise ConfigError(f"{path.name}: forcing.{key}.files: required with source file")
-            run.files(section.files, tower, f"forcing.{key}.files")
-    files = {"forcing.clm_history.file": forcing.clm_history.file}
-    if forcing.soil_water.adjustment:
-        files["forcing.soil_water.adjustment.file"] = forcing.soil_water.adjustment.file
-    for key, text in files.items():
-        if not run.path(text, tower).exists():
-            raise ConfigError(f"{path.name}: {key}: file not found: {run.path(text, tower)}")
+    for tower in domain.gridcells.names:  # every gridcell's forcing files ({tower} expanded)
+        run.files(forcing.meteorology.files, tower, "forcing.meteorology.files")
+        for key in ("vegetation", "soil_water"):
+            section = getattr(forcing, key)
+            if section.source == "file":
+                if not section.files:
+                    raise ConfigError(
+                        f"{path.name}: forcing.{key}.files: required with source file"
+                    )
+                run.files(section.files, tower, f"forcing.{key}.files")
+        files = {"forcing.clm_history.file": forcing.clm_history.file}
+        if forcing.soil_water.adjustment:
+            files["forcing.soil_water.adjustment.file"] = forcing.soil_water.adjustment.file
+        for key, text in files.items():
+            if not run.path(text, tower).exists():
+                raise ConfigError(f"{path.name}: {key}: file not found: {run.path(text, tower)}")
     substeps = model_step / config.numerics.substep_seconds
     if substeps != int(substeps):
         raise ConfigError(
@@ -554,11 +616,9 @@ _RAW_PREFIXES = ("mlcanopy.", "temperature.")
 def _check_supported(run_file: RunFile, source: str) -> None:
     if run_file.domain.type != "towers":
         raise ConfigError(f"{source}: domain.type: 'grid' is planned but not yet supported")
-    if len(run_file.domain.towers) != 1:
-        raise ConfigError(
-            f"{source}: domain.towers: this version runs one tower per run "
-            f"(got {list(run_file.domain.towers)}; multi-tower runs: Phase 6)"
-        )
+    towers = list(run_file.domain.towers)
+    if len(set(towers)) != len(towers):
+        raise ConfigError(f"{source}: domain.towers: a tower is listed twice ({towers})")
     ic = run_file.initial_conditions
     if ic.source == "restart" and not ic.restart_file:
         raise ConfigError(
@@ -620,9 +680,11 @@ def _resolve_time(t: TimeSection, source: str, step_seconds: int) -> tuple[dt.da
     return start, int(n)
 
 
-def _legacy_tower_values(domain: Domain) -> dict:
-    """The single patch's tower values in ``TowerDataMod`` form (-999 = default)."""
+def _legacy_tower_values(domain: Domain, patch: int = 0) -> dict:
+    """Patch ``patch``'s tower values in ``TowerDataMod`` form (-999 = default): its
+    gridcell's location and forcing, its soil column, and its own vegetation."""
     g, p, c = domain.gridcells, domain.patches, domain.columns
+    gi, ci = int(p.gridcell_index[patch]), int(p.column_index[patch])
 
     def v(x):
         x = float(x)
@@ -632,19 +694,19 @@ def _legacy_tower_values(domain: Domain) -> dict:
         return [-999.0, -999.0] if np.isnan(x).any() else [float(x[0]), float(x[1])]
 
     return {
-        "tower_lat": v(g.latitude[0]),
-        "tower_lon": v(g.longitude[0]),
-        "tower_ht": v(g.measurement_height[0]),
-        "tower_time": int(g.forcing_step_minutes[0]),
-        "tower_tex": c.texture_class[0] or "",
-        "tower_sand": v(c.sand_percent[0]),
-        "tower_clay": v(c.clay_percent[0]),
-        "tower_organic": v(c.organic_matter[0]),
-        "tower_isoicol": int(c.color_class[0]),
-        "tower_zbed": v(c.bedrock_depth[0]),
-        "tower_pft": int(p.pft_index[0]),
-        "tower_canht": v(p.canopy_height[0]),
-        "tower_root": v(p.root_biomass[0]),
-        "tower_pbeta_lai": pair(p.leaf_area_profile_beta[0]),
-        "tower_pbeta_sai": pair(p.stem_area_profile_beta[0]),
+        "tower_lat": v(g.latitude[gi]),
+        "tower_lon": v(g.longitude[gi]),
+        "tower_ht": v(g.measurement_height[gi]),
+        "tower_time": int(g.forcing_step_minutes[gi]),
+        "tower_tex": c.texture_class[ci] or "",
+        "tower_sand": v(c.sand_percent[ci]),
+        "tower_clay": v(c.clay_percent[ci]),
+        "tower_organic": v(c.organic_matter[ci]),
+        "tower_isoicol": int(c.color_class[ci]),
+        "tower_zbed": v(c.bedrock_depth[ci]),
+        "tower_pft": int(p.pft_index[patch]),
+        "tower_canht": v(p.canopy_height[patch]),
+        "tower_root": v(p.root_biomass[patch]),
+        "tower_pbeta_lai": pair(p.leaf_area_profile_beta[patch]),
+        "tower_pbeta_sai": pair(p.stem_area_profile_beta[patch]),
     }

@@ -29,6 +29,12 @@ pytestmark = pytest.mark.regression
 # 1e-10 is the level above which the regression policy looks for a defect
 # (numerics_and_regression.md §6).
 ROUNDOFF = 1e-10
+# The sensible heat flux between air layers is the most amplified of these differences: with
+# JAX 0.9.2 on Derecho (Phase 6) it reaches 1.1e-10 (FluxProfileSolution, step 40) against the
+# recording made with JAX 0.6.2, the same before and after the Phase 6 changes, while the
+# solved air and leaf temperatures agree to better than 1e-13 at every recorded call (no
+# discrete defect: numerics_and_regression.md §6).
+ROUNDOFF_FIELD = {"shair_profile": 3e-10}
 
 
 @pytest.fixture(scope="module")
@@ -46,5 +52,7 @@ def test_routine_reproduces_recorded_outputs(routine, replay_report):
     calls = replay_report[routine]
     assert calls, f"no recorded calls for {routine}"
     for call in calls:
-        worst = {f: d for f, d in call["max_rel_diff"].items() if d > ROUNDOFF}
+        worst = {
+            f: d for f, d in call["max_rel_diff"].items() if d > ROUNDOFF_FIELD.get(f, ROUNDOFF)
+        }
         assert not worst, f"{routine} (step {call['step']}): fields beyond round-off: {worst}"

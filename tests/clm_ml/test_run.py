@@ -72,7 +72,7 @@ def test_overrides(chats_run_dir):
     [  # fmt: skip
         (lambda d: d["time"].update(days=1), "exactly one of end, days, steps"),
         (lambda d: d["time"].update(step_seconds=3600), "forcing_step_minutes 30"),
-        (lambda d: d["domain"].update(towers=["CHATS7", "CHATS7"]), "one tower per run"),
+        (lambda d: d["domain"].update(towers=["CHATS7", "CHATS7"]), "listed twice"),
         (lambda d: d["domain"].update(type="grid"), "not yet supported"),
         (lambda d: d["initial_conditions"].update(source="restart"), "restart_file: required"),
         (lambda d: d.update(execution={"chunk": "5 days"}), "only '1 month'"),

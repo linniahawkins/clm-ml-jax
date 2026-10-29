@@ -1468,7 +1468,36 @@ The audit at the end of Phase 5b (module state the time step read, set up once p
   longitude, soil colour and layer counts, each equal to its own single run; CHATS7 alone
   stays bit for bit.
 
-**Step 3, many gridcells and patches in one run (`vmap`).**
+**Step 3, many gridcells and patches in one run (`vmap`).** 3a done (2026-10-28): `Run.legacy_spec` per
+patch (`patches`, `batch`); the worker sets up each patch as a one-patch legacy run and runs
+its first step before the next setup (both read the patch's PFT and tables from module state)
+and records its `GridInfo`; `offline_executable.main.PatchBatch`, `make_batch_runner` (the
+one-patch step `vmap`ped over patches, forcing per gridcell gathered to patches, CLM history
+record per patch, `gridcell:<variable>` sums accumulated in the scan), `run_streams` on a
+batch (one run is a batch of one; restart version 3 has the patch axis); per-patch stop
+messages; `Outputs.gridcell_data`. Mixed C3/C4 batches are refused until step 4. Test:
+`tests/regression/test_patches_batched.py`. Round-off only for one patch (≤ 2.7e-11).
+3b done: `clm_ml.model.Model` runs the batch in-process: a parameter table with one row per
+PFT of the domain (`Model.pft_names`), gathered to the patches (gradients per PFT); patch
+weights and the patch-gridcell map are inputs of the compiled chunk (gradient with respect to
+the weights); `run_chunk(..., program=other)` runs a model's inputs through another model's
+program (`test_model_patches.py`, `test_sites_one_program.py`).
+3c done (decision 25): `numerics.on_patch_error: stop | exclude`,
+`numerics.max_failed_patch_fraction`; failures per patch (balance checks and health); an
+excluded patch keeps its last good state, its outputs are fill values, gridcell sums leave out
+excluded or non-finite patches at every step (weights renormalized; the plain sum when all
+are fine) and its parameters enter through `where(alive, p, stop_gradient(p))`; the alive
+mask is saved in restarts (`test_patch_exclusion.py`). A NaN parameter (e.g. `vcmax25`) does
+not make a patch fail: the photosynthesis guards close the stomata.
+3d done: `execution.patch_count`/`gridcell_count` pad the batch (weight-0 copies of the last
+patch on a padding gridcell, padding gridcells read the last real gridcell's forcing, dropped
+from the outputs), so domains of different sizes share one compiled program
+(`test_patch_padding.py`).
+Found on the way: patches without explicit leaf/stem profiles stopped at setup
+(`beta_function_incomplete_cf error`): the JAX translation initialized `pbeta_lai/sai` to
+`+spval` where Fortran uses `-spval` (the sign marks "not set by the tower" for
+`getPADparameters`); fixed (no effect on CHATS7, which sets them).
+Plan:
 - Setup: each patch with the existing legacy code in a Python loop, stacked along a patch
   axis (enough for tests and up to ~10³ patches; step 6 replaces it).
 - Forcing with a gridcell axis, gathered to patches; one clock (decision 24).
@@ -1485,13 +1514,29 @@ The audit at the end of Phase 5b (module state the time step read, set up once p
   alone (round-off); permuting patches permutes outputs only; gridcell output equals the
   weighted sum for every statistic; gradient with respect to patch weights.
 
-**Step 4, C3/C4 groups in one program** (decision 22): the C3 patches and the C4 patches form
+**Step 4, C3/C4 groups in one program** ✅ Done (2026-10-28): `PatchBatch.groups` (the C3
+patches, then the C4 patches, from each patch's `GridInfo`); `make_batch_runner` runs each
+group's own pathway vmapped over its patches (state, forcing and parameters gathered per
+step, the groups' templates once per chunk) and puts the results back in patch order; one
+group (the usual case) runs as before, without gathering. Test:
+`tests/regression/test_c3_c4_groups.py` (a walnut and a C4 grass on one gridcell match each
+patch run alone; the gridcell value is the weighted sum).
+Original plan: the C3 patches and the C4 patches form
 two groups of fixed size, each batched with `vmap` and running only its own pathway
 (`GridInfo.c3` static per group); outputs are combined and PFT-parameter gradients add up
 across groups. Test: a gridcell with a C3 and a C4 patch matches each patch run alone. The same
 group mechanism can later bucket `max_layers` sizes if padding waste matters.
 
-**Step 5, several devices:** patches sorted by gridcell, no gridcell split between devices (so
+**Step 5, several devices** (design, 2026-10-28): every device runs the same program
+(`jax.shard_map` over a `patch` mesh axis), so every device gets the same block layout:
+`Gd` gridcells (consecutive gridcells of the domain, padded) and their patches in `N3` C3
+slots followed by `N4` C4 slots (`N3`, `N4`: the largest counts over the devices), the empty
+slots filled with weight-0 copies of a patch of the same pathway on the block's last
+gridcell. The groups become the same contiguous ranges on every device (no gathers), the
+forcing gather and the gridcell sums stay on the device, and the only communication is the
+sum of shared PFT-parameter gradients (inserted by JAX). Outputs are mapped back to domain
+order (`real_index`) and the padding dropped. One device keeps today's layout.
+Original plan: patches sorted by gridcell, no gridcell split between devices (so
 gridcell sums need no communication); the patch axis is split across devices with
 `jax.sharding`, PFT-parameter gradients summed across them. Test on CPU with simulated devices
 (`--xla_force_host_platform_device_count`); timing on 4 A100s.

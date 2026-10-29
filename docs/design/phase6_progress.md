@@ -80,8 +80,24 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   different lat/lon, bedrock, soil colour, layer counts through site A's program, no
   recompilation, equal to B's own run and B alone). Bit for bit.
 
+### 2026-10-28: step 3 (3a-3d)
+
+- 3a run path batched (`PatchBatch`, `make_batch_runner`, `read_batch_inputs`, `run_streams`
+  on a batch, `Outputs.gridcell_data`); each patch set up and first-stepped before the next
+  setup (module state); `GridInfo` per patch; mixed C3/C4 refused until step 4.
+- 3b `Model` batched (PFT table, weights and gridcell map as inputs, `program=`).
+- 3c decision 25 (`on_patch_error`, `max_failed_patch_fraction`).
+- 3d padding (`execution.patch_count`, `gridcell_count`).
+- Fixed: `pbeta_lai/sai` initial value `-spval` (Fortran) instead of `+spval` (PFT default
+  leaf/stem profiles were never applied; setup stopped for patches without explicit profiles).
+- `test_process_io`: `shair_profile` allowed 3e-10 (1.1e-10 with JAX 0.9.2 before any Phase 6
+  change; solved temperatures agree < 1e-13).
+- Login-node limit: running 5 model processes at once was killed (SIGKILL); tests run at most
+  2 in parallel.
+- New tests: `test_patches_batched`, `test_model_patches` (slow part: PFT gradient vs finite
+  difference), `test_patch_exclusion`, `test_patch_padding`.
+
 ## Next
 
-Step 3 (many gridcells and patches, vmap). (Old note: step 2b: split `MLOptions` (setup-only layer settings out of the static options) and per-patch
-layer counts (`towers.yaml` `n_layers_within`/`n_layers_above`); then the step 2 test (one
-program, two patches differing in every per-patch field).
+Commit step 3 (after the full regression on snapshot `trees/s3`; regenerate the reference:
+vmap round-off), run the slow PFT-gradient test; then step 4 (C3/C4 groups in one program).

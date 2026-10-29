@@ -61,6 +61,10 @@ class NumericsOptions:
         "rk4",
     ] = "rk4"  # runge_kutta_type
     checkpoint_steps: bool = True  # used from Phase 4 (whole-run compilation)
+    # A patch that fails a conservation check or whose state becomes unhealthy (decision 25):
+    # stop the run naming it (Fortran), or exclude it from then on (global runs)
+    on_patch_error: Literal["stop", "exclude"] = "stop"
+    max_failed_patch_fraction: float = 0.01  # with exclude: stop when more patches fail
 
 
 @dataclasses.dataclass(frozen=True)
@@ -101,6 +105,8 @@ class ModelConfig:
             raise ConfigError("model.yaml: physics.acclimation_days must be positive")
         if self.numerics.substep_seconds <= 0:
             raise ConfigError("model.yaml: numerics.substep_seconds must be positive")
+        if not 0.0 <= self.numerics.max_failed_patch_fraction <= 1.0:
+            raise ConfigError("model.yaml: numerics.max_failed_patch_fraction must be in [0, 1]")
         if self.canopy_layers.max_layers < 2:
             raise ConfigError("model.yaml: canopy_layers.max_layers must be at least 2")
         within, above = self.canopy_layers.n_layers_within, self.canopy_layers.n_layers_above

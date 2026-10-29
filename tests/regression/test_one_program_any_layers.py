@@ -28,9 +28,7 @@ import json, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, {src!r})
 from clm_ml.model import Model
-import jax.numpy as jnp
 import numpy as np
-import offline_executable.main as M
 from clm_ml import output_streams as S
 from clm_ml.legacy.namelist import convert_namelist
 from clm_ml.run import load_run
@@ -51,30 +49,18 @@ def chunk(model):
     return model.run_chunk(model.initial_state(), model.forcing(first, n), first,
                            streams=[stream])
 
-chunk(a)  # creates a's runner
+chunk(a)  # creates a's program
 runner = next(iter(a._runners.values()))
 _, own = chunk(b)  # b through its own program
-
-def through_a(model):  # model's chunk through a's compiled program, all inputs explicit
-    starts = M.step_starts(model._legacy, first, n)
-    rc = S.chunk_records(starts, first, model._legacy.time_of(0).dtime, stream.frequency)
-    shapes = M.output_shapes(model._legacy, model._template, list(names), 50)
-    buffers = (S.init_buffers("instantaneous", len(rc.keys),
-                              {{v: shapes[v] for v in names}}, jnp),)
-    _, bufs, _ = runner(model.initial_state(), model.forcing(first, n),
-                        (jnp.asarray(rc.index),), buffers, model.default_params(),
-                        model._template)
-    return dict(bufs[0]["value"])
-
-through_a(a)  # compiles a's program for this call signature
 compiled_before = runner._cache_size()
-via_a = through_a(b)
+_, via_a = b.run_chunk(b.initial_state(), b.forcing(first, n), first, streams=[stream],
+                       program=a)  # b's inputs (state, forcing, template) through a's program
 out = {{
     "layers": layers,
     "compiled_before": compiled_before,
     "compiled_after": runner._cache_size(),
-    "own": {{k: np.asarray(v).tolist() for k, v in own["s"].items()}},
-    "via_a": {{k: np.asarray(v).tolist() for k, v in via_a.items()}},
+    "own": {{k: np.asarray(v).tolist() for k, v in own["s"].items() if ":" not in k}},
+    "via_a": {{k: np.asarray(v).tolist() for k, v in via_a["s"].items() if ":" not in k}},
 }}
 print("RESULT" + json.dumps(out))
 """

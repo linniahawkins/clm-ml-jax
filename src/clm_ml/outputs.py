@@ -291,6 +291,9 @@ class Outputs:
     soil_temperature: np.ndarray | None = None  # (time, patch, soil_layer) K
     soil_depth: np.ndarray | None = None  # (patch, soil_layer) m, node depth
     raw: Mapping[str, np.ndarray] = dataclasses.field(default_factory=dict, repr=False)
+    # Area-weighted gridcell sums formed at every step inside the run (Phase 6 step 3),
+    # ``(time, gridcell, ...)``: used for the gridcell level, so min/max are right there
+    gridcell_data: Mapping[str, np.ndarray] = dataclasses.field(default_factory=dict, repr=False)
 
     def __getattr__(self, name: str) -> np.ndarray:
         data = object.__getattribute__(self, "data")
@@ -331,11 +334,17 @@ class Outputs:
         ``meta`` is :func:`domain_meta` plus ``soil_depth`` ``(patch, soil_layer)``. Raw
         legacy fields (``mlcanopy.<field>``, validation) go to ``raw``."""
         soil = records.get("soil_temperature")
+        gridcell = "gridcell:"
         return cls(
             data={
                 n: np.asarray(v, dtype=float)
                 for n, v in records.items()
-                if n not in ("time", "soil_temperature") and "." not in n
+                if n not in ("time", "soil_temperature") and "." not in n and ":" not in n
+            },
+            gridcell_data={
+                n[len(gridcell) :]: np.asarray(v, dtype=float)
+                for n, v in records.items()
+                if n.startswith(gridcell)
             },
             time=np.asarray(records["time"], dtype="datetime64[ns]"),
             patch_gridcell=np.asarray(meta["patch_gridcell"]),
@@ -366,22 +375,32 @@ class Outputs:
             time=self.time[mask],
             soil_temperature=None if self.soil_temperature is None else self.soil_temperature[mask],
             raw={n: v[mask] for n, v in self.raw.items()},
+            gridcell_data={n: v[mask] for n, v in self.gridcell_data.items()},
         )
 
     def select(self, names: Sequence[str]) -> "Outputs":
         unknown = sorted(set(names) - set(self.data))
         if unknown:
             raise KeyError(f"unknown output variable(s) {unknown}; see clm_ml.outputs.VARIABLES")
-        return dataclasses.replace(self, data={n: self.data[n] for n in names})
+        return dataclasses.replace(
+            self,
+            data={n: self.data[n] for n in names},
+            gridcell_data={n: v for n, v in self.gridcell_data.items() if n in names},
+        )
 
     def gridcell_mean(self) -> dict[str, np.ndarray]:
         """Area-weighted mean over each gridcell's patches, for variables without a
         ``layer`` dimension (patches on a gridcell have different layer grids).
-        Returns ``{name: array (time, gridcell, ...)}``."""
+        Returns ``{name: array (time, gridcell, ...)}``. Values summed over the gridcell's
+        patches at every step inside the run (``gridcell_data``) are used when present (the
+        only right ones for min and max); otherwise the patch records are averaged."""
         n_g = len(self.gridcell_names)
         out = {}
         for name, values in self.data.items():
             if _PATCH_ONLY_DIMS & set(VARIABLES_BY_NAME[name].dims):
+                continue
+            if name in self.gridcell_data:
+                out[name] = self.gridcell_data[name]
                 continue
             w = self.patch_weight.reshape((1, -1) + (1,) * (values.ndim - 2))
             summed = np.zeros((values.shape[0], n_g) + values.shape[2:])

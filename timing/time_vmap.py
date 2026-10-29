@@ -53,19 +53,25 @@ def main() -> None:
     tmp = Path(tempfile.mkdtemp())
     convert_namelist(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day", tmp)
     model = Model.from_run(load_run(tmp / "run.yaml", []))
-    state, params = model.initial_state(), model.default_params()
+    # The one-patch program and inputs of the model's (only) patch, vmapped below over N
+    # identical copies (Model itself batches the patches of a domain)
+    from clm_ml.legacy.state import state_from_instances
+
+    legacy, (insts, filt) = model._legacy, model._batch.firsts[0]
+    state, params = state_from_instances(insts), legacy.canopy_params
     first, n, npatch = 1, args.steps, args.patches
-    forcing = model.forcing(first, n)
+    chunk = legacy.load_chunk(first, n)
+    forcing = M.stack_step_inputs(
+        [M.step_inputs(legacy, chunk, k) for k in range(first, first + n)]
+    )
 
     # The chunk's pieces, as Model.run_chunk builds them
     stream = StreamSpec("s", "step", "mean", ("latent_heat_flux",))
     max_layers = model.run.config.canopy_layers.max_layers
-    runner = M.make_stream_runner(
-        model._legacy, model._template, model._filt, (stream,), max_layers
-    )
-    shapes = M.output_shapes(model._legacy, model._template, stream.variables, max_layers)
-    starts = M.step_starts(model._legacy, first, n)
-    rc = S.chunk_records(starts, first, model._legacy.time_of(0).dtime, stream.frequency)
+    runner = M.make_stream_runner(legacy, insts, filt, (stream,), max_layers)
+    shapes = M.output_shapes(legacy, insts, stream.variables, max_layers)
+    starts = M.step_starts(legacy, first, n)
+    rc = S.chunk_records(starts, first, legacy.time_of(0).dtime, stream.frequency)
     buffers = (S.init_buffers("mean", len(rc.keys), {v: shapes[v] for v in stream.variables}, jnp),)
     slots = (jnp.asarray(rc.index),)
 
@@ -78,7 +84,7 @@ def main() -> None:
         return jax.tree.map(lambda x: jnp.broadcast_to(x, (npatch,) + jnp.shape(x)).copy(), tree)
 
     batched = jax.jit(jax.vmap(one_patch, in_axes=(0, 0, 0, None)))
-    xs = (stack(state), stack(forcing), stack(model._template))
+    xs = (stack(state), stack(forcing), stack(insts))
     jax.block_until_ready(xs)
 
     def forward(p):
@@ -101,7 +107,7 @@ def main() -> None:
         result[f"{name}_patch_steps_per_s"] = round(npatch * n / times[1], 1)
         if name == "forward":
             lh, errors = out
-            ref, _ = jax.jit(one_patch)(state, forcing, model._template, params)
+            ref, _ = jax.jit(one_patch)(state, forcing, insts, params)
             ref = np.asarray(ref)
             diff = np.abs(np.asarray(lh) - ref[None]) / np.maximum(np.abs(ref[None]), 1e-30)
             result["max_rel_diff_vs_single"] = float(diff.max())

@@ -25,6 +25,9 @@ numerics:
   integrator: rk4                         # euler | rk2_trapezoid | rk2_midpoint | rk2_ralston |
                                           # rk3_heun | rk3_ralston | rk3_kutta | rk4   (runge_kutta_type)
   checkpoint_steps: true                  # trade compute for memory when taking gradients
+  on_patch_error: stop                    # stop | exclude: a failing patch stops the run (as
+                                          # Fortran) or is left out from then on (global runs)
+  max_failed_patch_fraction: 0.01         # with exclude: stop when more patches than this fail
 
 canopy_layers:
   max_layers: 50                          # fixed array size for every patch (CHATS7 uses 46)

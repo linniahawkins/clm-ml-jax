@@ -108,6 +108,34 @@ def setup_legacy_run(spec: dict):
         return main_mod.setup_run(main_mod.read_namelist(str(namelist)), _options(spec))
 
 
+def setup_batch(spec: dict):
+    """Every patch of ``spec`` (``spec["patches"]``) set up as a one-patch legacy run, one
+    after the other in this process (each installs its tower entry and tables first, and runs
+    its first step before the next setup), as an ``offline_executable.main.PatchBatch``
+    (Phase 6 step 3)."""
+    import offline_executable.main as main_mod
+
+    runs, grids, firsts = [], [], []
+    for patch in spec["patches"]:
+        patch_spec = {**spec, **patch}
+        prepare_process(patch_spec)
+        runs.append(setup_legacy_run(patch_spec))
+        # before the next patch's setup replaces the module state they read:
+        grids.append(main_mod.patch_grid(runs[-1]))
+        firsts.append(main_mod.PatchBatch.first_step(runs[-1], grids[-1]))
+    batch = spec["batch"]
+    domain_batch = main_mod.PatchBatch(
+        runs,
+        np.asarray(batch["gridcell_index"], dtype=int),
+        np.asarray(batch["weight"], dtype=float),
+        int(batch["n_gridcells"]),
+        [patch["tower_name"] for patch in spec["patches"]],
+        grids,
+        firsts,
+    )
+    return domain_batch.padded(batch.get("patch_count"), batch.get("gridcell_count"))
+
+
 def _options(spec: dict):
     """The multilayer canopy options of ``spec`` (model.yaml), passed to the physics."""
     from multilayer_canopy.MLclm_varctl import MLOptions
@@ -116,46 +144,55 @@ def _options(spec: dict):
 
 
 def run_spec(spec: dict, out_file: Path) -> None:
-    prepare_process(spec)
+    if spec.get("mode") == "legacy_ascii":
+        # Validation output only (one patch): the step-by-step legacy driver writing the six
+        # .out files.
+        prepare_process(spec)
+        import offline_executable.main as main_mod
 
-    # 5. Run.
-    import offline_executable.main as main_mod
-
-    with tempfile.TemporaryDirectory() as tmp:
-        if spec.get("mode") == "legacy_ascii":
-            # Validation output only: the step-by-step legacy driver writing the six .out files.
+        with tempfile.TemporaryDirectory() as tmp:
             namelist = _write_namelist(spec["namelist"], Path(tmp), spec["legacy_ascii_dir"])
             sys.argv = ["clm-ml-offline", str(namelist)]
             main_mod.main(_options(spec))
-            return
-    run = setup_legacy_run(spec)
+        return
 
+    # 5. Set up every patch, then run them together.
+    batch = setup_batch(spec)
     import datetime as dt
 
+    import offline_executable.main as main_mod
     from clm_ml.output_streams import StreamSpec
     from clm_ml.outputs import StreamFileWriter
-    from clm_src_main import ColumnType
     from clm_src_main.clm_varpar import nlevgrnd
 
     streams = [
         StreamSpec(s["name"], s["frequency"], s["statistic"], tuple(s["variables"]))
         for s in spec["streams"]
     ]
+    levels = [tuple(s["level"]) for s in spec["streams"]]
+    # Each stream's values: its variables, plus the gridcell sums formed in the chunk
+    keys = [
+        tuple(stream.variables)
+        + tuple(f"gridcell:{n}" for n in main_mod.gridcell_variables(stream.variables, level))
+        for stream, level in zip(streams, levels)
+    ]
     meta = dict(spec["meta"])
-    meta["soil_depth"] = np.asarray(ColumnType.col.z)[:, 1 : nlevgrnd + 1]
+    meta["soil_depth"] = np.concatenate(  # (patch, soil layer) node depths
+        [np.asarray(r.insts.site.z_col)[:, 1 : nlevgrnd + 1] for r in batch.runs]
+    )
     writers = None
     if spec.get("output_dir"):
         start = dt.datetime.fromisoformat(spec["run_start"])
         writers = [
             StreamFileWriter(
                 _FileOptions(s["level"], s["file_per"], s["name"]),
-                stream.variables,
+                stream_keys,
                 meta,
                 Path(spec["output_dir"]),
-                spec["tower_name"],
+                spec.get("file_prefix", spec["tower_name"]),
                 start,
             )
-            for s, stream in zip(spec["streams"], streams)
+            for s, stream_keys in zip(spec["streams"], keys)
         ]
     keep = bool(spec.get("return_records", True))
     collected: list[list] = [[] for _ in streams]
@@ -182,7 +219,7 @@ def run_spec(spec: dict, out_file: Path) -> None:
     restart = main_mod.read_restart(Path(spec["restart_in"])) if spec.get("restart_in") else None
     every = spec.get("restart_every")
     main_mod.run_streams(
-        run,
+        batch,
         streams,
         spec["max_layers"],
         on_records,
@@ -191,6 +228,9 @@ def run_spec(spec: dict, out_file: Path) -> None:
         restart_every=tuple(every) if every else None,
         save_extra=save_extra,
         restore_extra=restore_extra,
+        levels=levels,
+        on_patch_error=spec.get("on_patch_error", "stop"),
+        max_failed_patch_fraction=spec.get("max_failed_patch_fraction", 0.01),
     )
     if writers is not None:
         for w in writers:
@@ -200,10 +240,10 @@ def run_spec(spec: dict, out_file: Path) -> None:
     if keep:
         from clm_ml.outputs import records_to_arrays
 
-        for stream, records in zip(streams, collected):
+        for stream, stream_keys, records in zip(streams, keys, collected):
             if not records:
                 raise RuntimeError(f"output stream {stream.name} produced no records")
-            for key, value in records_to_arrays(records, stream.variables).items():
+            for key, value in records_to_arrays(records, stream_keys).items():
                 arrays[f"{stream.name}/{key}"] = value
     np.savez_compressed(out_file, **arrays)
 

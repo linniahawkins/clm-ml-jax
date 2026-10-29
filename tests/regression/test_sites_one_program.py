@@ -43,10 +43,8 @@ import json, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, {src!r})
 import yaml
-import jax.numpy as jnp
 import numpy as np
 from clm_ml.model import Model
-import offline_executable.main as M
 from clm_ml import output_streams as S
 from clm_ml.legacy.namelist import convert_namelist
 from clm_ml.run import load_run
@@ -76,9 +74,9 @@ def own(model):
 
 def site(model):
     s = model._template.site
-    return {{"bedrock": int(np.asarray(s.nbedrock_col)[0]),
-             "color": int(np.asarray(s.isoicol_col)[0]),
-             "lat": float(np.asarray(s.latdeg_grc)[0]),
+    return {{"bedrock": int(np.asarray(s.nbedrock_col).ravel()[0]),  # (patch, column)
+             "color": int(np.asarray(s.isoicol_col).ravel()[0]),
+             "lat": float(np.asarray(s.latdeg_grc).ravel()[0]),
              "layers": int(np.asarray(model._template.mlcanopy.ncan_canopy).max())}}
 
 result = {{}}
@@ -92,21 +90,10 @@ else:
     result["a"] = own(a)
     runner = next(iter(a._runners.values()))
     result["b"] = own(b)
-
-    def through_a(model):  # model's chunk through a's compiled program, all inputs explicit
-        starts = M.step_starts(model._legacy, first, n)
-        rc = S.chunk_records(starts, first, model._legacy.time_of(0).dtime, stream.frequency)
-        shapes = M.output_shapes(model._legacy, model._template, list(names), 50)
-        buffers = (S.init_buffers("instantaneous", len(rc.keys),
-                                  {{v: shapes[v] for v in names}}, jnp),)
-        _, bufs, _ = runner(model.initial_state(), model.forcing(first, n),
-                            (jnp.asarray(rc.index),), buffers, model.default_params(),
-                            model._template)
-        return {{k: np.asarray(v).tolist() for k, v in bufs[0]["value"].items()}}
-
-    through_a(a)  # compiles a's program for this call signature
     result["compiled_before"] = runner._cache_size()
-    result["b_via_a"] = through_a(b)
+    _, via = b.run_chunk(b.initial_state(), b.forcing(first, n), first, streams=[stream],
+                         program=a)  # b's inputs (state, forcing, template) through a's program
+    result["b_via_a"] = {{k: np.asarray(v).tolist() for k, v in via["s"].items()}}
     result["compiled_after"] = runner._cache_size()
 print("RESULT" + json.dumps(result))
 """

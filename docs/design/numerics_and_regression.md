@@ -294,6 +294,18 @@ moving there from the laptop (JAX 0.6.2) changed 65 fields by ~1e-16 and passed 
 noise-twin test. On another machine or JAX version, rely on the noise-twin test and expect the
 bit-for-bit test to fail.
 
+**Phase 6 round-off changes** (each passed the noise-twin test; reference regenerated):
+- Per-site data as inputs of the compiled chunk (step 2a): XLA no longer folds divisions by
+  the constant soil layer thickness (identical-input check of `SoilWater`: 1e-15; run
+  ≤ 1.4e-11).
+- The step batched over patches with `vmap` (step 3a), also for one patch: XLA fuses the
+  batched step differently (single values differ in the last digit; run ≤ 2.7e-11).
+- The identical-input replay (`test_process_io.py`) of `FluxProfileSolution` gives
+  `shair_profile` (sensible heat between air layers, a difference of nearly equal
+  temperatures) 1.1e-10 relative with JAX 0.9.2 on Derecho against the JAX 0.6.2 recording,
+  before any Phase 6 change; the solved temperatures agree to < 1e-13. That field alone is
+  allowed 3e-10.
+
 **How tight it is.** Since the solver fix (§5), the twin noise is at most about 4e-11 relative,
 so the noise-twin test detects any change larger than about 1e-10. (Before the fix it allowed
 up to ~9% at a single step.) The other checks remain:
