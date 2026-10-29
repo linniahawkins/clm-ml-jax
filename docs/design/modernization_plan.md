@@ -1309,13 +1309,37 @@ CHATS7 with explicit `n_layers_within`/`n_layers_above` that differ from the def
 same compiled program and matches its own separate run); gradients are finite with padding; the
 timing results are recorded.
 
+**Phase 5b end-of-phase results** (final code: masks, C3/C4 static):
+- Timing (CHATS7, CPU, against the step-0 baselines): compiled step 3.3 ms (2.8 ms, 1.18×);
+  gradient over 8 steps 21.6 ms per step (15.6 ms, 1.38×), peak 5.1 GB (5.9 GB); timing test
+  8.2 s per simulated day (7.2 s, 1.14×). Within the 1.5× limit. Gradient compilation ~11.5 min
+  (CPU).
+- Full regression folder: 192 passed (24 min with a cold compilation cache).
+- Slow tests: differentiability (7, including the finite-difference checks) and `Model` API
+  passed. The gradient padding test ran out of memory on the 17 GB CPU machine: gradient
+  compilation memory grows with `max_layers`, because the longwave and flux–profile
+  tridiagonal solves are unrolled over every slot (202 and 100 rows at 100 slots; before 5b,
+  over the patch's real layers). The test now compares 46 and 60 slots, one process each;
+  **not re-run on CPU (maintainer's decision): to be run on GPU after Phase 6.** Follow-up
+  for Phase 6: write those two solves as `lax.scan` loops, so program size, compile time
+  and memory do not grow with `max_layers` (round-off check required).
+- Fortran comparison, May 2007, `acclimation = run_mean`, 112 columns (the
+  fraction-at-minimum-leaf-water-potential column excluded as in Phase 4b): largest relative
+  error 0.074 % (Phase 4: 0.16 %), mean 0.0075 % (0.012 %), 2 columns with correlation
+  below 0.9999 (7): `flux` column 15 (r = 0.9968) and `aux` column 3 (r = 0.99990). All
+  within the 2.5 % tolerance.
+
 ### Phase 6: Many patches and gridcells
 
-**Before Phase 6:** get access to a GPU. Whether the padding cost of masks and the gradient
+**Before Phase 6:** get access to a GPU. (Maintainer, after Phase 5: Phase 6 goes ahead on
+CPU; GPU timing and the gradient padding test are re-run on GPU after Phase 6.) Whether the padding cost of masks and the gradient
 memory are acceptable is mostly a GPU question, and the Phase 4 GPU timing is still deferred.
 
 - Turn on `vmap` over the patch axis, with forcing gathered from gridcells and outputs
   aggregated back (`segment_sum`). Remove the one-patch restriction from Phase 1.
+- Tridiagonal solves as `lax.scan` (from Phase 5b): the longwave and flux–profile solves are
+  unrolled over every layer slot, so compile time and gradient memory grow with
+  `max_layers`; rewrite them as scans (same arithmetic order) before batching patches.
 - **Group patches by photosynthetic pathway inside one compiled program** (decision 22): the
   C3 patches and the C4 patches form two groups of fixed size (known at setup), each
   batched with `vmap` and running only its own pathway's code (`GridInfo.c3` static per

@@ -5,7 +5,7 @@ same results. Unused layer slots must not change anything; the only allowed diff
 round-off from sums over arrays of different lengths (~1e-11 relative, the size of the
 model's own round-off noise, numerics_and_regression.md §5).
 
-The gradient version checks that padded layers give finite gradients equal to the unpadded
+The gradient version (46 and 60 slots) checks that padded layers give finite gradients equal to the unpadded
 ones (a masked ``jnp.where`` differentiates both branches, so arithmetic on empty layers can
 produce NaN gradients even when the forward values are right). Slow: compiles gradients.
 """
@@ -22,6 +22,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SIZES = (46, 50, 100)
+# Gradients: 46 (no padding) and 60. Each size runs in its own process: gradient
+# compilation memory grows with max_layers (the tridiagonal solves are unrolled over every
+# slot), and 100 slots, or three sizes in one process, do not fit in 17 GB.
+GRADIENT_SIZES = (46, 60)
 RTOL = 1e-9  # relative to each variable's largest magnitude
 # Gradients amplify round-off: they pass through the implicit-function derivatives of the
 # iterative solvers, where a ~1e-11 change of a converged value moves the derivative by
@@ -65,17 +69,21 @@ print("RESULT" + json.dumps(out))
 """
 
 
-def _run(gradient: bool) -> dict:
-    script = SCRIPT.format(
-        src=str(ROOT / "src"),
-        namelist=str(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day"),
-        sizes=SIZES,
-        gradient=gradient,
-    )
-    run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
-    assert run.returncode == 0, run.stderr[-3000:]
-    line = next(ln for ln in run.stdout.splitlines() if ln.startswith("RESULT"))
-    return {int(k): v for k, v in json.loads(line[len("RESULT") :]).items()}
+def _run(gradient: bool, sizes=SIZES, separate: bool = False) -> dict:
+    """Results per size; ``separate``: one process per size (memory freed in between)."""
+    out = {}
+    for group in [(size,) for size in sizes] if separate else [tuple(sizes)]:
+        script = SCRIPT.format(
+            src=str(ROOT / "src"),
+            namelist=str(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day"),
+            sizes=group,
+            gradient=gradient,
+        )
+        run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+        assert run.returncode == 0, run.stderr[-3000:]
+        line = next(ln for ln in run.stdout.splitlines() if ln.startswith("RESULT"))
+        out.update({int(k): v for k, v in json.loads(line[len("RESULT") :]).items()})
+    return out
 
 
 def _common(a: np.ndarray, shape) -> np.ndarray:
@@ -85,8 +93,9 @@ def _common(a: np.ndarray, shape) -> np.ndarray:
 
 def _compare(results: dict, rtol: float = RTOL) -> list[str]:
     problems = []
-    exact = results[SIZES[0]]
-    for size in SIZES[1:]:
+    sizes = sorted(results)
+    exact = results[sizes[0]]
+    for size in sizes[1:]:
         for name, ref in exact.items():
             ref = np.asarray(ref, dtype=float)
             new = _common(np.asarray(results[size][name], dtype=float), ref.shape)
@@ -112,7 +121,7 @@ def test_padding_does_not_change_results():
 
 @pytest.mark.slow
 def test_padding_gives_finite_equal_gradients():
-    results = _run(gradient=True)
+    results = _run(gradient=True, sizes=GRADIENT_SIZES, separate=True)
     for size, grads in results.items():
         for name, g in grads.items():
             assert np.all(np.isfinite(np.asarray(g, dtype=float))), f"{size}: d/d{name} not finite"
