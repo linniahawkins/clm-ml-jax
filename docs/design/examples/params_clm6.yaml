@@ -1,5 +1,0 @@
-# CLM6 parameters for every PFT (Phase 6b, input decision 6): the values CLM defines from the
-# CTSM 6.0 parameter file, the CLM-ml-specific ones (vcmax25, iota, plant hydraulics, ...)
-# from clm5_defaults. See clm_ml.params.CLM_PARAMETER_FILE_FIELDS.
-extends: clm5_defaults
-clm_parameters: /glade/work/wwieder/modified_inputs/ctsm60_params.genericCropFix.ch4cal_d.c260410.nc

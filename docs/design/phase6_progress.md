@@ -190,6 +190,16 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   `jobs/global6b.log`, outputs `runs/global2000/`, a restart every month; to continue after
   the walltime: `qsub -v REV=...,RESTART=<runs/global2000/restart/domain_restart.pkl>`).
 
+### 2026-10-29: params files are YAML only (maintainer)
+
+- `params.yaml` no longer reads CLM netCDF files (`clm_parameters` removed). `clm-ml params
+  SOURCE -o OUT.yaml` (`clm_ml/params_convert.py`) writes a complete table from a CLM
+  parameter file (CLM-ml-specific values from `--base`, default `clm5_defaults`) or flattens
+  a params file. Built-in `clm6` = the CTSM 6.0 file converted (identical values to before).
+  The roughness ratios are ordinary optional parameters (`z0m_to_height_ratio`,
+  `displacement_to_height_ratio`), needed only by grid runs.
+- Open issues of Phase 6b to come back to (maintainer): `global_input.md` issues 1-16.
+
 ## Next (resume here in a new session)
 
 1. **Check the end-of-Phase-6 job** `endphase` (PBS job 8001129, CPU, project P93300041;

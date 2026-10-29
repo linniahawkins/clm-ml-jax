@@ -2,7 +2,7 @@
 # CRUJRA v4.10 forcing, CLM6 parameters, soil moisture prescribed from a CTSM 5.4 run.
 # Remove domain.grid.region for the whole globe (14 346 gridcells, 72 575 patches).
 model: model_grid.yaml
-params: params_clm6.yaml
+params: clm6                       # built-in: CLM6 (CTSM 6.0) parameters, see data/params/clm6.yaml
 time:
   start: 2000-01-01T00:00
   end: 2001-01-01T00:00

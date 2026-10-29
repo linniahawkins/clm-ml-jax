@@ -81,6 +81,8 @@ def params_to_legacy(params: Params, base: dict[str, np.ndarray]) -> dict[str, n
     """
     out = {key: value.copy() for key, value in base.items()}
     for spec in PARAM_SPECS:
+        if not spec.legacy_table:  # not in the legacy tables (e.g. the roughness ratios)
+            continue
         key = f"{spec.legacy_table}.{spec.legacy_field}"
         values = params.values[spec.name]
         for row in range(N_PFT):
@@ -99,6 +101,8 @@ def legacy_to_params_dict(tables: dict[str, np.ndarray]) -> dict[str, dict[str, 
     for row in range(1, N_PFT):
         entries = {}
         for spec in PARAM_SPECS:
+            if not spec.legacy_table:
+                continue
             table = tables[f"{spec.legacy_table}.{spec.legacy_field}"]
             if spec.spectral:
                 entries[spec.name] = [float(table[row, 1]), float(table[row, 2])]

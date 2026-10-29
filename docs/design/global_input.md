@@ -92,7 +92,7 @@ set is right.
 Where a choice came up while implementing, CLM's behaviour (CTSM 5.4 / CDEPS, source in
 `/glade/work/linnia/ctsm5.4.004`) was copied. Code: `clm_ml/grid.py` (domain),
 `clm_ml/grid_forcing.py` (forcing and land data), `clm_ml/legacy/grid_setup.py` (setup and
-chunk inputs), `clm_ml/params.py` (`clm_parameters`).
+chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file to params.yaml).
 
 | # | Topic | What is done | CLM source |
 |---|---|---|---|
@@ -109,8 +109,8 @@ chunk inputs), `clm_ml/params.py` (`clm_parameters`).
 | G11 | Initial soil temperature and water | `TSOI`/`H2OSOI` with the G10 interpolation at the end of the first step (what a tower setup reads from its CLM history slice), then CLM-ml's `SoilInit` (capped at porosity). CLM would start from a spun-up restart | — |
 | G12 | Canopy height | `MONTHLY_HEIGHT_TOP` with the G9 weights at the first step; constant in this file, and CLM-ml's layers are fixed at setup | `SatellitePhenologyMod.F90` |
 | G13 | Canopy bottom (step 5) | `MONTHLY_HEIGHT_BOT` is read and kept (`Patches.canopy_bottom`) but **not used**: CLM-ml v2's leaf-area profile is a beta distribution from the ground to the top, and CLM uses the bottom height only for snow burial (no snow model here). Using it (e.g. the profile between bottom and top) is a science change for the maintainer | `SatellitePhenologyMod.F90` (`fb`) |
-| G14 | Forcing height | Per patch `30 m + (z0mr + displar)·htop` with the CLM6 file's `z0mr`, `displar` (CLM's `ZengWang2007` roughness, decision 2) | `FrictionVelocityMod.F90`, `BiogeophysPreFluxCalcsMod.F90` |
-| G15 | Parameters | `clm_parameters:` in params.yaml (`extends: clm5_defaults`): from the CLM6 file `c3psn`, `rootprof_beta` (variant 1 = water, CLM's `rooting_profile_varindex_water`), `dleaf`, `xl`, `slatop`, `rhol/taul/rhos/taus` (vis, nir), `medlynslope`, `medlynintercept` (µmol → mol), `mbbopt`; everything else (vcmax25, ι, hydraulics, `g0_ball_berry`: `bbbopt` is not in the file) from `clm5_defaults` | `pftconMod.F90` |
+| G14 | Forcing height | Per patch `30 m + (z0mr + displar)·htop` with each PFT's `z0m_to_height_ratio`, `displacement_to_height_ratio` in params.yaml (CLM's `z0mr`, `displar`; built-in `clm6`) (CLM's `ZengWang2007` roughness, decision 2) | `FrictionVelocityMod.F90`, `BiogeophysPreFluxCalcsMod.F90` |
+| G15 | Parameters | One format: params.yaml. A CLM parameter file is converted once with `clm-ml params FILE.nc -o FILE.yaml` (`clm_ml/params_convert.py`), which writes a complete table; built-in `clm6` (`data/params/clm6.yaml`) is the CTSM 6.0 file converted: `c3psn`, `rootprof_beta` (variant 1 = water, CLM's `rooting_profile_varindex_water`), `dleaf`, `xl`, `slatop`, `rhol/taul/rhos/taus` (vis, nir), `medlynslope`, `medlynintercept` (µmol → mol), `mbbopt`, `z0mr`, `displar` from the file; everything else (vcmax25, ι, hydraulics, `g0_ball_berry`: `bbbopt` is not in the file) from `clm5_defaults` | `pftconMod.F90` |
 | G16 | Organic matter | Capped at CLM-ml's `organic_max` (130 kg m⁻³): CLM caps the organic fraction at 1, CLM-ml's formula has no cap, and 4 021 patches' soils exceed it (up to 318) | `SoilStateInitTimeConstMod.F90` |
 | G17 | Root biomass | Not in CLM (satellite phenology has no fine-root biomass): 500 g m⁻² for every patch (`domain.grid.root_biomass`), the value of every CLM-ml forest tower | — |
 | G18 | `min_patch_weight` | Applied to the fraction of the gridcell's *vegetated* area, then renormalized (towers: the weights as given, which sum to 1); a gridcell keeps at least its largest patch | — |

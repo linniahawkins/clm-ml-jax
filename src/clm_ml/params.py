@@ -14,18 +14,9 @@ A params file usually *extends* another and lists only what changes::
 Built-in files (``clm_ml/data/params/``): ``clm5_defaults`` (CLM5 / CLM-ml v1 values)
 and ``chats`` (CHATS walnut orchard; Bonan, Burns & Patton 2026, Table 2).
 
-A params file can also take the values CLM defines from a CLM parameter file (netCDF, e.g.
-the CTSM 6.0 file; Phase 6b, decision 27 and input decision 6)::
-
-    extends: clm5_defaults
-    clm_parameters: /path/to/ctsm60_params.c260410.nc
-
-The CLM file's values replace those of the ``extends`` chain for every PFT
-(:data:`CLM_PARAMETER_FILE_FIELDS`); the CLM-ml-specific parameters (stomatal optimization,
-plant hydraulics, ``vcmax25``, ...) are not in a CLM file and keep the ``extends`` values;
-this file's own ``pft:`` entries are applied last. The CLM file's roughness ratios
-(``z0mr``, ``displar``), which CLM uses for the forcing height, are kept in
-:attr:`Params.extra`.
+Every params file is YAML in this one format. To use a CLM parameter file (netCDF, e.g. the
+CTSM 6.0 file), convert it once (``clm-ml params ctsm60_params.nc -o params_clm6.yaml``,
+:mod:`clm_ml.params_convert`); the built-in ``clm6`` is that conversion of the CTSM 6.0 file.
 """
 
 from __future__ import annotations
@@ -70,6 +61,9 @@ class ParamSpec:
     legacy_table: str  # "MLpftcon" (multilayer_canopy.MLpftconMod) or "pftcon" (clm_src_main)
     legacy_field: str
     spectral: bool = False  # [vis, nir] pair
+    # Not needed by every run (e.g. only grid runs use the roughness ratios): a missing value
+    # is an error only where it is used
+    optional: bool = False
 
 
 PARAM_SPECS: tuple[ParamSpec, ...] = (
@@ -115,30 +109,15 @@ PARAM_SPECS: tuple[ParamSpec, ...] = (
     ParamSpec("leaf_transmittance", "-", "Leaf transmittance [vis, nir]", "pftcon", "taul", True),
     ParamSpec("stem_reflectance", "-", "Stem reflectance [vis, nir]", "pftcon", "rhos", True),
     ParamSpec("stem_transmittance", "-", "Stem transmittance [vis, nir]", "pftcon", "taus", True),
+    # Canopy roughness (CLM z0mr, displar): only the forcing height of grid runs uses them
+    # (30 m + (z0m + displacement) above the ground, CLM's rule); not CLM-ml physics parameters
+    ParamSpec("z0m_to_height_ratio", "-", "Momentum roughness length / canopy height (CLM z0mr)",
+              "", "z0mr", optional=True),
+    ParamSpec("displacement_to_height_ratio", "-",
+              "Displacement height / canopy height (CLM displar)", "", "displar", optional=True),
 )  # fmt: skip
 
 SPECS_BY_NAME: Mapping[str, ParamSpec] = {s.name: s for s in PARAM_SPECS}
-
-#: params.yaml name -> (CLM parameter-file variable(s), scale). Spectral parameters take a
-#: (vis, nir) pair of variables. ``rootprof_beta`` has two variants (CLM's
-#: ``rooting_profile_varindex_water`` = 1 is the one for water, which CLM-ml's root profile is).
-CLM_PARAMETER_FILE_FIELDS: Mapping[str, tuple] = {
-    "c3_photosynthesis": (("c3psn",), 1.0),
-    "root_profile_beta": (("rootprof_beta",), 1.0),  # variant 1 (water)
-    "leaf_dimension": (("dleaf",), 1.0),
-    "leaf_angle_index": (("xl",), 1.0),
-    "sla_top": (("slatop",), 1.0),
-    "leaf_reflectance": (("rholvis", "rholnir"), 1.0),
-    "leaf_transmittance": (("taulvis", "taulnir"), 1.0),
-    "stem_reflectance": (("rhosvis", "rhosnir"), 1.0),
-    "stem_transmittance": (("tausvis", "tausnir"), 1.0),
-    "g1_medlyn": (("medlynslope",), 1.0),
-    "g0_medlyn": (("medlynintercept",), 1.0e-6),  # umol H2O m-2 s-1 -> mol H2O m-2 s-1
-    "g1_ball_berry": (("mbbopt",), 1.0),
-}
-
-#: Other CLM parameter-file variables kept in ``Params.extra`` (not CLM-ml parameters)
-CLM_PARAMETER_FILE_EXTRA = ("z0mr", "displar")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -151,9 +130,6 @@ class Params:
 
     values: Mapping[str, np.ndarray]
     source: str = ""  # file the table was loaded from (for provenance)
-    # From a CLM parameter file (``clm_parameters``): per-PFT values that are not CLM-ml
-    # parameters, e.g. z0mr and displar for the forcing height of grid runs
-    extra: Mapping[str, np.ndarray] = dataclasses.field(default_factory=dict)
 
     def __getattr__(self, name: str) -> np.ndarray:
         if name in SPECS_BY_NAME:
@@ -164,13 +140,11 @@ class Params:
     def from_yaml(cls, path_or_name: Path | str) -> "Params":
         """Load a params file (a path, or a built-in name such as ``"chats"``), resolving
         ``extends:`` chains."""
-        merged, source, extra = _load_merged(path_or_name, seen=())
-        return cls._from_merged(merged, source, extra)
+        merged, source = _load_merged(path_or_name, seen=())
+        return cls._from_merged(merged, source)
 
     @classmethod
-    def _from_merged(
-        cls, merged: dict[str, dict[str, object]], source: str, extra: Optional[dict] = None
-    ) -> "Params":
+    def _from_merged(cls, merged: dict[str, dict[str, object]], source: str) -> "Params":
         values = {
             spec.name: np.full((len(PFT_NAMES), 2) if spec.spectral else len(PFT_NAMES), np.nan)
             for spec in PARAM_SPECS
@@ -185,7 +159,7 @@ class Params:
                         f"allowed: {sorted(SPECS_BY_NAME)}"
                     )
                 values[name][row] = _check_value(spec, value, f"{source}: pft.{pft}.{name}")
-        return cls(values=values, source=source, extra=dict(extra or {}))
+        return cls(values=values, source=source)
 
     def get(self, pft: str, name: str) -> np.ndarray:
         return self.values[name][pft_index(pft, "get()")]
@@ -198,7 +172,7 @@ class Params:
             if name not in SPECS_BY_NAME:
                 raise ConfigError(f"set(): unknown parameter {name!r}")
             values[name][row] = value
-        return Params(values=values, source=self.source, extra=self.extra)
+        return Params(values=values, source=self.source)
 
     def canopy_params(self, pft: str):
         """The parameters of one PFT as the physics takes them
@@ -217,13 +191,15 @@ class Params:
             fields[name] = value
         return CanopyParams(**fields)
 
-    def missing_for(self, pft_rows: list[int]) -> list[str]:
-        """Parameters with no value (NaN) for any of the given PFT rows."""
+    def missing_for(self, pft_rows: list[int], names=None) -> list[str]:
+        """Parameters with no value (NaN) for any of the given PFT rows: the required ones,
+        or those in ``names``."""
+        names = names or [s.name for s in PARAM_SPECS if not s.optional]
         return sorted(
             f"{PFT_NAMES[row]}.{name}"
-            for name, table in self.values.items()
+            for name in names
             for row in pft_rows
-            if np.isnan(table[row]).any()
+            if np.isnan(self.values[name][row]).any()
         )
 
     def describe(self, pft_rows: Optional[list[int]] = None) -> str:
@@ -283,24 +259,20 @@ def _load_merged(path_or_name, seen: tuple, relative_to: Optional[Path] = None):
     if path in seen:
         raise ConfigError(f"{path.name}: circular 'extends' chain")
     data = read_yaml(path)
-    unknown = sorted(set(data) - {"extends", "clm_parameters", "pft", "units", "description"})
+    unknown = sorted(set(data) - {"extends", "pft", "units", "description"})
     if unknown:
+        hint = (
+            "; a CLM parameter file is converted with `clm-ml params FILE.nc -o FILE.yaml`"
+            if "clm_parameters" in unknown
+            else ""
+        )
         raise ConfigError(
-            f"{path.name}: unknown key(s) {unknown}; allowed: extends, clm_parameters, pft, units"
+            f"{path.name}: unknown key(s) {unknown}; allowed: extends, pft, units{hint}"
         )
     merged: dict[str, dict[str, object]] = {}
-    extra: dict[str, np.ndarray] = {}
     if data.get("extends"):
-        merged, _, extra = _load_merged(data["extends"], seen + (path,), relative_to=path.parent)
+        merged, _ = _load_merged(data["extends"], seen + (path,), relative_to=path.parent)
         merged = {pft: dict(entries) for pft, entries in merged.items()}
-    if data.get("clm_parameters"):
-        clm_file = Path(str(data["clm_parameters"])).expanduser()
-        if not clm_file.is_absolute():
-            clm_file = path.parent / clm_file
-        clm_values, clm_extra = read_clm_parameter_file(clm_file)
-        for pft, entries in clm_values.items():
-            merged.setdefault(pft, {}).update(entries)
-        extra = {**extra, **clm_extra}
     pfts = data.get("pft") or {}
     if not isinstance(pfts, dict):
         raise ConfigError(f"{path.name}: pft: expected a mapping of PFT names to parameters")
@@ -309,41 +281,4 @@ def _load_merged(path_or_name, seen: tuple, relative_to: Optional[Path] = None):
         if not isinstance(entries, dict):
             raise ConfigError(f"{path.name}: pft.{pft}: expected a mapping of parameters")
         merged.setdefault(pft, {}).update(entries)
-    return merged, path.name, extra
-
-
-def read_clm_parameter_file(path: Path) -> tuple[dict, dict]:
-    """The PFT 1-16 values of a CLM parameter file (netCDF with ``pftname``) as
-    ``({pft name: {params.yaml name: value}}, {extra name: (n_pft,) array})``
-    (:data:`CLM_PARAMETER_FILE_FIELDS`, :data:`CLM_PARAMETER_FILE_EXTRA`). The file's PFT
-    names must match :data:`PFT_NAMES` row by row.
-
-    Fortran reference: CTSM pftconMod.F90 (InitRead)."""
-    import netCDF4 as nc
-
-    if not Path(path).exists():
-        raise ConfigError(f"clm_parameters: file not found: {path}")
-    n = len(PFT_NAMES)
-    with nc.Dataset(path) as ds:
-        names = [str(x).strip() for x in nc.chartostring(ds.variables["pftname"][:n])]
-        if names != list(PFT_NAMES):
-            raise ConfigError(f"{path}: pftname rows 0-{n - 1} are {names}, not {PFT_NAMES}")
-
-        def read(var):
-            if var not in ds.variables:
-                raise ConfigError(f"{path}: variable {var} not found")
-            v = np.asarray(ds.variables[var][:], dtype=float)
-            return v[0, :n] if v.ndim == 2 else v[:n]  # rootprof_beta: (variants, pft)
-
-        values: dict[str, dict] = {name: {} for name in PFT_NAMES[1:]}
-        for key, (variables, scale) in CLM_PARAMETER_FILE_FIELDS.items():
-            columns = [read(v) * scale for v in variables]
-            for row, name in enumerate(PFT_NAMES[1:], start=1):
-                if key == "c3_photosynthesis":
-                    values[name][key] = bool(round(columns[0][row]) == 1)
-                elif len(columns) == 2:
-                    values[name][key] = [float(columns[0][row]), float(columns[1][row])]
-                else:
-                    values[name][key] = float(columns[0][row])
-        extra = {v: read(v) for v in CLM_PARAMETER_FILE_EXTRA}
-    return values, extra
+    return merged, path.name

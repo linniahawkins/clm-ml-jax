@@ -31,8 +31,8 @@ decisions in ``docs/design/global_input.md``):
 - **Forcing height** per patch, CLM's rule: ``forcing_height + z0m + displa`` with
   ``z0m = z0mr * htop`` and ``displa = displar * htop`` (CLM's ``ZengWang2007`` roughness;
   ``forc_hgt_u_patch = forc_hgt_u + z0m + displa``, ``Sa_z = 30 m`` in CLM's data
-  atmosphere), with ``z0mr`` and ``displar`` from the CLM parameter file (params.yaml
-  ``clm_parameters``).
+  atmosphere), with ``z0mr`` and ``displar`` the PFT's ``z0m_to_height_ratio`` and
+  ``displacement_to_height_ratio`` in params.yaml (e.g. the built-in ``clm6``).
 - **Soil column** (one per patch, ``soil.columns: per_patch``): the top level of
   ``PCT_SAND``, ``PCT_CLAY``, ``ORGANIC``; ``SOIL_COLOR``; ``zbedrock``. Organic matter
   is capped at CLM-ml's ``organic_max`` (130 kg m-3): CLM caps the organic fraction at 1
@@ -150,12 +150,6 @@ def load_grid_domain(
     for key, path in (("surface_data", surf), ("land_mask", mask_file)):
         if not Path(path).exists():
             raise ConfigError(f"run.yaml: domain.grid.{key}: file not found: {path}")
-    extra = getattr(params, "extra", {}) or {}
-    if not {"z0mr", "displar"} <= set(extra):
-        raise ConfigError(
-            "domain.type grid: the params file needs clm_parameters (a CLM parameter file) for "
-            "z0mr and displar, which set each patch's forcing height (CLM's rule)"
-        )
 
     with nc.Dataset(mask_file) as ds:
         landmask = np.asarray(ds.variables["landmask"][:]) == 1
@@ -221,8 +215,15 @@ def load_grid_domain(
     pft = k_pft + 1
     n_p = pft.size
 
-    z0mr = np.asarray(extra["z0mr"], dtype=float)[pft]
-    displar = np.asarray(extra["displar"], dtype=float)[pft]
+    ratios = ("z0m_to_height_ratio", "displacement_to_height_ratio")
+    missing = params.missing_for(sorted(set(pft.tolist())), ratios)
+    if missing:
+        raise ConfigError(
+            f"params ({params.source}): no value for {missing[:4]}: grid runs need each PFT's "
+            "roughness ratios for the forcing height (CLM's rule), e.g. params: clm6"
+        )
+    z0mr = np.asarray(params.values[ratios[0]], dtype=float)[pft]
+    displar = np.asarray(params.values[ratios[1]], dtype=float)[pft]
     top = htop[k_pft, g_of]
     if not np.all(np.isfinite(top)) or np.any(top <= 0.0):
         bad = int(np.sum(~(top > 0.0)))

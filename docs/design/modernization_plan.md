@@ -1716,7 +1716,7 @@ from `clm5_defaults.yaml`); 10 + 10 canopy layers.
    renormalized over the vegetated land units, per-patch canopy top and bottom (from
    MONTHLY_HEIGHT_TOP/BOT, constant in time), per-patch forcing height (CLM's rule, CLM6
    `z0mr`, `displar`), soil columns (top-level sand, clay, organic matter; soil colour;
-   bedrock depth). Parameters from the CLM6 file mapped to `params.yaml` names
+   bedrock depth). Parameters: the CLM6 file converted to a params.yaml (`clm-ml params`, built-in `clm6`), names mapped as in `clm_ml.params_convert`
    (`clm_ml.params`), CLM-ml-specific parameters from `clm5_defaults.yaml`. The patches go
    straight into the vectorized setup (`vector_setup.setup_arrays`). Test: the loader's
    patches, weights and soil values against the surface data for a few gridcells; a small

@@ -33,7 +33,6 @@ SURFACE = (
     "/glade/campaign/cesm/cesmdata/inputdata/lnd/clm2/surfdata_esmf/ctsm5.4.0/"
     "surfdata_0.9x1.25_hist_2000_16pfts_c251022.nc"
 )
-CLM_PARAMS = "/glade/work/wwieder/modified_inputs/ctsm60_params.genericCropFix.ch4cal_d.c260410.nc"
 
 needs_data = pytest.mark.skipif(
     not (Path(SURFACE).exists() and Path(TRENDY).exists() and Path(f"{HIST}.2000-07.nc").exists()),
@@ -44,13 +43,12 @@ needs_data = pytest.mark.skipif(
 def grid_run_files(tmp: Path, region: dict, start: str, days: float = 1, co2: str = "{ppm: 383}",
                    extra_model: str = "") -> Path:  # fmt: skip
     """A small grid run (run.yaml, model.yaml, params.yaml) in ``tmp``."""
-    (tmp / "params.yaml").write_text(f"extends: clm5_defaults\nclm_parameters: {CLM_PARAMS}\n")
     (tmp / "model.yaml").write_text(
         "canopy_layers: {n_layers_within: 10, n_layers_above: 10, max_layers: 20}\n" + extra_model
     )
     (tmp / "run.yaml").write_text(f"""
 model: model.yaml
-params: params.yaml
+params: clm6
 time: {{start: {start}, days: {days}, step_seconds: 1800}}
 domain:
   type: grid
