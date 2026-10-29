@@ -69,22 +69,20 @@ set is right.
    streams): **bilinear** mapping for all three streams; time interpolation **coszen** for
    shortwave, **nearest** for precipitation, **linear** for TPQW; offset 0. (The existing
    forcing rules match: `coszen`, `constant` within the record's interval, `linear`.)
-2. **Forcing height: open.** CLM's data atmosphere sets 30 m (`Sa_z = 30` in
-   `datm_datamode_clmncep_mod.F90`), and CLM treats it as height above the zero-plane
-   displacement plus roughness length (`forc_hgt_u_patch = forc_hgt_u + z0m + displa`, with
-   `z0m = z0mr·htop`, `displa = displar·htop` per PFT). Recommended for CLM-ml: the same
-   rule per patch, `zref = 30 m + (z0mr + displar)·htop` from the CLM6 parameters, so the
-   reference height is always above the canopy top (a fixed 30 m leaves almost no air above
-   the tallest canopies: top up to 29.8 m). With the constant 10 layers above the canopy the
-   layer count does not depend on it.
+2. **Forcing height: CLM's rule, per patch:** `zref = 30 m + (z0mr + displar)·htop` with the
+   CLM6 `z0mr` and `displar` of the patch's PFT (CLM's data atmosphere sets 30 m, `Sa_z = 30`,
+   and CLM measures it from the zero-plane displacement plus roughness length,
+   `forc_hgt_u_patch = forc_hgt_u + z0m + displa`). Always above the canopy top.
 3. **Shortwave: CRUJRA's direct/diffuse split as given.**
 4. **Soil texture: the top level** of PCT_SAND, PCT_CLAY, ORGANIC.
-5. **Soil moisture: H2OSOI from the h0a files.** Checked on the top level of H2OSOI: 14 346 of
-   the 15 896 vegetated gridcells have it; **1 550 do not** (the same in January and July; all
-   latitudes; median 96 % vegetated): there the history's `landmask` is undefined (neither
-   land nor ocean), i.e. those gridcells are outside the land domain of the CLM run (21 244
-   land gridcells, against 22 648 in this surface dataset). Open: skip them, or fill from the
-   nearest gridcell with soil moisture; and which year(s) of soil moisture.
+5. **Soil moisture: H2OSOI from the h0a files; the domain is the CLM run's land mask.** Only
+   gridcells with `landmask == 1` in the history (and vegetation in the surface data) are in
+   the domain: **14 346 gridcells, 72 575 vegetated patches** (49 286 with at least 1 % of the
+   gridcell; 6 478 C4). The 1 550 vegetated surface-data gridcells outside the run's land
+   domain are skipped. (Checked on the top level of H2OSOI: every gridcell of the domain has
+   it.)
 6. **Parameters: CLM6** (the CTSM 6.0 file) for every PFT, except CHATS (which keeps its
    overrides); CLM-ml-specific parameters from `clm5_defaults.yaml`.
 7. **Layer counts: constant, 10 within and 10 above the canopy.**
+8. **Year: 2000** for the forcing (CRUJRA 2000), the soil moisture (h0a 2000-01 to 2000-12)
+   and the initial soil temperature (TSOI); the surface data are the year-2000 land cover.

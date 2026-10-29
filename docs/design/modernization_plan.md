@@ -1700,37 +1700,52 @@ runs, non-vegetated land units.
 CHATS); constant layer counts with canopy top and bottom from the surface dataset; bare ground
 and other non-vegetated land skipped, vegetated weights renormalized.
 
+**Input decisions** (maintainer, 2026-10-29; details `docs/design/global_input.md`): 1° (f09);
+year 2000; the domain is the vegetated gridcells inside the CLM run's land mask (14 346
+gridcells, 72 575 patches); CRUJRA mapped as CLM does (bilinear; time interpolation coszen
+for shortwave, nearest for precipitation, linear for the rest), its direct/diffuse
+shortwave as given; forcing height per patch `30 m + (z0mr + displar)·htop` (CLM's rule);
+top-level soil texture; CLM6 parameters for every PFT except CHATS (CLM-ml-specific ones
+from `clm5_defaults.yaml`); 10 + 10 canopy layers.
+
 **Steps:**
-1. **Inventory of the provided files** (read-only): variables, units, grids and masks,
-   time axes and calendars, missing-value conventions, which surface-dataset fields CLM-ml
-   needs (PFT fractions `PCT_NAT_PFT`, `PCT_CROP`/crop PFTs, land fraction, soil texture
-   `PCT_SAND`/`PCT_CLAY` and organic matter, soil colour, bedrock depth, monthly canopy top
-   and bottom heights and LAI/SAI), how CRUJRA maps to the tower forcing variables (6-hourly
-   temperature, humidity, pressure, wind, shortwave, longwave, precipitation; forcing height),
-   and the soil moisture file's layers. Written up in `docs/design/global_input.md`.
-2. **Grid domain loader** (`domain.type: grid` in run.yaml): the surface dataset → gridcells
-   (latitude, longitude, soil column properties) and vegetated PFT patches with renormalized
-   weights (decision 29); a region selection (bounding box or mask) for tests; per-patch
-   canopy heights from the surface dataset and the constant layer counts (decision 28). The
-   patches go straight into the vectorized setup (`vector_setup.setup_arrays`), not through
-   one spec per patch.
-3. **Forcing and land-data streams** for gridded input: CRUJRA (6-hourly) per gridcell,
-   interpolated to the model step with the existing rules (coszen for shortwave); LAI/SAI
-   (monthly, surface dataset) and soil moisture as daily/monthly records interpolated inside
-   the scan, in place of today's CLM-history record per patch at every model step (~3 GB per
-   simulated day for 2.6×10^5 patches, Phase 6 step 6 limits). Read per chunk with the halo
-   record, per device's gridcells (§6.9).
-4. **Canopy structure from the surface dataset:** canopy top and bottom per PFT patch.
-   CLM-ml fixes the layer structure at setup from the canopy height; which month's (or what
-   summary of the monthly) heights to use, and how the canopy bottom enters the leaf-area
-   profile (today it follows from the beta profile and `dpai_min`), is to be decided at this
-   step with the maintainer.
-5. **Regional test** (a few hundred gridcells): setup, a month's run, outputs written per
-   gridcell and patch; failure rates with `on_patch_error: exclude`; memory and compile time.
-6. **Global run** (1°, ~1.6×10^4 vegetated gridcells, ~7.8×10^4 patches; fits on one 4-GPU
-   node, which ran 65 536 patches in Phase 6 step 6); a few days to a month; timing, memory,
-   failures recorded. Addresses the compile time at global sizes (~15 min per program, not
-   stored by the compilation cache in Phase 6) as far as needed to run.
+1. ✅ **Inventory** (`docs/design/global_input.md`).
+2. **Grid domain loader** (`domain.type: grid` in run.yaml: surface-data file, the CLM
+   history file whose `landmask` defines the domain, an optional region box,
+   `min_patch_weight`): gridcells (lat/lon), vegetated PFT patches (PFTs 1-16) with weights
+   renormalized over the vegetated land units, per-patch canopy top and bottom (from
+   MONTHLY_HEIGHT_TOP/BOT, constant in time), per-patch forcing height (CLM's rule, CLM6
+   `z0mr`, `displar`), soil columns (top-level sand, clay, organic matter; soil colour;
+   bedrock depth). Parameters from the CLM6 file mapped to `params.yaml` names
+   (`clm_ml.params`), CLM-ml-specific parameters from `clm5_defaults.yaml`. The patches go
+   straight into the vectorized setup (`vector_setup.setup_arrays`). Test: the loader's
+   patches, weights and soil values against the surface data for a few gridcells; a small
+   region set up.
+3. **Setup without tower files:** the prototypes are set up with the legacy code, which
+   reads tower forcing and a CLM history file at setup (initial soil temperature and water,
+   the first record's acclimation temperature, the first step's air profiles). Identify every
+   setup field that depends on the forcing and land data (as in Phase 6 step 6: vary them one
+   at a time) and compute them from the gridded data per gridcell, so the prototypes only
+   provide structure. Test: equal to the legacy setup for a tower whose files hold one
+   gridcell's gridded data.
+4. **Gridded forcing and land-data streams:** CRUJRA 2000 (three streams), bilinear from
+   0.5° to f09 on the valid source points (as CLM; documented where it differs from ESMF's
+   mesh-based bilinear), wind speed as `u` (`v = 0`), direct/diffuse shortwave split into
+   visible/near-infrared as CLM's data atmosphere does; interpolated to the model step with
+   the existing rules (coszen, nearest, linear; record time stamps as in the files). LAI/SAI
+   (monthly climatology per PFT, surface data) and soil moisture (H2OSOI, monthly 2000, 20
+   levels, per gridcell) as monthly records interpolated in the scan (midpoint-linear,
+   decision 14), in place of the per-patch CLM-history record at every step. Read per chunk
+   with halo records.
+5. **Canopy bottom:** how MONTHLY_HEIGHT_BOT enters CLM-ml's leaf-area profile (today the
+   profile is a beta distribution from the ground to the top, with layers below `dpai_min`
+   removed): decided with the maintainer at this step.
+6. **Regional test** (a few hundred gridcells, e.g. a box over North America): set up, run
+   January and July 2000, write patch and gridcell output; failure rates with
+   `on_patch_error: exclude`; memory and compile time.
+7. **Global 1° run, year 2000** on one 4-GPU node (`execution.devices: 4`): timing,
+   memory, failure statistics; the ~15-minute compiles at this size (and why the compilation
+   cache does not store these programs) addressed as needed.
 
 **Done when:** a regional and a global 1° run complete from the provided inputs, with their
 timing, memory and failure statistics recorded, and the requirements they reveal written down

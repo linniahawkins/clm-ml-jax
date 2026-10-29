@@ -149,7 +149,12 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
 - Maintainer agreed Phase 6b (plan, decisions 26-29): real global input before Phase 7; the
   maintainer provides parameters, surface data, CRUJRA and soil moisture files.
 
+### 2026-10-29: Phase 6b plan
+
+- Inventory done (`docs/design/global_input.md`); input decisions recorded there and in the
+  plan's Phase 6b section (1°, year 2000, CLM land mask: 14 346 gridcells, 72 575 patches).
+
 ## Next
 
-Report the `endphase` job. Phase 6b step 1 (inventory) when the maintainer gives the input
-file locations.
+Phase 6b step 2 (grid domain loader), after the maintainer's go-ahead. The `endphase` job
+(full regression + slow tests on the final Phase 6 code) is still to be reported.
