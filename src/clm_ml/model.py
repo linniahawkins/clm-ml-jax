@@ -121,9 +121,10 @@ class Model:
         from clm_ml.legacy.state import state_from_instances
 
         batch = worker.setup_batch(spec)
-        template = M.stack_patches([st for st, _ in batch.firsts])
-        state = M.stack_patches([state_from_instances(st) for st, _ in batch.firsts])
-        return cls(run, batch, template, batch.firsts[0][1], state)
+        max_layers = run.config.canopy_layers.max_layers
+        template, _ = M.batched_first_step(batch, (), max_layers)
+        filt = batch.init_filt if batch.inits is None else batch.inits[0][1]
+        return cls(run, batch, template, filt, state_from_instances(template))
 
     # -- pieces ------------------------------------------------------------------------
 
@@ -210,6 +211,7 @@ class Model:
         ends included); the gridcell values are area-weighted sums over each gridcell's
         patches, formed at every step (variables without a layer axis). Differentiable with
         respect to the state, the forcing, the parameters and the weights."""
+        import jax
         import jax.numpy as jnp
 
         import offline_executable.main as M
@@ -226,7 +228,7 @@ class Model:
         names = sorted({v for s in streams for v in s.variables})
         gvars = [M.gridcell_variables(s.variables, ("gridcell",)) for s in streams]
         runner = (program or self)._runner(streams, gvars)
-        first_insts = self._batch.firsts[0][0]
+        first_insts = jax.tree.map(lambda x: x[0], self._template)
         shapes = {
             v: (self.n_patches,) + sh[1:]
             for v, sh in M.output_shapes(self._legacy, first_insts, names, max_layers).items()

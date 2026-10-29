@@ -655,17 +655,11 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers
 CHECKPOINT_STEP = True
 
 
-def _patch_step(run: LegacyRun, filt, grid, names, max_layers: int):
-    """One patch's time step for compiled chunks: ``step(template, state, x, params) ->
-    (state, {variable: value}, errors)``, with ``x`` one step's ``(now, met, clm_record,
-    forcing_bef, forcing_next)``, the output variables ``names`` (``clm_ml.outputs``,
-    computed with jax.numpy; leading axis the legacy patch axis of length 1) and ``errors``
-    the step's largest error of each Fortran conservation check. Used by the one-patch
-    (:func:`make_stream_runner`) and batched (:func:`make_batch_runner`) chunks."""
+def step_variables(names, max_layers: int):
+    """``variables(insts) -> {name: value}``: the output variables ``names`` of one patch's
+    containers, computed with jax.numpy (leading axis the legacy patch axis of length 1)."""
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
     from clm_src_main.clm_varpar import nlevgrnd
-
-    dtime = run.time_of(0).dtime
 
     def variables(insts) -> dict:
         m = insts.mlcanopy
@@ -681,6 +675,19 @@ def _patch_step(run: LegacyRun, filt, grid, names, max_layers: int):
             else:
                 out[n] = VARIABLES_BY_NAME[n].compute(r)[0]
         return out
+
+    return variables
+
+
+def _patch_step(run: LegacyRun, filt, grid, names, max_layers: int):
+    """One patch's time step for compiled chunks: ``step(template, state, x, params) ->
+    (state, {variable: value}, errors)``, with ``x`` one step's ``(now, met, clm_record,
+    forcing_bef, forcing_next)``, the output variables ``names`` (``clm_ml.outputs``,
+    computed with jax.numpy; leading axis the legacy patch axis of length 1) and ``errors``
+    the step's largest error of each Fortran conservation check. Used by the one-patch
+    (:func:`make_stream_runner`) and batched (:func:`make_batch_runner`) chunks."""
+    dtime = run.time_of(0).dtime
+    variables = step_variables(names, max_layers)
 
     def step(template, state, x, params):
         now, met, clm_record, forcing_bef, forcing_next = x
@@ -774,6 +781,14 @@ class PatchBatch:
     # Each patch's first (initializing) step, ``(insts, filt)``, run right after its setup
     # (it reads the patch's PFT and tables from module state, which the next setup replaces)
     firsts: Optional[list] = None
+    # Or (Phase 6 step 6) each patch only initialized at setup, ``(insts, inputs)`` of its first
+    # step (initialize="only", eager), the first step's physics then batched and compiled
+    # (:func:`batched_first_step`)
+    inits: Optional[list] = None
+    # Or the same already stacked, ``(insts, xs)`` with a leading patch axis, and the filter
+    # (the vectorized setup, ``clm_ml.legacy.vector_setup``)
+    init_stack: Optional[tuple] = None
+    init_filt: object = None
     # The domain's patches and gridcells come first; any after them are padding (copies with
     # weight 0 on padding gridcells, :meth:`padded`), dropped from the outputs
     n_real: Optional[int] = None
@@ -803,6 +818,15 @@ class PatchBatch:
         """A patch's first (initializing) step: ``(insts, filt)``."""
         inputs = step_inputs(run, run.load_chunk(0, 1), 0)
         return advance(run, run.insts, run.filt, inputs, True, params, grid)
+
+    @staticmethod
+    def initialize_patch(run: LegacyRun, grid):
+        """A patch's first-step initialization only (the canopy's vertical structure from the
+        first step's forcing and land data), ``(insts, filt, inputs)``: cheap, eager; the
+        step's physics is batched afterwards (:func:`batched_first_step`)."""
+        inputs = step_inputs(run, run.load_chunk(0, 1), 0)
+        insts, filt = advance(run, run.insts, run.filt, inputs, "only", None, grid)
+        return insts, filt, inputs
 
     @property
     def run(self) -> LegacyRun:
@@ -839,11 +863,13 @@ class PatchBatch:
     def gridcell_patch(self) -> list:
         """The first patch of each gridcell (whose run reads the gridcell's forcing); a padding
         gridcell without patches reads the last real gridcell's forcing."""
-        out = []
-        for g in range(self.n_gridcells):
-            on_g = np.flatnonzero(self.gridcell_index == g)
-            out.append(int(on_g[0]) if on_g.size else out[self.n_real_gridcells - 1])
-        return out
+        first = np.full(self.n_gridcells, -1)
+        gidx = np.asarray(self.gridcell_index)
+        g_seen, at = np.unique(gidx, return_index=True)
+        first[g_seen] = at
+        missing = first < 0
+        first[missing] = first[self.n_real_gridcells - 1]
+        return [int(p) for p in first]
 
     def padded(self, patch_count: Optional[int], gridcell_count: Optional[int]) -> "PatchBatch":
         """This batch padded to ``patch_count`` patches and ``gridcell_count`` gridcells, so
@@ -866,6 +892,12 @@ class PatchBatch:
             names=self.names + [f"padding {i}" for i in range(k)],
             grids=self.grids + [self.grids[-1]] * k,
             firsts=None if self.firsts is None else self.firsts + [self.firsts[-1]] * k,
+            inits=None if self.inits is None else self.inits + [self.inits[-1]] * k,
+            init_stack=(
+                None
+                if self.init_stack is None
+                else jax.tree.map(_append_copies(k), self.init_stack)
+            ),
             n_real=self.n_patches,
             n_real_gridcells=self.n_gridcells,
             source=np.concatenate([self.source, np.full(k, self.source[-1])]),
@@ -931,6 +963,10 @@ class PatchBatch:
             names=names,
             grids=[self.grids[p] for p in src],
             firsts=None if self.firsts is None else [self.firsts[p] for p in src],
+            inits=None if self.inits is None else [self.inits[p] for p in src],
+            init_stack=(
+                None if self.init_stack is None else jax.tree.map(lambda a: a[src], self.init_stack)
+            ),
             n_real=self.n_patches,
             n_real_gridcells=n_g,
             source=src,
@@ -939,8 +975,25 @@ class PatchBatch:
         )
 
     def params(self):
-        """The patches' parameters (``CanopyParams``) stacked along the patch axis."""
-        return stack_patches([r.canopy_params for r in self.runs])
+        """The patches' parameters (``CanopyParams``) stacked along the patch axis (each
+        distinct run's once, then indexed per patch)."""
+        index: dict = {}
+        run_of = np.array([index.setdefault(id(r), len(index)) for r in self.runs])
+        unique = {}
+        for r in self.runs:
+            unique.setdefault(id(r), r)
+        table = stack_patches([r.canopy_params for r in unique.values()])
+        return jax.tree.map(lambda a: jnp.take(a, jnp.asarray(run_of), axis=0), table)
+
+
+def _append_copies(k: int):
+    """``a`` with ``k`` copies of its last row appended (NumPy or JAX arrays)."""
+
+    def f(a):
+        xp = np if isinstance(a, np.ndarray) else jnp
+        return xp.concatenate([a, xp.repeat(a[-1:], k, axis=0)])
+
+    return f
 
 
 def patch_grid(run: LegacyRun):
@@ -1135,26 +1188,30 @@ def read_batch_inputs(batch: PatchBatch, first_step: int, n_steps: int):
     canopy forcing records, read once per gridcell, axes (step, gridcell, ...)) and ``xp``
     (the CLM history record per patch, axes (step, patch, ...))."""
     steps = range(first_step, first_step + n_steps)
-    chunks = {}
-
-    def inputs_of(p):
-        run = batch.runs[p]
-        if id(run) not in chunks:  # padding patches share their run: read once
-            chunk = run.load_chunk(first_step, n_steps)
-            chunks[id(run)] = [step_inputs(run, chunk, k) for k in steps]
-        return chunks[id(run)]
-
-    per_gridcell = []
-    for p in batch.gridcell_patch:
-        ins = inputs_of(p)
-        per_gridcell.append(
-            stack_step_inputs_parts(ins, ("now", "met", "forcing_bef", "forcing_next"))
-        )
-    per_patch = [
-        stack_step_inputs_parts(inputs_of(p), ("clm_record",))[0] for p in range(batch.n_patches)
-    ]
-    xg = jax.tree.map(lambda *x: jnp.stack(x, axis=1), *per_gridcell)
-    xp = jax.tree.map(lambda *x: jnp.stack(x, axis=1), *per_patch)
+    # each distinct run (patches set up from one prototype, padding copies) is read once
+    index: dict = {}
+    run_of = np.array([index.setdefault(id(r), len(index)) for r in batch.runs])
+    unique = {}
+    for r in batch.runs:
+        unique.setdefault(id(r), r)
+    per_run = []
+    for run in unique.values():
+        chunk = run.load_chunk(first_step, n_steps)
+        per_run.append([step_inputs(run, chunk, k) for k in steps])
+    gridcells = jax.tree.map(
+        lambda *x: jnp.stack(x, axis=1),
+        *[
+            stack_step_inputs_parts(i, ("now", "met", "forcing_bef", "forcing_next"))
+            for i in per_run
+        ],
+    )
+    patches = jax.tree.map(
+        lambda *x: jnp.stack(x, axis=1),
+        *[stack_step_inputs_parts(i, ("clm_record",))[0] for i in per_run],
+    )
+    g_run = jnp.asarray(run_of[np.asarray(batch.gridcell_patch)])
+    xg = jax.tree.map(lambda a: jnp.take(a, g_run, axis=1), gridcells)
+    xp = jax.tree.map(lambda a: jnp.take(a, jnp.asarray(run_of), axis=1), patches)
     return xg, xp
 
 
@@ -1404,6 +1461,66 @@ def fill_patches(buffers, alive):
     return {k: fill(v) if isinstance(v, dict) else v for k, v in buffers.items()}
 
 
+def batched_first_step(batch: PatchBatch, names=(), max_layers: int = 50):
+    """The first step of every patch of ``batch`` (each initialized at setup,
+    ``batch.inits``) as one compiled call, vmapped over each C3/C4 group's slots and split
+    over the devices like the chunks (Phase 6 step 6). Returns ``(template, values)``: the
+    containers after the first step with a leading patch axis (the template of the later
+    steps) and the output variables ``names`` of the step, ``(patch, ...)``."""
+    run = batch.run
+    dtime = run.time_of(0).dtime
+    variables = step_variables(names, max_layers)
+    if batch.init_stack is not None:
+        (insts0, xs), filt = batch.init_stack, batch.init_filt
+    else:
+        filt = batch.inits[0][1]
+        insts0 = stack_patches([insts for insts, _, _ in batch.inits])
+        xs = stack_patches(
+            [(i.now, i.met, i.clm_record, i.forcing_bef, i.forcing_next) for _, _, i in batch.inits]
+        )
+    params = batch.params()
+
+    def one(grid):
+        def step(insts, x, p):
+            now, met, clm_record, forcing_bef, forcing_next = x
+            inputs = StepInputs(
+                now._replace(dtime=dtime), met, clm_record, forcing_bef, forcing_next
+            )
+            out, _ = advance(run, insts, filt, inputs, False, p, grid)
+            return out, variables(out)
+
+        return jax.vmap(step)
+
+    groups = batch.groups
+
+    def first(insts0, xs, params):
+        outs = []
+        for grid, idx in groups:
+            lo, hi = int(idx[0]), int(idx[-1]) + 1
+            cut = lambda t: jax.tree.map(lambda a: a[lo:hi], t)  # noqa: E731
+            outs.append(one(grid)(cut(insts0), cut(xs), cut(params)))
+        return jax.tree.map(lambda *parts: jnp.concatenate(parts), *outs)
+
+    if batch.n_devices > 1:
+        from jax.sharding import Mesh, NamedSharding
+        from jax.sharding import PartitionSpec as Pspec
+
+        mesh = Mesh(np.array(jax.devices()[: batch.n_devices]), ("patch",))
+        # each device's block straight to its device (not the whole domain on the first)
+        insts0, xs, params = jax.device_put(
+            (insts0, xs, params), NamedSharding(mesh, Pspec("patch"))
+        )
+        first = jax.shard_map(
+            first,
+            mesh=mesh,
+            in_specs=Pspec("patch"),
+            out_specs=Pspec("patch"),
+            check_vma=False,
+        )
+    template, values = jax.jit(first)(insts0, xs, params)
+    return template, {n: unbatch_patch_axis(v, batch.n_patches) for n, v in values.items()}
+
+
 def real_part(buffers, batch: PatchBatch):
     """Stream buffers without the padding patches and gridcells (:meth:`PatchBatch.padded`)."""
     if batch.n_real == batch.n_patches and batch.n_real_gridcells == batch.n_gridcells:
@@ -1488,16 +1605,26 @@ def run_streams(
     def step_end(k):
         return step_starts(run, k, 1)[0] + datetime.timedelta(seconds=step_seconds)
 
-    # First step of every patch (initializes the canopy and builds the template): run at
-    # setup (PatchBatch.firsts), or here for a single run
-    firsts = batch.firsts
-    if firsts is None:
-        firsts = [PatchBatch.first_step(r, g) for r, g in zip(batch.runs, batch.grids)]
-    filt = firsts[0][1]
-    template = stack_patches([st for st, _ in firsts])
-    state = stack_patches([state_from_instances(st) for st, _ in firsts])
+    # First step of every patch (initializes the canopy and builds the template): batched
+    # and compiled after each patch's initialization at setup (PatchBatch.inits, step 6), or
+    # step by step (PatchBatch.firsts, or here for a single run)
+    if batch.inits is not None or batch.init_stack is not None:
+        template, first_values = batched_first_step(batch, names, max_layers)
+        filt = batch.init_filt if batch.inits is None else batch.inits[0][1]
+        first_insts = jax.tree.map(lambda x: x[0], template)
+        first_values = {n: np.asarray(v) for n, v in first_values.items()}
+    else:
+        firsts = batch.firsts
+        if firsts is None:
+            firsts = [PatchBatch.first_step(r, g) for r, g in zip(batch.runs, batch.grids)]
+        filt = firsts[0][1]
+        template = stack_patches([st for st, _ in firsts])
+        first_insts = firsts[0][0]
+        per_patch = [step_values(st, names, max_layers) for st, _ in firsts]
+        first_values = {n: np.concatenate([v[n] for v in per_patch]) for n in names}
+    state = state_from_instances(template)
     template_state = state
-    shapes1 = output_shapes(run, firsts[0][0], names, max_layers)  # one patch: (1, ...)
+    shapes1 = output_shapes(run, first_insts, names, max_layers)  # one patch: (1, ...)
     shapes = {n: (n_p,) + sh[1:] for n, sh in shapes1.items()}
 
     def buffer_shapes(spec, gv):
@@ -1517,8 +1644,7 @@ def run_streams(
 
     if restart is None:
         first = 1
-        per_patch = [step_values(st, names, max_layers) for st, _ in firsts]
-        values = {n: np.concatenate([v[n] for v in per_patch]) for n in names}
+        values = first_values
         for i, (spec, gv) in enumerate(zip(streams, gvars)):
             rec = S.chunk_records(step_starts(run, 0, 1), 0, step_seconds, spec.frequency)
             buffers = S.init_buffers(spec.statistic, 1, buffer_shapes(spec, gv), jnp)

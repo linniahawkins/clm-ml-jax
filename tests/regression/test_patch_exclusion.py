@@ -57,7 +57,7 @@ batch = worker.setup_batch(run.legacy_spec(None))
 import offline_executable.main as M
 from clm_ml.legacy.state import state_from_instances
 stream = StreamSpec("s", "step", "mean", ("latent_heat_flux", "gpp"))
-good = M.stack_patches([state_from_instances(st) for st, _ in batch.firsts])
+good = state_from_instances(M.batched_first_step(batch)[0])
 c = good.canopy
 bad = good._replace(canopy=c._replace(air_temperature=c.air_temperature.at[1].set(jnp.nan)))
 start = M.step_starts(batch.run, 0, 1)[0]

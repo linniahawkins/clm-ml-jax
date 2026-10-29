@@ -60,7 +60,8 @@ def main() -> None:
     # identical copies (Model itself batches the patches of a domain)
     from clm_ml.legacy.state import state_from_instances
 
-    legacy, (insts, filt) = model._legacy, model._batch.firsts[0]
+    legacy, filt = model._legacy, model._filt
+    insts = jax.tree.map(lambda x: x[0], model._template)
     state, params = state_from_instances(insts), legacy.canopy_params
     first, n, npatch = 1, args.steps, args.patches
     chunk = legacy.load_chunk(first, n)

@@ -267,7 +267,9 @@ def MLCanopyFluxes(
             ``*_bef_forcing`` fields carried in ``mlcanopy_type``.
         forcing_next: Forcing at the next CLM time step (replaces
             ``*_next_forcing``, which Fortran ``TowerMetNext`` filled).
-        initialize: True on the first time step of a run: set up the PAD
+        initialize: True on the first time step of a run (``"only"``: initialize, then
+            return without the step's physics, which a batched first step runs with
+            ``initialize=False``; Phase 6 step 6): set up the PAD
             parameters and the vertical structure and profiles. Fortran
             detected this from an unset ``zref`` (``zref == spval``); the
             caller now says so explicitly (False when continuing from a
@@ -356,6 +358,8 @@ def MLCanopyFluxes(
         )
         if masterproc:
             print("Successfully initialized multilayer canopy vertical structure")
+        if initialize == "only":  # the batched first step runs the physics (Phase 6 step 6)
+            return mlcanopy_inst
 
     # Runge-Kutta coefficients — Fortran line 197 (computed on the first step
     # and kept in module state; they depend only on runge_kutta_type, so they are

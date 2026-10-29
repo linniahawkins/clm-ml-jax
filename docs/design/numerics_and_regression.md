@@ -311,6 +311,14 @@ bit-for-bit test to fail.
   the chunk's `lax.scan` gave wrong states for groups of two or more patches and intermittent
   segmentation faults, while the identical operations outside a scan were right. The patch
   groups are contiguous slot ranges taken by slicing and joined by concatenation instead.
+- **Intermittent segmentation faults while compiling large CPU programs** (JAX 0.9.2 on
+  Derecho; the programs with C3 and C4 groups in one chunk): `gdb` shows a deep recursion in
+  LLVM's JIT linker (`llvm::orc::RTDyldObjectLinkingLayer::emit` → `ExecutionSession::lookup`
+  → `jitLinkForORC` …, 245 nested levels) overflowing a compile thread's stack. XLA splits
+  a CPU program into pieces compiled in parallel; `--xla_cpu_parallel_codegen_split_count=1`
+  (one piece) avoids it (5 of 5 compilations clean, against about half crashing). `clm_ml`
+  sets it on import unless `XLA_FLAGS` already choose it. Separate from the scatter problem
+  above (which gave wrong values, not only crashes).
 
 **How tight it is.** Since the solver fix (§5), the twin noise is at most about 4e-11 relative,
 so the noise-twin test detects any change larger than about 1e-10. (Before the fix it allowed

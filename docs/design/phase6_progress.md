@@ -118,10 +118,25 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   `jobs/diag.pbs`. A segfault on the login node running three models in one process (maybe
   memory) moved the diagnostics to a compute node.
 
+### 2026-10-29: steps 5 and 6
+
+- Step 5 committed (`832d311`) with the step 4 fix (contiguous C3/C4 slices; no scatter into
+  the scan's carry: it gave wrong states and segfaults). 4-GPU timing (`jobs/gpu4.log`):
+  16 384 patches 30 900 patch-steps/s, 65 536 patches 67 900 (3.8x one GPU at the same load
+  per GPU); `time_vmap` with 262 144 copies ran out of memory (it builds all copies on GPU 0).
+- Step 6a (batched compiled first step) and 6b (vectorized setup, bit for bit vs legacy).
+  Bug found and fixed on the way: `vector_setup` read `nlevsoi` before the first setup set it.
+- Running: full regression on the step 6 snapshot (`jobs/s6c.log`), global timing on 4 A100s
+  (`jobs/global.log`: 65 536 and 262 144 patches).
+
+- Full regression on the step 6 code (`s6c`): 198 passed, 2 failed (`test_c3_c4_groups`,
+  `test_devices`): worker segfaults. `gdb` (`probe/segv_repro.py`, `probe/segv_2.log`): the
+  crash is in LLVM's JIT linker during compilation (recursion overflowing a thread stack), not
+  in the model. `--xla_cpu_parallel_codegen_split_count=1`, set in `clm_ml/__init__.py`, gave
+  5/5 clean compilations (about 140-155 s each for the reproducer). Rerun of the failing tests
+  and the before-commit tests: job `s6d`.
+
 ## Next
 
-Step 5 (several devices): `PatchBatch` block layout per device (prototype and random-domain
-check: `probe/layout.py`), `jax.shard_map` over a `patch` mesh axis (classic `Mesh`, Auto axes;
-gradients of replicated inputs are summed across devices), outputs mapped back by
-`real_index`; test on CPU with `--xla_force_host_platform_device_count=4`; timing on 4 A100s.
-Then step 6 (batched setup at global scale).
+Commit step 6 when `s6c` passes; record the global timing; end-of-phase tests (all of
+`tests/regression`, the slow tests, Fortran comparison), CLAUDE.md update, final report.

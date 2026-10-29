@@ -109,30 +109,20 @@ def setup_legacy_run(spec: dict):
 
 
 def setup_batch(spec: dict):
-    """Every patch of ``spec`` (``spec["patches"]``) set up as a one-patch legacy run, one
-    after the other in this process (each installs its tower entry and tables first, and runs
-    its first step before the next setup), as an ``offline_executable.main.PatchBatch``
-    (Phase 6 step 3)."""
-    import offline_executable.main as main_mod
+    """Every patch of ``spec`` as an ``offline_executable.main.PatchBatch``: one legacy
+    setup per (forcing key, PFT) prototype, every patch's own fields computed for all patches
+    at once (``clm_ml.legacy.vector_setup``, bit for bit equal to setting each patch up,
+    :func:`setup_batch_legacy`), the first step's physics batched; then laid out for the
+    devices and C3/C4 groups (Phase 6 steps 3-6)."""
+    from clm_ml.legacy import vector_setup
 
-    runs, grids, firsts = [], [], []
-    for patch in spec["patches"]:
-        patch_spec = {**spec, **patch}
-        prepare_process(patch_spec)
-        runs.append(setup_legacy_run(patch_spec))
-        # before the next patch's setup replaces the module state they read:
-        grids.append(main_mod.patch_grid(runs[-1]))
-        firsts.append(main_mod.PatchBatch.first_step(runs[-1], grids[-1]))
-    batch = spec["batch"]
-    domain_batch = main_mod.PatchBatch(
-        runs,
-        np.asarray(batch["gridcell_index"], dtype=int),
-        np.asarray(batch["weight"], dtype=float),
-        int(batch["n_gridcells"]),
-        [patch["tower_name"] for patch in spec["patches"]],
-        grids,
-        firsts,
-    )
+    return laid_out(vector_setup.setup_batch(spec), spec["batch"])
+
+
+def laid_out(domain_batch, batch: dict):
+    """The domain-order batch laid out for ``batch["devices"]`` devices and C3/C4 groups
+    (block layout), or padded to ``patch_count``/``gridcell_count``."""
+    grids = domain_batch.grids
     devices = int(batch.get("devices") or 1)
     mixed = len({g.c3 for g in grids}) > 1
     if devices > 1 or mixed:
@@ -145,6 +135,36 @@ def setup_batch(spec: dict):
             )
         return domain_batch.blocked(devices)
     return domain_batch.padded(batch.get("patch_count"), batch.get("gridcell_count"))
+
+
+def setup_batch_legacy(spec: dict):
+    """Every patch of ``spec`` (``spec["patches"]``) set up as a one-patch legacy run, one
+    after the other in this process (each installs its tower entry and tables first, and runs
+    its first-step initialization before the next setup; the first step's physics is then
+    batched over the patches), as an ``offline_executable.main.PatchBatch``. The validation
+    reference of :func:`setup_batch` (``tests/regression/test_vector_setup.py``)."""
+    import offline_executable.main as main_mod
+
+    runs, grids, inits = [], [], []
+    for patch in spec["patches"]:
+        patch_spec = {**spec, **patch}
+        prepare_process(patch_spec)
+        runs.append(setup_legacy_run(patch_spec))
+        # before the next patch's setup replaces the module state they read: the patch's
+        # GridInfo and its first-step initialization (the step's physics is batched later)
+        grids.append(main_mod.patch_grid(runs[-1]))
+        inits.append(main_mod.PatchBatch.initialize_patch(runs[-1], grids[-1]))
+    batch = spec["batch"]
+    domain_batch = main_mod.PatchBatch(
+        runs,
+        np.asarray(batch["gridcell_index"], dtype=int),
+        np.asarray(batch["weight"], dtype=float),
+        int(batch["n_gridcells"]),
+        [patch["tower_name"] for patch in spec["patches"]],
+        grids,
+        inits=inits,
+    )
+    return laid_out(domain_batch, batch)
 
 
 def _options(spec: dict):

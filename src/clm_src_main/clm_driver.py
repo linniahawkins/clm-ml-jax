@@ -97,7 +97,8 @@ def clm_drv(
         forcing_bef, forcing_next: Multilayer canopy forcing at the previous
             and next CLM steps, for time interpolation (see ``MLCanopyFluxes``).
         initialize: True on the run's first time step (multilayer canopy
-            vertical-structure setup; see ``MLCanopyFluxes``).
+            vertical-structure setup; see ``MLCanopyFluxes``); ``"only"``: that setup
+            alone, returning the containers with only ``mlcanopy`` changed.
     """
     # ------------------------------------------------------------------
     # Unpack the model state (passed in explicitly; no module globals)
@@ -282,6 +283,12 @@ def clm_drv(
         grid=grid,
         site=site,
     )
+
+    if initialize == "only":
+        # First-step initialization only (Phase 6 step 6): the canopy's vertical structure,
+        # set up from this step's forcing and land data; every other container is returned as
+        # it came, and the batched first step computes this step from these containers
+        return insts._replace(mlcanopy=mlcanopy_inst), filter
 
     # ------------------------------------------------------------------
     # 9. Update soil temperatures — Fortran lines 101-104

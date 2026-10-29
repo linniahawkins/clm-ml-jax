@@ -1550,7 +1550,31 @@ gridcell sums need no communication); the patch axis is split across devices wit
 `jax.sharding`, PFT-parameter gradients summed across them. Test on CPU with simulated devices
 (`--xla_force_host_platform_device_count`); timing on 4 A100s.
 
-**Step 6, setup at global scale (new):** a batched (`vmap`) initialization over all patches
+**Step 6, setup at global scale** (implemented 2026-10-29):
+- Where the setup time went (one patch, CPU): `setup_run` 0.4 s, the first step 6 s, of
+  which the three initialization routines (`getPADparameters`, `initVerticalStructure`,
+  `initVerticalProfiles`) 0.6 s and the eager physics the rest.
+- 6a: the first step's physics batched and compiled over all patches
+  (`batched_first_step`, C3/C4 slices, `shard_map` on several devices); each patch only
+  initialized at setup (`initialize="only"` through `clm_drv` and `MLCanopyFluxes`). Round-off
+  only (identical-input check of the first step: 7.8e-11 in `dlwp_leaf`; run ≤ 4.8e-11,
+  noise-twin passes); reference regenerated.
+- 6b: `clm_ml.legacy.vector_setup`: one legacy setup per (forcing key, PFT) prototype; the
+  patch-dependent fields (found by varying one towers.yaml input at a time: site data, soil
+  properties, root profile, canopy height, root biomass, leaf/stem profiles, vertical
+  structure, initial canopy states) computed for all patches with the legacy formulas, the
+  beta CDF vectorized. Bit for bit equal to the per-patch legacy setup
+  (`tests/regression/test_vector_setup.py`, seven patches with every input varied; the
+  vectorized setup runs first in a fresh process: an early version read the soil layer counts
+  before they were set). `setup_arrays` takes per-patch input arrays (no spec per patch);
+  forcing is read once per distinct run and indexed per gridcell and patch.
+- Timing: `timing/time_global.py` (synthetic domain, every input random, CHATS7 forcing;
+  `timing/results_global.jsonl`).
+- Limits (global production, follow-on): forcing comes from prototype runs (gridded forcing
+  is the `domain.type: grid` loader); the CLM-history land data are per patch at every model
+  step in the chunk (~30 values per patch-step: ~3 GB per day for 2.6×10^5 patches), to be
+  replaced by daily/monthly records interpolated in the scan.
+Original plan: a batched (`vmap`) initialization over all patches
 (vertical structure from canopy height and layer counts, soil initialization, the first
 initializing step) in place of the per-patch legacy setup. Test: a synthetic global-size
 domain built from CHATS7 (~3×10⁵ patches, varied latitude/longitude, soils and layer counts)

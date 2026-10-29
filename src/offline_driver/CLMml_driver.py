@@ -150,6 +150,36 @@ def init_acclim(
     )
 
 
+from clm_src_main.clm_varpar import mxpft  # noqa: E402
+
+# ------------------------------------------------------------------
+# CLM canopy top height by PFT — Fortran local data htop_pft(0:mxpft)
+# Fortran lines 40-42
+# ------------------------------------------------------------------
+HTOP_PFT: list[float] = (
+    [0.0]  # index 0: not_vegetated
+    + [
+        17.0,
+        17.0,
+        14.0,  # 1-3:  needleleaf trees
+        35.0,
+        35.0,
+        18.0,
+        20.0,
+        20.0,  # 4-8:  broadleaf trees
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+    ]  # 9-16: shrubs/grasses/crops
+    + [0.0] * (mxpft - 16)  # 17-mxpft: additional crop PFTs
+)
+
+
 def TowerVeg(
     it: int,
     begp: int,
@@ -212,32 +242,7 @@ def TowerVeg(
         tower_root,
     )
 
-    # ------------------------------------------------------------------
-    # CLM canopy top height by PFT — Fortran local data htop_pft(0:mxpft)
-    # Fortran lines 40-42
-    # ------------------------------------------------------------------
-    _htop_pft: list[float] = (
-        [0.0]  # index 0: not_vegetated
-        + [
-            17.0,
-            17.0,
-            14.0,  # 1-3:  needleleaf trees
-            35.0,
-            35.0,
-            18.0,
-            20.0,
-            20.0,  # 4-8:  broadleaf trees
-            0.5,
-            0.5,
-            0.5,
-            0.5,
-            0.5,
-            0.5,
-            0.5,
-            0.5,
-        ]  # 9-16: shrubs/grasses/crops
-        + [0.0] * (mxpft - 16)  # 17-mxpft: additional crop PFTs
-    )
+    _htop_pft = HTOP_PFT  # CLM canopy top height by PFT (module level)
 
     # Unpack mutable arrays (Fortran associate block)
     htop = canopystate_inst.htop_patch
