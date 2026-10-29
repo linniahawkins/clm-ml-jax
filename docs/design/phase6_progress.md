@@ -154,7 +154,21 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
 - Inventory done (`docs/design/global_input.md`); input decisions recorded there and in the
   plan's Phase 6b section (1°, year 2000, CLM land mask: 14 346 gridcells, 72 575 patches).
 
-## Next
+## Next (resume here in a new session)
 
-Phase 6b step 2 (grid domain loader), after the maintainer's go-ahead. The `endphase` job
-(full regression + slow tests on the final Phase 6 code) is still to be reported.
+1. **Check the end-of-Phase-6 job** `endphase` (PBS job 8001129, CPU, project P93300041;
+   queued at the end of the session on 2026-10-29): full `tests/regression`, all slow tests,
+   and the CPU 8-step `time_model` rerun on commit `2205796`+. Results in
+   `/glade/derecho/scratch/linnia/clm-ml-jax/jobs/endphase.log` (lines starting `=====`,
+   `passed`, `failed`); the timing line is appended to
+   `jobs/endphase_results_model.jsonl` (copy into `timing/results_model.jsonl`). If it did not
+   run, resubmit: `cd /glade/derecho/scratch/linnia/clm-ml-jax/jobs && qsub -v REV=$(git -C
+   /glade/work/linnia/clm-ml-jax rev-parse HEAD) endphase.pbs`. Phase 6 is finished when it
+   passes (the Fortran comparison and the targeted regression already did).
+2. **Phase 6b step 2, grid domain loader**, after the maintainer's go-ahead (plan Phase 6b;
+   inputs and decisions in `docs/design/global_input.md`). No science decision is needed
+   for steps 2-4; step 5 (canopy bottom) needs the maintainer.
+
+Job scripts: `/glade/derecho/scratch/linnia/clm-ml-jax/jobs/` (`run_tests.pbs` with
+`REV TESTS MARK TAG`, `diag.pbs`, `fortran_compare.pbs`, `global.pbs`, `gpu4.pbs`,
+`endphase.pbs`); probes in `.../probe/`. GPU jobs: UCLB0069; CPU jobs: P93300041.
