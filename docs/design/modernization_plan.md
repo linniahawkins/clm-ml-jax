@@ -1415,7 +1415,7 @@ so the slim carried state stays in Phase 7. The obstacle is setup: 14–26 s per
 legacy Python code with module state. Testing on Derecho: fast and before-commit tests on the
 login node; slow and end-of-phase tests as PBS jobs (CPU: project P93300041; GPU: UCLB0069).
 
-**Step 0, housekeeping (separate commits).**
+**Step 0, housekeeping (separate commits).** ✅ Done (2026-10-28).
 - 0a. Regenerate the regression reference on Derecho: JAX 0.9.2 and the Derecho CPU change
   results by ~1e-16 (noise-twin passes, bit-for-bit fails on 65 fields), so the bit-for-bit
   test is only useful with a Derecho reference. The laptop (JAX 0.6.2) no longer matches bit
@@ -1537,7 +1537,7 @@ GPU node.
 - **Fortran comparison test** skips the files with several rows per step (`fsun`, `profile`,
   `fluxprofile`: 6 tests skipped) because it matches rows by time only.
 - `offline_driver/controlMod.control` is not used by the run path (Phase 7 cleanup).
-- **float32 inputs in a float64 model** (found on Derecho, Phase 6): `CanopyStateType`
+- ✅ *Fixed in Phase 6 step 0b (all float64; ≤ 7e-9 change, reference regenerated).* **float32 inputs in a float64 model** (found on Derecho, Phase 6): `CanopyStateType`
   creates `elai_patch`, `esai_patch`, `htop_patch`, `frac_veg_nosno_patch` as float32, and
   `SurfaceAlbedoType` the albedos and `coszen_col`. LAI and SAI from the forcing are written into
   them each step (`clmDataMod`, JAX warns "cannot safely cast value from float64 to float32")

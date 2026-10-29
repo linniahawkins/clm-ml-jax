@@ -43,9 +43,19 @@ _PREPARED: Optional[tuple] = None  # (tower, soil layer structure) this process 
 # (the "thunk" runtime, default in JAX 0.6.2): reproduced with a 2-step chunk; the older
 # runtime computes them, with or without jax.checkpoint on the step. XLA reads this flag
 # when it starts, so it is set here, on import, unless already chosen. (Normal runs,
-# Run.execute and the command line, keep the default runtime.)
+# Run.execute and the command line, keep the default runtime.) JAX 0.9.2 no longer supports
+# the flag (the new runtime is the only one) and computes these gradients without crashing
+# (Phase 6, step 0c), so it is set only for JAX < 0.7.
 _LEGACY_CPU_RUNTIME = "--xla_cpu_use_thunk_runtime=false"
-if "xla_cpu_use_thunk_runtime" not in os.environ.get("XLA_FLAGS", ""):
+
+
+def _jax_older_than(major: int, minor: int) -> bool:
+    from importlib.metadata import version
+
+    return tuple(int(x) for x in version("jax").split(".")[:2]) < (major, minor)
+
+
+if _jax_older_than(0, 7) and "xla_cpu_use_thunk_runtime" not in os.environ.get("XLA_FLAGS", ""):
     import jax._src.xla_bridge as _xla_bridge
 
     if _xla_bridge.backends_are_initialized():
