@@ -242,7 +242,7 @@ def SoilResistance(
         psis = psis.at[p].set(psis_p)
 
         # Fractional water uptake per layer
-        nlayers_f = nbedrock[c].astype(jnp.float32)
+        nlayers_f = nbedrock[c].astype(jnp.float64)
         # Guard nlayers_f > 0 for safe 1/nlayers_f gradient inside jnp.where
         nlayers_f_safe = jnp.maximum(nlayers_f, 1.0)
         et_loss_uniform = jnp.where(active_j, 1.0 / nlayers_f_safe, 0.0)

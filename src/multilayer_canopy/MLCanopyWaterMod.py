@@ -218,7 +218,7 @@ def CanopyInterception(
         h2ocan_bef_v = mlcanopy_inst.h2ocan_bef_profile[p, 1:]
 
         has_pai = dpai_v > 0.0
-        n_active = jnp.sum(has_pai.astype(jnp.float32))  # JAX scalar
+        n_active = jnp.sum(has_pai.astype(jnp.float64))  # JAX scalar
         n_safe = jnp.maximum(n_active, 1.0)  # avoid /0
 
         # jnp.maximum avoids select op → prevents XLA select_divide_fusion bug

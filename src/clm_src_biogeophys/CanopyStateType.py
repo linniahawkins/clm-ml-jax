@@ -88,14 +88,15 @@ class CanopyState(NamedTuple):
 
     Note:
         In the original Fortran, frac_veg_nosno_patch is integer (ispval).
-        We use float32 for uniformity and to avoid JIT complications with
-        mixed dtypes. Values should still be 0.0 or 1.0.
+        We use float64 (as all model fields; float32 rounded LAI and SAI, Phase 6
+        step 0b) to avoid JIT complications with mixed dtypes. Values should still be 0.0
+        or 1.0.
     """
 
-    frac_veg_nosno_patch: Array  # shape: (n_patches,), dtype: float32
-    elai_patch: Array  # shape: (n_patches,), dtype: float32
-    esai_patch: Array  # shape: (n_patches,), dtype: float32
-    htop_patch: Array  # shape: (n_patches,), dtype: float32
+    frac_veg_nosno_patch: Array  # shape: (n_patches,), dtype: float64
+    elai_patch: Array  # shape: (n_patches,), dtype: float64
+    esai_patch: Array  # shape: (n_patches,), dtype: float64
+    htop_patch: Array  # shape: (n_patches,), dtype: float64
 
 
 # ============================================================================
@@ -137,11 +138,11 @@ def init_allocate(begp: int, endp: int, use_nan: bool = True) -> CanopyState:
     init_val = jnp.nan if use_nan else 0.0
 
     # Initialize all arrays (lines 60-63)
-    # Note: Using float32 for memory efficiency and typical precision needs
-    frac_veg_nosno_patch = jnp.full(n_patches, init_val, dtype=jnp.float32)
-    elai_patch = jnp.full(n_patches, init_val, dtype=jnp.float32)
-    esai_patch = jnp.full(n_patches, init_val, dtype=jnp.float32)
-    htop_patch = jnp.full(n_patches, init_val, dtype=jnp.float32)
+    # float64, as the Fortran double precision (float32 rounded LAI/SAI; Phase 6 step 0b)
+    frac_veg_nosno_patch = jnp.full(n_patches, init_val, dtype=jnp.float64)
+    elai_patch = jnp.full(n_patches, init_val, dtype=jnp.float64)
+    esai_patch = jnp.full(n_patches, init_val, dtype=jnp.float64)
+    htop_patch = jnp.full(n_patches, init_val, dtype=jnp.float64)
 
     return CanopyState(
         frac_veg_nosno_patch=frac_veg_nosno_patch,
@@ -205,10 +206,10 @@ def create_canopy_state(n_patches: int, use_zeros: bool = True) -> CanopyState:
     init_val = 0.0 if use_zeros else jnp.nan
 
     return CanopyState(
-        frac_veg_nosno_patch=jnp.full(n_patches, init_val, dtype=jnp.float32),
-        elai_patch=jnp.full(n_patches, init_val, dtype=jnp.float32),
-        esai_patch=jnp.full(n_patches, init_val, dtype=jnp.float32),
-        htop_patch=jnp.full(n_patches, init_val, dtype=jnp.float32),
+        frac_veg_nosno_patch=jnp.full(n_patches, init_val, dtype=jnp.float64),
+        elai_patch=jnp.full(n_patches, init_val, dtype=jnp.float64),
+        esai_patch=jnp.full(n_patches, init_val, dtype=jnp.float64),
+        htop_patch=jnp.full(n_patches, init_val, dtype=jnp.float64),
     )
 
 

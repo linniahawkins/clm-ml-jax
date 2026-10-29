@@ -106,28 +106,28 @@ def get_jax_constants() -> dict:
     """
     return {
         # Mathematical constants
-        "rpi": jnp.array(rpi, dtype=jnp.float32),
+        "rpi": jnp.array(rpi, dtype=jnp.float64),
         # Physical constants
-        "tfrz": jnp.array(tfrz, dtype=jnp.float32),
-        "sb": jnp.array(sb, dtype=jnp.float32),
-        "grav": jnp.array(grav, dtype=jnp.float32),
-        "vkc": jnp.array(vkc, dtype=jnp.float32),
-        "denh2o": jnp.array(denh2o, dtype=jnp.float32),
-        "denice": jnp.array(denice, dtype=jnp.float32),
-        "tkwat": jnp.array(tkwat, dtype=jnp.float32),
-        "tkice": jnp.array(tkice, dtype=jnp.float32),
-        "tkair": jnp.array(tkair, dtype=jnp.float32),
-        "hfus": jnp.array(hfus, dtype=jnp.float32),
-        "hvap": jnp.array(hvap, dtype=jnp.float32),
-        "hsub": jnp.array(hsub, dtype=jnp.float32),
-        "cpice": jnp.array(cpice, dtype=jnp.float32),
-        "cpliq": jnp.array(cpliq, dtype=jnp.float32),
+        "tfrz": jnp.array(tfrz, dtype=jnp.float64),
+        "sb": jnp.array(sb, dtype=jnp.float64),
+        "grav": jnp.array(grav, dtype=jnp.float64),
+        "vkc": jnp.array(vkc, dtype=jnp.float64),
+        "denh2o": jnp.array(denh2o, dtype=jnp.float64),
+        "denice": jnp.array(denice, dtype=jnp.float64),
+        "tkwat": jnp.array(tkwat, dtype=jnp.float64),
+        "tkice": jnp.array(tkice, dtype=jnp.float64),
+        "tkair": jnp.array(tkair, dtype=jnp.float64),
+        "hfus": jnp.array(hfus, dtype=jnp.float64),
+        "hvap": jnp.array(hvap, dtype=jnp.float64),
+        "hsub": jnp.array(hsub, dtype=jnp.float64),
+        "cpice": jnp.array(cpice, dtype=jnp.float64),
+        "cpliq": jnp.array(cpliq, dtype=jnp.float64),
         # Bedrock constants
-        "thk_bedrock": jnp.array(thk_bedrock, dtype=jnp.float32),
-        "csol_bedrock": jnp.array(csol_bedrock, dtype=jnp.float32),
-        "zmin_bedrock": jnp.array(zmin_bedrock, dtype=jnp.float32),
+        "thk_bedrock": jnp.array(thk_bedrock, dtype=jnp.float64),
+        "csol_bedrock": jnp.array(csol_bedrock, dtype=jnp.float64),
+        "zmin_bedrock": jnp.array(zmin_bedrock, dtype=jnp.float64),
         # Special values
-        "spval": jnp.array(spval, dtype=jnp.float32),
+        "spval": jnp.array(spval, dtype=jnp.float64),
         "ispval": jnp.array(ispval, dtype=jnp.int32),
     }
 

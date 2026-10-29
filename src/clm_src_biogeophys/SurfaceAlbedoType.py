@@ -121,15 +121,15 @@ def init_surface_albedo_state(ncol: int, npatch: int, numrad: int = NUMRAD) -> S
         Fortran source lines 21-29, 39-46
         In Fortran, arrays are allocated and initialized to nan (spval).
         Here we use jnp.nan for consistency with the Fortran behavior.
-        Uses float32 for memory efficiency while maintaining precision.
+        float64, as the Fortran double precision (Phase 6 step 0b).
     """
     # Size numrad+1 so that 1-based ivis=1, inir=2 indices are valid (slot 0 unused)
     return SurfaceAlbedoState(
-        coszen_col=jnp.full((ncol,), jnp.nan, dtype=jnp.float32),
-        albd_patch=jnp.full((npatch, numrad + 1), jnp.nan, dtype=jnp.float32),
-        albi_patch=jnp.full((npatch, numrad + 1), jnp.nan, dtype=jnp.float32),
-        albgrd_col=jnp.full((ncol, numrad + 1), jnp.nan, dtype=jnp.float32),
-        albgri_col=jnp.full((ncol, numrad + 1), jnp.nan, dtype=jnp.float32),
+        coszen_col=jnp.full((ncol,), jnp.nan, dtype=jnp.float64),
+        albd_patch=jnp.full((npatch, numrad + 1), jnp.nan, dtype=jnp.float64),
+        albi_patch=jnp.full((npatch, numrad + 1), jnp.nan, dtype=jnp.float64),
+        albgrd_col=jnp.full((ncol, numrad + 1), jnp.nan, dtype=jnp.float64),
+        albgri_col=jnp.full((ncol, numrad + 1), jnp.nan, dtype=jnp.float64),
     )
 
 
@@ -168,21 +168,21 @@ def init_allocate(bounds: BoundsType, numrad: int = NUMRAD) -> SurfaceAlbedoStat
 
     # Allocate and initialize arrays with NaN (Fortran lines 67-71)
     # Line 67: allocate (this%coszen_col (begc:endc))
-    coszen_col = jnp.full((num_cols,), jnp.nan, dtype=jnp.float32)
+    coszen_col = jnp.full((num_cols,), jnp.nan, dtype=jnp.float64)
 
     # Line 68: allocate (this%albd_patch (begp:endp,1:numrad))
     # Size numrad+1 so that 1-based ivis=1, inir=2 indices are valid (slot 0 unused)
-    albd_patch = jnp.full((num_patches, numrad + 1), jnp.nan, dtype=jnp.float32)
+    albd_patch = jnp.full((num_patches, numrad + 1), jnp.nan, dtype=jnp.float64)
 
     # Line 69: allocate (this%albi_patch (begp:endp,1:numrad))
-    albi_patch = jnp.full((num_patches, numrad + 1), jnp.nan, dtype=jnp.float32)
+    albi_patch = jnp.full((num_patches, numrad + 1), jnp.nan, dtype=jnp.float64)
 
     # Line 70: allocate (this%albgrd_col (begc:endc,1:numrad))
     # Size numrad+1 so that 1-based ivis=1, inir=2 indices are valid (slot 0 unused)
-    albgrd_col = jnp.full((num_cols, numrad + 1), jnp.nan, dtype=jnp.float32)
+    albgrd_col = jnp.full((num_cols, numrad + 1), jnp.nan, dtype=jnp.float64)
 
     # Line 71: allocate (this%albgri_col (begc:endc,1:numrad))
-    albgri_col = jnp.full((num_cols, numrad + 1), jnp.nan, dtype=jnp.float32)
+    albgri_col = jnp.full((num_cols, numrad + 1), jnp.nan, dtype=jnp.float64)
 
     return SurfaceAlbedoState(
         coszen_col=coszen_col,
