@@ -398,6 +398,107 @@ def vertical_profiles(base: dict, ncan, forcing: dict):
 
 
 # ---------------------------------------------------------------------------------------
+# Grid runs: the first step's forcing and land data per patch (Phase 6b step 3)
+# ---------------------------------------------------------------------------------------
+
+
+def soil_init(t_soisno, h2osoi_vol, h2osoi_liq, h2osoi_ice, tsoi, h2osoi, watsat, nbedrock, dz,
+              nlevsoi: int, nlevgrnd: int):  # fmt: skip
+    """``CLMml_driver.SoilInit`` (CLM5.0 soil) for all patches, with the legacy arrays'
+    indexing: writes beyond an array's last slot are dropped and reads clamped to it, as
+    JAX's ``.at[].set`` and indexing do. ``tsoi`` (P, nlevgrnd), ``h2osoi`` (P, nlevsoi);
+    the others the patches' legacy rows (P, slots)."""
+    from clm_src_main.clm_varcon import denh2o
+
+    t, vol = np.array(t_soisno, dtype=float), np.array(h2osoi_vol, dtype=float)
+    liq, ice = np.array(h2osoi_liq, dtype=float), np.array(h2osoi_ice, dtype=float)
+
+    def put(a, j, v):
+        if j < a.shape[1]:
+            a[:, j] = v
+
+    def get(a, j):
+        return a[:, min(j, a.shape[1] - 1)]
+
+    for j in range(1, nlevgrnd + 1):
+        put(t, j, tsoi[:, j - 1])
+    for j in range(1, nlevsoi + 1):
+        put(vol, j, h2osoi[:, j - 1])
+    for j in range(nlevsoi + 1, nlevgrnd + 1):
+        put(vol, j, 0.0)
+    for p in range(vol.shape[0]):
+        for j in range(1, int(nbedrock[p]) + 1):
+            jj = min(j, vol.shape[1] - 1)
+            if j < vol.shape[1]:
+                vol[p, j] = min(vol[p, jj], watsat[p, min(j, watsat.shape[1] - 1)])
+    for j in range(1, nlevgrnd + 1):
+        put(liq, j, get(vol, j) * get(dz, j) * denh2o)
+        put(ice, j, 0.0)
+    return t, vol, liq, ice
+
+
+def first_step_fields(init, first: dict, watsat, nbedrock, nlevsoi: int, nlevgrnd: int):
+    """The first-step-initialized containers with each patch's own first-step forcing and
+    land data (``first``, :func:`setup_arrays`): the forcing containers (``TowerMetCurr``),
+    the acclimation temperature and reference pressure (``init_acclim``, first record) and
+    the soil temperature and water (``SoilInit``). The canopy profiles follow from the
+    forcing in :func:`vertical_profiles`. These are the fields that vary with the forcing and
+    land data files (found by perturbing each input of a tower, Phase 6b step 3)."""
+    from clm_src_main.clm_varpar import inir, ivis
+
+    met = first["met"]
+    f = lambda x: np.asarray(x, dtype=float)  # noqa: E731
+    col = lambda x: f(x)[:, None]  # noqa: E731
+
+    def bands(base, pair):
+        out = np.array(base, dtype=float)
+        out[:, 0, ivis], out[:, 0, inir] = f(pair[0]), f(pair[1])
+        return out
+
+    a2l = init.atm2lnd
+    a2l = a2l._replace(
+        forc_u_grc=col(met.uref),
+        forc_v_grc=np.zeros_like(np.asarray(a2l.forc_v_grc, dtype=float)),
+        forc_solad_downscaled_col=bands(a2l.forc_solad_downscaled_col, met.solad),
+        forc_solai_grc=bands(a2l.forc_solai_grc, met.solai),
+        forc_t_downscaled_col=col(met.tref),
+        forc_pbot_downscaled_col=col(met.pref),
+        forc_lwrad_downscaled_col=col(met.lwsky),
+        forc_pco2_grc=col(met.pco2),
+        forc_po2_grc=col(met.po2),
+    )
+    w2l = init.wateratm2lndbulk._replace(
+        forc_q_downscaled_col=col(met.qref),
+        forc_rain_downscaled_col=col(met.rain),
+        forc_snow_downscaled_col=col(met.snow),
+    )
+    fv = init.frictionvel._replace(forc_hgt_u_patch=col(first["zref"]))
+    site = init.site
+    t, vol, liq, ice = soil_init(
+        np.asarray(init.temperature.t_soisno_col)[:, 0],
+        np.asarray(init.waterstatebulk.h2osoi_vol_col)[:, 0],
+        np.asarray(init.waterstatebulk.h2osoi_liq_col)[:, 0],
+        np.asarray(init.waterstatebulk.h2osoi_ice_col)[:, 0],
+        f(first["tsoi"]),
+        f(first["h2osoi"]),
+        np.asarray(watsat, dtype=float),
+        nbedrock,
+        np.asarray(site.dz_col)[:, 0],
+        nlevsoi,
+        nlevgrnd,
+    )
+    temp = init.temperature._replace(t_a10_patch=col(met.tref), t_soisno_col=t[:, None])
+    ws = init.waterstatebulk._replace(
+        h2osoi_vol_col=vol[:, None], h2osoi_liq_col=liq[:, None], h2osoi_ice_col=ice[:, None]
+    )
+    ml = init.mlcanopy._replace(pref_forcing=col(met.pref))
+    return init._replace(
+        atm2lnd=a2l, wateratm2lndbulk=w2l, frictionvel=fv, temperature=temp,
+        waterstatebulk=ws, mlcanopy=ml,
+    )  # fmt: skip
+
+
+# ---------------------------------------------------------------------------------------
 # The batch
 # ---------------------------------------------------------------------------------------
 
@@ -468,12 +569,19 @@ def setup_batch(spec: dict):
 
 
 def setup_arrays(proto_specs: dict, keys, tower: dict, within, above, gridcell_index, weight,
-                 n_gridcells: int, names, host: bool = False):  # fmt: skip
+                 n_gridcells: int, names, host: bool = False, first: dict = None):  # fmt: skip
     """The batch from per-patch input arrays: ``proto_specs`` (prototype key -> a legacy
     patch spec set up as that prototype), ``keys`` the prototype of each patch, ``tower``
     ``{TOWER_INPUTS name: (P, ...)}`` the patches' own inputs, ``within``/``above`` explicit
     layer counts (0: model.yaml spacing). ``host``: keep the containers as NumPy arrays
-    (large domains: placed on the devices block by block later)."""
+    (large domains: placed on the devices block by block later).
+
+    ``first`` (grid runs, Phase 6b step 3): each patch's own forcing and land data of the
+    first step, replacing the prototypes' (which then only provide structure):
+    ``{"zref": (P,), "met": TowerMet, "forcing_bef"/"forcing_next": AtmForcingRecord,
+    "clm_record": ClmHistoryRecord (per patch arrays), "tsoi": (P, nlevgrnd), "h2osoi":
+    (P, nlevsoi)}``, or a function returning it (called after the prototypes' setups); see
+    :func:`first_step_fields`."""
     import jax
     import jax.numpy as jnp
 
@@ -564,6 +672,12 @@ def setup_arrays(proto_specs: dict, keys, tower: dict, within, above, gridcell_i
     pbeta_sai = np.array(np.asarray(ml0.pbeta_sai_canopy), dtype=float)
     pbeta_lai[:, 0, 1:3], pbeta_sai[:, 0, 1:3] = lai_b, sai_b
     zref = np.asarray(init.frictionvel.forc_hgt_u_patch)[:, 0]
+    if first is not None:
+        first = first() if callable(first) else first
+        zref = np.asarray(first["zref"], dtype=float)
+        init = first_step_fields(init, first, props["watsat_col"], nbed, nlevsoi, nlevgrnd)
+        ml = init.mlcanopy
+        xs = (xs[0], first["met"], first["clm_record"], first["forcing_bef"], first["forcing_next"])
     struct = vertical_structure(
         zref, htop, lai_b, sai_b, within, above, opts,
         {k: np.asarray(getattr(ml0, k))[:, 0] for k in STRUCTURE_FIELDS},

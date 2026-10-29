@@ -38,6 +38,8 @@ RULES = {
     "pbot": "linear",
     "fsdsbot": "coszen",
     "prect": "constant",
+    "fsds_direct": "coszen",
+    "fsds_diffuse": "coszen",
 }
 MISSING = -999.0  # tower files: variable absent
 
@@ -89,6 +91,9 @@ def interpolate_records(
         if name not in values:
             continue
         v = np.asarray(values[name], dtype=float)
+        if rule != "linear" and (v == MISSING).all():  # variable absent from the files
+            out[name] = np.full(len(step_starts), MISSING)
+            continue
         if rule == "linear":
             missing = v == MISSING
             if missing.all():

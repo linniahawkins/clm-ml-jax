@@ -1,0 +1,35 @@
+# A 1° (f09) grid run from the Phase 6b inputs (docs/design/global_input.md): year 2000,
+# CRUJRA v4.10 forcing, CLM6 parameters, soil moisture prescribed from a CTSM 5.4 run.
+# Remove domain.grid.region for the whole globe (14 346 gridcells, 72 575 patches).
+model: model_grid.yaml
+params: params_clm6.yaml
+time:
+  start: 2000-01-01T00:00
+  end: 2001-01-01T00:00
+  step_seconds: 1800               # the model step; the gridded streams are interpolated to it
+domain:
+  type: grid
+  grid:
+    surface_data: /glade/campaign/cesm/cesmdata/inputdata/lnd/clm2/surfdata_esmf/ctsm5.4.0/surfdata_0.9x1.25_hist_2000_16pfts_c251022.nc
+    land_mask: /glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.2000-01.nc
+    region: {lat: [30, 50], lon: [-110, -80]}
+forcing:
+  gridded:
+    meteorology:
+      tpqw: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.TPQWL.{year}.nc
+      solar: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.Solr_Diffuse.{year}.nc
+      precipitation: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.Prec.{year}.nc
+      mask: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/domain.crujra.v2.5_0.5x0.5.c240722.nc
+    co2: {file: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/CO2field/fco2_datm_global_simyr_1700-2025_TRENDY_c260722.nc}
+    soil: {files: "/glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.{year}-{month:02d}.nc"}
+execution:
+  devices: 4
+output:
+  directory: output_grid
+  streams:
+  - name: daily
+    frequency: daily
+    variables: [latent_heat_flux, sensible_heat_flux, net_radiation, gpp, ground_heat_flux,
+                canopy_top_air_temperature, leaf_area_index, soil_water_stress]
+    level: [patch, gridcell]
+    file_per: month

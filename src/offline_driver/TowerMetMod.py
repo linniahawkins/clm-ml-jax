@@ -165,6 +165,10 @@ class TowerMetRaw(NamedTuple):
     fldsbot: float  # Longwave radiation (W/m2)
     pbot: float  # Atmospheric pressure (Pa)
     prect: float  # Precipitation (mm/s)
+    # Direct and diffuse solar radiation (W/m2), when the file has them instead of FSDS
+    # (gridded CRUJRA-style forcing written as tower files, Phase 6b); -999 = absent
+    fsds_direct: float = -999.0
+    fsds_diffuse: float = -999.0
 
 
 class TowerMet(NamedTuple):
@@ -185,6 +189,9 @@ class TowerMet(NamedTuple):
     co2_ppm: float  # Atmospheric CO2 (umol/mol)
     pco2: float  # CO2 partial pressure (Pa)
     po2: float  # O2 partial pressure (Pa)
+    # Snowfall (kg H2O/m2/s): 0 for tower forcing (Fortran: forc_snow = 0); gridded forcing
+    # splits precipitation into rain and snow as CLM's data atmosphere does (Phase 6b)
+    snow: float = 0.0
 
 
 def read_tower_met_series(ncfilename: str, records: Sequence[int]) -> List[TowerMetRaw]:
@@ -200,7 +207,8 @@ def read_tower_met_series(ncfilename: str, records: Sequence[int]) -> List[Tower
         return []
     lo, hi = min(records), max(records) + 1
     with nc.Dataset(ncfilename, "r") as ds:
-        for name in ("FSDS", "PRECTmms", "TBOT", "WIND"):
+        split = "FSDS_DIRECT" in ds.variables and "FSDS_DIFFUSE" in ds.variables
+        for name in ("PRECTmms", "TBOT", "WIND") + (() if split else ("FSDS",)):
             if name not in ds.variables:
                 handle_err(-1, name)
         n_file = ds.dimensions["time"].size
@@ -224,6 +232,8 @@ def read_tower_met_series(ncfilename: str, records: Sequence[int]) -> List[Tower
             "fldsbot": span("FLDS"),
             "pbot": span("PSRF"),
             "prect": span("PRECTmms"),
+            "fsds_direct": span("FSDS_DIRECT"),
+            "fsds_diffuse": span("FSDS_DIFFUSE"),
         }
 
     def value(values, r: int) -> float:
@@ -331,8 +341,14 @@ def derive_tower_met(raw: TowerMetRaw, tower_height: float) -> TowerMet:
     - longwave from atmospheric emissivity when missing
     - CO2 from ``TowerMetCO2``, O2 = 0.209 * pressure
     """
-    fsds = float(jnp.maximum(raw.fsdsbot, 0.0))
-    solad_vis, solai_vis, solad_nir, solai_nir = TowerMetSolarRad(fsds)
+    if round(raw.fsds_direct) != -999 and round(raw.fsds_diffuse) != -999:
+        # direct and diffuse given: half visible, half near-infrared each (CLM's data
+        # atmosphere, datm_datamode_clmncep_advance)
+        solad_vis = solad_nir = raw.fsds_direct * 0.5
+        solai_vis = solai_nir = raw.fsds_diffuse * 0.5
+    else:
+        fsds = float(jnp.maximum(raw.fsdsbot, 0.0))
+        solad_vis, solai_vis, solad_nir, solai_nir = TowerMetSolarRad(fsds)
 
     hgt = float(tower_height)
     if round(hgt) == -999:
@@ -456,7 +472,7 @@ def TowerMetCurr(
         forc_pbot = forc_pbot.at[c].set(met.pref)
         forc_lwrad = forc_lwrad.at[c].set(met.lwsky)
         forc_rain = forc_rain.at[c].set(met.rain)
-        forc_snow = forc_snow.at[c].set(0.0)
+        forc_snow = forc_snow.at[c].set(met.snow)  # 0 for towers (Fortran)
         forc_hgt_u = forc_hgt_u.at[p].set(met.hgt)
         forc_pco2 = forc_pco2.at[g].set(met.pco2)
         forc_po2 = forc_po2.at[g].set(met.po2)

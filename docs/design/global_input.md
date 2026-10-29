@@ -86,3 +86,60 @@ set is right.
 7. **Layer counts: constant, 10 within and 10 above the canopy.**
 8. **Year: 2000** for the forcing (CRUJRA 2000), the soil moisture (h0a 2000-01 to 2000-12)
    and the initial soil temperature (TSOI); the surface data are the year-2000 land cover.
+
+## Implementation decisions (Phase 6b steps 2-5, copying CLM)
+
+Where a choice came up while implementing, CLM's behaviour (CTSM 5.4 / CDEPS, source in
+`/glade/work/linnia/ctsm5.4.004`) was copied. Code: `clm_ml/grid.py` (domain),
+`clm_ml/grid_forcing.py` (forcing and land data), `clm_ml/legacy/grid_setup.py` (setup and
+chunk inputs), `clm_ml/params.py` (`clm_parameters`).
+
+| # | Topic | What is done | CLM source |
+|---|---|---|---|
+| G1 | Time of the meteorology | The land step `[t, t + Δt]` uses the data atmosphere evaluated at `t` (the step start): CLM's run sequence runs LND before ATM in each coupling interval, and datm computes the next interval's data | `nuopc.runseq`, `atm_comp_nuopc.F90` (`nextTime`) |
+| G2 | Time interpolation | Per stream in its own calendar, file stamps as given: TPQW **linear** between the bracketing stamps; Precip **nearest** (tie: earlier); Solar **coszen** = lower-bound record × `cosz(t)/⟨cosz⟩` (instantaneous `cosz`, floor 0.001; `⟨cosz⟩` mean over the record interval sampled every model step from its stamp; 0 when the sun is down); model's orbital parameters (run year) | `dshr_strdata_mod.F90`, `dshr_tinterp_mod.F90` |
+| G3 | Calendar | Model calendar stays Gregorian (CLM-ml v2 driver); CRUJRA and the history files are `noleap`: a model 29 February uses 28 February data (CDEPS rule for a Gregorian model with a no-leap stream) | `dshr_strdata_advance` (`ymdmod`) |
+| G4 | 0.5° → 1° mapping | Bilinear between the four surrounding 0.5° points; nearest valid point when a corner is outside the CRUJRA land mask (ESMF bilinear with source mask + nearest-source extrapolation). Weights planar in lat/lon (ESMF: on the sphere; second-order difference) | `dshr_strdata_mod.F90` (`ESMF_REGRIDMETHOD_BILINEAR`, `EXTRAPMETHOD_NEAREST_STOD`) |
+| G5 | datm derivations | `TBOT ≥ 180 K`; `QBOT` capped at saturation (`datm_eSat`, ice below 0 °C); `PSRF = 0` → 101325 Pa; direct and diffuse shortwave each split half visible / half NIR; forcing height 30 m | `datm_datamode_clmncep_mod.F90` |
+| G6 | Rain and snow | datm ramp `frac_rain = (T − 273.15)/2` in [0, 1], then CLM's repartition with its defaults (all snow at 0 °C, all rain at 2 °C: the same ramp). Snowfall reaches CLM-ml's canopy interception (`forc_snow`; towers: 0, as Fortran) | `shr_precip_mod.F90`, `atm2lndMod.F90` (`partition_precip`) |
+| G7 | Wind | datm sets `u = v = WIND/√2`; the model only uses `√(u² + v²)`, so `u = WIND, v = 0` (same speed, no round-off) | `datm_datamode_clmncep_mod.F90` |
+| G8 | CO2 | TRENDY `fco2_datm_global_simyr_1700-2025_TRENDY_c260722.nc` (annual global, mid-year stamps), linear in time at the step start (datm `co2tseries` uses linear); or a constant (`co2: {ppm: ...}`). O2 = 0.209 × pressure | `stream_definition_datm.xml` (`co2tseries`) |
+| G9 | LAI, SAI | Surface-data `MONTHLY_LAI/SAI` per PFT and gridcell with CLM's satellite-phenology weights (`interpMonthlyVeg`: daily, at the end of the step plus one step, no-leap month lengths), interpolated inside the compiled chunk; `elai = tlai`, `esai = tsai` (no snow burial: no snow model), set to 0 below 0.05 | `SatellitePhenologyMod.F90` |
+| G10 | Soil water | `H2OSOI` (20 levels) from the monthly h0a files, linear between the file stamps (mid-month in CTSM 5.4 history) at the step end (`get_curr_date`); interpolated inside the compiled chunk. The CLM run's 25 ground / 20 soil levels equal CLM-ml's `clm5_0` structure (checked) | `SoilMoistureStreamMod.F90` (`soilm_tintalgo = linear`) |
+| G11 | Initial soil temperature and water | `TSOI`/`H2OSOI` with the G10 interpolation at the end of the first step (what a tower setup reads from its CLM history slice), then CLM-ml's `SoilInit` (capped at porosity). CLM would start from a spun-up restart | — |
+| G12 | Canopy height | `MONTHLY_HEIGHT_TOP` with the G9 weights at the first step; constant in this file, and CLM-ml's layers are fixed at setup | `SatellitePhenologyMod.F90` |
+| G13 | Canopy bottom (step 5) | `MONTHLY_HEIGHT_BOT` is read and kept (`Patches.canopy_bottom`) but **not used**: CLM-ml v2's leaf-area profile is a beta distribution from the ground to the top, and CLM uses the bottom height only for snow burial (no snow model here). Using it (e.g. the profile between bottom and top) is a science change for the maintainer | `SatellitePhenologyMod.F90` (`fb`) |
+| G14 | Forcing height | Per patch `30 m + (z0mr + displar)·htop` with the CLM6 file's `z0mr`, `displar` (CLM's `ZengWang2007` roughness, decision 2) | `FrictionVelocityMod.F90`, `BiogeophysPreFluxCalcsMod.F90` |
+| G15 | Parameters | `clm_parameters:` in params.yaml (`extends: clm5_defaults`): from the CLM6 file `c3psn`, `rootprof_beta` (variant 1 = water, CLM's `rooting_profile_varindex_water`), `dleaf`, `xl`, `slatop`, `rhol/taul/rhos/taus` (vis, nir), `medlynslope`, `medlynintercept` (µmol → mol), `mbbopt`; everything else (vcmax25, ι, hydraulics, `g0_ball_berry`: `bbbopt` is not in the file) from `clm5_defaults` | `pftconMod.F90` |
+| G16 | Organic matter | Capped at CLM-ml's `organic_max` (130 kg m⁻³): CLM caps the organic fraction at 1, CLM-ml's formula has no cap, and 4 021 patches' soils exceed it (up to 318) | `SoilStateInitTimeConstMod.F90` |
+| G17 | Root biomass | Not in CLM (satellite phenology has no fine-root biomass): 500 g m⁻² for every patch (`domain.grid.root_biomass`), the value of every CLM-ml forest tower | — |
+| G18 | `min_patch_weight` | Applied to the fraction of the gridcell's *vegetated* area, then renormalized (towers: the weights as given, which sum to 1); a gridcell keeps at least its largest patch | — |
+| G19 | Gridcell output | Area-weighted mean over the vegetated patches (bare ground and other land units left out, decision 29) | — |
+
+## Open issues (not fixed; for the maintainer)
+
+1. **CLM6's default roughness is `Meier2022`**, not `ZengWang2007`: CLM6 computes `z0m` and
+   `displa` from LAI each step, so its forcing height varies in time. CLM-ml fixes the forcing
+   height at setup; G14 follows the agreed rule (decision 2).
+2. **Calendar**: TRENDY CLM runs use `noleap`; this model is Gregorian (G3). A no-leap model
+   calendar would touch the time manager, chunks, output time stamps and restarts.
+3. **Frozen soil**: `H2OSOI` is total water; CLM-ml's `SoilInit`/`clmData` put it all in
+   liquid (ice = 0), so frozen soils have liquid water for root uptake and soil thermal
+   properties. CLM's soil-moisture stream keeps the model's own ice fraction. (`SOILLIQ` and
+   `SOILICE` are in the history files.)
+4. **No snowpack**: snowfall is intercepted by the canopy (G6) but snow reaching the ground
+   is not accumulated; the ground is never snow covered (no change to albedo, ground heat
+   flux, LAI burial).
+5. **Root biomass** 500 g m⁻² everywhere (G17) and **canopy bottom** unused (G13): science
+   choices to revisit.
+6. **Initial state** from monthly means (G11), not a spun-up restart: expect a spin-up drift
+   of the soil temperature over the first weeks.
+7. **Meteorology memory**: the meteorology is built on the host per chunk at the model step
+   (~39 numbers per gridcell-step, ~7 GB per month for 14 346 gridcells). Interpolating the
+   6-hourly records inside the compiled chunk, as is done for vegetation and soil water, would
+   remove it (Phase 7).
+8. **`forc_hgt_u_patch` after setup**: the step writes the gridcell's 30 m into this container
+   (`TowerMetCurr`); unused (the canopy uses `zref_forcing`, set at setup to the patch's
+   height), but misleading if output.
+9. **Tiny canopies**: grass and crop tops go down to 5 mm (surface-data heights with 10 + 10
+   layers); not filtered.

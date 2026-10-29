@@ -113,9 +113,19 @@ def setup_batch(spec: dict):
     setup per (forcing key, PFT) prototype, every patch's own fields computed for all patches
     at once (``clm_ml.legacy.vector_setup``, bit for bit equal to setting each patch up,
     :func:`setup_batch_legacy`), the first step's physics batched; then laid out for the
-    devices and C3/C4 groups (Phase 6 steps 3-6)."""
+    devices and C3/C4 groups (Phase 6 steps 3-6). Grid runs (``spec["grid"]``, Phase 6b):
+    prototypes per PFT from the gridded data, the chunks read gridded data
+    (``clm_ml.legacy.grid_setup``)."""
     from clm_ml.legacy import vector_setup
 
+    if spec.get("grid"):
+        from clm_ml.legacy import grid_setup
+
+        domain_batch, inputs = grid_setup.setup_grid_batch(spec)
+        batch = laid_out(domain_batch, spec["batch"])
+        batch.reader = grid_setup.GridChunkReader(inputs, batch)
+        batch.land_fn = grid_setup.land_fn
+        return batch
     return laid_out(vector_setup.setup_batch(spec), spec["batch"])
 
 
@@ -188,7 +198,13 @@ def run_spec(spec: dict, out_file: Path) -> None:
         return
 
     # 5. Set up every patch, then run them together.
+    import time
+
+    t0 = time.perf_counter()
     batch = setup_batch(spec)
+    if spec.get("grid"):
+        print(f"timing: setup {time.perf_counter() - t0:.1f} s ({batch.n_real} patches, "
+              f"{batch.n_real_gridcells} gridcells, layout {batch.layout})", flush=True)  # fmt: skip
     import datetime as dt
 
     import offline_executable.main as main_mod
@@ -208,9 +224,13 @@ def run_spec(spec: dict, out_file: Path) -> None:
         for stream, level in zip(streams, levels)
     ]
     meta = dict(spec["meta"])
-    meta["soil_depth"] = np.concatenate(  # (patch, soil layer) node depths
-        [np.asarray(r.insts.site.z_col)[:, 1 : nlevgrnd + 1] for r in batch.runs]
-    )
+    if spec.get("grid"):  # one soil layer structure for every patch
+        z0 = np.asarray(batch.runs[0].insts.site.z_col)[:, 1 : nlevgrnd + 1]
+        meta["soil_depth"] = np.repeat(z0, batch.n_real, axis=0)
+    else:
+        meta["soil_depth"] = np.concatenate(  # (patch, soil layer) node depths
+            [np.asarray(r.insts.site.z_col)[:, 1 : nlevgrnd + 1] for r in batch.runs]
+        )
     writers = None
     if spec.get("output_dir"):
         start = dt.datetime.fromisoformat(spec["run_start"])
@@ -266,6 +286,12 @@ def run_spec(spec: dict, out_file: Path) -> None:
     if writers is not None:
         for w in writers:
             w.close()
+    if spec.get("grid"):
+        import jax
+
+        stats = [d.memory_stats() or {} for d in jax.local_devices()]
+        peak = [round(st.get("peak_bytes_in_use", 0) / 1e9, 2) for st in stats]
+        print(f"timing: peak device memory GB {peak}", flush=True)
 
     arrays = {"static.soil_depth": meta["soil_depth"]}
     if keep:

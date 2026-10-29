@@ -174,7 +174,12 @@ def _interpolated_chunk(self: TowerForcingSource, first_step: int, n_steps: int)
         starts,
         self.step_seconds,
         _COSZ_FUNCTIONS[key],
-        rules={"fsdsbot": self.shortwave, "prect": self.precipitation},
+        rules={
+            "fsdsbot": self.shortwave,
+            "fsds_direct": self.shortwave,
+            "fsds_diffuse": self.shortwave,
+            "prect": self.precipitation,
+        },
     )
     mets = [
         derive_tower_met(

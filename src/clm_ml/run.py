@@ -26,6 +26,8 @@ import numpy as np
 
 from clm_ml.config import ModelConfig
 from clm_ml.domain import Domain
+from clm_ml.grid import GridSection
+from clm_ml.grid_forcing import GriddedForcingSection
 from clm_ml.io.yaml_schema import ConfigError, apply_overrides, from_dict, read_yaml
 from clm_ml.params import PFT_NAMES, Params
 
@@ -49,6 +51,7 @@ class DomainSection:
     towers: tuple[str, ...] = ()
     towers_file: Optional[str] = None
     min_patch_weight: float = 0.0
+    grid: Optional[GridSection] = None  # type grid (Phase 6b): clm_ml.grid
 
 
 @dataclasses.dataclass(frozen=True)
@@ -95,11 +98,15 @@ class SoilWaterSection(LandDataSection):
 
 @dataclasses.dataclass(frozen=True)
 class ForcingSection:
-    meteorology: MeteorologySection
+    # Towers: tower meteorology and the CLM history file (both required)
+    meteorology: Optional[MeteorologySection] = None
     # The CLM history file: initial conditions, and LAI/SAI/soil water with source clm_history
-    clm_history: ClmHistorySection
+    clm_history: Optional[ClmHistorySection] = None
     vegetation: LandDataSection = LandDataSection()  # LAI, SAI
     soil_water: SoilWaterSection = SoilWaterSection()  # volumetric soil water
+    # Grid runs (Phase 6b): CRUJRA datm streams, CO2, monthly CLM history soil data
+    # (clm_ml.grid_forcing); vegetation from the surface data
+    gridded: Optional[GriddedForcingSection] = None
 
 
 #: Earlier forcing keys and what replaced them (plan §4.1)
@@ -201,6 +208,12 @@ class Run:
     start: dt.datetime
     n_steps: int
     source: str = "run.yaml"
+    path_: Optional[Path] = None  # run.yaml itself (grid runs: the worker reloads it)
+    overrides: tuple = ()
+
+    @property
+    def is_grid(self) -> bool:
+        return self.run_file.domain.type == "grid"
 
     # -- paths -------------------------------------------------------------------------
 
@@ -402,14 +415,24 @@ class Run:
     def legacy_spec(self, legacy_ascii_dir: Optional[Path], patch: int = 0) -> dict:
         """Everything the legacy worker needs, as JSON-serializable values: patch ``patch``'s
         setup at the top level (one-patch models, ``clm_ml.model``), every patch's in
-        ``patches``, and the domain's patch-gridcell map and weights in ``batch``."""
+        ``patches``, and the domain's patch-gridcell map and weights in ``batch``. Grid runs
+        (``grid``): the worker reloads the run file and builds its prototypes from the
+        gridded data (``clm_ml.legacy.grid_setup``)."""
         tower_name = self.domain.gridcells.names[0]
-        spec = self._patch_spec(patch)
+        if self.is_grid:
+            spec = {
+                "grid": {"run_file": str(self.path_), "overrides": list(self.overrides)},
+                "tower_name": "domain",
+            }
+            patches = []
+        else:
+            spec = self._patch_spec(patch)
+            patches = [
+                spec if p == patch else self._patch_spec(p) for p in range(self.domain.n_patches)
+            ]
         return {
             **spec,
-            "patches": [
-                spec if p == patch else self._patch_spec(p) for p in range(self.domain.n_patches)
-            ],
+            "patches": patches,
             "batch": {
                 "gridcell_index": self.domain.patches.gridcell_index.tolist(),
                 "weight": self.domain.patches.weight.tolist(),
@@ -457,7 +480,8 @@ class Run:
             f"  params     {self.params.source}",
             f"  gridcells  {d.n_gridcells}   patches {d.n_patches}",
         ]
-        for i, n_layers in enumerate(d.layer_counts(c)):
+        shown_patches = 20 if self.is_grid else d.n_patches
+        for i, n_layers in enumerate(d.layer_counts(c)[:shown_patches]):
             g = d.patches.gridcell_index[i]
             shown = "from CLM history" if n_layers == 0 else str(n_layers)
             lines.append(
@@ -465,6 +489,8 @@ class Run:
                 f"weight {d.patches.weight[i]:g}  canopy layers {shown} "
                 f"(max_layers {c.canopy_layers.max_layers})"
             )
+        if shown_patches < d.n_patches:
+            lines.append(f"    ... ({d.n_patches - shown_patches} more patches)")
         unvalidated = c.non_default_options()
         if unvalidated:
             lines.append(
@@ -509,6 +535,11 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
     params = Params.from_yaml(params_ref)
 
     _check_supported(run_file, path.name)
+    model_step = config.numerics.step_seconds or run_file.time.step_seconds
+    if run_file.domain.type == "grid":
+        return _load_grid_run(
+            run_file, base_dir, config, params, path, tuple(overrides), model_step
+        )
     towers_file = run_file.domain.towers_file
     domain = Domain.from_towers(
         run_file.domain.towers,
@@ -552,15 +583,19 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
                 f"{name} has forcing_step_minutes {step_minutes}"
             )
 
-    model_step = config.numerics.step_seconds or run_file.time.step_seconds
     if model_step <= 0 or run_file.time.step_seconds % model_step:
         raise ConfigError(
             f"model.yaml: numerics.step_seconds ({model_step}) must divide the forcing "
             f"interval (run.yaml time.step_seconds, {run_file.time.step_seconds} s)"
         )
     start, n_steps = _resolve_time(run_file.time, path.name, model_step)
-    run = Run(run_file, base_dir, config, params, domain, start, n_steps, source=path.name)
+    run = Run(run_file, base_dir, config, params, domain, start, n_steps, source=path.name,
+              path_=path, overrides=tuple(overrides))  # fmt: skip
     forcing = run_file.forcing
+    if forcing.meteorology is None or forcing.clm_history is None:
+        raise ConfigError(
+            f"{path.name}: forcing.meteorology and forcing.clm_history are required for towers"
+        )
     for tower in domain.gridcells.names:  # every gridcell's forcing files ({tower} expanded)
         run.files(forcing.meteorology.files, tower, "forcing.meteorology.files")
         for key in ("vegetation", "soil_water"):
@@ -584,6 +619,63 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
             f"divide the model step ({model_step} s)"
         )
     return run
+
+
+def _load_grid_run(run_file, base_dir, config, params, path, overrides, model_step) -> Run:
+    """A ``domain.type: grid`` run (Phase 6b): the domain from the surface data
+    (:mod:`clm_ml.grid`), the gridded forcing (:mod:`clm_ml.grid_forcing`)."""
+    from clm_ml.grid import load_grid_domain
+
+    d, f, src = run_file.domain, run_file.forcing, path.name
+    if d.grid is None:
+        raise ConfigError(f"{src}: domain.grid: required with domain.type grid")
+    if f.gridded is None:
+        raise ConfigError(f"{src}: forcing.gridded: required with domain.type grid")
+    if config.physics.acclimation_temperature != "running_mean":
+        raise ConfigError(
+            f"{src}: model.yaml physics.acclimation_temperature: grid runs need running_mean "
+            "(the Fortran whole-run mean needs all of a run's forcing before it starts)"
+        )
+    if run_file.output.legacy_ascii:
+        raise ConfigError(f"{src}: output.legacy_ascii: not available for grid runs")
+    if run_file.initial_conditions.source != "clm_history" and not (
+        run_file.initial_conditions.source == "restart"
+    ):
+        raise ConfigError(f"{src}: initial_conditions.source: clm_history or restart")
+    if run_file.time.step_seconds != model_step:
+        raise ConfigError(
+            f"{src}: time.step_seconds: for grid runs, the model step ({model_step} s); the "
+            "gridded streams are interpolated to it"
+        )
+    start, n_steps = _resolve_time(run_file.time, src, model_step)
+
+    def resolve(text):
+        p = Path(str(text)).expanduser()
+        return p if p.is_absolute() else (base_dir / p).resolve()
+
+    domain = load_grid_domain(
+        d.grid, params=params, config=config, start=start, step_seconds=model_step,
+        min_patch_weight=d.min_patch_weight, resolve=resolve,
+    )  # fmt: skip
+    ex = run_file.execution
+    for key, count, own in (
+        ("patch_count", ex.patch_count, domain.n_patches),
+        ("gridcell_count", ex.gridcell_count, domain.n_gridcells),
+    ):
+        if count is not None and count < own:
+            raise ConfigError(f"{src}: execution.{key} ({count}) is less than {own}")
+    if ex.devices > 1 and (ex.patch_count or ex.gridcell_count):
+        raise ConfigError(
+            f"{src}: execution.patch_count/gridcell_count with devices > 1 is not supported"
+        )
+    substeps = model_step / config.numerics.substep_seconds
+    if substeps != int(substeps):
+        raise ConfigError(
+            f"model.yaml: numerics.substep_seconds ({config.numerics.substep_seconds:g}) must "
+            f"divide the model step ({model_step} s)"
+        )
+    return Run(run_file, base_dir, config, params, domain, start, n_steps, source=src,
+               path_=path, overrides=overrides)  # fmt: skip
 
 
 def _check_forcing_keys(forcing, source: str) -> None:
@@ -624,8 +716,6 @@ _RAW_PREFIXES = ("mlcanopy.", "temperature.")
 
 
 def _check_supported(run_file: RunFile, source: str) -> None:
-    if run_file.domain.type != "towers":
-        raise ConfigError(f"{source}: domain.type: 'grid' is planned but not yet supported")
     towers = list(run_file.domain.towers)
     if len(set(towers)) != len(towers):
         raise ConfigError(f"{source}: domain.towers: a tower is listed twice ({towers})")

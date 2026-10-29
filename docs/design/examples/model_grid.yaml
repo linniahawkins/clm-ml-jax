@@ -1,0 +1,8 @@
+# Global runs (decision 28, input decision 7): 10 layers within and 10 above every canopy.
+canopy_layers:
+  n_layers_within: 10
+  n_layers_above: 10
+  max_layers: 20
+numerics:
+  on_patch_error: exclude          # decision 25: a failing patch is left out, not the run
+  max_failed_patch_fraction: 0.05

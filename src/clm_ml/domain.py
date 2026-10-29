@@ -107,6 +107,8 @@ class Gridcells:
     longitude: np.ndarray  # (ng,)
     measurement_height: np.ndarray  # (ng,) m
     forcing_step_minutes: np.ndarray  # (ng,) int
+    # Grid domains (Phase 6b): each gridcell's (row, column) on the surface-data grid
+    grid_index: Optional[np.ndarray] = None  # (ng, 2) int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -121,6 +123,11 @@ class Patches:
     stem_area_profile_beta: np.ndarray  # (np, 2)
     n_layers_within: np.ndarray  # (np,) int, 0 = model.yaml canopy_layers
     n_layers_above: np.ndarray  # (np,) int, 0 = model.yaml canopy_layers
+    # Grid domains (Phase 6b): canopy bottom (m, from the surface data; not used by the
+    # leaf-area profile, see clm_ml.grid) and the forcing height of each patch (m, CLM's
+    # 30 m + z0m + displacement height); None for towers (the gridcell's height)
+    canopy_bottom: Optional[np.ndarray] = None  # (np,)
+    measurement_height: Optional[np.ndarray] = None  # (np,)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -245,8 +252,10 @@ class Domain:
         """
         c = config.canopy_layers
         counts = []
+        own = self.patches.measurement_height
         for i, htop in enumerate(self.patches.canopy_height):
             zref = self.gridcells.measurement_height[self.patches.gridcell_index[i]]
+            zref = zref if own is None else own[i]
             zref = 30.0 if np.isnan(zref) else zref  # legacy default for tower_ht = -999
             if np.isnan(htop):
                 counts.append(0)

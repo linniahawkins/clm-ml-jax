@@ -10,6 +10,7 @@ Mirrors the Fortran entry point in offline_driver/CLMml.F90 and
 the namelist reader in offline_driver/controlMod.F90.
 """
 
+import contextlib
 import dataclasses
 import datetime
 import os
@@ -798,6 +799,12 @@ class PatchBatch:
     source: Optional[np.ndarray] = None
     real_index: Optional[np.ndarray] = None
     layout: Optional[tuple] = None  # (devices, gridcells per device, C3 slots, C4 slots)
+    # Grid runs (Phase 6b): the chunk inputs come from gridded data, ``reader(first_step,
+    # n_steps) -> (xg, xp)`` (in place of each run's ``load_chunk``), and the CLM history
+    # record of each step is formed inside the chunk, ``land_fn(xw, land, gidx)`` with
+    # ``xp = (xw, land)`` (per-step weights, chunk-constant monthly records)
+    reader: object = None
+    land_fn: object = None
 
     def __post_init__(self):
         if self.n_real is None:
@@ -1088,10 +1095,19 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
         some_out = (seg((~ok).astype(jnp.int32)) > 0).reshape(den_b.shape)
         return jnp.where(some_out, renorm, plain)
 
-    def step(template, carry, x):
+    land_fn = batch.land_fn
+
+    def to_patches(a, gidx):
+        """A per-gridcell input (gridcell, ...) gathered to the patches; a value without a
+        gridcell axis (the step's time in grid runs) broadcast to them."""
+        return jnp.take(a, gidx, 0) if a.ndim >= 1 else jnp.broadcast_to(a, (n_p,))
+
+    def step(template, land, carry, x):
         state, buffers, errors = carry
         xg, xp, slots, params, weight, alive, gidx = x
-        now, met, forcing_bef, forcing_next = jax.tree.map(lambda a: jnp.take(a, gidx, 0), xg)
+        now, met, forcing_bef, forcing_next = jax.tree.map(lambda a: to_patches(a, gidx), xg)
+        if land_fn is not None:  # grid runs: the step's CLM history record from the records
+            xp = land_fn(xp, land, gidx)
         x_patch = (now, met, xp, forcing_bef, forcing_next)
         state, values, step_errors = batched_step(template, state, x_patch, params)
         values = {n: unbatch_patch_axis(v, n_p) for n, v in values.items()}
@@ -1124,8 +1140,11 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
             jax.tree.map(lambda a, lo=int(idx[0]), hi=int(idx[-1]) + 1: a[lo:hi], template)
             for _, idx in groups
         )
+        land = None
+        if land_fn is not None:
+            xp, land = xp  # per-step weights (scanned), monthly records (chunk constant)
         (state, buffers, errors), _ = jax.lax.scan(
-            lambda c, x: checkpointed_step(templates, c, x),
+            lambda c, x: checkpointed_step(templates, land, c, x),
             (state, buffers, errors),
             (xg, xp, slots) + per_step,
         )
@@ -1157,11 +1176,14 @@ def _sharded(run_chunk, n_devices: int, default_template):
         def spec_tree(tree, spec):
             return jax.tree.map(lambda _: spec, tree)
 
-        buffer_specs = jax.tree.map(lambda x: behind if x.ndim >= 2 else whole, buffers)
+        def by_ndim(tree):  # (time/record, patch or gridcell, ...) split; (time,) replicated
+            return jax.tree.map(lambda x: behind if x.ndim >= 2 else whole, tree)
+
+        buffer_specs = by_ndim(buffers)
         in_specs = (
             spec_tree(state, lead),
-            spec_tree(xg, behind),
-            spec_tree(xp, behind),
+            by_ndim(xg),
+            by_ndim(xp),
             spec_tree(slots, whole),
             buffer_specs,
             spec_tree(params, lead),
@@ -1186,7 +1208,10 @@ def _sharded(run_chunk, n_devices: int, default_template):
 def read_batch_inputs(batch: PatchBatch, first_step: int, n_steps: int):
     """A chunk's forcing for :func:`make_batch_runner`: ``xg`` (time, meteorology and the
     canopy forcing records, read once per gridcell, axes (step, gridcell, ...)) and ``xp``
-    (the CLM history record per patch, axes (step, patch, ...))."""
+    (the CLM history record per patch, axes (step, patch, ...)). Grid runs read gridded
+    data instead (``batch.reader``, Phase 6b)."""
+    if batch.reader is not None:
+        return batch.reader(first_step, n_steps)
     steps = range(first_step, first_step + n_steps)
     # each distinct run (patches set up from one prototype, padding copies) is read once
     index: dict = {}
@@ -1461,6 +1486,34 @@ def fill_patches(buffers, alive):
     return {k: fill(v) if isinstance(v, dict) else v for k, v in buffers.items()}
 
 
+@contextlib.contextmanager
+def without_persistent_cache_on_cpu():
+    """Compile without the on-disk compilation cache on CPU. With JAX 0.9.2, loading some
+    large cached CPU programs back from the cache crashes in LLVM's object loader
+    (``ELFFile::getShNum`` under ``RTDyldObjectLinkingLayer::emit``; deterministic, while the
+    same program compiled afresh runs), seen for the batched first step of a batch of towers
+    with C3 and C4 groups (Phase 6b). The first step is compiled once per run, so it is not
+    cached on CPU. (On GPU these programs are too large for the cache to store anyway.) Uses
+    JAX's private switch ``compilation_cache._cache_used``; without it the cache is used."""
+    try:
+        from jax._src import compilation_cache as cc
+
+        device = jax.devices()[0]
+        if device.platform != "cpu":
+            yield
+            return
+        cc.is_cache_used(device.client)  # make JAX decide (once per process) first
+        saved = cc._cache_used
+    except Exception:  # private API changed: keep the cache
+        yield
+        return
+    cc._cache_used = False
+    try:
+        yield
+    finally:
+        cc._cache_used = saved
+
+
 def batched_first_step(batch: PatchBatch, names=(), max_layers: int = 50):
     """The first step of every patch of ``batch`` (each initialized at setup,
     ``batch.inits``) as one compiled call, vmapped over each C3/C4 group's slots and split
@@ -1517,7 +1570,8 @@ def batched_first_step(batch: PatchBatch, names=(), max_layers: int = 50):
             out_specs=Pspec("patch"),
             check_vma=False,
         )
-    template, values = jax.jit(first)(insts0, xs, params)
+    with without_persistent_cache_on_cpu():
+        template, values = jax.jit(first)(insts0, xs, params)
     return template, {n: unbatch_patch_axis(v, batch.n_patches) for n, v in values.items()}
 
 
@@ -1608,6 +1662,9 @@ def run_streams(
     # First step of every patch (initializes the canopy and builds the template): batched
     # and compiled after each patch's initialization at setup (PatchBatch.inits, step 6), or
     # step by step (PatchBatch.firsts, or here for a single run)
+    import time as _time
+
+    t_first = _time.perf_counter()
     if batch.inits is not None or batch.init_stack is not None:
         template, first_values = batched_first_step(batch, names, max_layers)
         filt = batch.init_filt if batch.inits is None else batch.inits[0][1]
@@ -1624,6 +1681,8 @@ def run_streams(
         first_values = {n: np.concatenate([v[n] for v in per_patch]) for n in names}
     state = state_from_instances(template)
     template_state = state
+    if batch.reader is not None:  # grid runs: progress for long runs
+        print(f"timing: first step {_time.perf_counter() - t_first:.1f} s", flush=True)
     shapes1 = output_shapes(run, first_insts, names, max_layers)  # one patch: (1, ...)
     shapes = {n: (n_p,) + sh[1:] for n, sh in shapes1.items()}
 
@@ -1705,9 +1764,15 @@ def run_streams(
         weight = jnp.asarray(batch.weight, dtype=jnp.float64)
         gidx = jnp.asarray(batch.runner_gidx)
         chunk_start_state = state
+        t_chunk = _time.perf_counter()
         state, buffers, errors = runner(
             state, xg, xp, slots, buffers, params, weight, jnp.asarray(alive), gidx
         )
+        if batch.reader is not None:
+            jax.block_until_ready(state)
+            secs = _time.perf_counter() - t_chunk
+            print(f"timing: chunk {starts[0]:%Y-%m-%d} {n} steps {secs:.1f} s "
+                  f"({batch.n_real * n / secs:.0f} patch-steps/s)", flush=True)  # fmt: skip
         end = step_end(first_step + n - 1)
         where = f"the chunk {starts[0]} to {end}"
         if on_patch_error == "stop":
