@@ -244,3 +244,50 @@ def test_grid_run_equals_tower_runs_of_its_data(tmp_path):
         night = np.max(np.abs(g[v][:12] - t[v][:12])) / np.max(np.abs(t[v]))  # 00-12 UTC
         assert night <= 1e-10, (v, night)
         assert np.max(np.abs(g[v] - t[v])) <= 0.1 * np.max(np.abs(t[v])), v
+
+
+THIN_LAYER_SCRIPT = """
+import sys
+from pathlib import Path
+ROOT = Path({root!r}); sys.path.insert(0, str(ROOT / "src")); sys.path.insert(0, str(ROOT))
+import yaml, numpy as np
+from tests.regression.test_grid_setup import grid_run_files
+from clm_ml.run import load_run
+tmp = Path({tmp!r})
+path = grid_run_files(tmp, {{"lat": [41.5, 42.5], "lon": [-109.0, -108.5]}}, "2000-01-01T00:00",
+                      days=16, co2="{{ppm: 369}}",
+                      extra_model='numerics: {{ignore_checks: ["CanopyFluxesDiagnostics 3"]}}\\n')
+r = yaml.safe_load(path.read_text())
+r["output"]["streams"] = [{{"name": "s", "frequency": "step", "statistic": "instantaneous",
+    "level": ["patch"], "variables": ["mlcanopy.td_profile", "mlcanopy.dpai_profile",
+    "mlcanopy.tleaf_leaf", "stem_area_added", "stem_area_index", "leaf_area_index"]}}]
+path.write_text(yaml.safe_dump(r))
+run = load_run(path)
+pft = [str(x) for x in run.domain.patches.pft_index]
+out = run.execute(write=False)["s"]
+d = {{k: np.asarray(v) for k, v in {{**out.data, **out.raw}}.items()}}
+td, dpai, tl = d["mlcanopy.td_profile"], d["mlcanopy.dpai_profile"], d["mlcanopy.tleaf_leaf"]
+leafy = (dpai > 0) & (dpai < 1e30)
+print("max td of leafy layers", float(td[leafy].max()))
+print("min dpai of leafy layers", float(dpai[leafy].min()))
+print("leaf T range", float(tl[..., 1:3][leafy].min()), float(tl[..., 1:3][leafy].max()))
+print("stem area added max by patch", np.round(d["stem_area_added"].max(axis=0), 4).tolist(), pft)
+"""
+
+
+@needs_data
+def test_thin_layers_keep_minimum_plant_area(tmp_path):
+    """Issue 14: a stems-only shrub (LAI 0, SAI 0.108) in Wyoming, January 2000, whose bottom
+    layer held 0.0013 m2 m-2: CLM-ml's 9-angle diffuse transmittance exceeded 1 there and
+    the leaf temperature ran away at a calm sunrise (13 January). With every leafy layer
+    kept at min_layer_plant_area (0.01, added as stems) the run completes (patch errors stop
+    the run), every leafy layer transmits less than it receives, and leaf temperatures stay
+    physical."""
+    out = _python(THIN_LAYER_SCRIPT.format(root=str(ROOT), tmp=str(tmp_path)))
+    value = lambda key: [float(x) for x in out.split(key)[1].split("\n")[0].split()]  # noqa: E731
+    assert value("max td of leafy layers")[0] < 1.0, out
+    assert value("min dpai of leafy layers")[0] >= 0.01 - 1e-12, out
+    t_min, t_max = value("leaf T range")
+    assert 200.0 < t_min and t_max < 330.0, out
+    added = out.split("stem area added max by patch")[1].split("]")[0]
+    assert max(float(x) for x in added.strip(" [").split(",")) > 0.0, out

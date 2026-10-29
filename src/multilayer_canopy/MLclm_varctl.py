@@ -159,6 +159,12 @@ class MLOptions(NamedTuple):
     mlcan_to_clm: int = 0
     met_type: int = 0
     dpai_min: float = 0.01
+    # Minimum plant area of every leafy layer at every time step (m2/m2), added as stem area
+    # (not Fortran CLM-ml v2; Phase 6b, issue 14): the 9-angle diffuse transmittance exceeds 1
+    # below ~0.005, which makes the longwave equations unstable. 0: CLM-ml v2 as in Fortran.
+    # Value: CLM-ml v1's dpai_min ("minimum plant area index to be considered a vegetation
+    # layer", m2/m2), applied per step instead of removing layers at setup.
+    layer_pai_floor: float = 0.01
     # Layer slots of every canopy profile array (model.yaml canopy_layers.max_layers; Fortran:
     # the parameter nlevmlcan = 100). Patches use 1..ncan; the rest is padding.
     max_layers: int = 50

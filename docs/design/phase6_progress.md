@@ -200,6 +200,20 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   `displacement_to_height_ratio`), needed only by grid runs.
 - Open issues of Phase 6b to come back to (maintainer): `global_input.md` issues 1-16.
 
+### 2026-10-29: issue 14 diagnosed and fixed (decision 30)
+
+- Diagnosis (probes `probe/issue14/`): CLM-ml's 9-angle diffuse transmittance is 1.0051 at zero
+  plant area, so layers thinner than ~0.005 m2 m-2 have td > 1; the Norman longwave then makes
+  a layer's net longwave grow with its temperature and calm conditions let it run away. Same
+  in the Fortran. Affects up to a third of the vegetated area in winter (most do not diverge
+  but create energy).
+- Fix (maintainer's choice among the options in `global_input.md` issue 14): every leafy layer
+  keeps 0.01 m2 m-2 (CLM-ml v1's dpai_min) at every step, added as stems; replaces G20.
+  CHATS7 bit for bit; reference regenerated to add the new field `sai_floor_canopy` (all
+  existing fields identical). New test `test_thin_layers_keep_minimum_plant_area`.
+- New open issue 17: LAI non-differentiability (CLM's 0.05 cutoff, the floor's kink); raise
+  again later (maintainer).
+
 ## Next (resume here in a new session)
 
 1. **Check the end-of-Phase-6 job** `endphase` (PBS job 8001129, CPU, project P93300041;

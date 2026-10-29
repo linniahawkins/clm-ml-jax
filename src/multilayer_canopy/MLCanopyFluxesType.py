@@ -75,7 +75,7 @@ class mlcanopy_type(NamedTuple):
     ztop_canopy: jnp.ndarray  # Canopy foliage top height (m)
     zbot_canopy: jnp.ndarray  # Canopy foliage bottom height (m)
     lai_canopy: jnp.ndarray  # Leaf area index (m2/m2)
-    sai_canopy: jnp.ndarray  # Stem area index (m2/m2)
+    sai_canopy: jnp.ndarray  # Stem area index (m2/m2), with sai_floor_canopy
     root_biomass_canopy: jnp.ndarray  # Fine root biomass (g/m2)
     pbeta_lai_canopy: jnp.ndarray  # Beta distribution parameters for LAI (-); shape (np,3)
     pbeta_sai_canopy: jnp.ndarray  # Beta distribution parameters for SAI (-); shape (np,3)
@@ -385,6 +385,10 @@ class mlcanopy_type(NamedTuple):
     # the host after the step or chunk (check_balance). Not Fortran: Fortran stopped inside the
     # routine. The default (None) keeps containers pickled before this field readable.
     balance_error: jnp.ndarray = None  # shape (np, len(BALANCE_CHECKS))
+    # Stem area added by the per-layer minimum plant area (m2/m2; MLOptions.layer_pai_floor,
+    # Phase 6b): sai_canopy minus the prescribed stem area. Last, with a default, like
+    # balance_error, so containers pickled before it stay readable.
+    sai_floor_canopy: jnp.ndarray = None
 
 
 #: The Fortran error checks recorded in ``balance_error``: (name, tolerance). The Fortran
@@ -502,6 +506,7 @@ def create_mlcanopy(begp: int, endp: int, max_layers: int) -> mlcanopy_type:
         zbot_canopy=_r(np_),
         lai_canopy=_r(np_),
         sai_canopy=_r(np_),
+        sai_floor_canopy=_r(np_),
         root_biomass_canopy=_r(np_),
         # -spval, as Fortran InitAllocate: a negative value marks "not set by the tower", so
         # getPADparameters gives the PFT default profile (with +spval it never did)

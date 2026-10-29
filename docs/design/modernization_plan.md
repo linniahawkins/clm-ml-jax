@@ -50,6 +50,7 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 27 | Parameters for global runs | **CLM5 defaults for every PFT** (`params: clm5_defaults` or the maintainer's parameter file); the CHATS overrides stay for CHATS (`params: chats`). |
 | 28 | Canopy layers in global runs | **Constant layer counts** (model.yaml `canopy_layers.n_layers_within`/`n_layers_above`, the same for every patch); **canopy top and bottom heights from the surface dataset** (per PFT and gridcell). |
 | 29 | Non-vegetated land | **Skipped for now**: bare ground (and the other non-vegetated land units) are left out; each gridcell's vegetated patch weights are renormalized to sum to 1, and gridcells without vegetation are left out of the domain. |
+| 30 | Thin canopy layers (Phase 6b, issue 14) | **Every leafy layer keeps at least 0.01 m² m⁻² of plant area at every step, the missing part added as stem area** (model.yaml `canopy_layers.min_layer_plant_area`, 0 = CLM-ml v2). CLM-ml's 9-angle diffuse transmittance exceeds 1 below ~0.005 m² m⁻² per layer, which made the longwave equations unstable (runaway leaf temperatures) and created energy in up to a third of the vegetated area in winter. The value is CLM-ml v1's `dpai_min` (m² m⁻²), which v1 applied at setup; applied each step here so the layer structure stays fixed. Stems, not leaves, so no photosynthesis or transpiration is added and leaf area keeps its gradient. CHATS7 unchanged. Details and the options considered: `global_input.md` issue 14, G20. |
 
 Smaller decisions: see §8.
 

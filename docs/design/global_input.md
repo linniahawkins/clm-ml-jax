@@ -114,7 +114,7 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
 | G16 | Organic matter | Capped at CLM-ml's `organic_max` (130 kg m⁻³): CLM caps the organic fraction at 1, CLM-ml's formula has no cap, and 4 021 patches' soils exceed it (up to 318) | `SoilStateInitTimeConstMod.F90` |
 | G17 | Root biomass | Not in CLM (satellite phenology has no fine-root biomass): 500 g m⁻² for every patch (`domain.grid.root_biomass`), the value of every CLM-ml forest tower | — |
 | G18 | `min_patch_weight` | Applied to the fraction of the gridcell's *vegetated* area, then renormalized (towers: the weights as given, which sum to 1); a gridcell keeps at least its largest patch | — |
-| G20 | No plant area | A patch CLM would treat as not vegetated (`elai + esai < 0.05`: CLM's bare-ground fluxes for that step) keeps a stem area of 0.05 m² m⁻² (CLM's vegetated threshold): CLM-ml has no bare-ground path, and zero plant area gives undefined sunlit fractions (the patch failed and was excluded for the rest of the run). 2 926 patches (4 %) are in this state in February, 141 in August (mostly crops and arctic grass) | `SatellitePhenologyMod.F90` (`frac_veg_nosno_alb`) |
+| G20 | Minimum plant area per layer (decision 30, replaces the earlier 0.05 of stems for patches without plant area) | Every leafy layer keeps at least `min_layer_plant_area` = 0.01 m² m⁻² at every step; the missing part is added as **stem** area (LAI is never changed, so no photosynthesis or transpiration is added), and the canopy's SAI includes it (output `stem_area_added`). The value is CLM-ml v1's `dpai_min` ('minimum plant area index to be considered a vegetation layer', m²/m², `MLclm_varctl.F90` l. 37), which v1 applied once at setup with the first step's LAI and SAI (`MLinitVerticalMod.F90` l. 199-265); here it is applied each step without removing layers. A patch with no plant area thus has 0.01 in each of its leafy layers. `0` gives CLM-ml v2 exactly. CHATS7 unchanged (its thinnest layer is 0.011) | CLM-ml v1 `initVerticalStructure` |
 | G19 | Gridcell output | Area-weighted mean over the vegetated patches (bare ground and other land units left out, decision 29) | — |
 
 ## Open issues (not fixed; for the maintainer)
@@ -168,9 +168,11 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
     Grid runs list the check in `numerics.ignore_checks` (reported every chunk, no
     exclusion). Fixing the diagnostic (sum the components, as CLM) is a science change
     for the maintainer (CHATS7 never freezes, so its results would not change).
-13. **Bare-ground patches** (G20): a CLM-ml bare-ground path (or leaving the patch out of
-    its gridcell for those steps) would copy CLM exactly.
-14. **Diffuse transmittance above 1 in thin layers (diagnosed 2026-10-29; not fixed).**
+13. **Bare-ground patches**: where CLM treats a patch as not vegetated (`elai + esai < 0.05`:
+    bare-ground fluxes), this model keeps a sparse canopy (0.01 m² m⁻² of stems per leafy
+    layer, G20). A CLM-ml bare-ground path (or leaving the patch out of its gridcell for those
+    steps) would copy CLM exactly.
+14. **Diffuse transmittance above 1 in thin layers (diagnosed and fixed 2026-10-29: decision 30, G20).**
     Seen as NaN in 5 of 2 902 regional patches in January (deciduous shrubs in Wyoming,
     LAI 0, SAI 0.108). Diagnosis (probes in `probe/issue14/`, no code changed):
     - CLM-ml v2 computes a layer's diffuse transmittance with a 9-angle midpoint rule
@@ -206,6 +208,22 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
       per layer each step, as `dpai_min` was in CLM-ml v1); (d) a radiation formulation that
       stays well conditioned as `dpai -> 0`. CLM (big leaf) has no layers, so it has nothing
       to copy here.
+    - **Fix chosen by the maintainer** (decision 30): a minimum plant area of 0.01 m² m⁻² in
+      every leafy layer at every step, added as stems (G20). It keeps every layer's `td` below
+      1 (the threshold is ~0.005), keeps the layer structure fixed (no layers switching on and
+      off: no orphaned leaf states, no start-date dependence, no new discontinuities), and
+      leaves CHATS7 bit for bit (reference regenerated only to add the new field; every
+      existing field identical). Global effect (2000 monthly LAI/SAI): a floored layer in
+      37 % of patch-months (58 % of the vegetated area in January, 25 % in July), adding a
+      median 0.005 m² m⁻² (+1.2 % of the prescribed LAI + SAI; 95th percentile +18 %, max
+      0.1). Test: `tests/regression/test_grid_setup.py::test_thin_layers_keep_minimum_plant_area`
+      (the Wyoming shrub through 16 January: max `td` 0.996, leaf temperature 256-279 K).
+      Options considered and why not: normalizing the quadrature (changes every result,
+      CHATS7 included, and leaves the longwave equations ill-conditioned as plant area -> 0);
+      v1's setup-time removal of thin layers (start-date dependent; fails for patches with
+      almost no plant area); removing layers each step (orphaned leaf heat, water and
+      intercepted water, abrupt profile changes, discrete switches); a floor on the canopy's
+      LAI + SAI (does not reach the thin bottom layers of tree and shrub profiles: 0.41 needed).
 15. **Wet needleleaf canopies** (observation): CLM6's `dleaf` for needleleaf trees is 0.65 mm
     (CLM5: 4 cm), and CLM-ml's leaf boundary-layer conductance grows as `dleaf` shrinks.
     Needleleaf evergreen temperate patches in the south-eastern US have January latent heat
@@ -240,3 +258,12 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
 All gridcell values finite. `soil_water_stress` (`btran`) is 1 everywhere: CLM-ml's WUE
 stomatal scheme sets it to 1 and applies water stress through leaf water potential (as the
 Fortran); use the leaf water potential outputs instead.
+17. **LAI is not everywhere differentiable** (raise again: maintainer, 2026-10-29). Two places
+    in the vegetation data path: (a) CLM's satellite-phenology cutoff (G9) sets LAI and SAI to
+    exactly 0 below 0.05: a *jump* in the data (zero gradient below 0.05, a step at 0.05);
+    (b) the per-layer minimum plant area (G20) is a *kink*: in a floored layer the leaf area
+    still follows LAI (d leaf area / d LAI = the layer's fraction) but the layer's total plant
+    area is pinned at 0.01 (d total / d LAI = 0), and the slope changes where a layer crosses
+    0.01. The gradient with respect to SAI is zero in floored layers. Matters for
+    calibration and sensitivity with respect to LAI/SAI (decision 7); a smooth alternative
+    for either changes forward values near the threshold and is a science choice.

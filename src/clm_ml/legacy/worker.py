@@ -42,7 +42,7 @@ MLCANOPY_FIELDS = (
     "lhvegsha_canopy", "lhvegsun_canopy", "lsc_profile", "lwdwn_profile", "lwp_hist_leaf",
     "lwp_mean_profile", "lwup_canopy", "lwupw_profile", "mflx_profile", "nbot_canopy",
     "ncan_canopy", "ntop_canopy", "pref_forcing", "psis_soil", "rhomol_forcing", "rnet_canopy",
-    "rnleaf_leaf", "rnsoi_soil", "sai_canopy", "shair_profile", "shflx_canopy", "shleaf_leaf",
+    "rnleaf_leaf", "rnsoi_soil", "sai_canopy", "sai_floor_canopy", "shair_profile", "shflx_canopy", "shleaf_leaf",
     "shsoi_soil", "shveg_canopy", "shvegsha_canopy", "shvegsun_canopy", "solar_zen_forcing",
     "stflx_air_canopy", "stflx_veg_canopy", "swbeam_profile", "swdwn_profile", "swskyb_forcing",
     "swskyd_forcing", "swupw_profile", "swveg_canopy", "swvegsha_canopy", "swvegsun_canopy",

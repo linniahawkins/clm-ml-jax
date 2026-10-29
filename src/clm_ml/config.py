@@ -81,7 +81,11 @@ class CanopyLayerOptions:
     tall_canopy_threshold: float = 2.0  # dz_param (m)
     n_layers_above: Optional[int] = None  # nlayer_above (None = from dz)
     n_layers_within: Optional[int] = None  # nlayer_within (None = from dz)
-    min_plant_area_per_layer: float = 0.01  # dpai_min (m2/m2)
+    min_plant_area_per_layer: float = 0.01  # dpai_min (fraction of the canopy, at setup)
+    # Every leafy layer keeps at least this plant area (m2 m-2) at every step, the missing
+    # part added as stem area (issue 14: thinner layers transmit more diffuse radiation than
+    # they receive); 0 reproduces CLM-ml v2 (Fortran)
+    min_layer_plant_area: float = 0.01
 
 
 @dataclasses.dataclass(frozen=True)
@@ -179,6 +183,7 @@ class ModelConfig:
             "nlayer_above": c.n_layers_above or 0,
             "nlayer_within": c.n_layers_within or 0,
             "dpai_min": float(c.min_plant_area_per_layer),
+            "layer_pai_floor": float(c.min_layer_plant_area),
             "max_layers": int(c.max_layers),
             "met_type": {"none": 0, "three_point": 3}[interpolation],
         }

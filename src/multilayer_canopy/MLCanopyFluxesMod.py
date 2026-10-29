@@ -410,6 +410,9 @@ def MLCanopyFluxes(
     # ------------------------------------------------------------------
     lai = mlcanopy_inst.lai_canopy
     sai = mlcanopy_inst.sai_canopy
+    sai_floor = mlcanopy_inst.sai_floor_canopy
+    if sai_floor is None:  # a container from before the field existed
+        sai_floor = jnp.zeros_like(sai)
     dlai = mlcanopy_inst.dlai_profile
     dsai = mlcanopy_inst.dsai_profile
     dpai = mlcanopy_inst.dpai_profile
@@ -417,13 +420,27 @@ def MLCanopyFluxes(
     for p in filter_mlcan:
         lai_val = canopystate_inst.elai_patch[p]
         sai_val = canopystate_inst.esai_patch[p]
-        lai = lai.at[p].set(lai_val)
-        sai = sai.at[p].set(sai_val)
 
         # Layers 1..ncan (data; padding kept), vectorized over the layer slots
         lay = layers(mlcanopy_inst, p)
         _dlai_sl = pad_with_top(lay, mlcanopy_inst.dlai_frac_profile[p, 1:]) * lai_val
         _dsai_sl = pad_with_top(lay, mlcanopy_inst.dsai_frac_profile[p, 1:]) * sai_val
+        # Not Fortran (Phase 6b, issue 14): every leafy layer keeps at least
+        # opts.layer_pai_floor of plant area, the missing part added as stem area, and the
+        # canopy's stem area includes it. CLM-ml's 9-angle diffuse transmittance (SolarRadiation)
+        # exceeds 1 below ~0.005 m2/m2, which makes a layer's net longwave grow with its
+        # temperature (Norman longwave) and the leaf temperature run away. Layers at or above
+        # the floor are unchanged (x + 0.0), so CLM-ml v2 results are kept where no layer is
+        # that thin (CHATS7). Value: CLM-ml v1's dpai_min (m2/m2).
+        _add = jnp.where(
+            lay.leafy, jnp.maximum(opts.layer_pai_floor - (_dlai_sl + _dsai_sl), 0.0), 0.0
+        )
+        _dsai_sl = _dsai_sl + _add
+        _sai_floor = jnp.sum(_add)
+        sai_val = sai_val + _sai_floor
+        lai = lai.at[p].set(lai_val)
+        sai = sai.at[p].set(sai_val)
+        sai_floor = sai_floor.at[p].set(_sai_floor)
         dlai = dlai.at[p, 1:].set(keep(lay.in_use, _dlai_sl, dlai[p, 1:]))
         dsai = dsai.at[p, 1:].set(keep(lay.in_use, _dsai_sl, dsai[p, 1:]))
         dpai = dpai.at[p, 1:].set(keep(lay.in_use, _dlai_sl + _dsai_sl, dpai[p, 1:]))
@@ -437,6 +454,7 @@ def MLCanopyFluxes(
     mlcanopy_inst = mlcanopy_inst._replace(
         lai_canopy=lai,
         sai_canopy=sai,
+        sai_floor_canopy=sai_floor,
         dlai_profile=dlai,
         dsai_profile=dsai,
         dpai_profile=dpai,

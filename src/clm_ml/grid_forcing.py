@@ -37,8 +37,9 @@ CLM's satellite phenology, and CLM's prescribed soil-moisture stream.
 **Vegetation**: the surface data's monthly ``MONTHLY_LAI``/``MONTHLY_SAI`` per PFT and
 gridcell, interpolated as CLM's satellite phenology does (:func:`clm_ml.grid.clm_monthly_weights`
 at the end of the step plus one step), then ``elai = tlai`` and ``esai = tsai`` (no snow
-burial: this model has no snow), set to 0 below 0.05 (CLM); a patch left with no plant
-area keeps a stem area of 0.05 (:data:`MIN_PLANT_AREA`).
+burial: this model has no snow), set to 0 below 0.05 (CLM). (A patch left with little or no
+plant area still has a canopy: the model keeps a minimum plant area in every leafy layer,
+model.yaml ``canopy_layers.min_layer_plant_area``.)
 
 **Soil water**: ``H2OSOI`` from monthly CLM history files per gridcell (the CLM run's
 ``landmask`` grid), **linear** between the files' time stamps (the middle of each month in
@@ -73,11 +74,6 @@ PSTD = 101325.0  # SHR_CONST_PSTD
 SOLZEN_MIN = 0.001  # dshr_tInterp_mod solZenMin
 O2_MOLAR = 0.209  # CLM o2_molar_const
 ELAI_MIN = 0.05  # SatellitePhenologyMod: lai/sai below this are set to 0
-#: Stem area (m2 m-2) given to a patch CLM would treat as not vegetated (elai + esai < 0.05,
-#: frac_veg_nosno = 0: CLM's bare-ground fluxes). CLM-ml has no bare-ground path and needs
-#: some plant area (zero gives undefined sunlit fractions), so the patch keeps CLM's
-#: vegetated threshold as stems, a nearly transparent canopy (decision G20).
-MIN_PLANT_AREA = 0.05
 
 #: datm stream -> (variables, time interpolation)
 STREAMS = {
@@ -630,13 +626,12 @@ class GridInputs:
 
 def exposed_area(tlai, tsai, xp=np):
     """``(elai, esai)`` from the interpolated LAI and SAI: CLM's satellite phenology without
-    snow burial (``max(., 0)``, then 0 below 0.05), and :data:`MIN_PLANT_AREA` of stems where
-    nothing is left (``xp``: ``numpy`` or ``jax.numpy``, same operations)."""
+    snow burial (``max(., 0)``, then 0 below 0.05) (``xp``: ``numpy`` or ``jax.numpy``, same
+    operations)."""
     elai = xp.maximum(tlai, 0.0)
     esai = xp.maximum(tsai, 0.0)
     elai = xp.where(elai < ELAI_MIN, 0.0, elai)
     esai = xp.where(esai < ELAI_MIN, 0.0, esai)
-    esai = xp.where(elai + esai < ELAI_MIN, MIN_PLANT_AREA, esai)
     return elai, esai
 
 
