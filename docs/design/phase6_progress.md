@@ -282,34 +282,29 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   extra memory is the unsplit forcing (fixed in `607fe1f`). One GPU per domain of this size
   is the efficient choice; more GPUs only for wall time.
 
-## Next (resume here in a new session) — updated 2026-10-29 evening
+## Next (resume here in a new session) — updated 2026-10-30
 
-**State.** Branch `phase6/patches`, last commit `c26dc0d` (all pushed). Work in the Derecho
-checkout `/glade/work/linnia/clm-ml-jax` (env `/glade/work/linnia/conda-envs/clm-ml-jax`).
-Phase 6b steps 1-6 done; step 7 (global run) running. Since the regional test: issue 14 fixed
-(decision 30, per-layer minimum plant area as stems), CLM's 0.05 LAI/SAI cutoff removed
-(decision 31), issue 12 fixed (decision 32, canopy-top latent heat per sub-step), params files
-are YAML only (`clm-ml params`, built-in `clm6`). All decisions: plan §0 (23-32); Phase 6b
-details, decisions G1-G20 and open issues 1-17: `docs/design/global_input.md`.
+**State.** Branch `phase6/patches` (all pushed). Work in the Derecho checkout
+`/glade/work/linnia/clm-ml-jax` (env `/glade/work/linnia/conda-envs/clm-ml-jax`). Phase 6b
+steps 1-6 done; step 7 (global run) partly done: January-March 2000 ran, then GPU memory ran
+out (diagnosed and fixed, decision 33 and the per-patch constants; entry 2026-10-30 above).
+Since the regional test: decisions 30-33, params files YAML only (`clm-ml params`, built-in
+`clm6`). All decisions: plan §0 (23-33); Phase 6b details, decisions G1-G20 and open issues
+1-17: `docs/design/global_input.md`.
 
 **Working agreement with the maintainer** (this session): copy CLM where a choice comes up;
 for a bug, *diagnose first with probes (scratch, no code changes) and bring the diagnosis
 before changing code*; no shortcuts, hacks or dropping things that fail; science changes are
 the maintainer's decision; document every decision and issue so it is not lost.
 
-1. **Global run (Phase 6b step 7)**: PBS job **8008287** (4 A100s, `jobs/global6b.pbs`,
-   commit `aa43e33` = with decision 30 but *before* decisions 31-32; the maintainer chose to
-   let it finish). Log `/glade/derecho/scratch/linnia/clm-ml-jax/jobs/global6b.log` (its
-   timing lines had not appeared after 1.5 h although the GPUs were busy: look at the end),
-   outputs and monthly restarts in `/glade/derecho/scratch/linnia/clm-ml-jax/runs/global2000/`.
-   GPU 1 used 37 of 40 GB in January (memory limit close). If it ran out of walltime:
-   `cd .../jobs && qsub -v REV=aa43e33,RESTART=<runs/global2000/restart/domain_restart.pkl>
-   global6b.pbs`. Then record in `global_input.md` (like the regional table): setup, first
-   step, per-chunk times and compile, patch-steps/s, GPU memory, excluded patches (which,
-   when, why), and the requirements for Phase 7; mark step 7 done in the plan. Failure
-   statistics are for the model before decisions 31-32 (say so; a short rerun on the final
-   model if needed). The cancelled first attempt (commit `6c1b66f`, log
-   `jobs/global6b_cancelled_6c1b66f.log`) produced nothing.
+1. **GPU work deferred (maintainer, 2026-10-30)**: the long-run GPU issues are listed in the
+   plan, Phase 6 step 1c, "GPU issues for long runs" (2.3 GB programs that cannot be cached,
+   scaling over GPUs, startup). Deferred with them: the GPU check of `607fe1f`/`3dcea3c`
+   (job script `probe/oom/verify33.pbs`, global domain, January 2000) and the rest of the
+   year 2000 (rerun on the final code rather than continuing the `aa43e33` restart, which
+   was written with monthly chunks; one A100 is the efficient choice, ~10 h walltime).
+   Outputs of the partial run: `runs/global2000/` (Jan-Feb files; restart 2000-04-01 holding
+   March's pending output). Probe logs: `probe/oom/live_g{1,2,4}.log`, `smi_*.csv`.
 2. **Issue 10 (next, agreed)**: round-off amplification (a 1e-15 change of LAI moves latent
    heat by ~8 W m-2 after sunrise in some 1° patches; `test_grid_setup.py` documents it).
    Investigation only first, as for issue 14: find the discrete switch (compare routine by
@@ -322,9 +317,11 @@ the maintainer's decision; document every decision and issue so it is not lost.
    floor's kink in the LAI gradient (**maintainer asked to raise LAI differentiability
    again later**). Also: transpiration/evaporation latent heat outputs still use the last
    sub-step's latent heat (issue 12 note).
-4. **After step 7**: close Phase 6b (end-of-phase tests as a CPU job: `tests/regression` and
-   slow tests; the CHATS7 50-step CPU gradient test fails with issue 16, pre-existing), then
-   discuss Phase 7 with the maintainer (standing rule: stop before a new phase).
+4. **Closing Phase 6b** (maintainer's call: step 7 as it stands, Jan-Mar plus the GPU
+   findings, or after the deferred GPU work): record the Phase 7 requirements the global run
+   revealed in `global_input.md`, run the end-of-phase tests as a CPU job (`tests/regression`
+   and slow tests; the CHATS7 50-step CPU gradient test fails with issue 16, pre-existing),
+   then discuss Phase 7 with the maintainer (standing rule: stop before a new phase).
 
 **Probes and inputs (scratch, not in the repo)**: `/glade/derecho/scratch/linnia/clm-ml-jax/
 probe/6b/` (Phase 6b), `probe/issue14/` (thin layers: `common.py` sets up the Wyoming gridcell

@@ -1422,6 +1422,26 @@ details and file locations).
 - When the optimization resumes: fewer, larger operations inside the loops (a parallel
   tridiagonal solve: ~6 rounds instead of 50 sequential rows; fusing the per-layer leaf loops),
   guided by the profile.
+- **GPU issues for long runs (found in the global 1° run, Phase 6b step 7; deferred with the
+  optimization, maintainer 2026-10-30).** Details and numbers: `phase6_progress.md`,
+  2026-10-30.
+  1. *Program size.* A compiled chunk program has 2.3 GB of GPU code. Each program stays
+     loaded on every GPU while cached (the April out-of-memory stop with monthly chunks), and
+     it is over protobuf's 2 GB limit, so it can never be stored in the persistent
+     compilation cache: every run compiles it (~840 s), and the batched first step (~800-900
+     s) too. Decision 33 (one fixed chunk length) keeps it to one chunk program per run;
+     making the code smaller (find what is unrolled) would also make it cacheable.
+  2. *Scaling over GPUs.* Global domain, steady chunk: 1 A100 42 700 patch-steps/s, 2 A100s
+     30 100 per GPU, 4 A100s 19 100 per GPU. One GPU is the efficient choice for a domain of
+     this size (a year of 1°: ~8.3 GPU-hours); find why the per-GPU rate drops with more
+     devices (host work per chunk, transfers, the sharded program).
+  3. *Startup.* Setup (~100 s), first step and chunk compile (~30 min together) do not shrink
+     with more GPUs; host memory ~90 GB.
+  4. *Not yet run on a GPU:* decision 33 and the per-patch constants change (`607fe1f`,
+     `3dcea3c`) pass every CPU test, including the multi-device one; their GPU check (global
+     domain, January 2000) and the year-2000 rerun wait for this work.
+  5. *Job logs:* Derecho's `cut` buffers its output even under `stdbuf -oL`, and PBS writes
+     `-o` logs at the end; tee live output to a scratch file.
 
 **Agreed plan for steps 0 and 2–6 (maintainer, after step 1b).** Memory is not the obstacle
 for a global run (~0.33 MB per patch: ~300 000 patches are ~25 GB per GPU on a 4-GPU node),
@@ -1750,9 +1770,15 @@ from `clm5_defaults.yaml`); 10 + 10 canopy layers.
 6. ✅ **Regional test** (done 2026-10-29: results in `global_input.md`) (a few hundred gridcells, e.g. a box over North America): set up, run
    January and July 2000, write patch and gridcell output; failure rates with
    `on_patch_error: exclude`; memory and compile time.
-7. **Global 1° run, year 2000** on one 4-GPU node (`execution.devices: 4`): timing,
+7. ◐ **Global 1° run, year 2000** on one 4-GPU node (`execution.devices: 4`): timing,
    memory, failure statistics; the ~15-minute compiles at this size (and why the compilation
-   cache does not store these programs) addressed as needed.
+   cache does not store these programs) addressed as needed. *Status (2026-10-30):* January to
+   March 2000 ran (commit `aa43e33`, before decisions 31-32; no patch excluded; ~46 000
+   patch-steps/s with the monthly compiles), then GPU memory ran out loading April's program
+   (diagnosed: 2.3 GB of code per program, one per month length). Fixed by decision 33
+   (fixed 10-day chunks) and by holding per-patch constants once; GPU scaling measured
+   (1/2/4 A100s). The rest of the year and the GPU check of the fixes are deferred with the
+   GPU work (step 1c, "GPU issues for long runs").
 
 **Implementation decisions and open issues** (copying CLM wherever a choice came up, as the
 maintainer asked): `docs/design/global_input.md` (G1-G19, open issues 1-11).
