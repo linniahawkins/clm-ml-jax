@@ -344,6 +344,10 @@ the runs, so the suites are run in three tiers (times measured after Phase 5a, c
 | Before each commit | the bit-for-bit and noise-twin tests (`test_end_to_end_regression.py`, `test_clm_ml_equivalence.py`; one shared run), plus the changed feature's own end-to-end test | ~1 min (with tier 1: 41 s) |
 | At the end of a phase, before merging to `main` | all of `tests/regression -m regression` (~8 min), and the slow tests: `test_differentiability.py` and `test_model_api.py` (~20 min, gradient compilation), `test_fortran_python_comparison.py` | ~30 min |
 
+**Phase 7** (structure only, maintainer 2026-10-30) uses a smaller set: lint, the bit-for-bit
+and noise-twin test and the moved routines' golden tests per commit, gradient and feature tests
+at package ends, the rest at the phase end (`phase7_progress.md`, "Testing in Phase 7").
+
 The feature tests (restarts, ensembles, output streams, coarse forcing, land-data files,
 parameters from YAML, per-routine process IO) check behaviour that a change elsewhere rarely
 touches; a change that does touch it runs that test before committing. New end-to-end tests

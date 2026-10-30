@@ -1,6 +1,5 @@
 # Claude-specific files
 .claude/
-CLAUDE.md
 CLM-ml_v1/
 clubb_ML/
 tests/integration/

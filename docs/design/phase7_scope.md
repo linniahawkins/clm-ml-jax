@@ -24,7 +24,7 @@ tests) and the Phase 6 review. Numbers marked ~ are estimates.
 | D9 | **`gs_solver` and `mlcan_to_clm` options kept.** |
 | D10 | **C3/C4 groups unchanged** (decision 22); revisited with the GPU work after Phase 8. |
 | D11 | **Worker subprocess dropped** once setup has no module globals (7.4): runs and tests in-process. |
-| D12 | **Gradient testing:** CPU gradient tier with `--xla_backend_optimization_level=0` after each process move (§7 D); GPU gradient job at package ends with a warm compilation cache (§7 A, C). |
+| D12 | **Gradient testing:** CPU gradient tests with `--xla_backend_optimization_level=0` (§7 D); one GPU gradient job at the end of Phase 7. Refined by the minimum-testing rule (maintainer, 2026-10-30; `phase7_progress.md`, decision log C0). |
 | — | Earlier: process interface as a name-to-function registry with declared reads/writes (§6.6, decision 21); bare ground, issue 10 and GPU performance after Phase 8. |
 
 ## 2. What the code looks like today (facts from the surveys)
@@ -76,16 +76,16 @@ layout:
    process is compared with its own pre-move behaviour on identical input.
 3. **Golden Fortran tests**: import paths and the `tridiag` adapter change; the JSON files never
    change.
-4. **Gradients**: CPU gradient tier (optimization off, §7 D) after each process move; GPU tier
-   at package ends.
+4. **Gradients**: a CPU gradient test when a hand-written gradient moves, the CPU tier at package
+   ends (optimization off, §7 D), one GPU job at the phase end.
 5. **Fortran comparison** (`.out` files): a small netCDF-to-`.out` writer in `clm_ml/io/legacy.py`
    replaces `clm-ml-offline` for this workflow.
 
 ## 4. Work packages, in order
 
-Each package: one or more commits on `phase7/restructure`, before-commit tests (fast tier,
-bit-for-bit + noise twin, the package's own tests), CPU gradient tier where physics moved (GPU tier at the package end),
-documentation in the same change.
+Each package: one or more commits on `phase7/restructure`, the minimum tests of
+`phase7_progress.md` ("Testing in Phase 7"), documentation and the decision log in the same
+change.
 
 **7.0 Preparation** (~2 days)
 - Delete the dead modules (list in §2); remove `controlMod` writes and `clm_instRest`.
@@ -171,7 +171,7 @@ after (no GPU optimization beyond D5).
 | Risk | Handling |
 |---|---|
 | A refactor changes the answer silently | bit-for-bit through the legacy view after every commit; process replay per process |
-| Gradients break | CPU gradient tier (optimization off, §7 D) after every process move; GPU tier at package ends |
+| Gradients break | CPU gradient test when a hand-written gradient moves; CPU tier at package ends; GPU at phase end |
 | Boundary adapters during 7.2 slow the step | transition only; timing test before/after 7.2, discuss > 1.5x (standing rule) |
 | vmapping sun/shade or vectorizing soil loops changes round-off | allowed only with the noise-twin test and a recorded reference update, as a separate commit |
 | Setup rewrite misses a forcing-dependent field | the template comparison test (towers and grid, the Phase 6b review locations) |
