@@ -361,9 +361,9 @@ segfaults, issue 16).
 
 **State.** Branch `phase6/patches` (all pushed). Phase 6 and 6b done (step 7 closed as it
 stands); adversarial review done and its chosen fixes in (`b45bd9a`, decision 34); GPU
-gradients pass. Still queued at the time of writing: the end-of-phase CPU job (slow tests and
-the CPU timing test, `jobs/endphase6b.pbs`, log `jobs/endphase6b.log`; the CHATS7 chunk
-gradient test segfaults on CPU there, issue 16). Decisions: plan §0 (23-34); Phase 6b
+gradients pass. End-of-phase CPU job (`jobs/endphase6b_dev.pbs`): slow tests 9 pass, 1 fails
+(the CHATS7 chunk gradient test segfaults on CPU, issue 16; it passes on the A100); all of
+`tests/regression` passed separately (206). Phase 7 scope: `docs/design/phase7_scope.md`. Decisions: plan §0 (23-34); Phase 6b
 details, G1-G20 and open issues: `docs/design/global_input.md`.
 
 **Working agreement with the maintainer**: copy CLM where a choice comes up; for a bug,
