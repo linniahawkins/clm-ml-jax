@@ -3,8 +3,9 @@ JAX translation of clm_instMod Fortran module.
 
 Instances and definitions of all CLM component data types.
 Provides module-level singletons for every state container used
-throughout the CLM and CLMml physics, together with initialization
-and restart entry points.
+throughout the CLM and CLMml physics, together with initialization.
+The Fortran ``clm_instRest`` (restart I/O, all calls commented out) is not
+translated; restarts are written by the run driver.
 
 Original Fortran module: clm_instMod
 Fortran lines 1-105
@@ -76,7 +77,6 @@ from clm_src_main.atm2lndType import Init as _atm2lnd_Init
 from clm_src_main.atm2lndType import atm2lnd_type  # noqa: F401
 from clm_src_main.decompMod import bounds_type  # noqa: F401
 from clm_src_main.initVerticalMod import initVertical  # noqa: F401
-from clm_src_main.ncdio_pio import file_desc_t  # noqa: F401
 from clm_src_main.SiteType import site_type  # noqa: F401
 from clm_src_main.wateratm2lndBulkType import (
     Init as _wateratm2lndbulk_Init,
@@ -224,37 +224,3 @@ def clm_instInit(bounds: bounds_type, max_layers: int) -> None:
     solarabs_inst = _solarabs_Init(bounds)  # type: ignore[arg-type]
     SurfaceAlbedoInitTimeConst(bounds)
     mlcanopy_inst = _mlcanopy_Init(bounds.begp, bounds.endp, max_layers)  # CLMml
-
-
-# ---------------------------------------------------------------------------
-# Public: restart (define / write / read)
-# ---------------------------------------------------------------------------
-
-
-def clm_instRest(
-    bounds: bounds_type,
-    ncid: file_desc_t,
-    flag: str,
-) -> None:
-    """
-    Define, write, or read the CLM restart file.
-
-    Mirrors Fortran subroutine ``clm_instRest`` (lines 85-102).
-
-    In the Fortran source, most component restart calls are commented
-    out; only ``mlcanopy_inst.restart`` is active. The commented calls
-    are preserved below as Python comments at matching positions.
-
-    Args:
-        bounds: Decomposition bounds for the local MPI task.
-        ncid: NetCDF file descriptor (PIO).
-            Fortran: ``type(file_desc_t), intent(inout) :: ncid``.
-        flag: Restart operation selector. One of ``'define'``,
-            ``'write'``, or ``'read'``.
-            Fortran: ``character(len=*), intent(in) :: flag``.
-    """
-    # Commented-out restart calls (Fortran lines 97-99):
-    # atm2lnd_inst.restart(bounds, ncid, flag=flag)
-    # soilstate_inst.restart(bounds, ncid, flag=flag)
-    # canopystate_inst.restart(bounds, ncid, flag=flag)
-    # mlcanopy_inst.restart(bounds, ncid, flag=flag)     # CLMml — Fortran line 101 (not yet implemented)

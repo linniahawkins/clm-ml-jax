@@ -106,7 +106,7 @@ ml_vert_init: int = ispval  # Flag: initialize multilayer canopy vertical struct
 
 # ---------------------------------------------------------------------------
 # Namelist-overridable defaults — Fortran lines 56-63
-# These can also be set via the clmML_inparm namelist (controlMod.control()).
+# These can also be set via the clmML_inparm namelist (read by the run setup, as Fortran's controlMod).
 # Tower-specific values override these defaults.
 # ---------------------------------------------------------------------------
 

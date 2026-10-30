@@ -43,7 +43,6 @@ include = [
     "multilayer_canopy*",
     "offline_driver*",
     "offline_executable*",
-    "utils*",
 ]
 
 [tool.black]

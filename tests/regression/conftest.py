@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pytest
 
@@ -37,3 +39,14 @@ def current(tmp_path_factory):
 @pytest.fixture(scope="session")
 def current_fields(current):
     return recorded_fields(current[1]["fields"].raw)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _default_cpu_code_generation():
+    """The regression tests compare round-off: refuse to run them with the CPU gradient tier's
+    flag (LLVM optimization off changes round-off; tests/gradient_tier.py)."""
+    if "--xla_backend_optimization_level=0" in os.environ.get("XLA_FLAGS", ""):
+        pytest.fail(
+            "XLA_FLAGS sets --xla_backend_optimization_level=0 (the CPU gradient tier's flag); "
+            "the regression tests need the default code generation. Unset it."
+        )

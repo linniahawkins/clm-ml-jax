@@ -45,6 +45,7 @@ print("RESULT" + json.dumps({{"grad": g, "fd": fd}}))
 
 
 @pytest.mark.slow
+@pytest.mark.gradient
 def test_model_chunk_gradient_matches_finite_difference():
     script = SCRIPT.format(
         src=str(ROOT / "src"),

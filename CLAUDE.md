@@ -197,8 +197,15 @@ docs/design/           modernization plan, API sketch, example YAML, timing resu
   The physics receives `StepTime` (`clm_time_manager.step_time`) instead of reading the
   time manager, and receives the previous/next-step forcing as an `AtmForcingWindow`
   argument. Don't reintroduce file reads or `clm_time_manager.itim` in the run path.
-- Arrays are **1-based**, with an unused index 0 and a single "patch" dimension
-  (`np = endp + 1`).
+- Profile axes (layers, leaves `isun=1`/`isha=2`, bands `ivis=1`/`inir=2`, soil levels, RK
+  stages) are **1-based** with an unused index 0 (the ground in a few layer fields). The
+  legacy containers keep a "patch" axis of length 1; in the run path the patch index is 0
+  (`begp = endp = 0`). Phase 7.1 moves to 0-based arrays without the patch axis (D1).
+- **The legacy view (Phase 7):** the regression reference stores raw legacy fields
+  (`mlcanopy.<field>`, 1-based, patch axis). `clm_ml/legacy/view.py::legacy_view` maps the
+  state to them; the output variables (`outputs._Raw`) and validation streams read the
+  state only through it (the legacy `.out` writer still reads the containers:
+  `write_output`). When the state changes, change the view, never the reference.
 - Since Phase 3c each physics routine has **one** traceable implementation taking a `GridInfo`
   (since Phase 5b only the patch index and the static C3/C4 flag; layer counts are data, see
   below). Guard checks that need concrete numbers with
@@ -215,7 +222,9 @@ docs/design/           modernization plan, API sketch, example YAML, timing resu
 - **XLA CPU gradient crash (issue 16, JAX 0.9.2):** running compiled CPU gradients of a CHATS7
   chunk segfaults in LLVM-optimized code. Run CPU gradient tests with
   `XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1 --xla_backend_optimization_level=0"`
-  (gradient tests only: round-off differs). (JAX 0.6.2 had a different gradient crash;
+  (gradient tests only: round-off differs; `tests/gradient_tier.py` sets it, and the
+  regression tests and `record_run.py` refuse to run with it). (JAX 0.6.2 had a different
+  gradient crash;
   `clm_ml.model` sets `--xla_cpu_use_thunk_runtime=false` only for JAX < 0.7.)
 - **Never scatter into a scan's carry with array indices** (`.at[idx].set` inside the chunk's
   `lax.scan`): with JAX 0.9.2 on CPU it gave wrong states and intermittent segfaults (Phase 6
@@ -227,11 +236,11 @@ docs/design/           modernization plan, API sketch, example YAML, timing resu
   `from clm_varpar import nlevsoi` in code that may run before the first setup: that copies -1
   (the vectorized setup did; `test_vector_setup.py` now runs it first in a fresh process).
 - The `-999` value in tower and parameter tables means "use the default".
-- **Most `MLclm_varctl` options are copied into consumer modules at import time**
-  (`from multilayer_canopy.MLclm_varctl import gs_type`). Setting them later has no effect.
-  `clm_ml.legacy.worker` sets all options, PFT tables (and their `Init` functions, which
-  `initialize2` calls again) and the tower table *before* the physics modules are imported,
-  in a fresh process.
+- **Options reach the physics only as `opts` (Phase 5a);** the module variables of
+  `MLclm_varctl` are setup inputs. `pftcon_val` is still copied at import by `pftconMod` and
+  `MLpftconMod` (`from ... import pftcon_val`), so `clm_ml.legacy.worker` sets the options,
+  PFT tables (and their `Init` functions, which `initialize2` calls again) and the tower
+  table *before* those modules are imported, in a fresh process (goes in Phase 7.4).
 - The standalone soil temperature (`MLSoilTemperatureMod`) assumes **one patch per soil column**
   (p == c). Multiple PFTs sharing a column is not supported by the current code.
 - **Options are passed explicitly (Phase 5a):** `MLclm_varctl.MLOptions` (built from model.yaml
@@ -300,6 +309,8 @@ python -m pytest tests/fortran_validation -m "not slow" -q            # routine-
 python -m pytest tests/regression -m regression -q                    # all end-to-end regression tests (~8 min CPU; end of phase)
 python -m pytest tests/regression/test_end_to_end_regression.py tests/regression/test_clm_ml_equivalence.py -m regression -q   # bit-for-bit + noise twin only (~1 min; before each commit)
 python -m pytest tests/test_fortran_python_comparison.py -m slow -q   # vs Fortran output
+python tests/gradient_tier.py [--focused]                  # CPU gradient tier (tests marked `gradient`, LLVM optimization off; issue 16)
+qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs          # GPU gradient tier (develop queue, warm GPU compile cache)
 
 python tests/regression/record_run.py --update-reference   # reference + 2 noise twins; only after intended or round-off-only changes; say so in the PR
 python timing/time_offline.py                              # timing test; appends to timing/results.jsonl

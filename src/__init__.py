@@ -8,7 +8,7 @@ organized by functional areas:
 - clm_src_biogeophys: Biogeophysical process implementations
 - clm_src_cpl: Coupling interface code
 - clm_src_utils: Utility functions and helper modules
-- cime_src_share_util: Shared CIME utilities
+- clm_share: Shared CIME utilities (orbital parameters)
 - multilayer_canopy: Multi-layer canopy model
 - offline_driver: Standalone CLM driver
 """

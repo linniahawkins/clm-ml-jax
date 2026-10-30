@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import os
 import subprocess
 import sys
 import tempfile
@@ -174,6 +175,11 @@ def _provenance(name: str) -> dict[str, np.ndarray]:
 
 def update_reference() -> None:
     """Record the reference and both twins (three runs, in parallel processes)."""
+    if "--xla_backend_optimization_level=0" in os.environ.get("XLA_FLAGS", ""):
+        raise SystemExit(
+            "XLA_FLAGS sets --xla_backend_optimization_level=0 (the CPU gradient tier's flag), "
+            "which changes round-off; unset it to record the reference."
+        )
     jobs = {"reference": REFERENCE_FILE, **TWIN_FILES}
     with ProcessPoolExecutor(max_workers=len(jobs)) as pool:
         for message in pool.map(_record_one, jobs.keys(), jobs.values()):

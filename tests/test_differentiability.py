@@ -32,6 +32,8 @@ import pytest
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
+pytestmark = pytest.mark.gradient  # the gradient tier (tests/gradient_tier.py)
+
 # Project root on the path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
@@ -55,7 +57,6 @@ def _build_initialized_model():
     tower_name = str(params.get("tower_name", "CHATS7"))
     start_ymd = int(params.get("start_ymd", 20070501))
     iyear = start_ymd // 10000
-    imonth = (start_ymd // 100) % 100
 
     fin_tower = _main_mod._resolve_path(str(params.get("fin_tower", "")))
     fin_clm = _main_mod._resolve_path(str(params.get("fin_clm", "")))
@@ -66,11 +67,7 @@ def _build_initialized_model():
     from clm_src_utils import clm_time_manager
     from clm_src_utils.clm_time_manager import step_time
     from multilayer_canopy import MLclm_varctl
-    from offline_driver import TowerDataMod, clmSoilOptionMod, controlMod
-
-    controlMod.tower_site = tower_name
-    controlMod.iyear = iyear
-    controlMod.imonth = imonth
+    from offline_driver import TowerDataMod, clmSoilOptionMod
 
     tower_num = 0
     for i in range(1, int(TowerDataMod.ntower) + 1):

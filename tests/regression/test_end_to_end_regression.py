@@ -40,6 +40,13 @@ def _valid(values):
     return np.isfinite(values) & (np.abs(values) < 1e30)  # skip spval (1e36) fill values
 
 
+def test_legacy_view_gives_reference_fields(current_fields):
+    """The recorded field list (``worker.MLCANOPY_FIELDS``/``TEMPERATURE_FIELDS``) is exactly
+    the reference's: none missing, none new (Phase 7 keeps this comparison complete). Each is
+    read through ``clm_ml.legacy.view`` during the run (a field it lacks fails the run)."""
+    assert sorted(current_fields) == sorted(FIELDS)
+
+
 @pytest.mark.parametrize("field", FIELDS)
 def test_bit_identical_to_reference(field, reference, current_fields):
     """Every real value is bit-identical. Fill values (|x| >= 1e30, e.g. spval sums in unused

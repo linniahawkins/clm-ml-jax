@@ -1,0 +1,40 @@
+#!/bin/bash
+#PBS -N clmml_gradgpu
+#PBS -A UCLB0069
+#PBS -q develop
+#PBS -l select=1:ncpus=16:ngpus=1:mem=120GB
+#PBS -l walltime=01:30:00
+#PBS -j oe
+# GPU gradient tier (phase7_progress.md, "Testing in Phase 7"): the tests marked `gradient`
+# (Model chunk gradient against finite differences, test_differentiability.py) and the
+# patch-weight/PFT gradients of test_model_patches.py, on one A100, on a snapshot of REV.
+#
+#   qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs
+#
+# Warm cache: compiled GPU programs persist in CACHE (default below) between jobs, so an
+# unchanged program reloads in ~1 min instead of compiling for ~7 (scope §7 C). Keep CACHE
+# separate from the CPU cache (~/.cache/jax_compile_cache).
+set -u
+SCRATCH=${SCRATCH:-/glade/derecho/scratch/$USER}
+REPO=${REPO:-/glade/work/$USER/clm-ml-jax}
+ENV_BIN=${ENV_BIN:-/glade/work/$USER/conda-envs/clm-ml-jax/bin}
+CACHE=${CACHE:-$SCRATCH/jax_compile_cache_gpu}
+LOG=$SCRATCH/clm-ml-jax/jobs/grad_gpu_${TAG:-run}.log
+mkdir -p $(dirname $LOG) $CACHE
+exec > >(tee -a $LOG) 2>&1
+export PATH=$ENV_BIN:$PATH
+export JAX_COMPILATION_CACHE_DIR=$CACHE
+export TMPDIR=$SCRATCH/tmp
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+TREE=$SCRATCH/clm-ml-jax/trees/grad_$(date +%s)
+git -C $REPO worktree add --detach $TREE ${REV:-HEAD} >/dev/null 2>&1 \
+  || { echo "worktree add failed: ${REV:-HEAD}"; exit 1; }
+cd $TREE && export PYTHONPATH=$TREE/src:$TREE
+git log --oneline -1; nvidia-smi --query-gpu=name --format=csv,noheader; date
+python -c "import jax; print(jax.devices())"
+python -m pytest tests/test_model_api.py tests/test_differentiability.py \
+  tests/regression/test_model_patches.py -m "gradient or regression or slow" \
+  -q -p no:cacheprovider -o addopts="" -rA 2>&1 \
+  | grep -v "pjrt_executable\|^W10\|Attempting\|Successful" | tail -60
+cd /; git -C $REPO worktree remove --force $TREE
+echo "ALL DONE $(date)"

@@ -159,7 +159,7 @@ python timing/time_offline.py     # wall-clock time of a 50-step run; appends to
    ```
 3. Use module-level globals from `MLclm_varctl.py` for configuration
 4. Add tests in `tests/multilayer_canopy/test_my_physics.py`
-5. Register output variables in `clm_src_main/histFileMod.py`
+5. Register output variables in `src/clm_ml/outputs.py` (`VARIABLES`)
 
 ### Adding a New Tower Site
 

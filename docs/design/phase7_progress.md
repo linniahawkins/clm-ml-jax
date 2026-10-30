@@ -41,22 +41,50 @@ CPU gradient tier (issue 16: the default CPU build crashes running gradients; wi
 optimization off it runs; round-off differs, so never use this flag for the regression tests):
 
 ```bash
-JAX_PLATFORMS=cpu XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1 --xla_backend_optimization_level=0" \
-  python -m pytest tests/test_model_api.py::test_model_chunk_gradient_matches_finite_difference \
-  tests/test_differentiability.py -m slow -p no:cacheprovider -o addopts="" -q   # 8 tests, ~10 min
+python tests/gradient_tier.py              # the 8 tests marked `gradient`, ~11 min (sets the flags)
+python tests/gradient_tier.py --focused    # the chunk gradient test only, after a hand-written gradient moves
+qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop queue, warm GPU cache)
 ```
 
 ## Log
 
-(entries start with 7.0)
+### 7.0 Preparation (2026-10-30)
+
+- **Dead code removed (C1):** `cime_src_share_util/`, `utils/`, `lnd_comp_mct`, `histFileMod`,
+  `restUtilMod`, `fileutils`, `clm_share.shr_file_mod`/`shr_kind_mod`, CLM's
+  `SoilTemperatureMod`, `WaterFluxType`, `WaterStateType`, `offline_driver/CLMml.py`, the whole
+  of `controlMod` (its writes in `main.py` and `test_differentiability.py`) and `clm_instRest`.
+- **Legacy view (C2):** `clm_ml/legacy/view.py`; the output variables and validation streams read
+  the state only through it (the legacy `.out` writer not yet). New test
+  `test_legacy_view_gives_reference_fields`.
+- **Gradient tier (C3):** marker `gradient`, `tests/gradient_tier.py`, guards against the
+  optimization-off flag in the regression tests and `record_run.py`, `jobs/grad_gpu.pbs` in the
+  repo. CLAUDE.md gotchas updated (index layout, options copied at import, the view).
+- **Tests:** lint; `tests/clm_ml` 129 pass (11.8 min on a loaded login node); fast Fortran golden
+  160 pass (4.2 min); CPU gradient tier 8 pass (11.3 min); noise twin 88 pass. Independent
+  review: no defects; nits fixed.
+- **Bit for bit: this package is identical to HEAD `aa61279` on all 88 fields** (probe: same
+  50-step run with each tree, same cache). **But HEAD itself is not bit for bit with the
+  committed reference** (75 of 88 fields; relative differences up to ~1e-9 in
+  `shair_profile`, 7e-16 in `pref_forcing`; noise twin passes). Probes
+  (`/glade/derecho/scratch/linnia/clm-ml-jax/probe7/`): not this package (HEAD fails the same
+  way); not the calendar commit `b45bd9a` (`15fbd08`, before it, gives values identical to
+  HEAD); not `legacy_ascii` (identical with and without); runs are reproducible. A fresh
+  compile (empty compilation cache) differs from cached programs in one field
+  (`t_soisno_col`, 1.7e-13 K, soil level 6). So the reference (recorded at `607fe1f` + the
+  `3dcea3c` change) was made by compiled programs that today's compilation does not reproduce;
+  the bit-for-bit result depends on the compilation-cache state. **Reference not re-recorded:
+  the maintainer's decision** (see Next).
 
 ## Next (resume here)
 
-**Start package 7.0 (preparation)**, scope §4:
-1. Delete the dead modules listed in scope §2; remove `controlMod` writes and `clm_instRest`.
-2. The legacy-view adapter (new state -> reference field names and 1-based shapes) and a test
-   that it reproduces today's reference from today's containers exactly.
-3. A pytest marker or small script for the CPU gradient tier (command above) and the GPU
-   gradient job with a warm cache.
-4. CLAUDE.md: remove gotchas as they stop holding.
-Then stop and report to the maintainer.
+**Package 7.0 done; waiting for the maintainer.** Decide first, before 7.1:
+1. **The bit-for-bit safety net** (log 7.0): the committed reference no longer matches the code
+   bit for bit (round-off only). Proposal: re-record the reference at the 7.0 commit with an
+   empty compilation cache, and make the bit-for-bit test (and `record_run.py`) always use a
+   fresh, test-only cache directory, so the compared programs never depend on what other runs
+   left in the shared cache; check that two recordings in separate processes are identical.
+2. Then **package 7.1 (the step state)**, scope §4: `StepState` (0-based, no patch axis),
+   boundary adapters, diagnostics cut (D6) with `phase7_removed_diagnostics.md`; the legacy
+   view maps the new state to the reference names; route the legacy `.out` writer through the
+   view (or retire it) first.

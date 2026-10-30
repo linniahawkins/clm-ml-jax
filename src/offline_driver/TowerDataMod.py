@@ -15,7 +15,7 @@ from jax import Array
 
 # ---------------------------------------------------------------------------
 # Mutable scalar: current tower site index — Fortran line 14
-# Set by controlMod.control() after matching tower_name to tower_id.
+# Set by the run setup after matching tower_name to tower_id.
 # ---------------------------------------------------------------------------
 
 tower_num: int = 0  # Tower site index (1-based into arrays below; 0 = unset)

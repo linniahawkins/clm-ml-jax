@@ -52,7 +52,6 @@ from clm_src_main.decompMod import bounds_type  # noqa: E402
 from multilayer_canopy.MLCanopyFluxesType import BALANCE_CHECKS, check_balance  # noqa: E402
 from multilayer_canopy.MLclm_varctl import DEFAULT_OPTIONS, MLOptions  # noqa: E402
 from multilayer_canopy.MLMathToolsMod import is_concrete  # noqa: E402
-from offline_driver import controlMod  # noqa: E402
 
 # Root of the Python source tree  (…/clm-ml-jax/src)
 _SRC_ROOT = Path(__file__).resolve().parent.parent
@@ -220,13 +219,6 @@ def setup_run(nml: dict, opts: Optional[MLOptions] = None) -> LegacyRun:
     fin2 = fin_clm
 
     print(f"Site: {tower_name}  Year: {iyear}  Month: {imonth}", flush=True)
-
-    # ------------------------------------------------------------------
-    # 2. Set global run-control variables  (mirrors controlMod.F90)
-    # ------------------------------------------------------------------
-    controlMod.tower_site = tower_name
-    controlMod.iyear = iyear
-    controlMod.imonth = imonth
 
     # ------------------------------------------------------------------
     # 2b. Resolve tower index and propagate key settings to global modules
@@ -709,20 +701,19 @@ CHECKPOINT_STEP = True
 def step_variables(names, max_layers: int):
     """``variables(insts) -> {name: value}``: the output variables ``names`` of one patch's
     containers, computed with jax.numpy (leading axis the legacy patch axis of length 1)."""
+    from clm_ml.legacy.view import legacy_view, raw_fields
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
     from clm_src_main.clm_varpar import nlevgrnd
 
     def variables(insts) -> dict:
-        m = insts.mlcanopy
-        raw = {f"mlcanopy.{f}": getattr(m, f)[None] for f in m._fields}
-        r = _Raw(raw, max_layers, xp=jnp)
+        view = legacy_view(insts)
+        r = _Raw(raw_fields(view, jnp), max_layers, xp=jnp)
         out = {}
         for n in names:
             if n == "soil_temperature":  # (patch == column) soil layers 1..nlevgrnd
-                out[n] = insts.temperature.t_soisno_col[:, 1 : nlevgrnd + 1]
+                out[n] = view["temperature.t_soisno_col"][:, 1 : nlevgrnd + 1]
             elif "." in n:  # raw legacy field, e.g. "mlcanopy.tair_profile" (validation)
-                container, field = n.split(".", 1)
-                out[n] = jnp.asarray(getattr(getattr(insts, container), field), dtype=float)
+                out[n] = jnp.asarray(view[n], dtype=float)
             else:
                 out[n] = VARIABLES_BY_NAME[n].compute(r)[0]
         return out
@@ -1353,18 +1344,18 @@ def _grid_of(template, filt):
 
 def output_shapes(run: LegacyRun, template, names, max_layers: int) -> dict:
     """Per-step shape of each output variable (for ``init_buffers``)."""
+    from clm_ml.legacy.view import legacy_view, raw_fields
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
     from clm_src_main.clm_varpar import nlevgrnd
 
-    m = template.mlcanopy
-    r = _Raw({f"mlcanopy.{f}": np.asarray(getattr(m, f))[None] for f in m._fields}, max_layers)
+    view = legacy_view(template)
+    r = _Raw(raw_fields(view, np), max_layers)
     shapes = {}
     for n in names:
         if n == "soil_temperature":
-            shapes[n] = np.asarray(template.temperature.t_soisno_col)[:, 1 : nlevgrnd + 1].shape
+            shapes[n] = np.asarray(view["temperature.t_soisno_col"])[:, 1 : nlevgrnd + 1].shape
         elif "." in n:
-            container, field = n.split(".", 1)
-            shapes[n] = np.shape(getattr(getattr(template, container), field))
+            shapes[n] = np.shape(view[n])
         else:
             shapes[n] = np.shape(VARIABLES_BY_NAME[n].compute(r))[1:]
     return shapes
@@ -1373,18 +1364,18 @@ def output_shapes(run: LegacyRun, template, names, max_layers: int) -> dict:
 def step_values(insts, names, max_layers: int) -> dict:
     """Output variables of one step from its containers (numpy), as the stream runner
     computes them inside a chunk; used for the first (initializing) step."""
+    from clm_ml.legacy.view import legacy_view, raw_fields
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
     from clm_src_main.clm_varpar import nlevgrnd
 
-    m = insts.mlcanopy
-    r = _Raw({f"mlcanopy.{f}": np.asarray(getattr(m, f))[None] for f in m._fields}, max_layers)
+    view = legacy_view(insts)
+    r = _Raw(raw_fields(view, np), max_layers)
     out = {}
     for n in names:
         if n == "soil_temperature":
-            out[n] = np.asarray(insts.temperature.t_soisno_col)[:, 1 : nlevgrnd + 1]
+            out[n] = np.asarray(view["temperature.t_soisno_col"])[:, 1 : nlevgrnd + 1]
         elif "." in n:
-            container, field = n.split(".", 1)
-            out[n] = np.asarray(getattr(getattr(insts, container), field), dtype=float)
+            out[n] = np.asarray(view[n], dtype=float)
         else:
             out[n] = np.asarray(VARIABLES_BY_NAME[n].compute(r), dtype=float)[0]
     return out
