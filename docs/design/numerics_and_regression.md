@@ -294,6 +294,12 @@ moving there from the laptop (JAX 0.6.2) changed 65 fields by ~1e-16 and passed 
 noise-twin test. On another machine or JAX version, rely on the noise-twin test and expect the
 bit-for-bit test to fail.
 
+**CPU only (Phase 7, decision C4 in `phase7_decisions.md`).** The Derecho login nodes have
+GPUs, which JAX uses by default; `tests/conftest.py` and `record_run.py` select the CPU. On the
+GPU, compiling the same program in two processes gives a different program in about one case
+in five (~1e-11 from the first step; within the noise twins), so the bit-for-bit test is a
+CPU test; on the CPU fresh compiles are identical to each other and to the reference.
+
 **Phase 6 round-off changes** (each passed the noise-twin test; reference regenerated):
 - Per-site data as inputs of the compiled chunk (step 2a): XLA no longer folds divisions by
   the constant soil layer thickness (identical-input check of `SoilWater`: 1e-15; run

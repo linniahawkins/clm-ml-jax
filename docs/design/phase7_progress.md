@@ -76,6 +76,15 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   the bit-for-bit result depends on the compilation-cache state. **Reference not re-recorded:
   the maintainer's decision** (see Next).
 
+### 7.1 The step state (started 2026-10-30)
+
+- **Safety net (C4):** the 7.0 bit-for-bit failure was the login node's GPUs (JAX's default
+  there), not the compilation cache. On CPU, fresh compiles are identical to each other and to
+  the committed reference (all 88 fields); on the GPU about one fresh compile in five differs
+  (~1e-11, within the noise twins). Reference **not** re-recorded; bit for bit stays the gate.
+  `tests/conftest.py` (CPU unless chosen), `record_run.py` refuses another platform,
+  `jobs/grad_gpu.pbs` selects `cuda`. Tests: lint; bit-for-bit + noise twin 177 pass (1.5 min).
+
 ## Next (resume here)
 
 **Package 7.0 done; waiting for the maintainer.** Decide first, before 7.1:

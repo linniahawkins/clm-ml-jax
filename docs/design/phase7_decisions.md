@@ -85,3 +85,29 @@ Why: one command, no flag to remember, and no way to run the bit-for-bit test wi
 code generation by accident. The job was only in scratch.
 Alternatives: a `conftest` hook setting `XLA_FLAGS` for marked tests: too late (JAX reads the
 flag at backend start, and the tests' subprocesses inherit the environment).
+
+### C4. The bit-for-bit test stays a hard gate; tests and the reference run on CPU (7.1, 2026-10-30)
+Context: 7.0 found the code no longer bit for bit with the committed reference (75 of 88
+fields, round-off) and blamed the compilation cache. The maintainer chose to re-record the
+reference with a fresh cache, then (when fresh compiles turned out to differ from each other)
+option 2: start 7.1 with the noise twin as the gate and bit for bit advisory.
+Decision: neither. The Derecho login nodes (derecho3, derecho7) have two A100s and JAX uses
+them by default, so the 7.0 probes and the first probes of this session ran on the **GPU**.
+Probes (`/glade/derecho/scratch/linnia/clm-ml-jax/probe7b`, `probe7c`): on the GPU, about one
+fresh compile in five gives a different program (54 fields differ from step 0 by ~1e-11, up to
+6e-10 relative; `--xla_gpu_deterministic_ops` does not change it; runs from one cache are
+reproducible; Python hash seeds play no part). **On the CPU (`JAX_PLATFORMS=cpu`) two fresh
+compiles are identical to each other and to the committed reference on all 88 fields.** So the
+reference stays as it is, the bit-for-bit test remains the per-commit gate, and every test and
+recording runs on CPU: `tests/conftest.py` sets `JAX_PLATFORMS=cpu` unless chosen (that file
+appeared untracked in the working tree on 2026-10-30, not written by Claude; committed as it
+is), `record_run.py --update-reference` refuses another platform, and `jobs/grad_gpu.pbs` now
+sets `JAX_PLATFORMS=cuda` (with the conftest it would otherwise have tested the CPU).
+Why: stronger than option 2 at no cost, and it is the safety net the scope assumes. All GPU
+variants pass the noise-twin test (worst 63 % of its allowance), so GPU results stay checkable
+with the noise twin.
+Alternatives: option 2 as chosen (weaker for no reason once the cause was found); running
+the tests on a fresh compilation cache (adds ~1 min per commit, unnecessary on CPU).
+Open: the GPU's compile-to-compile variation (diagnosis not finished: the ~412 small setup
+programs get different cache keys in every fresh process, on CPU too, without changing CPU
+results); matters for GPU reproducibility, not for Phase 7.

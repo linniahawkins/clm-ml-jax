@@ -180,6 +180,11 @@ def update_reference() -> None:
             "XLA_FLAGS sets --xla_backend_optimization_level=0 (the CPU gradient tier's flag), "
             "which changes round-off; unset it to record the reference."
         )
+    # The reference is recorded on CPU: JAX would otherwise use the GPUs of a Derecho login
+    # node, where compiling the same program twice can change the last bits (Phase 7, C4).
+    os.environ.setdefault("JAX_PLATFORMS", "cpu")
+    if os.environ["JAX_PLATFORMS"] != "cpu":
+        raise SystemExit("JAX_PLATFORMS must be cpu (or unset) to record the reference.")
     jobs = {"reference": REFERENCE_FILE, **TWIN_FILES}
     with ProcessPoolExecutor(max_workers=len(jobs)) as pool:
         for message in pool.map(_record_one, jobs.keys(), jobs.values()):

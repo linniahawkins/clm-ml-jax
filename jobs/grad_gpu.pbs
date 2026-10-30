@@ -26,6 +26,7 @@ export PATH=$ENV_BIN:$PATH
 export JAX_COMPILATION_CACHE_DIR=$CACHE
 export TMPDIR=$SCRATCH/tmp
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export JAX_PLATFORMS=cuda  # tests/conftest.py makes CPU the default
 TREE=$SCRATCH/clm-ml-jax/trees/grad_$(date +%s)
 git -C $REPO worktree add --detach $TREE ${REV:-HEAD} >/dev/null 2>&1 \
   || { echo "worktree add failed: ${REV:-HEAD}"; exit 1; }

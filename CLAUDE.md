@@ -289,6 +289,11 @@ docs/design/           modernization plan, API sketch, example YAML, timing resu
   crashes in LLVM's object loader (deterministic); the batched first step is compiled without
   the cache on CPU (`main.without_persistent_cache_on_cpu`). A deterministic segfault right
   after "Initialization complete." on CPU is this; try an empty cache directory.
+- **Login nodes have GPUs** (derecho3, derecho7: two A100s each) and JAX uses them by
+  default: tests and the reference recording force the CPU (`tests/conftest.py`,
+  `record_run.py`); probes must set `JAX_PLATFORMS=cpu` too. On the GPU, two fresh compiles of
+  the same program can differ by ~1e-11 (decision C4 in `phase7_decisions.md`), so bit for bit
+  is a CPU test.
 - **Real 1° patches amplify round-off** (1e-15 in LAI -> ~8 W m-2 after sunrise): grid
   regression tests compare inputs exactly and outputs only through the night.
 
