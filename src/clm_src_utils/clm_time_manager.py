@@ -41,6 +41,7 @@ Original Fortran module: clm_time_manager
 
 from __future__ import annotations
 
+import datetime
 from typing import NamedTuple
 
 from clm_src_main.abortutils import endrun  # noqa: F401
@@ -359,52 +360,60 @@ def is_end_curr_month() -> bool:
 # ---------------------------------------------------------------------------
 
 
+#: Model calendars (run.yaml ``time.calendar``) and their ``calkindflag`` names (CTSM:
+#: ``GREGORIAN`` and ``NO_LEAP``; CLM-ml's ``isleap`` knows ``GREGORIAN``, any other name has
+#: no leap years)
+CALENDARS = {"gregorian": "GREGORIAN", "noleap": "NOLEAP"}
+
+
+def _noleap_seconds(t: datetime.datetime) -> int:
+    """Seconds of date-time ``t`` since 0001-01-01 in the 365-day calendar."""
+    if t.month == 2 and t.day == 29:
+        raise ValueError(f"{t:%Y-%m-%d} does not exist in the noleap calendar")
+    days = (t.year - 1) * 365 + _mdaycum[t.month - 1] + t.day - 1
+    return days * 86400 + t.hour * 3600 + t.minute * 60 + t.second
+
+
+def add_seconds(t: datetime.datetime, seconds: float, calendar: str = "GREGORIAN"):
+    """Date-time ``seconds`` after ``t`` in ``calendar`` (``calkindflag`` names): exact
+    calendar arithmetic, as CTSM's ESMF clock (proleptic Gregorian, or 365-day years with
+    the months of a normal year). Noleap dates are ordinary dates that skip 29 February."""
+    if calendar.strip() == "GREGORIAN":
+        return t + datetime.timedelta(seconds=seconds)
+    total = _noleap_seconds(t) + seconds
+    days, sec = divmod(total, 86400)
+    days, sec = int(days), float(sec)
+    years, doy = divmod(days, 365)
+    month = next(m for m in range(12, 0, -1) if _mdaycum[m - 1] <= doy)
+    out = datetime.datetime(years + 1, month, doy - _mdaycum[month - 1] + 1)
+    return out + datetime.timedelta(seconds=sec)
+
+
+def seconds_between(a: datetime.datetime, b: datetime.datetime, calendar: str = "GREGORIAN"):
+    """Seconds from ``a`` to ``b`` in ``calendar`` (``calkindflag`` names)."""
+    if calendar.strip() == "GREGORIAN":
+        return (b - a).total_seconds()
+    return float(_noleap_seconds(b) - _noleap_seconds(a)) + ((b.microsecond - a.microsecond) * 1e-6)
+
+
 def date_after(start_ymd: int, start_tod: int, nsecs: int) -> tuple:
     """
-    Date ``nsecs`` seconds after ``start_ymd`` / ``start_tod``.
+    Date ``nsecs`` seconds after ``start_ymd`` / ``start_tod`` in the calendar
+    ``calkindflag``.
 
-    The arithmetic of Fortran ``get_curr_date`` (lines 103-153): the number of
-    years is taken from whole days elapsed, using the leap status of the
-    *start* year, and month/year rollover is applied afterwards.
+    Exact calendar arithmetic (:func:`add_seconds`), as CTSM's ESMF clock. Fortran
+    CLM-ml's ``get_curr_date`` (lines 103-153) counted whole years with the length of
+    the *start* year and rolled months over afterwards, which is exact only within
+    about a year of the start: from 1901 the date ran 37 days ahead after 150 years,
+    from 2000 112 days behind (Phase 6 review, R2). Equal to it for the runs it was
+    written for (CHATS7 and runs of up to a year from 1 January).
 
     Returns:
         ``(yr, mon, day, tod)``.
     """
-    mcyear = start_ymd // 10000
-    ndays = (nsecs + start_tod) // 86400
-
-    if isleap(mcyear, calkindflag):
-        nyears = ndays // 366
-    else:
-        nyears = ndays // 365
-
-    # Day of current year
-    if isleap(mcyear, calkindflag):
-        ndays = ndays % 366
-    else:
-        ndays = ndays % 365
-
-    tod = (nsecs + start_tod) % 86400
-
-    # Initialise current year, month, day from start date + offsets
-    mcyear = start_ymd // 10000 + nyears
-    mcmnth = (start_ymd % 10000) // 100
-    mcday = (start_ymd % 100) + ndays
-
-    # Roll over month/year boundaries — replaces Fortran "go to 10"
-    while True:
-        days_per_month = _mdayleap[mcmnth - 1] if isleap(mcyear, calkindflag) else _mday[mcmnth - 1]
-        if mcday > days_per_month:
-            mcday -= days_per_month
-            mcmnth += 1
-            if mcmnth == 13:
-                mcyear += 1
-                mcmnth = 1
-        else:
-            break
-
-    date_ymd = mcyear * 10000 + mcmnth * 100 + mcday
-    return date_ymd // 10000, (date_ymd % 10000) // 100, date_ymd % 100, tod
+    start = datetime.datetime(start_ymd // 10000, start_ymd // 100 % 100, start_ymd % 100)
+    t = add_seconds(start, start_tod + nsecs, calkindflag)
+    return t.year, t.month, t.day, t.hour * 3600 + t.minute * 60 + t.second
 
 
 def calday_of(yr: int, mon: int, day: int, tod: int, caller: str = "calday_of") -> float:

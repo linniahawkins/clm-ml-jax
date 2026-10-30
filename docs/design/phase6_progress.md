@@ -333,6 +333,28 @@ equal to the netCDF file.
 **Not checkable on CPU**: end-to-end gradients (a 1-step `Model.run_chunk` gradient
 segfaults, issue 16).
 
+### 2026-10-30: review fixes (maintainer's choices)
+
+- R1: not a use case (several towers on several devices); `load_run` refuses devices > 1
+  with towers of different meteorology files.
+- R2 fixed, decision 34: `time.calendar: gregorian | noleap` (noleap for grid runs), exact
+  date arithmetic as CTSM's clock (`clm_time_manager.add_seconds`, `date_after`), used by
+  run length, step times, output records, restarts and the gridded streams. Orbit of the
+  start year (known departure, ~0.02° over 150 years).
+- R3 fixed: restarts keep the chunk schedule's start (`chunk_anchor`).
+- R6 fixed: restarts hold the state, the output record in progress and bookkeeping only;
+  records not yet in a file are written at the restart and the resumed run appends.
+- R9: timing fixed (vegetation weights at the end of the step, as CTSM's ordering); the 29
+  February weights are CLM's own (28-day February in CTSM), kept and documented.
+- Norman solar radiation refused at load; bare ground (issue 13) after the modernization;
+  docs: G8 CO2 stamps, decision 27 (CLM6 parameters).
+- Not changed (minor, recorded): R4, R5, R7, R8, R10, R11 smaller items.
+- Tests: fast tier (289, new: calendars, anchor, writer across a restart, guards), all of
+  `tests/regression` (206, bit for bit), Fortran comparison unchanged (max 0.068 %, the same
+  2 columns below r = 0.9999). GPU gradients (A100, `jobs/grad_gpu.pbs`): differentiability
+  tests and the per-patch weight/PFT gradients pass; the 50-step chunk gradient against
+  finite differences failed (rerun with full output).
+
 ## Next (resume here in a new session) — updated 2026-10-30
 
 **State.** Branch `phase6/patches` (all pushed). Work in the Derecho checkout

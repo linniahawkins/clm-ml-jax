@@ -455,15 +455,16 @@ class GridInputs:
 
     ``domain``: the run's grid :class:`clm_ml.domain.Domain`; ``surface_data``: its surface
     dataset; ``section``: run.yaml ``forcing.gridded``; ``start``, ``step_seconds``,
-    ``n_steps``: the run's clock (one for all gridcells)."""
+    ``n_steps``, ``calendar`` (``GREGORIAN`` or ``NOLEAP``): the run's clock (one for all
+    gridcells)."""
 
     def __init__(self, domain, surface_data, section: GriddedForcingSection, start, step_seconds,
-                 n_steps, resolve=lambda p: Path(p)):  # fmt: skip
+                 n_steps, resolve=lambda p: Path(p), calendar="GREGORIAN"):  # fmt: skip
         import netCDF4 as nc
 
         from clm_share.shr_orb_mod import shr_orb_params
 
-        self.domain, self.start = domain, start
+        self.domain, self.start, self.calendar = domain, start, calendar
         self.step_seconds, self.n_steps = int(step_seconds), int(n_steps)
         g = domain.gridcells
         met = section.meteorology
@@ -502,7 +503,11 @@ class GridInputs:
     # -- time ------------------------------------------------------------------------------
 
     def step_start(self, k: int) -> dt.datetime:
-        return self.start + dt.timedelta(seconds=k * self.step_seconds)
+        """Start of run step ``k`` in the model calendar (a noleap run never reaches 29
+        February; a Gregorian one reads the no-leap streams' 28 February then, G3)."""
+        from clm_src_utils.clm_time_manager import add_seconds
+
+        return add_seconds(self.start, k * self.step_seconds, self.calendar)
 
     # -- meteorology -----------------------------------------------------------------------
 
@@ -618,7 +623,7 @@ class GridInputs:
 
         out = []
         for k in range(first_step, first_step + n):
-            when = satellite_phenology_date(self.step_start(k), self.step_seconds)
+            when = satellite_phenology_date(self.step_start(k), self.step_seconds, self.calendar)
             m1, m2, w1, w2 = clm_monthly_weights(when.month, when.day)
             out.append((m1 - 1, m2 - 1, w1, w2))
         m1, m2, w1, w2 = (np.array(c) for c in zip(*out))

@@ -567,10 +567,7 @@ def month_chunks(run: LegacyRun, first_step: int) -> list:
     per calendar month of the steps' start times (plan decision 17)."""
     chunks = []
     for k in range(first_step, run.ntimes):
-        t = run.time_of(k)
-        start = datetime.datetime(t.year, t.month, t.day) + datetime.timedelta(
-            seconds=t.tod - t.dtime
-        )
+        start = step_start_of(run.time_of(k))
         key = (start.year, start.month)
         if chunks and chunks[-1][0] == key:
             chunks[-1][2] += 1
@@ -579,20 +576,23 @@ def month_chunks(run: LegacyRun, first_step: int) -> list:
     return [(k, n) for _, k, n in chunks]
 
 
-def chunk_schedule(run: LegacyRun, first_step: int, chunk_steps: Optional[int] = None):
+def chunk_schedule(
+    run: LegacyRun, first_step: int, chunk_steps: Optional[int] = None, anchor: int = 1
+):
     """``(chunks, length)``: the ``(first_step, n_steps)`` chunks covering run steps
     ``first_step ... ntimes - 1`` and the length every chunk is run at (decision 33).
 
-    ``chunk_steps``: fixed-length chunks counted from run step 1 (the step after the
-    initializing one), each run at ``length = min(chunk_steps, ntimes - 1)`` steps: a short
-    last chunk is padded to it, so one compiled program serves the whole run, and a run
-    shorter than a chunk is one unpadded chunk. A run resumed from a restart (written at a
-    chunk end) keeps the same chunks. ``None``: calendar months (:func:`month_chunks`), each
+    ``chunk_steps``: fixed-length chunks counted from run step ``anchor`` (1, the step after
+    the initializing one; 0 for a run started from a restart at its start time), each run at
+    ``length = min(chunk_steps, ntimes - anchor)`` steps: a short last chunk is padded to it,
+    so one compiled program serves the whole run, and a run shorter than a chunk is one
+    unpadded chunk. A run resumed from a restart (written at a chunk end, with its
+    ``anchor``) keeps the same chunks. ``None``: calendar months (:func:`month_chunks`), each
     run at its own length (``length`` None)."""
     if chunk_steps is None:
         return month_chunks(run, first_step), None
-    length = max(1, min(chunk_steps, run.ntimes - 1))
-    if first_step > 1 and (first_step - 1) % length:
+    length = max(1, min(chunk_steps, run.ntimes - anchor))
+    if first_step > anchor and (first_step - anchor) % length:
         raise ValueError(
             f"run step {first_step} is not the start of a {length}-step chunk (a restart "
             "written with another execution.chunk?)"
@@ -1390,15 +1390,18 @@ def step_values(insts, names, max_layers: int) -> dict:
     return out
 
 
+def step_start_of(t) -> datetime.datetime:
+    """Start (datetime) of the step whose ``StepTime`` is ``t``, in the model calendar
+    (``clm_time_manager.calkindflag``)."""
+    from clm_src_utils import clm_time_manager as tm
+
+    end = datetime.datetime(t.year, t.month, t.day)
+    return tm.add_seconds(end, t.tod - t.dtime, tm.calkindflag)
+
+
 def step_starts(run: LegacyRun, first_step: int, n_steps: int) -> list:
     """Start times (datetime) of run steps ``first_step ... first_step + n_steps - 1``."""
-    out = []
-    for k in range(first_step, first_step + n_steps):
-        t = run.time_of(k)
-        out.append(
-            datetime.datetime(t.year, t.month, t.day) + datetime.timedelta(seconds=t.tod - t.dtime)
-        )
-    return out
+    return [step_start_of(run.time_of(k)) for k in range(first_step, first_step + n_steps)]
 
 
 #: State fields that are temperatures (K), checked against a plausible range
@@ -1797,8 +1800,10 @@ def run_streams(
     ignored = ignored_check_indices(ignore_checks)
     alive = np.ones(n_p, dtype=bool)
 
+    from clm_src_utils import clm_time_manager as tm
+
     def step_end(k):
-        return step_starts(run, k, 1)[0] + datetime.timedelta(seconds=step_seconds)
+        return tm.add_seconds(step_starts(run, k, 1)[0], step_seconds, tm.calkindflag)
 
     # First step of every patch (initializes the canopy and builds the template): batched
     # and compiled after each patch's initialization at setup (PatchBatch.inits, step 6), or
@@ -1843,7 +1848,7 @@ def run_streams(
         return out
 
     if restart is None:
-        first = 1
+        first = anchor = 1
         values = first_values
         for i, (spec, gv) in enumerate(zip(streams, gvars)):
             rec = S.chunk_records(step_starts(run, 0, 1), 0, step_seconds, spec.frequency)
@@ -1853,8 +1858,11 @@ def run_streams(
             buffers = S.accumulate(spec.statistic, buffers, 0, vals)
             on_records(i, collectors[i].add_chunk(rec, real_part(buffers, batch)))
     else:
-        elapsed = (restart["time"] - run_start).total_seconds()
+        elapsed = tm.seconds_between(run_start, restart["time"], tm.calkindflag)
         first = int(round(elapsed / step_seconds))
+        # the run's chunks start at the step after the initializing one, or at step 0 when it
+        # started from a restart at its start time (kept in its restarts, review R3)
+        anchor = int(restart.get("chunk_anchor", 1)) if first > 0 else 0
         if first * step_seconds != elapsed or not 0 <= first < run.ntimes:
             raise ValueError(
                 f"restart time {restart['time']} is not a step of this run "
@@ -1888,7 +1896,7 @@ def run_streams(
     # (plan §6.9; jax-gcm overlaps I/O the same way).
     from concurrent.futures import ThreadPoolExecutor
 
-    schedule, length = chunk_schedule(run, first, chunk_steps)
+    schedule, length = chunk_schedule(run, first, chunk_steps, anchor)
     reader = ThreadPoolExecutor(max_workers=1)
     pending = reader.submit(read_chunk_inputs, batch, *schedule[0], length) if schedule else None
     for c, (first_step, n) in enumerate(schedule):
@@ -1962,6 +1970,7 @@ def run_streams(
                     "collectors": [c._pending for c in collectors],
                     "alive": alive.copy(),
                     "layout": batch.layout,
+                    "chunk_anchor": anchor,
                     "extra": save_extra() if save_extra is not None else None,
                 },
             )

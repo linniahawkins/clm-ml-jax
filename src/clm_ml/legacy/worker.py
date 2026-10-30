@@ -64,6 +64,11 @@ def prepare_process(spec: dict) -> None:
     jax.config.update("jax_enable_x64", True)
     import jax.numpy as jnp
 
+    # 1b. Model calendar (run.yaml time.calendar), read by the time manager at every date
+    from clm_src_utils import clm_time_manager
+
+    clm_time_manager.calkindflag = spec.get("calendar", "GREGORIAN")
+
     # 2. Options -- before any physics module copies them at import.
     from multilayer_canopy import MLclm_varctl
 
@@ -255,8 +260,10 @@ def run_spec(spec: dict, out_file: Path) -> None:
             collected[i].extend(records)
 
     def save_extra():
-        return {"writers": [w.state() for w in writers] if writers is not None else None,
-                "collected": collected}  # fmt: skip
+        # the output files in progress (their records are written first); no output history:
+        # a restart holds what the next run needs, not the records so far (review R6), so a
+        # resumed run returns the records from the restart on
+        return {"writers": [w.state() for w in writers] if writers is not None else None}
 
     def restore_extra(saved):
         if saved is None:
@@ -264,8 +271,6 @@ def run_spec(spec: dict, out_file: Path) -> None:
         if writers is not None and saved.get("writers") is not None:
             for w, ws in zip(writers, saved["writers"]):
                 w.restore(ws)
-        for i, records in enumerate(saved.get("collected") or []):
-            collected[i][:0] = records
 
     restart = main_mod.read_restart(Path(spec["restart_in"])) if spec.get("restart_in") else None
     every = spec.get("restart_every")

@@ -77,6 +77,8 @@ def chunk_records(
     step_seconds: int,
     frequency: str,
 ) -> ChunkRecords:
+    from clm_src_utils import clm_time_manager as tm
+
     keys, index, ends = [], [], []
     for k, start in enumerate(step_starts):
         key = record_key(start, first_step_index + k, frequency)
@@ -84,7 +86,7 @@ def chunk_records(
             keys.append(key)
             ends.append(None)
         index.append(len(keys) - 1)
-        ends[-1] = start + dt.timedelta(seconds=step_seconds)
+        ends[-1] = tm.add_seconds(start, step_seconds, tm.calkindflag)  # model calendar
     return ChunkRecords(tuple(keys), np.asarray(index, dtype=np.int32), tuple(ends))
 
 

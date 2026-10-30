@@ -43,6 +43,9 @@ class TimeSection:
     days: Optional[float] = None
     steps: Optional[int] = None
     step_seconds: int = 1800  # forcing data interval (the model step: model.yaml numerics)
+    # Model calendar (as CTSM's GREGORIAN / NO_LEAP): dates, solar geometry, run length and
+    # output records follow it. noleap only for grid runs (tower forcing is a real time series)
+    calendar: Literal["gregorian", "noleap"] = "gregorian"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -242,7 +245,7 @@ class Run:
         neighbouring records interpolation needs); files for months inside the run must
         exist, the others are used when they exist."""
         entries = [entry] if isinstance(entry, str) else list(entry)
-        end = self.start + dt.timedelta(seconds=(self.n_steps - 1) * self.step_seconds)  # last step
+        end = self.time_after((self.n_steps - 1) * self.step_seconds)  # last step
         months, (y, m) = [], (self.start.year, self.start.month)
         y, m = (y - 1, 12) if m == 1 else (y, m - 1)
         while (y, m) <= ((end.year, end.month + 1) if end.month < 12 else (end.year + 1, 1)):
@@ -274,6 +277,19 @@ class Run:
     @property
     def output_directory(self) -> Path:
         return self.path(self.run_file.output.directory)
+
+    @property
+    def calkindflag(self) -> str:
+        """The model calendar as the time manager names it (``GREGORIAN``, ``NOLEAP``)."""
+        from clm_src_utils.clm_time_manager import CALENDARS
+
+        return CALENDARS[self.run_file.time.calendar]
+
+    def time_after(self, seconds: float) -> dt.datetime:
+        """The date-time ``seconds`` after the run start, in the model calendar."""
+        from clm_src_utils.clm_time_manager import add_seconds
+
+        return add_seconds(self.start, seconds, self.calkindflag)
 
     @property
     def chunk_steps(self) -> Optional[int]:
@@ -481,6 +497,7 @@ class Run:
             ],
             "meta": _domain_meta(self.domain),
             "run_start": self.start.isoformat(),
+            "calendar": self.calkindflag,
             "restart_every": parse_every(self.run_file.execution.restart_every, "restart_every"),
             "chunk_steps": self.chunk_steps,
             "restart_in": (
@@ -493,7 +510,7 @@ class Run:
     def summary(self) -> str:
         """What ``clm-ml check`` prints."""
         d, c = self.domain, self.config
-        end = self.start + dt.timedelta(seconds=self.n_steps * self.step_seconds)
+        end = self.time_after(self.n_steps * self.step_seconds)
         lines = [
             f"Run: {self.source}",
             f"  time       {self.start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M}, "
@@ -556,6 +573,12 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
     params = Params.from_yaml(params_ref)
 
     _check_supported(run_file, path.name)
+    if config.physics.solar_radiation == "norman":
+        raise ConfigError(
+            "model.yaml: physics.solar_radiation: norman is not supported: its JAX translation "
+            "was never validated and stops at the first CHATS7 step with a conservation error "
+            "(plan, open issues of Phases 4-5); use two_stream"
+        )
     model_step = config.numerics.step_seconds or run_file.time.step_seconds
     if run_file.domain.type == "grid":
         return _load_grid_run(
@@ -604,6 +627,11 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
                 f"{name} has forcing_step_minutes {step_minutes}"
             )
 
+    if run_file.time.calendar != "gregorian":
+        raise ConfigError(
+            f"{path.name}: time.calendar: {run_file.time.calendar} only for grid runs; tower "
+            "forcing is a real (Gregorian) time series"
+        )
     if model_step <= 0 or run_file.time.step_seconds % model_step:
         raise ConfigError(
             f"model.yaml: numerics.step_seconds ({model_step}) must divide the forcing "
@@ -633,6 +661,14 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
         for key, text in files.items():
             if not run.path(text, tower).exists():
                 raise ConfigError(f"{path.name}: {key}: file not found: {run.path(text, tower)}")
+    met = {tuple(run.files(forcing.meteorology.files, t)) for t in domain.gridcells.names}
+    if run_file.execution.devices > 1 and len(met) > 1:
+        # the device layout's padding slots can make a gridcell read another tower's forcing
+        # (Phase 6 review R1); several towers on several devices is not a use case
+        raise ConfigError(
+            f"{path.name}: execution.devices > 1 with towers that have different meteorology "
+            "files is not supported (one tower, or towers sharing their forcing)"
+        )
     substeps = model_step / config.numerics.substep_seconds
     if substeps != int(substeps):
         raise ConfigError(
@@ -776,22 +812,29 @@ def _parse_datetime(text: str, key: str) -> dt.datetime:
 
 
 def _resolve_time(t: TimeSection, source: str, step_seconds: int) -> tuple[dt.datetime, int]:
-    """Start and number of model steps (``step_seconds`` long)."""
+    """Start and number of model steps (``step_seconds`` long), in the model calendar."""
+    from clm_src_utils.clm_time_manager import CALENDARS, seconds_between
+
+    calendar = CALENDARS[t.calendar]
     start = _parse_datetime(t.start, "time.start")
     given = [k for k in ("end", "days", "steps") if getattr(t, k) is not None]
     if len(given) != 1:
         raise ConfigError(f"{source}: time: give exactly one of end, days, steps (got {given})")
-    if t.steps is not None:
-        n = t.steps
-    else:
-        seconds = (
-            (_parse_datetime(t.end, "time.end") - start).total_seconds()
-            if t.end is not None
-            else t.days * 86400.0
-        )
-        n = seconds / step_seconds
-        if n != int(n):
-            raise ConfigError(f"{source}: time: run length is not a whole number of steps")
+    try:
+        if t.steps is not None:
+            n = t.steps
+            seconds_between(start, start, calendar)  # the start exists in the calendar
+        else:
+            seconds = (
+                seconds_between(start, _parse_datetime(t.end, "time.end"), calendar)
+                if t.end is not None
+                else t.days * 86400.0
+            )
+            n = seconds / step_seconds
+            if n != int(n):
+                raise ConfigError(f"{source}: time: run length is not a whole number of steps")
+    except ValueError as e:  # 29 February in the noleap calendar
+        raise ConfigError(f"{source}: time: {e}")
     if int(n) < 1:
         raise ConfigError(f"{source}: time: the run must be at least one step long")
     return start, int(n)

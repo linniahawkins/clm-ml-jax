@@ -75,3 +75,12 @@ def test_pad_steps_repeats_the_last_step():
     out = pad_steps({"a": a}, 5)["a"]
     assert isinstance(out, np.ndarray) and out.shape == (5, 2)
     np.testing.assert_array_equal(out[3:], [[4.0, 5.0], [4.0, 5.0]])
+
+
+def test_run_started_from_a_restart_keeps_its_chunks_when_resumed():
+    # A run started from a restart at its start time runs step 0 in its first chunk
+    # (anchor 0); a restart written at one of its chunk ends resumes there (review R3).
+    run = _run(20000101, 3 * 480)
+    chunks, length = chunk_schedule(run, 0, 480, anchor=0)
+    assert chunks == [(0, 480), (480, 480), (960, 480)] and length == 480
+    assert chunk_schedule(run, 480, 480, anchor=0) == ([(480, 480), (960, 480)], 480)

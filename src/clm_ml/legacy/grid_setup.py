@@ -275,7 +275,7 @@ def grid_inputs(run):
 
     return GridInputs(
         run.domain, run.path(run.run_file.domain.grid.surface_data), run.run_file.forcing.gridded,
-        run.start, run.step_seconds, run.n_steps, resolve=run.path,
+        run.start, run.step_seconds, run.n_steps, resolve=run.path, calendar=run.calkindflag,
     )  # fmt: skip
 
 

@@ -104,3 +104,45 @@ def test_file_writer_writes_each_month_when_complete(tmp_path):
 
     with xr.open_dataset(tmp_path / "T_d_2007-05_patch.nc") as ds:
         assert ds.sizes["time"] == 2  # the record ending at 1 June 00:00 belongs to May
+
+
+def test_file_writer_continues_a_file_after_a_restart(tmp_path):
+    """A restart holds no output records (review R6): the writer writes them to their file
+    first, and the run resumed from the restart appends to it; the files equal those of an
+    uninterrupted run."""
+    import xarray as xr
+
+    from clm_ml.outputs import StreamFileWriter
+
+    class Opts:
+        name, level, file_per = "d", ("patch",), "month"
+
+    meta = {"patch_gridcell": [0], "patch_weight": [1.0], "patch_pft": ["x"],
+            "gridcell_names": ["g"], "soil_depth": np.zeros((1, 1))}  # fmt: skip
+    start = dt.datetime(2007, 5, 1)
+
+    def record(d):
+        end = start + d * dt.timedelta(days=1)
+        return (end.date(), end, {"gpp": np.array([float(d)])})
+
+    records = [record(d) for d in range(1, 40)]
+    full = StreamFileWriter(Opts, ("gpp",), meta, tmp_path / "full", "T", start)
+    full.add(records)
+    full.close()
+
+    first = StreamFileWriter(Opts, ("gpp",), meta, tmp_path / "split", "T", start)
+    first.add(records[:10])
+    saved = first.state()  # restart after 10 May
+    assert "records" not in saved
+    first.add(records[10:20])  # the interrupted run goes on (and is lost)
+    resumed = StreamFileWriter(Opts, ("gpp",), meta, tmp_path / "split", "T", start)
+    resumed.restore(saved)
+    resumed.add(records[10:])
+    resumed.close()
+    for month in ("2007-05", "2007-06"):
+        name = f"T_d_{month}_patch.nc"
+        with (
+            xr.open_dataset(tmp_path / "full" / name) as a,
+            xr.open_dataset(tmp_path / "split" / name) as b,
+        ):
+            xr.testing.assert_identical(a.load(), b.load())

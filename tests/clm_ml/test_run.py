@@ -94,6 +94,8 @@ def test_overrides(chats_run_dir):
         (lambda d: d["forcing"].update(vegetation={"source": "file", "file": "x.nc"}),
          "replaced by files"),
         (lambda d: d["forcing"].update(vegetation={"source": "monthly"}), "monthly"),
+        (lambda d: d["time"].update(calendar="noleap"), "only for grid runs"),
+        (lambda d: d["time"].update(calendar="julian"), "calendar"),
     ]
     ,
 )
@@ -110,3 +112,8 @@ def test_cli_check_and_errors(chats_run_dir, capsys):
     assert "OK" in capsys.readouterr().out
     assert main(["check", str(chats_run_dir / "run.yaml"), "--set", "time.steps=0"]) == 2
     assert "at least one step" in capsys.readouterr().err
+
+
+def test_norman_solar_radiation_is_not_supported(chats_run_dir):
+    with pytest.raises(ConfigError, match="norman is not supported"):
+        load_run(chats_run_dir / "run.yaml", ["model.physics.solar_radiation=norman"])

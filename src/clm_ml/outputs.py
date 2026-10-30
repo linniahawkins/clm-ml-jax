@@ -452,12 +452,31 @@ class Outputs:
         ds.attrs["time_convention"] = "time is the end of each output interval"
         return ds
 
-    def to_netcdf(self, path: Path, levels: Sequence[str] = ("patch", "gridcell")) -> list[Path]:
-        """Write one file per requested level (``*_patch.nc``, ``*_gridcell.nc``)."""
+    def to_netcdf(
+        self, path: Path, levels: Sequence[str] = ("patch", "gridcell"), append: bool = False
+    ) -> list[Path]:
+        """Write one file per requested level (``*_patch.nc``, ``*_gridcell.nc``); with
+        ``append``, add the records to the existing files along ``time`` (a file continued
+        after a restart)."""
+        import os
+
+        import xarray as xr
+
         written = []
         for level in levels:
             out = Path(path).with_name(f"{Path(path).stem}_{level}.nc")
-            self.to_xarray(level).to_netcdf(out)
+            ds = self.to_xarray(level)
+            if append and out.exists():
+                with xr.open_dataset(out) as old:
+                    ds = xr.concat(
+                        [old.load(), ds], dim="time", data_vars="minimal", coords="minimal",
+                        compat="override",
+                    )  # fmt: skip
+                tmp = out.with_name(out.name + ".tmp")
+                ds.to_netcdf(tmp)
+                os.replace(tmp, out)
+            else:
+                ds.to_netcdf(out)
             written.append(out)
         return written
 
@@ -483,6 +502,7 @@ class StreamFileWriter:
         self.directory, self.tower, self.run_start = Path(directory), tower, run_start
         self._label = None
         self._records: list = []
+        self._started: set = set()  # labels whose file holds records written before a restart
         self.written: list[Path] = []
 
     def _label_of(self, end) -> str:
@@ -505,18 +525,25 @@ class StreamFileWriter:
             self._flush()
 
     def state(self) -> dict:
-        """The records not yet written (saved with a restart)."""
-        return {"label": self._label, "records": list(self._records)}
+        """For a restart: the completed records are written to their file first (a restart
+        holds no output history, Phase 6 review R6); the run continuing from the restart
+        appends to that file. Returns the file in progress."""
+        if self._records:
+            self._flush()
+            self._started.add(self._label)
+        return {"label": self._label, "started": sorted(self._started)}
 
     def restore(self, saved: dict) -> None:
-        self._label, self._records = saved["label"], list(saved["records"])
+        self._label, self._records = saved["label"], []
+        self._started = set(saved.get("started", ()))
 
     def _flush(self) -> None:
         outputs = Outputs.from_records(records_to_arrays(self._records, self.variables), self.meta)
         if outputs.data or outputs.soil_temperature is not None:
             self.directory.mkdir(parents=True, exist_ok=True)
             path = self.directory / f"{self.tower}_{self.stream.name}_{self._label}.nc"
-            self.written += outputs.to_netcdf(path, self.stream.level)
+            files = outputs.to_netcdf(path, self.stream.level, append=self._label in self._started)
+            self.written += [f for f in files if f not in self.written]
         self._records = []
 
 

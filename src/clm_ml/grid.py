@@ -90,9 +90,11 @@ class GridSection:
 def clm_monthly_weights(month: int, day: int) -> tuple[int, int, float, float]:
     """CLM's satellite-phenology time weights (``interpMonthlyVeg``) for a date: the two
     months (1-12) whose monthly values are interpolated and their weights. CLM evaluates
-    them at the date one step after the end of the current step (``get_curr_date(offset =
-    dtime)``); the weights change once a day, and a month's value is reached at the middle of
-    its ``NDAYPM`` days.
+    them for each step at the step's end (:func:`satellite_phenology_date`); the weights
+    change once a day, and a month's value is reached at the middle of
+    its ``NDAYPM`` days. ``NDAYPM`` has 28 days for February in every calendar, as in CTSM,
+    so in a Gregorian run 29 February gives (29 - 0.5)/28 > 1: its weights step slightly
+    beyond 1 March's, exactly as CLM's do (the noleap calendar has no 29 February).
 
     Fortran reference: SatellitePhenologyMod.F90, subroutine interpMonthlyVeg."""
     t = (day - 0.5) / NDAYPM[month - 1]
@@ -107,11 +109,20 @@ def clm_monthly_weights(month: int, day: int) -> tuple[int, int, float, float]:
     return m1, m2, w1, 1.0 - w1
 
 
-def satellite_phenology_date(step_start: dt.datetime, step_seconds: int) -> dt.datetime:
-    """The date at which CLM evaluates the monthly vegetation for the step starting at
-    ``step_start``: the end of the step plus one step (``get_curr_date`` with
-    ``offset = dtime``)."""
-    return step_start + dt.timedelta(seconds=2 * step_seconds)
+def satellite_phenology_date(
+    step_start: dt.datetime, step_seconds: int, calendar: str = "GREGORIAN"
+) -> dt.datetime:
+    """The date of the monthly-vegetation time weights for the step starting at
+    ``step_start``: the end of the step, in the model calendar.
+
+    As CTSM: ``interpMonthlyVeg`` (start of step n, ``get_curr_date(offset = dtime)``, the end
+    of step n + one step) sets the weights that ``UpdateSatellitePhenologyCanopy`` uses after
+    ``CanopyFluxes`` of step n, for the next step's leaf and stem area (``clm_driver.F90``):
+    step n + 1 sees the weights at its own end. (Phase 6 review, R9: the end of the step plus
+    one step had been used here, one step early.)"""
+    from clm_src_utils.clm_time_manager import add_seconds
+
+    return add_seconds(step_start, step_seconds, calendar)
 
 
 def _in_region(lat, lon, region: Optional[RegionSection]):
