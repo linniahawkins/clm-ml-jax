@@ -127,9 +127,9 @@ def main() -> None:
     jax.block_until_ready(template)
     result["first_step_s"] = round(time.perf_counter() - t0, 1)
     print("first step", result["first_step_s"], "s", flush=True)
-    from clm_ml.legacy.state import state_from_instances
+    from clm_ml.legacy.state import batched_state
 
-    state = state_from_instances(template)
+    state = batched_state(template)
 
     first, n = 1, args.steps
     t0 = time.perf_counter()

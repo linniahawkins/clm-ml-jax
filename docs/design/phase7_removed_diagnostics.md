@@ -85,7 +85,6 @@ Meanings are from the container's comments (`MLCanopyFluxesType`, CLM-ml v2
 | `cpleaf_profile` | Layer leaf heat capacity (J/m2 leaf/K) | MLLeafHeatCapacityMod | MLFluxProfileSolutionMod, MLLeafFluxesMod, MLLeafHeatCapacityMod |
 | `kb_profile` | Direct beam extinction coefficient (-) | MLSolarRadiationMod | MLCanopyNitrogenProfileMod, MLSolarRadiationMod |
 | `tb_profile` | Layer transmittance of direct beam (-) | MLSolarRadiationMod | MLSolarRadiationMod |
-| `td_profile` | Layer transmittance of diffuse radiation (-) | MLSolarRadiationMod | MLLongwaveRadiationMod, MLSolarRadiationMod |
 | `lwsrc_profile` | Layer source: absorbed LW (W/m2) | MLCanopyFluxesMod | MLCanopyFluxesMod |
 | `rnsrc_profile` | Layer source: net radiation (W/m2) | MLCanopyFluxesMod | MLCanopyFluxesMod |
 | `stsrc_profile` | Layer source: storage heat flux (W/m2) | MLCanopyFluxesMod | MLCanopyFluxesMod |
@@ -155,4 +154,4 @@ Meanings are from the container's comments (`MLCanopyFluxesType`, CLM-ml v2
 | `lhtop_canopy` | Canopy-top latent heat flux: sub-step average of LatVap(tref)·etair(ncan) (W/m2; issue 12) | MLCanopyFluxesMod | MLCanopyFluxesMod |
 | `t_ref2m_patch` | 2-m air temperature (K; `temperature` container, not set by CLM-ml) | TemperatureType | MLCanopyFluxesMod |
 
-134 fields (11 read by no module).
+133 fields (11 read by no module).

@@ -768,10 +768,6 @@ def _domain_meta(domain) -> dict:
     return domain_meta(domain)
 
 
-#: Raw legacy fields allowed as stream variables (validation): "mlcanopy.<field>" etc.
-_RAW_PREFIXES = ("mlcanopy.", "temperature.")
-
-
 def _check_supported(run_file: RunFile, source: str) -> None:
     towers = list(run_file.domain.towers)
     if len(set(towers)) != len(towers):
@@ -788,14 +784,17 @@ def _check_supported(run_file: RunFile, source: str) -> None:
         raise ConfigError(f"{source}: output.streams: stream names must be unique ({names})")
     if not names:
         raise ConfigError(f"{source}: output.streams: at least one stream is needed")
+    from clm_ml.legacy.view import FIELDS
     from clm_ml.outputs import VARIABLES_BY_NAME
 
+    # raw legacy fields (validation): those of the legacy view, "mlcanopy.<field>" etc.
+    raw = {f"{c}.{f}" for c, f in FIELDS}
     for st in run_file.output.streams:
         unknown = [
             v for v in st.variables
             if v not in ("all", "soil_temperature")
             and v not in VARIABLES_BY_NAME
-            and not v.startswith(_RAW_PREFIXES)
+            and v not in raw
         ]  # fmt: skip
         if unknown:
             raise ConfigError(

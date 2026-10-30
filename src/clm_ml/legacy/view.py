@@ -20,22 +20,26 @@ from __future__ import annotations
 from typing import Mapping
 
 from clm_ml.legacy.state import (
+    CANOPY_FIELDS,
+    SOIL_FIELDS,
     instances_with_step_state,
     patch_layers,
     step_state_from_instances,
 )
 from clm_ml.state import Diagnostics, PatchLayers, StepState
 
-#: The fields the view gives, ``(container, field)``: every field the reference records
-#: (and the legacy ``.out`` writer reads).
+#: The fields the view gives, ``(container, field)``: the diagnostics, the prognostic state
+#: and the layer grid under their legacy names. They include every field the reference
+#: records and the legacy ``.out`` writer reads, and are the only raw fields a validation
+#: stream can name (``mlcanopy.<field>``).
 FIELDS = (
     tuple(("mlcanopy", f) for f in Diagnostics._fields if f != "balance_error")
-    + tuple(("mlcanopy", f) for f in ("tair_profile", "eair_profile"))  # State
-    + tuple(  # PatchLayers
+    + tuple((c, f) for c, f, _ in (*CANOPY_FIELDS.values(), *SOIL_FIELDS.values()))
+    + tuple(
         ("mlcanopy", f)
         for f in ("ncan_canopy", "ntop_canopy", "nbot_canopy", "dz_profile", "zs_profile")
     )
-    + (("mlcanopy", "zw_profile"), ("temperature", "t_soisno_col"))
+    + (("mlcanopy", "zw_profile"),)
 )
 
 

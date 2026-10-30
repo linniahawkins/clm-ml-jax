@@ -92,8 +92,11 @@ def get(legacy, layout: tuple):
 
 
 def put(legacy, layout: tuple, value):
-    """``legacy`` with the block at ``layout`` replaced by ``value``."""
+    """``legacy`` with the block at ``layout`` replaced by ``value`` (of the block's shape:
+    ``dynamic_update_slice`` would silently move a block that does not fit)."""
     value = jnp.asarray(value, dtype=legacy.dtype)
+    if value.shape != _size(legacy, layout):
+        raise ValueError(f"block of shape {value.shape} at {layout} in {legacy.shape}")
     return lax.dynamic_update_slice(legacy, value[None], (0,) + tuple(layout))
 
 

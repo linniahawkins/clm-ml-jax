@@ -171,3 +171,30 @@ Why: the bit-for-bit test then checks the step state, the adapters and the view 
 (it passes on all 88 fields, as do the `.out` files and the stream-runner test). The writer is
 kept (not retired) because the Fortran comparison needs it until 7.6.
 Alternatives: retire `clm-ml-offline` now and write `.out` from netCDF (scope puts it in 7.6).
+
+### C8. Independent review of 7.1: fixes (7.1, 2026-10-30)
+Context: the reviewer agent (diff only) found two defects outside the per-commit tests and
+several risks.
+Decision:
+- `td_profile` (diffuse transmittance per layer) is kept as a diagnostic: the issue-14 test
+  (`test_thin_layers_keep_minimum_plant_area`) checks it, and D6 keeps what checks use. The
+  view now gives every state field under its legacy name as well (`tleaf_leaf`, `cair_profile`,
+  `lwp_leaf`, `h2ocan_profile`, `tg_soil`, `t_a10_patch`, which that test and validation may
+  name), and `clm-ml check` accepts only the view's fields as raw stream variables (a typo or
+  a removed field fails at check time, not after setup).
+- `put` checks the block's shape: `dynamic_update_slice` silently moves a block that does not
+  fit (e.g. a `level` array given for a `layer` field in 7.2).
+- `timing/time_global.py` builds the batched state with `batched_state`.
+- New fast test `tests/clm_ml/test_legacy_adapters.py` (fake containers, ~2 s): 0-based shapes,
+  blocks at the right legacy entries, the round trip containers -> `StepState` -> containers,
+  template entries kept outside the blocks, `batched_state`, the shape check, the layer masks,
+  and that the view covers every reference field. Old-layout fixtures in `test_acclimation`
+  and `test_restart_utils` updated.
+- The `.out` writer keeps JAX arrays (reviewer's nit: numpy once per chunk): `CLMml_driver.output` reads `t_soisno_col[1, ic]` (Fortran's column 1) on a column axis of length 1, which JAX clamps to column 0 and numpy rejects; the writer goes in 7.6.
+- A batched 3-patch run (C3 and C4 groups, different layer counts) compared bit for bit with
+  the 7.0 code (`probe7d/mixed.py`): the carried state's dropped fill entries were checked
+  only by the one-patch reference before.
+Not done: an explicit field -> layout table in place of the name-based rule (reviewer's
+readability nit); the rule covers 5 exceptions and the new test exercises every field.
+Why: the defects were real failures (KeyError in the issue-14 test; a crash in the global
+timing test); the guards make 7.2's moves fail loudly instead of silently.

@@ -197,15 +197,20 @@ docs/design/           modernization plan, API sketch, example YAML, timing resu
   The physics receives `StepTime` (`clm_time_manager.step_time`) instead of reading the
   time manager, and receives the previous/next-step forcing as an `AtmForcingWindow`
   argument. Don't reintroduce file reads or `clm_time_manager.itim` in the run path.
-- Profile axes (layers, leaves `isun=1`/`isha=2`, bands `ivis=1`/`inir=2`, soil levels, RK
-  stages) are **1-based** with an unused index 0 (the ground in a few layer fields). The
-  legacy containers keep a "patch" axis of length 1; in the run path the patch index is 0
-  (`begp = endp = 0`). Phase 7.1 moves to 0-based arrays without the patch axis (D1).
+- **Two layouts until the physics moves (Phase 7.1-7.2).** The legacy containers' profile
+  axes (layers, leaves `isun=1`/`isha=2`, bands `ivis=1`/`inir=2`, soil levels, RK stages) are
+  **1-based** with an unused index 0 (the ground in a few layer fields), behind a "patch" axis
+  of length 1 (patch index 0 in the run path). The step state (`clm_ml/state.py`: `State`,
+  `Diagnostics`, `StepState`, `PatchLayers`) is **0-based without the patch axis** (D1;
+  axes `layer`, `level` = ground + layers, `leaf`, `band`, `soil_level`); batched states have
+  one leading patch axis. `clm_ml/legacy/state.py` converts between them (blocks written with
+  `dynamic_update_slice` into the template).
 - **The legacy view (Phase 7):** the regression reference stores raw legacy fields
-  (`mlcanopy.<field>`, 1-based, patch axis). `clm_ml/legacy/view.py::legacy_view` maps the
-  state to them; the output variables (`outputs._Raw`) and validation streams read the
-  state only through it (the legacy `.out` writer still reads the containers:
-  `write_output`). When the state changes, change the view, never the reference.
+  (`mlcanopy.<field>`, 1-based, patch axis). `clm_ml/legacy/view.py::legacy_view(template,
+  step, layers)` maps a `StepState` to them; the output variables (`outputs._Raw`),
+  validation streams and the legacy `.out` writer read a step's results only through it.
+  When the state changes, change the view, never the reference. Fields no longer returned by
+  the step: `docs/design/phase7_removed_diagnostics.md`.
 - Since Phase 3c each physics routine has **one** traceable implementation taking a `GridInfo`
   (since Phase 5b only the patch index and the static C3/C4 flag; layer counts are data, see
   below). Guard checks that need concrete numbers with

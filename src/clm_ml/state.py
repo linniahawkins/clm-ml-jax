@@ -141,6 +141,7 @@ class Diagnostics(NamedTuple):
     gac_profile: Array  # (layer,) aerodynamic conductance for scalars, mol m-2 s-1
     lsc_profile: Array  # (layer,) leaf-specific conductance, mmol H2O m-2 leaf s-1 MPa-1
     lwp_mean_profile: Array  # (layer,) leaf water potential, sunlit/shaded mean, MPa
+    td_profile: Array  # (layer,) transmittance of diffuse radiation (issue 14 check)
     lwdwn_profile: Array  # (level,) downward longwave at the ground and each layer, W m-2
     lwupw_profile: Array  # (level,) upward longwave at the ground and each layer, W m-2
     swbeam_profile: Array  # (level, band) direct beam shortwave, W m-2

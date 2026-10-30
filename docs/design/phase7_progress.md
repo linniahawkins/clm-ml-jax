@@ -93,6 +93,11 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   only through the legacy view (`legacy_view(template, step, layers)`). Removed fields (D6):
   `phase7_removed_diagnostics.md` (134). Tests: lint; bit-for-bit + noise twin +
   `test_clm_ml_equivalence` + `test_stream_runner` 180 pass.
+- **Independent review fixes (C8):** `td_profile` kept (issue-14 check); the view gives all
+  state fields too; `clm-ml check` validates raw stream names against the view; `put` checks
+  block shapes; `time_global.py` fixed; new `tests/clm_ml/test_legacy_adapters.py`. Tests: lint;
+  bit-for-bit + noise twin + equivalence + thin-layer (issue 14) 180 pass; adapter, acclimation
+  and restart-utility unit tests pass.
 
 ## Next (resume here)
 

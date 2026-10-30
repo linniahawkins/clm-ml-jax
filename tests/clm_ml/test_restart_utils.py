@@ -16,18 +16,19 @@ from offline_executable.main import (
 
 
 def _state(tair=300.0, tleaf=(0.0, 295.0)):
+    """One patch's state (0-based, no patch axis): two layers in use and one padding layer."""
     canopy = CanopyState(
-        air_temperature=np.array([[1e36, tair, 299.0]]),  # level 0 is a fill value
-        vapor_pressure=np.array([[0.0, 1500.0, 1400.0]]),
-        co2=np.array([[0.0, 380.0, 380.0]]),
-        leaf_temperature=np.array([[list(tleaf)]]),  # 0 marks an unused entry
-        leaf_water_potential=np.array([[[0.0, -1.0]]]),
-        intercepted_water=np.array([[0.0, 0.0, 0.0]]),
-        ground_temperature=np.array([290.0]),
-        acclimation_temperature=np.array([288.0]),
-        acclimation_steps=np.array([5.0]),
+        air_temperature=np.array([tair, 299.0, 1e36]),  # the padding layer holds a fill value
+        vapor_pressure=np.array([1500.0, 1400.0, 0.0]),
+        co2=np.array([380.0, 380.0, 0.0]),
+        leaf_temperature=np.array([list(tleaf), [0.0, 0.0], [0.0, 0.0]]),  # 0: no leaves
+        leaf_water_potential=np.array([[0.0, -1.0], [0.0, 0.0], [0.0, 0.0]]),
+        intercepted_water=np.array([0.0, 0.0, 0.0]),
+        ground_temperature=np.array(290.0),
+        acclimation_temperature=np.array(288.0),
+        acclimation_steps=np.array(5.0),
     )
-    return State(canopy=canopy, soil=SoilState(temperature=np.array([[0.0, 285.0, 284.0]])))
+    return State(canopy=canopy, soil=SoilState(temperature=np.array([285.0, 284.0])))
 
 
 def test_health_check_passes_and_ignores_fill_values_and_zeros():
