@@ -269,7 +269,18 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   - **one A100 runs the whole 1° globe**: 72 575 patches, 816 s per 10 days (42 700
     patch-steps/s), peak 21.2 GB; setup 98 s, first step 794 s. The 4-GPU global run gave
     ~83 000 patch-steps/s without compile (~21 000 per GPU), so one GPU is about twice as
-    efficient per GPU-hour; 2- and 4-GPU probes pending.
+    efficient per GPU-hour.
+- **Scaling with GPUs** (same probe, old code; steady 480-step chunk, global domain):
+
+  | A100s | patch-steps/s | per GPU | year, running only | GPU-hours per year | peak GB per GPU |
+  |---|---|---|---|---|---|
+  | 1 | 42 700 | 42 700 | ~8.3 h | 8.3 | 21.2 |
+  | 2 | 60 200 | 30 100 | ~5.9 h | 11.8 | 16.2, 11.1 |
+  | 4 | 76 400 | 19 100 | ~4.6 h | 18.6 | 11.2, 6.1, 6.1, 6.1 |
+
+  Compiling (~840 s) and the first step (~800-900 s) do not shrink with more GPUs. Device 0's
+  extra memory is the unsplit forcing (fixed in `607fe1f`). One GPU per domain of this size
+  is the efficient choice; more GPUs only for wall time.
 
 ## Next (resume here in a new session) — updated 2026-10-29 evening
 
