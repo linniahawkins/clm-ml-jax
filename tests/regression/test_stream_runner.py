@@ -1,5 +1,5 @@
 """Output streams accumulated inside a compiled chunk agree with the variables computed
-afterwards (numpy) from each step's containers, and a daily-mean stream equals the mean of
+afterwards (numpy) from each step's StepState, and a daily-mean stream equals the mean of
 the per-step values. The model is initialized in a fresh process (module-level tables)."""
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import offline_executable.main as M
 from tests.regression.record_run import write_portable_namelist
 import jax, jax.numpy as jnp, numpy as np
 from clm_ml.legacy.state import state_from_instances
+from clm_ml.legacy.view import view_series
 from clm_ml import output_streams as S
 from clm_ml.outputs import VARIABLES, _Raw
 
@@ -36,8 +37,9 @@ first, n = 1, 49
 chunk = run.load_chunk(first, n)
 xs = M.stack_step_inputs([M.step_inputs(run, chunk, k) for k in range(first, first + n)])
 names = tuple(v.name for v in VARIABLES) + ("soil_temperature",)
-_, (_, mlc, _) = M.make_chunk_runner(run, template, filt)(state0, xs)
-r = _Raw({{f"mlcanopy.{{f}}": np.asarray(getattr(mlc, f)) for f in mlc._fields}}, 50)
+_, steps = M.make_chunk_runner(run, template, filt)(state0, xs)
+views = view_series(template, steps)  # (step, patch, ...) legacy fields of each step
+r = _Raw({{k: np.asarray(v) for k, v in views.items() if k.startswith("mlcanopy.")}}, 50)
 ref = {{v.name: np.asarray(v.compute(r), float)[:, 0] for v in VARIABLES}}
 
 def starts(k0, nn):

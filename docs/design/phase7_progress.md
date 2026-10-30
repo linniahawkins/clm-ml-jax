@@ -88,6 +88,11 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   adapters by blocks in `clm_ml/legacy/state.py` (`batched_state` for batched templates);
   restart version 4. `clm_ml/state.py` also defines `Diagnostics`, `StepState` and
   `PatchLayers` (used from the next commit). Tests: lint; bit-for-bit + noise twin 177 pass.
+- **Step results as `StepState` (C6, C7):** the step returns `StepState(state, diagnostics)`;
+  output variables, validation streams, the first step and the legacy `.out` writer read it
+  only through the legacy view (`legacy_view(template, step, layers)`). Removed fields (D6):
+  `phase7_removed_diagnostics.md` (134). Tests: lint; bit-for-bit + noise twin +
+  `test_clm_ml_equivalence` + `test_stream_runner` 180 pass.
 
 ## Next (resume here)
 

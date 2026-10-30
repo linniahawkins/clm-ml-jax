@@ -49,7 +49,9 @@ except ImportError:
 from clm_ml.legacy.state import (  # noqa: E402
     batched_state,
     instances_with_state,
+    patch_layers,
     state_from_instances,
+    step_state_from_instances,
 )
 from clm_src_cpl.lnd_comp_nuopc import InitializeRealize, ModelAdvance  # noqa: E402
 from clm_src_main.decompMod import bounds_type  # noqa: E402
@@ -650,12 +652,13 @@ def stack_step_inputs(inputs: list) -> tuple:
     )
 
 
-def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers"):
+def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "steps"):
     """A compiled function ``(state, xs) -> (state, per-step outputs)`` that advances a
     chunk of steps as one ``jax.lax.scan`` (plan Phase 4). ``xs`` is from
-    :func:`stack_step_inputs`; the per-step outputs are ``(state, mlcanopy,
-    temperature)`` after each step (the containers are for the output writer), or only the
-    state with ``outputs="state"`` (e.g. for ensembles). Steps are rebuilt from ``template``
+    :func:`stack_step_inputs`; the per-step outputs are each step's
+    :class:`clm_ml.state.StepState` (for the legacy output writer, through
+    ``clm_ml.legacy.view.view_series``), or only the state with ``outputs="state"`` (e.g. for
+    ensembles). Steps are rebuilt from ``template``
     plus the carried state, as in the step-by-step loop.
 
     The compiled function takes an optional third argument, the patch's ``CanopyParams``
@@ -683,10 +686,10 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "containers
             params=params,
             grid=grid,
         )
-        state = state_from_instances(insts, state)
+        step = step_state_from_instances(insts, state)
         if outputs == "state":
-            return state, state
-        return state, (state, insts.mlcanopy, insts.temperature)
+            return step.state, step.state
+        return step.state, step
 
     default_params = run.canopy_params
 
@@ -703,14 +706,14 @@ CHECKPOINT_STEP = True
 
 
 def step_variables(names, max_layers: int):
-    """``variables(insts) -> {name: value}``: the output variables ``names`` of one patch's
-    containers, computed with jax.numpy (leading axis the legacy patch axis of length 1)."""
-    from clm_ml.legacy.view import legacy_view, raw_fields
+    """``variables(view) -> {name: value}``: the output variables ``names`` of one patch's
+    step from its legacy view (``clm_ml.legacy.view``), computed with jax.numpy (leading
+    axis the legacy patch axis of length 1)."""
+    from clm_ml.legacy.view import raw_fields
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
     from clm_src_main.clm_varpar import nlevgrnd
 
-    def variables(insts) -> dict:
-        view = legacy_view(insts)
+    def variables(view) -> dict:
         r = _Raw(raw_fields(view, jnp), max_layers, xp=jnp)
         out = {}
         for n in names:
@@ -732,6 +735,8 @@ def _patch_step(run: LegacyRun, filt, grid, names, max_layers: int):
     computed with jax.numpy; leading axis the legacy patch axis of length 1) and ``errors``
     the step's largest error of each Fortran conservation check. Used by the one-patch
     (:func:`make_stream_runner`) and batched (:func:`make_batch_runner`) chunks."""
+    from clm_ml.legacy.view import legacy_view
+
     dtime = run.time_of(0).dtime
     variables = step_variables(names, max_layers)
 
@@ -754,8 +759,10 @@ def _patch_step(run: LegacyRun, filt, grid, names, max_layers: int):
             params=params,
             grid=grid,
         )
-        errors = insts.mlcanopy.balance_error.max(axis=0)
-        return state_from_instances(insts, state), variables(insts), errors
+        # the step's results leave the step only as its StepState (D6)
+        step = step_state_from_instances(insts, state)
+        view = legacy_view(template, step, patch_layers(template))
+        return step.state, variables(view), step.diagnostics.balance_error
 
     return step
 
@@ -1348,11 +1355,11 @@ def _grid_of(template, filt):
 
 def output_shapes(run: LegacyRun, template, names, max_layers: int) -> dict:
     """Per-step shape of each output variable (for ``init_buffers``)."""
-    from clm_ml.legacy.view import legacy_view, raw_fields
+    from clm_ml.legacy.view import raw_fields, view_of_instances
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
     from clm_src_main.clm_varpar import nlevgrnd
 
-    view = legacy_view(template)
+    view = view_of_instances(template)
     r = _Raw(raw_fields(view, np), max_layers)
     shapes = {}
     for n in names:
@@ -1368,11 +1375,11 @@ def output_shapes(run: LegacyRun, template, names, max_layers: int) -> dict:
 def step_values(insts, names, max_layers: int) -> dict:
     """Output variables of one step from its containers (numpy), as the stream runner
     computes them inside a chunk; used for the first (initializing) step."""
-    from clm_ml.legacy.view import legacy_view, raw_fields
+    from clm_ml.legacy.view import raw_fields, view_of_instances
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
     from clm_src_main.clm_varpar import nlevgrnd
 
-    view = legacy_view(insts)
+    view = view_of_instances(insts)
     r = _Raw(raw_fields(view, np), max_layers)
     out = {}
     for n in names:
@@ -1655,6 +1662,8 @@ def batched_first_step(batch: PatchBatch, names=(), max_layers: int = 50):
     over the devices like the chunks (Phase 6 step 6). Returns ``(template, values)``: the
     containers after the first step with a leading patch axis (the template of the later
     steps) and the output variables ``names`` of the step, ``(patch, ...)``."""
+    from clm_ml.legacy.view import view_of_instances
+
     run = batch.run
     dtime = run.time_of(0).dtime
     variables = step_variables(names, max_layers)
@@ -1675,7 +1684,7 @@ def batched_first_step(batch: PatchBatch, names=(), max_layers: int = 50):
                 now._replace(dtime=dtime), met, clm_record, forcing_bef, forcing_next
             )
             out, _ = advance(run, insts, filt, inputs, False, p, grid)
-            return out, variables(out)
+            return out, variables(view_of_instances(out))
 
         return jax.vmap(step)
 
@@ -2031,7 +2040,18 @@ def main(opts: Optional[MLOptions] = None):
     # slower, for debugging).
     chunk_steps = int(params["chunk_steps"]) if "chunk_steps" in params else None
 
-    def write_output(calday, mlcanopy, temperature):
+    from types import SimpleNamespace
+
+    from clm_ml.legacy.view import legacy_view, view_of_instances, view_series
+
+    def write_output(calday, view):
+        """The .out records of one step from its legacy view (the containers' fields the
+        writer reads, as attributes)."""
+        fields = {tuple(k.split(".", 1)): v for k, v in view.items()}
+        mlcanopy = SimpleNamespace(**{f: v for (c, f), v in fields.items() if c == "mlcanopy"})
+        temperature = SimpleNamespace(
+            **{f: v for (c, f), v in fields.items() if c == "temperature"}
+        )
         output(
             calday,
             tower_num,
@@ -2065,7 +2085,8 @@ def main(opts: Optional[MLOptions] = None):
         inputs = step_inputs(run, run.load_chunk(0, 1), 0)
         st, filt = advance(run, st, filt, inputs, initialize=True)
         template, state = st, state_from_instances(st)
-        write_output(inputs.now.calday, st.mlcanopy, st.temperature)
+        layers = patch_layers(template)
+        write_output(inputs.now.calday, view_of_instances(st))
         report(1, time.perf_counter() - step_t0)
 
         if chunk_steps is None or chunk_steps > 0:
@@ -2086,15 +2107,13 @@ def main(opts: Optional[MLOptions] = None):
                 # length compiles once).
                 pad = (chunk_steps - n) if chunk_steps else 0
                 padded = inputs + [inputs[-1]] * pad
-                _, (states, mlcanopy, temperature) = runner(state, stack_step_inputs(padded))
-                check_balance(mlcanopy.balance_error[:n], f"time steps {first + 1}-{first + n}")
-                state = jax.tree.map(lambda a: a[n - 1], states)
+                _, steps = runner(state, stack_step_inputs(padded))
+                errors = steps.diagnostics.balance_error[:n]
+                check_balance(errors, f"time steps {first + 1}-{first + n}")
+                state = jax.tree.map(lambda a: a[n - 1], steps.state)
+                views = view_series(template, steps)
                 for k, inp in enumerate(inputs):
-                    write_output(
-                        inp.now.calday,
-                        jax.tree.map(lambda a, k=k: a[k], mlcanopy),
-                        jax.tree.map(lambda a, k=k: a[k], temperature),
-                    )
+                    write_output(inp.now.calday, {f: v[k] for f, v in views.items()})
                 chunk_dt = time.perf_counter() - chunk_t0
                 report(first + n, chunk_dt / n, detail=f"(chunk of {n} steps: {chunk_dt:.1f}s) ")
         else:
@@ -2104,8 +2123,9 @@ def main(opts: Optional[MLOptions] = None):
                 state = advance_acclimation(run, state, inputs)
                 st = instances_with_state(template, state)
                 st, filt = advance(run, st, filt, inputs, initialize=False)
-                state = state_from_instances(st, state)
-                write_output(inputs.now.calday, st.mlcanopy, st.temperature)
+                step = step_state_from_instances(st, state)
+                state = step.state
+                write_output(inputs.now.calday, legacy_view(template, step, layers))
                 report(_itim, time.perf_counter() - step_t0)
     finally:
         for fh in (fout1, fout2, fout3, fout4, fout5, fout6):
