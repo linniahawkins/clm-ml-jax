@@ -372,8 +372,10 @@ code; no shortcuts; science changes are the maintainer's decision; document ever
 and issue.
 
 **Before Phase 7 (standing rule: stop and discuss a new phase):**
-1. Gradient testing tier for Phase 7: CPU gradients crash (issue 16), so gradient tests run
-   as a GPU job (`jobs/grad_gpu.pbs`, develop queue) after process changes.
+1. Gradient testing tier for Phase 7: CPU gradients crash (issue 16) with LLVM optimization
+   on; with `--xla_backend_optimization_level=0` all CPU gradient tests pass (8 tests, 9.7 min
+   on a login node, 2026-10-30). Proposed: that CPU tier after process changes, the GPU job
+   (`jobs/grad_gpu.pbs`, develop queue) at package ends (phase7_scope §7).
 2. Phase 7 starting decisions (plan Phase 7): 0-based indexing or not; the §6.6 process
    interface; restarts as netCDF (include `chunk_anchor` and the writers' file in progress,
    no output history); meteorology interpolated inside the chunk (issue 7, assigned to

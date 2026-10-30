@@ -271,6 +271,10 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
     compilation cache too, on Derecho (JAX 0.9.2); it failed the same way in the end-of-Phase-6
     job on the commit before Phase 6b. Resembles the JAX 0.6.2 CPU runtime bug of Phase 4
     (gradients over chunks of several steps). Gradients ran on the A100 (Phase 6 step 1b).
+    **Diagnosed 2026-10-30** (probes in `probe/issue16/`): not stack size, threading, the
+    compilation cache or the instruction set; the gradient runs with LLVM optimization off
+    (`--xla_backend_optimization_level=0`), so the crash is in XLA's optimized CPU code. Work-
+    around for gradient tests (round-off differs, so not for regression tests): phase7_scope §7 D.
 
 ## Regional test (Phase 6b step 6, 2026-10-29)
 
