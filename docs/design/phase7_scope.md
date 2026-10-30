@@ -1,4 +1,4 @@
-# Phase 7 scope (draft for the maintainer, 2026-10-30)
+# Phase 7 scope (decisions taken 2026-10-30; start not yet agreed)
 
 Phase 7 turns the translated Fortran structure into the target architecture of the plan (§6):
 physics organized by process under `clm_ml/physics/`, a per-step state in place of the legacy
@@ -18,6 +18,13 @@ tests) and the Phase 6 review. Numbers marked ~ are estimates.
 | D3 | **Meteorology built inside the compiled chunk** (open issue 7). |
 | D4 | Orbital parameters per year: **not** done (decision 34's known departure stays). |
 | D5 | **No new unrolled Python loops** in compiled code; remove the large existing ones where it preserves the arithmetic. |
+| D6 | **Diagnostics: keep only what outputs and checks use.** Every removed field is listed (name, meaning, the routine that computed it) in `docs/design/phase7_removed_diagnostics.md` so it can be added back. |
+| D7 | **Round-off-changing simplifications allowed** (sun/shade as one vmapped call, vectorized soil loops, one `SoilThermProp` call), each as its own commit with a recorded reference update and the noise-twin test. |
+| D8 | **WellMixed flux-profile, dataset profiles, Norman solar: kept, registered as unsupported** (a clear error when chosen); fixing them is a later task (listed in the plan after Phase 8). |
+| D9 | **`gs_solver` and `mlcan_to_clm` options kept.** |
+| D10 | **C3/C4 groups unchanged** (decision 22); revisited with the GPU work after Phase 8. |
+| D11 | **Worker subprocess dropped** once setup has no module globals (7.4): runs and tests in-process. |
+| D12 | **Gradient testing:** CPU gradient tier with `--xla_backend_optimization_level=0` after each process move (§7 D); GPU gradient job at package ends with a warm compilation cache (§7 A, C). |
 | — | Earlier: process interface as a name-to-function registry with declared reads/writes (§6.6, decision 21); bare ground, issue 10 and GPU performance after Phase 8. |
 
 ## 2. What the code looks like today (facts from the surveys)
@@ -69,21 +76,23 @@ layout:
    process is compared with its own pre-move behaviour on identical input.
 3. **Golden Fortran tests**: import paths and the `tridiag` adapter change; the JSON files never
    change.
-4. **Gradients**: GPU tier (§7) after each process move.
+4. **Gradients**: CPU gradient tier (optimization off, §7 D) after each process move; GPU tier
+   at package ends.
 5. **Fortran comparison** (`.out` files): a small netCDF-to-`.out` writer in `clm_ml/io/legacy.py`
    replaces `clm-ml-offline` for this workflow.
 
 ## 4. Work packages, in order
 
 Each package: one or more commits on `phase7/restructure`, before-commit tests (fast tier,
-bit-for-bit + noise twin, the package's own tests), gradient tier on GPU where physics moved,
+bit-for-bit + noise twin, the package's own tests), CPU gradient tier where physics moved (GPU tier at the package end),
 documentation in the same change.
 
 **7.0 Preparation** (~2 days)
 - Delete the dead modules (list in §2); remove `controlMod` writes and `clm_instRest`.
 - The legacy-view adapter and a test that it reproduces today's reference from today's
   containers exactly.
-- GPU test runner (§7) and the gradient tier as a job script.
+- The CPU gradient tier (pytest marker + command with the flag) and the GPU gradient job with
+  a warm cache.
 - Update CLAUDE.md gotchas that no longer hold (options copied at import, patch index 1).
 
 **7.1 The step state** (~1 week) — §6.6 interface, 0-based from the start (D1)
@@ -92,7 +101,9 @@ documentation in the same change.
   masks); `PatchParams` (exists as `CanopyParams`).
 - Boundary adapters old container ⇄ `StepState` so processes can move one at a time while the
   rest still uses the container (transition only; removed in 7.4).
-- Decide the diagnostics set: keep all ~164 for now (bit-for-bit, outputs need 85), prune later.
+- Diagnostics (D6): only fields used by outputs and checks; removed ones listed in
+  `phase7_removed_diagnostics.md`. The legacy view fills removed fields from the reference so
+  the bit-for-bit test still compares everything that remains.
 
 **7.2 Processes into `clm_ml/physics/`** (~3-4 weeks; one commit per process, each bit for bit)
 
@@ -105,7 +116,7 @@ documentation in the same change.
 | 5 | `longwave.py`, `canopy_water.py`, `leaf_heat_capacity`, `plant_hydraulics.py` | sun/shade water potential over the leaf axis |
 | 6 | `turbulence.py` (MLCanopyTurbulenceMod, 1 500 lines; psihat table packaged as data) | largest; RSL lookup tables as an input, not a module global |
 | 7 | `leaf_boundary_layer.py`, `photosynthesis.py` | sun and shade as one vmapped call over the leaf axis (D5; halves the largest kernel) — round-off only if XLA fuses differently: check |
-| 8 | `flux_profile.py` (implicit solution, soil fluxes; WellMixed: decide, §8) | |
+| 8 | `flux_profile.py` (implicit solution, soil fluxes; WellMixed registered as unsupported, D8) | |
 | 9 | `nitrogen_profile.py`, `integrators.py` (RK) | |
 | 10 | `canopy.py`: the step driver (MLCanopyFluxes, accumulation, diagnostics) | the legacy container leaves the step here |
 
@@ -199,19 +210,6 @@ ends; B and E only if D turns out too slow):
 - **E. Login-node GPUs** (derecho7 has two A100 80 GB): instant for 5-minute checks, if NCAR's
   login-node policy allows it; not for long runs.
 
-## 8. Open decisions for the maintainer before 7.1
+## 8. Open decisions
 
-1. **Diagnostics set** in the new state: all ~164 kept (simplest, bit for bit) or only what
-   outputs and checks use (smaller, faster; decide per field later)?
-2. **Round-off-changing simplifications** (sun/shade as one vmapped call, vectorized soil loops,
-   one `SoilThermProp` call): allowed as separate commits with a recorded reference update?
-3. **Variants that do not run compiled**: `WellMixed` flux-profile (fails on traced layer
-   counts) and dataset profiles; Norman solar (unsupported) — keep registered as unsupported,
-   fix, or delete?
-4. **Unused options**: `gs_solver` (never read), `mlcan_to_clm` (writes CLM containers that
-   nothing reads) — delete?
-5. **C3/C4 groups** trace the step twice in mixed batches (decision 22). Keep (it is the
-   measured GPU choice) and accept the program size, or revisit after Phase 8 with the GPU work?
-6. **The worker subprocess**: drop it once setup has no globals (runs in-process; simpler,
-   faster tests)?
-7. **GPU queue**: which of §7 A-E to set up.
+All answered 2026-10-30 (D6-D12 in §1). Remaining: the maintainer's go-ahead to start 7.0.

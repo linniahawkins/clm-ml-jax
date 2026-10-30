@@ -55,6 +55,7 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 32 | Canopy-top latent heat (Phase 6b, issue 12) | **The reported canopy latent heat flux is the sub-step average of `LatVap(tref)·etair(ncan)`**, not the averaged water vapor flux times the last sub-step's `LatVap(tref)` (Fortran). The two differ when the air crosses 0 °C within a step (vaporization vs sublimation), which failed the canopy energy balance check; the model's state and energy budget were consistent. CHATS7: round-off only. |
 | 33 | Chunk length (Phase 6b, global run) | **Fixed-length chunks, default 10 days** (`execution.chunk: N days`), replacing calendar months (decision 17) as jax-gcm does (`run.chunk_days`). A short last chunk is padded to the full length (inactive steps leave the state, output and checks unchanged) and output buffers always have the most record slots a chunk can touch, so **one program is compiled per run**; a run shorter than a chunk is one unpadded chunk. Calendar output is unchanged: records spanning chunks are merged on the host. Restarts are written at the first chunk end on or after each `restart_every` boundary. Each chunk's forcing goes to the devices already split by patch. Reason (measured, global 1° run on 4 A100s): every month length compiled anew (~1000 s each; these programs are too large for the persistent cache), about 40 % of each month's wall time, and a month of unsplit forcing (~5 GB, two months with the prefetch) sat on device 0, which ran out of memory loading April's program. Chunk length barely changes GPU throughput beyond a few days (seconds of host work per chunk against ~1 min of GPU time per simulated day). CHATS7 unchanged (one chunk); an output record spanning chunks differs from the one-chunk run by round-off (its partial sums are added on the host). |
 | 34 | Model calendar (Phase 6 review, R2) | **`time.calendar: gregorian` (default) or `noleap`, as CTSM's `GREGORIAN` / `NO_LEAP`, with exact date arithmetic** (`clm_time_manager.add_seconds`, `date_after`): dates, run length, solar geometry (`calday`, CLM's day-366 rule for the orbit), output records, restarts and the gridded streams' model times follow it. Replaces Fortran CLM-ml's `get_curr_date`, which counted years with the start year's length (37 days ahead after 150 years from 1901, 112 behind from 2000); unchanged for runs within a year of a 1 January start (CHATS7, the 2000 run). `noleap` only for grid runs (tower forcing is a real Gregorian series). In a Gregorian run a 29 February reads the no-leap streams' 28 February (G3) and gets CLM's satellite-phenology weights for day 29 of a 28-day February (as CTSM). Known departure: the orbital parameters are those of the start year (CLM's historical runs update them each year; ~0.02° of declination over 150 years). |
+| 35 | Phase 7 starting decisions (maintainer, 2026-10-30) | **0-based indexing; restarts as netCDF; meteorology built inside the compiled chunk; no orbital parameters per year; no new unrolled Python loops; diagnostics only as outputs and checks need (removed ones listed for adding back); round-off-changing simplifications as separate recorded commits; WellMixed, dataset profiles and Norman kept registered as unsupported (fix later); `gs_solver`/`mlcan_to_clm` kept; C3/C4 groups revisited with the GPU work after Phase 8; worker subprocess dropped; gradients checked on CPU with LLVM optimization off after each process move and on GPU at package ends.** Details: `phase7_scope.md` §1 (D1-D12), §7. |
 
 Smaller decisions: see §8.
 
@@ -1848,6 +1849,14 @@ Science questions found in Phase 6b, to address after the modernization (details
 The deferred GPU work: Phase 6 step 1c (kernel count per step) and "GPU issues for long runs"
 (2.3 GB compiled programs that cannot be cached, scaling over GPUs, startup), with the GPU
 check of decision 33 and a full-year global run.
+Also: revisit the C3/C4 groups (decision 22), which trace the step twice in mixed batches
+(decision 35).
+
+### After Phase 8: unsupported variants (maintainer, 2026-10-30)
+
+WellMixed flux-profile and dataset profiles (fail on traced layer counts) and Norman solar
+radiation stay registered but refuse to run (decision 35); make them run compiled and
+validate them against Fortran.
 
 ### After Phase 8: option B (shared soil columns)
 
