@@ -160,19 +160,20 @@ after (no GPU optimization beyond D5).
 | Risk | Handling |
 |---|---|
 | A refactor changes the answer silently | bit-for-bit through the legacy view after every commit; process replay per process |
-| Gradients break (CPU cannot check them, issue 16) | GPU gradient tier after every process move (§7) |
+| Gradients break | CPU gradient tier (optimization off, §7 D) after every process move; GPU tier at package ends |
 | Boundary adapters during 7.2 slow the step | transition only; timing test before/after 7.2, discuss > 1.5x (standing rule) |
 | vmapping sun/shade or vectorizing soil loops changes round-off | allowed only with the noise-twin test and a recorded reference update, as a separate commit |
 | Setup rewrite misses a forcing-dependent field | the template comparison test (towers and grid, the Phase 6b review locations) |
 | Phase too large to review | one process per commit; a progress log as in Phase 6 |
 
-## 7. GPU queue time (gradients are checked on the GPU while issue 16 blocks CPU)
+## 7. GPU queue time
 
 Measured 2026-10-30: the GPU develop queue (`gpudev`) started jobs in ~10-20 min; the main GPU
 queue took hours; the full gradient tier takes ~45 min to run, a focused gradient test ~5 min
 with a warm compilation cache.
 
-Options (recommended: A + B + C now, D if the probes find a cure):
+Options (recommended: D for day-to-day gradient checks, plus A + C for the GPU tier at package
+ends; B and E only if D turns out too slow):
 
 - **A. Gradient tier per package, not per edit.** Forward correctness is checked bit for bit on
   CPU after every edit; gradients once per moved process (focused test, ~5 min of GPU) and the
@@ -183,13 +184,18 @@ Options (recommended: A + B + C now, D if the probes find a cure):
   check; cost: the GPU-hours the job holds (~1 per hour).
 - **C. Warm compilation cache** for the GPU gradient programs (they are small enough to cache):
   unchanged programs reload in ~1 min instead of ~7.
-- **D. Fix issue 16 (CPU gradient crash).** Probes (2026-10-30, `probe/issue16/`): the
-  1-step CHATS7 gradient segfaults while running on CPU (the forward pass is fine) with the
-  default settings, single-threaded execution, a 2 GB thread stack, no compilation cache and
-  AVX2-only code generation; so it is not stack size, threading, the cache or the instruction
-  set. Next probe: another jaxlib version in a separate scratch environment (needs the
-  maintainer's OK: no change to the main environment), and reporting it to JAX with a
-  minimal reproducer.
+- **D. CPU gradient tier with LLVM optimization off (issue 16 work-around, found 2026-10-30).**
+  Probes (`probe/issue16/`): the 1-step CHATS7 gradient segfaults while running on CPU (the
+  forward pass is fine) with the default settings, single-threaded execution, a 2 GB thread
+  stack, no compilation cache and AVX2-only code generation, but **runs with
+  `XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1 --xla_backend_optimization_level=0"`**:
+  the crash is in LLVM's optimized CPU code. With that flag the chunk gradient test and all
+  of `tests/test_differentiability.py` pass on a login node (8 tests, 9.7 min, no queue).
+  The flag changes round-off (loss 119.32881205729213 vs 119.32881205727297), so it is for
+  gradient tests only, never for the bit-for-bit or noise-twin tests. Proposal: a CPU
+  gradient tier run by a separate pytest invocation with the flag after each process move;
+  the GPU tier at package ends (GPU gradients are what calibration uses). Still to do: report
+  the crash to JAX with a minimal reproducer.
 - **E. Login-node GPUs** (derecho7 has two A100 80 GB): instant for 5-minute checks, if NCAR's
   login-node policy allows it; not for long runs.
 
