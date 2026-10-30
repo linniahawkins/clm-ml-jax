@@ -118,13 +118,13 @@ class Model:
         # the model uses only what it holds (options, parameters, state).
         _PREPARED = key
         import offline_executable.main as M
-        from clm_ml.legacy.state import state_from_instances
+        from clm_ml.legacy.state import batched_state
 
         batch = worker.setup_batch(spec)
         max_layers = run.config.canopy_layers.max_layers
         template, _ = M.batched_first_step(batch, (), max_layers)
         filt = batch.init_filt if batch.inits is None else batch.inits[0][1]
-        return cls(run, batch, template, filt, state_from_instances(template))
+        return cls(run, batch, template, filt, batched_state(template))
 
     # -- pieces ------------------------------------------------------------------------
 

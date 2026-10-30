@@ -111,3 +111,26 @@ the tests on a fresh compilation cache (adds ~1 min per commit, unnecessary on C
 Open: the GPU's compile-to-compile variation (diagnosis not finished: the ~412 small setup
 programs get different cache keys in every fresh process, on CPU too, without changing CPU
 results); matters for GPU reproducibility, not for Phase 7.
+
+### C5. The carried state: 0-based, no patch axis, adapters by blocks (7.1, 2026-10-30)
+Context: scope 7.1 asks for the step state as 0-based arrays without the patch axis, with
+adapters to the legacy containers while the physics still uses them.
+Decision: `clm_ml.state.State` keeps its structure (`canopy`, `soil`; plan §6.7 keeps soil per
+column for option B) and names, with new shapes: layer fields `(layer,)` (legacy index
+`i + 1`), leaf fields `(layer, leaf)` (leaf 0 sunlit, 1 shaded), scalars `()`, soil
+temperature `(soil_level,)` (legacy `t_soisno_col[1 : nlevgrnd + 1]`). Batched runs add one
+leading patch axis (`(patch, ...)` instead of `(patch, 1, ...)`); `batched_state(template)`
+builds it. The adapters (`clm_ml/legacy/state.py`) describe each field as a block of its legacy
+array (`LAYOUTS`: first index per axis after the patch axis); reading slices the block, writing
+uses `lax.dynamic_update_slice` with constant starts into the template. The entries outside
+the blocks (index 0 of the layer and leaf axes, unused soil levels) come from the template:
+the reference shows them constant fill values (or 0) after the first step, and the
+bit-for-bit test passes (all 88 fields), so they carry nothing from step to step. An axis
+`level` (`max_layers + 1`, 0 = the ground) is used for the five radiation profiles whose
+legacy index 0 is the ground (it varies in time) and for `zw` (layer tops above the ground).
+Restart format version 4 (the old pickles have the old shapes).
+Why: the scope's layout (D1) with the least change at the boundary; whole-array copies of
+fill entries would keep legacy structure in the state.
+Alternatives: scatter writes (`.at[...].set`): avoided because scatters into the scan carry
+misbehaved on CPU (numerics doc §6); a separate `ground` field for the radiation profiles:
+two fields per flux instead of one axis, and the legacy view would need to join them anyway.

@@ -46,7 +46,11 @@ try:
 except ImportError:
     pass
 
-from clm_ml.legacy.state import instances_with_state, state_from_instances  # noqa: E402
+from clm_ml.legacy.state import (  # noqa: E402
+    batched_state,
+    instances_with_state,
+    state_from_instances,
+)
 from clm_src_cpl.lnd_comp_nuopc import InitializeRealize, ModelAdvance  # noqa: E402
 from clm_src_main.decompMod import bounds_type  # noqa: E402
 from multilayer_canopy.MLCanopyFluxesType import BALANCE_CHECKS, check_balance  # noqa: E402
@@ -1490,7 +1494,8 @@ def read_restart(path: Path) -> dict:
 
 # 2: layer arrays sized by model.yaml max_layers (Phase 5b; version 1 had 100 slots)
 # 3: a leading patch axis on every state array (Phase 6 step 3, patches run batched)
-RESTART_VERSION = 3
+# 4: the state 0-based without the legacy patch axis (Phase 7.1, clm_ml.state)
+RESTART_VERSION = 4
 
 
 def gridcell_variables(names, level) -> tuple:
@@ -1816,7 +1821,7 @@ def run_streams(
         first_insts = firsts[0][0]
         per_patch = [step_values(st, names, max_layers) for st, _ in firsts]
         first_values = {n: np.concatenate([v[n] for v in per_patch]) for n in names}
-    state = state_from_instances(template)
+    state = batched_state(template)
     template_state = state
     if batch.reader is not None:  # grid runs: progress for long runs
         print(f"timing: first step {_time.perf_counter() - t_first:.1f} s", flush=True)

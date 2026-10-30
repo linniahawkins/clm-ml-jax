@@ -84,6 +84,10 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   (~1e-11, within the noise twins). Reference **not** re-recorded; bit for bit stays the gate.
   `tests/conftest.py` (CPU unless chosen), `record_run.py` refuses another platform,
   `jobs/grad_gpu.pbs` selects `cuda`. Tests: lint; bit-for-bit + noise twin 177 pass (1.5 min).
+- **Carried state 0-based (C5):** `clm_ml.state.State` without the patch axis, 0-based;
+  adapters by blocks in `clm_ml/legacy/state.py` (`batched_state` for batched templates);
+  restart version 4. `clm_ml/state.py` also defines `Diagnostics`, `StepState` and
+  `PatchLayers` (used from the next commit). Tests: lint; bit-for-bit + noise twin 177 pass.
 
 ## Next (resume here)
 
