@@ -229,21 +229,65 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   step; `ignore_checks` removed from the grid example and tests. CHATS7 round-off only
   (`lhflx_canopy` <= 4.8e-16), reference regenerated.
 
-## Next (resume here in a new session)
+## Next (resume here in a new session) — updated 2026-10-29 evening
 
-1. **Check the end-of-Phase-6 job** `endphase` (PBS job 8001129, CPU, project P93300041;
-   queued at the end of the session on 2026-10-29): full `tests/regression`, all slow tests,
-   and the CPU 8-step `time_model` rerun on commit `2205796`+. Results in
-   `/glade/derecho/scratch/linnia/clm-ml-jax/jobs/endphase.log` (lines starting `=====`,
-   `passed`, `failed`); the timing line is appended to
-   `jobs/endphase_results_model.jsonl` (copy into `timing/results_model.jsonl`). If it did not
-   run, resubmit: `cd /glade/derecho/scratch/linnia/clm-ml-jax/jobs && qsub -v REV=$(git -C
-   /glade/work/linnia/clm-ml-jax rev-parse HEAD) endphase.pbs`. Phase 6 is finished when it
-   passes (the Fortran comparison and the targeted regression already did).
-2. **Phase 6b step 2, grid domain loader**, after the maintainer's go-ahead (plan Phase 6b;
-   inputs and decisions in `docs/design/global_input.md`). No science decision is needed
-   for steps 2-4; step 5 (canopy bottom) needs the maintainer.
+**State.** Branch `phase6/patches`, last commit `c26dc0d` (all pushed). Work in the Derecho
+checkout `/glade/work/linnia/clm-ml-jax` (env `/glade/work/linnia/conda-envs/clm-ml-jax`).
+Phase 6b steps 1-6 done; step 7 (global run) running. Since the regional test: issue 14 fixed
+(decision 30, per-layer minimum plant area as stems), CLM's 0.05 LAI/SAI cutoff removed
+(decision 31), issue 12 fixed (decision 32, canopy-top latent heat per sub-step), params files
+are YAML only (`clm-ml params`, built-in `clm6`). All decisions: plan §0 (23-32); Phase 6b
+details, decisions G1-G20 and open issues 1-17: `docs/design/global_input.md`.
 
-Job scripts: `/glade/derecho/scratch/linnia/clm-ml-jax/jobs/` (`run_tests.pbs` with
-`REV TESTS MARK TAG`, `diag.pbs`, `fortran_compare.pbs`, `global.pbs`, `gpu4.pbs`,
-`endphase.pbs`); probes in `.../probe/`. GPU jobs: UCLB0069; CPU jobs: P93300041.
+**Working agreement with the maintainer** (this session): copy CLM where a choice comes up;
+for a bug, *diagnose first with probes (scratch, no code changes) and bring the diagnosis
+before changing code*; no shortcuts, hacks or dropping things that fail; science changes are
+the maintainer's decision; document every decision and issue so it is not lost.
+
+1. **Global run (Phase 6b step 7)**: PBS job **8008287** (4 A100s, `jobs/global6b.pbs`,
+   commit `aa43e33` = with decision 30 but *before* decisions 31-32; the maintainer chose to
+   let it finish). Log `/glade/derecho/scratch/linnia/clm-ml-jax/jobs/global6b.log` (its
+   timing lines had not appeared after 1.5 h although the GPUs were busy: look at the end),
+   outputs and monthly restarts in `/glade/derecho/scratch/linnia/clm-ml-jax/runs/global2000/`.
+   GPU 1 used 37 of 40 GB in January (memory limit close). If it ran out of walltime:
+   `cd .../jobs && qsub -v REV=aa43e33,RESTART=<runs/global2000/restart/domain_restart.pkl>
+   global6b.pbs`. Then record in `global_input.md` (like the regional table): setup, first
+   step, per-chunk times and compile, patch-steps/s, GPU memory, excluded patches (which,
+   when, why), and the requirements for Phase 7; mark step 7 done in the plan. Failure
+   statistics are for the model before decisions 31-32 (say so; a short rerun on the final
+   model if needed). The cancelled first attempt (commit `6c1b66f`, log
+   `jobs/global6b_cancelled_6c1b66f.log`) produced nothing.
+2. **Issue 10 (next, agreed)**: round-off amplification (a 1e-15 change of LAI moves latent
+   heat by ~8 W m-2 after sunrise in some 1° patches; `test_grid_setup.py` documents it).
+   Investigation only first, as for issue 14: find the discrete switch (compare routine by
+   routine on perturbed vs unperturbed inputs; probe pattern in `probe/issue14/common.py`,
+   `wrap.py`), then report to the maintainer before changing code.
+3. **Open issues awaiting the maintainer** (`global_input.md`): 1 Meier2022 roughness, 2
+   noleap calendar, 3 frozen soil water as liquid, 4 no snowpack, 5 root biomass / canopy
+   bottom, 6 spin-up, 7 meteorology interpolated in the chunk, 13 bare ground (options
+   written up), 15 wet needleleaf canopies vs CLM, 16 CPU gradient crash (XLA), 17b the
+   floor's kink in the LAI gradient (**maintainer asked to raise LAI differentiability
+   again later**). Also: transpiration/evaporation latent heat outputs still use the last
+   sub-step's latent heat (issue 12 note).
+4. **After step 7**: close Phase 6b (end-of-phase tests as a CPU job: `tests/regression` and
+   slow tests; the CHATS7 50-step CPU gradient test fails with issue 16, pre-existing), then
+   discuss Phase 7 with the maintainer (standing rule: stop before a new phase).
+
+**Probes and inputs (scratch, not in the repo)**: `/glade/derecho/scratch/linnia/clm-ml-jax/
+probe/6b/` (Phase 6b), `probe/issue14/` (thin layers: `common.py` sets up the Wyoming gridcell
+and the failing step, `wrap.py`/`track*.py` routine-by-routine tracking, `td_threshold.py`,
+`how_common.py`, `layer_floor.py`), `probe/issue12/per_step.py`. CLM source:
+`/glade/work/linnia/ctsm5.4.004` (CTSM 5.4, CDEPS); CLM-ml v2 Fortran:
+`/glade/u/home/linnia/clm-ml-jax/run_model/CLM-ml_v2.CHATS`; CLM-ml v1:
+`/glade/derecho/scratch/linnia/ext/CLM-ml_v1` (github.com/gbonan/CLM-ml_v1, `5c8d01d`).
+Regional outputs: `runs/regional/` (Jan, Jul 2000).
+
+**Jobs**: scripts in `/glade/derecho/scratch/linnia/clm-ml-jax/jobs/` (`regional_dev.pbs`,
+`global6b.pbs`, `recheck_dev.pbs`, `run_grid.py`, plus the Phase 6 ones). GPU: `-A UCLB0069`
+(`-q develop` starts quickly, 1.5 h max used; `-q main` waited ~3 h); CPU: `-A P93300041`.
+`qstat -u linnia` lists jobs (develop jobs too). Pipe job output through
+`grep --line-buffered` so lines are not lost.
+
+**Other checkout**: `/glade/u/home/linnia/clm-ml-jax/run_model/clm-ml-jax` (home) is on
+`phase6/patches` at an older commit with a git stash "profile_gpu WIP (1a/1b/10+2)" from the
+old `profile_gpu` plan (superseded); pull before using it, or ignore it.
