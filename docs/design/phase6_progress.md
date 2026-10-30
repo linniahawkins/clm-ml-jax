@@ -221,6 +221,14 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   (issue 17a resolved; 17b, the floor's kink, remains). Towers are unaffected (CHATS7 reads
   CLM's history ELAI/ESAI).
 
+### 2026-10-29: issue 12 diagnosed and fixed (decision 32)
+
+- The canopy check 3 failures in winter come from the diagnostic canopy-top latent heat
+  (averaged etair times the last sub-step's latent heat) on steps where the air crosses 0 C,
+  not from the physics. The diagnostic is now accumulated per sub-step; check 3 closes on every
+  step; `ignore_checks` removed from the grid example and tests. CHATS7 round-off only
+  (`lhflx_canopy` <= 4.8e-16), reference regenerated.
+
 ## Next (resume here in a new session)
 
 1. **Check the end-of-Phase-6 job** `endphase` (PBS job 8001129, CPU, project P93300041;

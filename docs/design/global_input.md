@@ -157,17 +157,28 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
     CPU (`main.without_persistent_cache_on_cpu`). The earlier "intermittent" CPU
     segmentation faults of Phase 6 (`test_c3_c4_groups`, `test_devices`) may have been the
     same bug.
-12. **CLM-ml's canopy energy balance check below freezing** (`CanopyFluxesDiagnostics 3`,
-    Fortran CLM-ml v2): the canopy-top latent heat is `etflx × LatVap(tref)` (air
-    temperature), the leaf and soil latent heats use the latent heat at their own
-    temperatures, and `LatVap` jumps from vaporization to sublimation (+13 %) at 0 °C. When
-    air, leaves and ground straddle freezing the check fails by ~0.1-2 W m⁻² (56 of 61
-    patches in two January days over Illinois; with a single latent heat 0 failed). The
-    state's energy is unaffected; the *reported* total latent heat uses the air temperature's
-    value. CLM sums the components (`eflx_lh_tot = hvap·qflx_evap_veg + htvp·qflx_evap_soi`).
-    Grid runs list the check in `numerics.ignore_checks` (reported every chunk, no
-    exclusion). Fixing the diagnostic (sum the components, as CLM) is a science change
-    for the maintainer (CHATS7 never freezes, so its results would not change).
+12. **Canopy energy balance check when the air crosses freezing (diagnosed and fixed
+    2026-10-29, decision 32).** The check `CanopyFluxesDiagnostics 3` failed by ~0.1-2 W m⁻²
+    in winter. *Diagnosis* (probe `probe/issue12/per_step.py`; an earlier explanation in this
+    file, "leaves and soil use their own temperature's latent heat", was wrong): CLM-ml
+    (Fortran and JAX) uses one latent heat in every sub-step, `LatVap(tref)` at the sub-step's
+    interpolated air temperature, for the leaves, the soil, the flux-profile solution and the
+    air storage, so every sub-step conserves energy and the sub-step averages are consistent.
+    Only the diagnostic canopy-top latent heat was `etair(ncan) · LatVap(tref)` with the
+    *averaged* water vapor flux and the *last* sub-step's `tref` (Fortran
+    `MLCanopyFluxesMod.F90` l. 1389). When `tref` crosses 0 °C within a step, the sub-steps
+    use vaporization and sublimation (13 % apart) and the two differ. Over two January days
+    in Illinois, all 16 failing steps straddled 0 °C; every other step closed to ≤ 9e-9.
+    *Fix*: the canopy-top latent heat is accumulated sub-step by sub-step
+    (`LatVap(tref_k) · etair(ncan)_k`, averaged like the other fluxes; `lhtop_canopy`), so the
+    reported `latent_heat_flux` is the latent heat of the water vapor that left the canopy.
+    Check 3 then closes on every step (29 freezing crossings in the same days); grid runs no
+    longer need `numerics.ignore_checks` (the option stays). CHATS7 never crosses freezing:
+    `lhflx_canopy` changes by round-off only (≤ 4.8e-16 relative), reference regenerated.
+    *Still using the last sub-step's latent heat* (not in any check; same small inconsistency
+    on steps that cross freezing): the transpiration and canopy-evaporation latent heat
+    outputs (`transpiration_latent_heat_flux`, `canopy_evaporation_latent_heat_flux`) and the
+    legacy `.out` writer.
 13. **Bare-ground patches** (discussed with the maintainer 2026-10-29). **What CLM does**
     (CTSM 5.4): at every albedo step (every 30-min step here) `UpdateSatellitePhenologyCanopy`
     sets `elai`/`esai` below 0.05 to 0 and `frac_veg_nosno = 1` only if `elai + esai >= 0.05`;

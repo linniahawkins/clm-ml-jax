@@ -491,7 +491,7 @@ def MLCanopyFluxes(
     # ------------------------------------------------------------------
     # Flux accumulators — Fortran lines 57-64 (local arrays)
     # ------------------------------------------------------------------
-    nvar1d = 23
+    nvar1d = 24
     nvar2d = 14
     nvar3d = 12
     endp = bounds.endp
@@ -1092,7 +1092,7 @@ def _MLAccumulateFluxes(
     """
     from clm_src_main.clm_varpar import inir, ivis  # noqa: F401
 
-    nvar1d = 23
+    nvar1d = 24
     nvar2d = 14
     nvar3d = 12
 
@@ -1134,6 +1134,14 @@ def _MLAccumulateFluxes(
         _acc1(mlcanopy_inst.swskyd_forcing[p, ivis])
         _acc1(mlcanopy_inst.swskyd_forcing[p, inir])
         _acc1(mlcanopy_inst.lwsky_forcing[p])
+        # Not Fortran (issue 12): the canopy-top latent heat flux of the sub-step, with the
+        # sub-step's own latent heat; averaged like the other fluxes (Fortran multiplies the
+        # averaged water vapor flux by the last sub-step's LatVap(tref), which differs when
+        # tref crosses freezing within the step)
+        _acc1(
+            mlcanopy_inst.etair_profile[p, mlcanopy_inst.ncan_canopy[p]]
+            * LatVap(mlcanopy_inst.tref_forcing[p])
+        )
 
         assert (i + 1) == nvar1d, f"_MLAccumulateFluxes: nvar1d mismatch ({i+1} != {nvar1d})"
 
@@ -1235,7 +1243,7 @@ def _MLScaleAndWriteBack(
     from clm_src_main.abortutils import endrun  # noqa: F401
     from clm_src_main.clm_varpar import inir, ivis  # noqa: F401
 
-    nvar1d = 23
+    nvar1d = 24
     nvar2d = 14
     nvar3d = 12
 
@@ -1268,6 +1276,9 @@ def _MLScaleAndWriteBack(
     swskyb = mlcanopy_inst.swskyb_forcing
     swskyd = mlcanopy_inst.swskyd_forcing
     lwsky = mlcanopy_inst.lwsky_forcing
+    lhtop = mlcanopy_inst.lhtop_canopy
+    if lhtop is None:  # a container from before the field existed
+        lhtop = jnp.zeros_like(lwsky)
     shair = mlcanopy_inst.shair_profile
     etair = mlcanopy_inst.etair_profile
     stair = mlcanopy_inst.stair_profile
@@ -1327,6 +1338,7 @@ def _MLScaleAndWriteBack(
         swskyd = swskyd.at[p, ivis].set(_wb1())
         swskyd = swskyd.at[p, inir].set(_wb1())
         lwsky = lwsky.at[p].set(_wb1())
+        lhtop = lhtop.at[p].set(_wb1())
 
         assert (i + 1) == nvar1d, "_MLScaleAndWriteBack: nvar1d mismatch"
 
@@ -1409,6 +1421,7 @@ def _MLScaleAndWriteBack(
         swskyb_forcing=swskyb,
         swskyd_forcing=swskyd,
         lwsky_forcing=lwsky,
+        lhtop_canopy=lhtop,
         shair_profile=shair,
         etair_profile=etair,
         stair_profile=stair,
@@ -1764,7 +1777,9 @@ def _CanopyFluxesDiagnostics(
         elif flux_profile_type == 1:
             shflx_val = mlcanopy_inst.shair_profile[p, _ncan]
             etflx_val = mlcanopy_inst.etair_profile[p, _ncan]
-            lhflx_val = etflx_val * LatVap(mlcanopy_inst.tref_forcing[p])
+            # The sub-step average of the canopy-top latent heat flux (issue 12); Fortran:
+            # etair(ncan) * LatVap(tref) with the averaged etair and the last sub-step's tref
+            lhflx_val = mlcanopy_inst.lhtop_canopy[p]
         else:
             endrun(msg=" ERROR: CanopyFluxesDiagnostics: turbulence type not valid")
             shflx_val = etflx_val = lhflx_val = 0.0  # Unreachable

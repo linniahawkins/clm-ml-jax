@@ -255,8 +255,7 @@ from tests.regression.test_grid_setup import grid_run_files
 from clm_ml.run import load_run
 tmp = Path({tmp!r})
 path = grid_run_files(tmp, {{"lat": [41.5, 42.5], "lon": [-109.0, -108.5]}}, "2000-01-01T00:00",
-                      days=16, co2="{{ppm: 369}}",
-                      extra_model='numerics: {{ignore_checks: ["CanopyFluxesDiagnostics 3"]}}\\n')
+                      days=16, co2="{{ppm: 369}}")
 r = yaml.safe_load(path.read_text())
 r["output"]["streams"] = [{{"name": "s", "frequency": "step", "statistic": "instantaneous",
     "level": ["patch"], "variables": ["mlcanopy.td_profile", "mlcanopy.dpai_profile",
@@ -280,8 +279,8 @@ def test_thin_layers_keep_minimum_plant_area(tmp_path):
     """Issue 14: a stems-only shrub (LAI 0, SAI 0.108) in Wyoming, January 2000, whose bottom
     layer held 0.0013 m2 m-2: CLM-ml's 9-angle diffuse transmittance exceeded 1 there and
     the leaf temperature ran away at a calm sunrise (13 January). With every leafy layer
-    kept at min_layer_plant_area (0.01, added as stems) the run completes (patch errors stop
-    the run), every leafy layer transmits less than it receives, and leaf temperatures stay
+    kept at min_layer_plant_area (0.01, added as stems) the run completes (any failed check stops
+    the run, the canopy energy balance below freezing included: issue 12), every leafy layer transmits less than it receives, and leaf temperatures stay
     physical."""
     out = _python(THIN_LAYER_SCRIPT.format(root=str(ROOT), tmp=str(tmp_path)))
     value = lambda key: [float(x) for x in out.split(key)[1].split("\n")[0].split()]  # noqa: E731

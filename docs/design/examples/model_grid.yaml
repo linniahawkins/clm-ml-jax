@@ -6,8 +6,3 @@ canopy_layers:
 numerics:
   on_patch_error: exclude          # decision 25: a failing patch is left out, not the run
   max_failed_patch_fraction: 0.05
-  # CLM-ml's diagnostic canopy latent heat uses the air temperature's latent heat (vaporization
-  # or sublimation), the leaves and soil their own: below freezing this check fails by ~0.1-2
-  # W m-2 although the fluxes are unchanged (open issue 12 in docs/design/global_input.md).
-  # Reported every chunk, but does not exclude patches.
-  ignore_checks: ["CanopyFluxesDiagnostics 3"]

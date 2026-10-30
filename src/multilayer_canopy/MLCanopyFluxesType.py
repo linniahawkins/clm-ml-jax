@@ -389,6 +389,10 @@ class mlcanopy_type(NamedTuple):
     # Phase 6b): sai_canopy minus the prescribed stem area. Last, with a default, like
     # balance_error, so containers pickled before it stay readable.
     sai_floor_canopy: jnp.ndarray = None
+    # Canopy-top latent heat flux (W/m2): the sub-step average of LatVap(tref)·etair(ncan)
+    # (issue 12; Fortran multiplies the averaged etair by the last sub-step's LatVap(tref)).
+    # Last, with a default, so older pickled containers stay readable.
+    lhtop_canopy: jnp.ndarray = None
 
 
 #: The Fortran error checks recorded in ``balance_error``: (name, tolerance). The Fortran
@@ -507,6 +511,7 @@ def create_mlcanopy(begp: int, endp: int, max_layers: int) -> mlcanopy_type:
         lai_canopy=_r(np_),
         sai_canopy=_r(np_),
         sai_floor_canopy=_r(np_),
+        lhtop_canopy=_r(np_),
         root_biomass_canopy=_r(np_),
         # -spval, as Fortran InitAllocate: a negative value marks "not set by the tower", so
         # getPADparameters gives the PFT default profile (with +spval it never did)
