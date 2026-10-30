@@ -34,10 +34,12 @@ def loss(p):
     _, out = model.run_chunk(state, forcing, first, p, streams=[stream])
     return out["s"]["latent_heat_flux"].mean()
 
-g = float(jax.grad(loss)(params).vcmax25)
-eps = 1e-3 * float(params.vcmax25)
-fd = (float(loss(params._replace(vcmax25=params.vcmax25 + eps)))
-      - float(loss(params._replace(vcmax25=params.vcmax25 - eps)))) / (2 * eps)
+# vcmax25 is per PFT (the table, Phase 6): the derivative along a 0.1 % change of every
+# entry (only the patch's PFT matters) against a centred finite difference
+d = 1e-3 * params.vcmax25
+g = float((jax.grad(loss)(params).vcmax25 * d).sum())
+fd = (float(loss(params._replace(vcmax25=params.vcmax25 + d)))
+      - float(loss(params._replace(vcmax25=params.vcmax25 - d)))) / 2
 print("RESULT" + json.dumps({{"grad": g, "fd": fd}}))
 """
 
