@@ -282,6 +282,57 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   extra memory is the unsplit forcing (fixed in `607fe1f`). One GPU per domain of this size
   is the efficient choice; more GPUs only for wall time.
 
+### 2026-10-30: adversarial review of Phase 6/6b (`d112478..HEAD`)
+
+Four independent reviews (batch runner and run loop; setup; gridded input against CTSM 5.4 /
+CDEPS; physics). Probes in `probe/review6/` (scratch). Nothing changed yet; fixes await the
+maintainer.
+
+**Confirmed defects**
+- R1. *Multi-device tower runs read the wrong forcing*: `PatchBatch.gridcell_patch` takes the
+  first slot of a gridcell, which in `blocked()` can be a padding copy of a patch from another
+  gridcell, so that gridcell's meteorology comes from another tower's files (first step
+  right, every later step wrong; `Model.forcing` too). Grid runs unaffected (own reader).
+  `p1_blocked_gridcell_patch.py`. Fix: the first real slot.
+- R2. *Calendar drift in multi-year runs*: `clm_time_manager.date_after` (Fortran
+  `get_curr_date`) counts years with the start year's length: +37 days after 150 years from
+  1901, -112 days from 2000; repeated or missing dates. Affects the solar geometry against
+  the forcing (grid runs read forcing at true time), output record keys, and restart resume
+  (wrong step or refused). Within one year from a 1 January start it is exact (CHATS7, the
+  2000 run). `p2_date_after.py`, `p3_clock_drift.py`. CLM's ESMF clock is exact.
+- R3. *A run started from a restart at its start time cannot be resumed* with fixed chunks
+  (chunks then start at step 0, not 1; the resume check refuses). `p4_restart_from_start.py`.
+
+**Likely / minor**
+- R4. A patch failing a check with finite values still enters the gridcell sums (and
+  parameter gradients) for the chunk in which it fails (now 10 days); only its patch output
+  is filled.
+- R5. Padding slots placed on real gridcells combine one gridcell's meteorology with another
+  patch's site data; stop mode checks them as if real.
+- R6. Restart files hold every collected record when `return_records` is on (the
+  `Run.execute` default): they grow with run length.
+- R7. Tower vectorized setup is not bit for bit when the porosity cap binds (no effect: the
+  first step rewrites those values); docstring/test claim too strong.
+- R8. `soil.layer_structure: clm4_5` with `domain.type: grid` not rejected at load.
+- R9. LAI/SAI time weights one model step earlier than CLM (CLM: end of step); on 29
+  February the weights overshoot (CLM's no-leap months).
+- R10. Minimum plant area keeps diffuse transmittance below 1 only for `clumping_index`
+  above ~0.55 (all built-in PFTs 1.0; a calibration could go below).
+- R11. Docs: CO2 stamps are not mid-year (G8); plan decision 27 says CLM5 parameters, the
+  runs use `clm6`. Smaller: per-variable exclusion in `gridcell_sum`, unmasked first-step
+  gridcell sums, `Model.weights()` in slot order with devices > 1, a run starting in the first
+  forcing year cannot start, 184 gridcells nearest-point where ESMF may interpolate.
+
+**Checked and fine** (highlights): tridiagonal scans and their gradients against dense
+solves; longwave rows and padding; the minimum plant area in every consumer and not applied
+twice; decision 32 consistent with check 3; sharding specs; padded chunks; record merging;
+grid setup bit for bit in the southern hemisphere, Siberia (snow, shallow bedrock), the Sahel
+(C4, crops) and with other CO2; gridded derivations and units against CDEPS/CTSM; clm6.yaml
+equal to the netCDF file.
+
+**Not checkable on CPU**: end-to-end gradients (a 1-step `Model.run_chunk` gradient
+segfaults, issue 16).
+
 ## Next (resume here in a new session) — updated 2026-10-30
 
 **State.** Branch `phase6/patches` (all pushed). Work in the Derecho checkout
