@@ -351,48 +351,38 @@ segfaults, issue 16).
 - Not changed (minor, recorded): R4, R5, R7, R8, R10, R11 smaller items.
 - Tests: fast tier (289, new: calendars, anchor, writer across a restart, guards), all of
   `tests/regression` (206, bit for bit), Fortran comparison unchanged (max 0.068 %, the same
-  2 columns below r = 0.9999). GPU gradients (A100, `jobs/grad_gpu.pbs`): differentiability
-  tests and the per-patch weight/PFT gradients pass; the 50-step chunk gradient against
-  finite differences failed (rerun with full output).
+  2 columns below r = 0.9999). **GPU gradients (A100, `jobs/grad_gpu.pbs`, develop queue,
+  ~45 min): all pass** — the differentiability tests, the per-patch weight and PFT gradients,
+  and the chunk gradient against finite differences (its script had rotted since Phase 6:
+  per-PFT parameters; fixed `35fbdb2`). Gradients are checked on the GPU while issue 16
+  blocks them on CPU.
 
-## Next (resume here in a new session) — updated 2026-10-30
+## Next (resume here in a new session) — updated 2026-10-30 (Phase 6b closed)
 
-**State.** Branch `phase6/patches` (all pushed). Work in the Derecho checkout
-`/glade/work/linnia/clm-ml-jax` (env `/glade/work/linnia/conda-envs/clm-ml-jax`). Phase 6b
-steps 1-7 done; step 7 (global run) closed as it stands (maintainer, 2026-10-30): January-March
-2000 ran, then GPU memory ran out (diagnosed and fixed, decision 33 and the per-patch
-constants; entry 2026-10-30 above); the GPU work is a separate effort after Phase 8.
-Since the regional test: decisions 30-33, params files YAML only (`clm-ml params`, built-in
-`clm6`). All decisions: plan §0 (23-33); Phase 6b details, decisions G1-G20 and open issues
-1-17: `docs/design/global_input.md`.
+**State.** Branch `phase6/patches` (all pushed). Phase 6 and 6b done (step 7 closed as it
+stands); adversarial review done and its chosen fixes in (`b45bd9a`, decision 34); GPU
+gradients pass. Still queued at the time of writing: the end-of-phase CPU job (slow tests and
+the CPU timing test, `jobs/endphase6b.pbs`, log `jobs/endphase6b.log`; the CHATS7 chunk
+gradient test segfaults on CPU there, issue 16). Decisions: plan §0 (23-34); Phase 6b
+details, G1-G20 and open issues: `docs/design/global_input.md`.
 
-**Working agreement with the maintainer** (this session): copy CLM where a choice comes up;
-for a bug, *diagnose first with probes (scratch, no code changes) and bring the diagnosis
-before changing code*; no shortcuts, hacks or dropping things that fail; science changes are
-the maintainer's decision; document every decision and issue so it is not lost.
+**Working agreement with the maintainer**: copy CLM where a choice comes up; for a bug,
+diagnose first with probes (scratch, no code changes) and bring the diagnosis before changing
+code; no shortcuts; science changes are the maintainer's decision; document every decision
+and issue.
 
-1. **GPU work deferred to a separate effort (maintainer, 2026-10-30)**: the long-run GPU issues are listed in the
-   plan, Phase 6 step 1c, "GPU issues for long runs" (2.3 GB programs that cannot be cached,
-   scaling over GPUs, startup). Deferred with them: the GPU check of `607fe1f`/`3dcea3c`
-   (job script `probe/oom/verify33.pbs`, global domain, January 2000) and the rest of the
-   year 2000 (rerun on the final code rather than continuing the `aa43e33` restart, which
-   was written with monthly chunks; one A100 is the efficient choice, ~10 h walltime).
-   Outputs of the partial run: `runs/global2000/` (Jan-Feb files; restart 2000-04-01 holding
-   March's pending output). Probe logs: `probe/oom/live_g{1,2,4}.log`, `smi_*.csv`.
-2. **Issue 10** (round-off amplification): moved to the science issues after the
-   modernization (maintainer, 2026-10-30; plan "After Phase 8: science issues").
-3. **Open issues awaiting the maintainer** (`global_input.md`): 1 Meier2022 roughness, 2
-   noleap calendar, 3 frozen soil water as liquid, 4 no snowpack, 5 root biomass / canopy
-   bottom, 6 spin-up, 7 meteorology interpolated in the chunk, 13 bare ground (options
-   written up), 15 wet needleleaf canopies vs CLM, 16 CPU gradient crash (XLA), 17b the
-   floor's kink in the LAI gradient (**maintainer asked to raise LAI differentiability
-   again later**). Also: transpiration/evaporation latent heat outputs still use the last
-   sub-step's latent heat (issue 12 note).
-4. **Closing Phase 6b** (step 7 closed as it stands): an adversarial review of Phase 6/6b
-   and what the unfinished items mean for Phase 7 (running 2026-10-30); record the Phase 7 requirements the global run
-   revealed in `global_input.md`, run the end-of-phase tests as a CPU job (`tests/regression`
-   and slow tests; the CHATS7 50-step CPU gradient test fails with issue 16, pre-existing),
-   then discuss Phase 7 with the maintainer (standing rule: stop before a new phase).
+**Before Phase 7 (standing rule: stop and discuss a new phase):**
+1. Gradient testing tier for Phase 7: CPU gradients crash (issue 16), so gradient tests run
+   as a GPU job (`jobs/grad_gpu.pbs`, develop queue) after process changes.
+2. Phase 7 starting decisions (plan Phase 7): 0-based indexing or not; the §6.6 process
+   interface; restarts as netCDF (include `chunk_anchor` and the writers' file in progress,
+   no output history); meteorology interpolated inside the chunk (issue 7, assigned to
+   Phase 7); orbital parameters per year (decision 34's known departure) could become time
+   data; avoid unrolled Python loops (2.3 GB GPU programs, deferred GPU work).
+3. Recorded, not blocking: review R4 (a failing patch counts in its chunk's gridcell sums),
+   R5 (padding slots checked as real), R7, R8, R10 (minimum plant area vs clumping < 0.55),
+   R11 smaller items; after Phase 8: issue 10, bare ground (13), GPU performance; open
+   science issues 1, 3-6, 15, 17b with the maintainer.
 
 **Probes and inputs (scratch, not in the repo)**: `/glade/derecho/scratch/linnia/clm-ml-jax/
 probe/6b/` (Phase 6b), `probe/issue14/` (thin layers: `common.py` sets up the Wyoming gridcell
