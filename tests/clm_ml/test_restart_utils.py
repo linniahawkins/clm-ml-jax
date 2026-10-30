@@ -42,12 +42,19 @@ def test_health_check_catches_nan_and_implausible_temperatures():
 
 
 def test_restart_boundaries():
-    jan1, jun1 = dt.datetime(2010, 1, 1), dt.datetime(2010, 6, 1)
-    assert restart_boundary(jan1, (1, "year")) and not restart_boundary(jun1, (1, "year"))
-    assert restart_boundary(jan1, (10, "year")) and not restart_boundary(jan1, (4, "year"))
-    assert restart_boundary(jun1, (1, "month"))
-    assert not restart_boundary(dt.datetime(2010, 6, 1, 0, 30), (1, "month"))
-    assert not restart_boundary(jan1, None)
+    # a restart at the first chunk end on or after a boundary (decision 33)
+    t = dt.datetime
+    assert restart_boundary(t(2009, 12, 25), t(2010, 1, 1), (1, "year"))
+    assert restart_boundary(t(2009, 12, 25), t(2010, 1, 4, 0, 30), (1, "year"))
+    assert not restart_boundary(t(2010, 1, 1), t(2010, 1, 11), (1, "year"))  # at its start
+    assert not restart_boundary(t(2010, 5, 25), t(2010, 6, 4), (1, "year"))
+    assert restart_boundary(t(2009, 12, 25), t(2010, 1, 4), (10, "year"))
+    assert not restart_boundary(t(2009, 12, 25), t(2010, 1, 4), (4, "year"))
+    assert restart_boundary(t(2010, 5, 25), t(2010, 6, 4), (1, "month"))
+    assert restart_boundary(t(2010, 3, 25), t(2010, 4, 4), (3, "month"))  # Jan, Apr, Jul, Oct
+    assert not restart_boundary(t(2010, 5, 25), t(2010, 6, 4), (3, "month"))
+    assert not restart_boundary(t(2010, 6, 1, 0, 30), t(2010, 6, 11), (1, "month"))
+    assert not restart_boundary(t(2009, 12, 25), t(2010, 1, 4), None)
 
 
 def test_restart_file_keeps_previous_and_falls_back(tmp_path):

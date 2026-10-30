@@ -17,7 +17,7 @@ domain:
   min_patch_weight: 0.0            # drop patches covering less than this fraction of a gridcell
 
 execution:
-  chunk: 1 month                   # forcing read and output written per chunk (sets memory use)
+  chunk: 10 days                   # compiled chunk length (sets forcing memory; a shorter run is one chunk)
   restart_every: null              # one restart at the end of the run
 
 forcing:

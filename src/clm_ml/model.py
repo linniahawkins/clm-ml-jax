@@ -160,18 +160,22 @@ class Model:
         return jnp.asarray(self._batch.weight, dtype=jnp.float64)
 
     def chunks(self) -> list:
-        """``(first_step, n_steps)`` of the run's compiled chunks after the first step."""
+        """``(first_step, n_steps)`` of the run's chunks after the first step
+        (``execution.chunk``, decision 33; the last one may be shorter)."""
         import offline_executable.main as M
 
-        return M.month_chunks(self._legacy, 1)
+        return M.chunk_schedule(self._legacy, 1, self.run.chunk_steps)[0]
 
     def forcing(self, first_step: int, n_steps: int):
         """The forcing of run steps ``first_step ... first_step + n_steps - 1``: ``(xg, xp)``,
         the meteorology per gridcell and the CLM history record per patch, stacked per step
         (differentiable input of :meth:`run_chunk`)."""
+        import jax
+        import jax.numpy as jnp
+
         import offline_executable.main as M
 
-        return M.read_batch_inputs(self._batch, first_step, n_steps)
+        return jax.tree.map(jnp.asarray, M.read_batch_inputs(self._batch, first_step, n_steps))
 
     # -- running -----------------------------------------------------------------------
 

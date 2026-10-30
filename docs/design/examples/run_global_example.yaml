@@ -16,7 +16,7 @@ domain:
   min_patch_weight: 0.01
 
 execution:
-  chunk: 1 month                   # ~80 MB of meteorology per chunk at 1 degree
+  chunk: 10 days                   # one compiled program; forcing memory per chunk (decision 33)
   restart_every: 10 years
 
 forcing:

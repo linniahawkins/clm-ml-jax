@@ -328,7 +328,6 @@ class GridChunkReader:
 
     def __call__(self, first_step: int, n_steps: int):
         import jax
-        import jax.numpy as jnp
 
         from clm_src_utils.clm_time_manager import step_time
 
@@ -346,13 +345,14 @@ class GridChunkReader:
         times = [
             step_time(ymd, tod, inp.step_seconds, k + 1) for k in range(first_step, first_step + n)
         ]
-        now = type(times[0])(*(jnp.asarray(np.array(col)) for col in zip(*times)))
+        now = type(times[0])(*(np.array(col) for col in zip(*times)))
         xg = (now, tower_met(cur), bef, nxt)
         m1, m2, w1, w2 = inp.vegetation_weights(first_step, n)
         h, lb, f1, f2 = inp.soil_window(first_step, n)
         xw = (m1, m2, w1, w2, lb, f1, f2)
         land = (inp.lai[:, self.src_p], inp.sai[:, self.src_p], h[:, self.src_g])
-        return jax.tree.map(jnp.asarray, xg), jax.tree.map(jnp.asarray, (xw, land))
+        # host arrays: the run places them on the devices, split by patch (decision 33)
+        return jax.tree.map(np.asarray, xg), jax.tree.map(np.asarray, (xw, land))
 
 
 def land_fn(xw, land, gidx):

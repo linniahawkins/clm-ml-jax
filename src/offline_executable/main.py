@@ -579,6 +579,56 @@ def month_chunks(run: LegacyRun, first_step: int) -> list:
     return [(k, n) for _, k, n in chunks]
 
 
+def chunk_schedule(run: LegacyRun, first_step: int, chunk_steps: Optional[int] = None):
+    """``(chunks, length)``: the ``(first_step, n_steps)`` chunks covering run steps
+    ``first_step ... ntimes - 1`` and the length every chunk is run at (decision 33).
+
+    ``chunk_steps``: fixed-length chunks counted from run step 1 (the step after the
+    initializing one), each run at ``length = min(chunk_steps, ntimes - 1)`` steps: a short
+    last chunk is padded to it, so one compiled program serves the whole run, and a run
+    shorter than a chunk is one unpadded chunk. A run resumed from a restart (written at a
+    chunk end) keeps the same chunks. ``None``: calendar months (:func:`month_chunks`), each
+    run at its own length (``length`` None)."""
+    if chunk_steps is None:
+        return month_chunks(run, first_step), None
+    length = max(1, min(chunk_steps, run.ntimes - 1))
+    if first_step > 1 and (first_step - 1) % length:
+        raise ValueError(
+            f"run step {first_step} is not the start of a {length}-step chunk (a restart "
+            "written with another execution.chunk?)"
+        )
+    chunks = [(k, min(length, run.ntimes - k)) for k in range(first_step, run.ntimes, length)]
+    return chunks, length
+
+
+#: Shortest period (s) of each output frequency, for the record slots a chunk can touch
+_SHORTEST_PERIOD = {"hourly": 3600, "daily": 86400, "monthly": 28 * 86400, "yearly": 365 * 86400}
+
+
+def max_chunk_records(frequency: str, length: int, step_seconds: int) -> int:
+    """The most records of a stream of ``frequency`` that ``length`` consecutive steps can
+    touch, wherever they start: the record slots of fixed-length chunks (decision 33), so
+    every chunk has the same buffer shapes and reuses one compiled program."""
+    if frequency == "step":
+        return length
+    period = max(1, _SHORTEST_PERIOD[frequency] // step_seconds)
+    return min(length, (length - 1) // period + 2)
+
+
+def pad_steps(tree, length: int, n_steps=None):
+    """Every leaf's leading (step) axis extended to ``length`` by repeating its last entry
+    (the padded steps of a short last chunk, decision 33); numpy leaves stay numpy."""
+
+    def pad(a):
+        n = a.shape[0]
+        if n == length:
+            return a
+        xp = np if isinstance(a, np.ndarray) else jnp
+        return xp.concatenate([a, xp.repeat(a[-1:], length - n, axis=0)])
+
+    return jax.tree.map(pad, tree)
+
+
 def advance_acclimation(run: LegacyRun, state, inputs: StepInputs):
     """The state with the acclimation temperature's running mean advanced by this step's
     forcing air temperature (decision 15): ``mean += (T - mean) / min(n, N)``, with ``n``
@@ -1042,7 +1092,9 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
     fractions) is an input, so the gridcell sums are differentiable with respect to it; the
     patch-gridcell map ``gidx`` is an input too, so domains with the same numbers of patches
     and gridcells share the program.
-    ``errors``: ``(patch, check)``.
+    ``errors``: ``(patch, check)``. ``active`` (optional, ``(step,)`` bool): steps marked
+    False (the padding of a short last chunk, decision 33) leave the state, the buffers and
+    the errors unchanged.
 
     ``alive`` ``(patch,)`` marks the patches still in the run (decision 25, ``exclude``). An
     excluded patch, or one whose value is not finite at a step, is left out of its gridcell's
@@ -1104,7 +1156,7 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
 
     def step(template, land, carry, x):
         state, buffers, errors = carry
-        xg, xp, slots, params, weight, alive, gidx = x
+        xg, xp, slots, params, weight, alive, gidx, *active = x
         now, met, forcing_bef, forcing_next = jax.tree.map(lambda a: to_patches(a, gidx), xg)
         if land_fn is not None:  # grid runs: the step's CLM history record from the records
             xp = land_fn(xp, land, gidx)
@@ -1119,11 +1171,16 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
             )
             new_buffers.append(S.accumulate(spec.statistic, b, slot, vals))
         errors = jnp.maximum(errors, step_errors)
-        return (state, tuple(new_buffers), errors), None
+        new = (state, tuple(new_buffers), errors)
+        if active:  # padded steps of a short last chunk change nothing (decision 33)
+            new = jax.tree.map(lambda a, b: jnp.where(active[0], a, b), new, carry)
+        return new, None
 
     checkpointed_step = jax.checkpoint(step) if CHECKPOINT_STEP else step
 
-    def run_chunk(state, xg, xp, slots, buffers, params, weight, alive, gidx, template=template):
+    def run_chunk(
+        state, xg, xp, slots, buffers, params, weight, alive, gidx, template=template, active=None
+    ):
         n = jax.tree.leaves(xg)[0].shape[0]
         params = jax.tree.map(
             lambda p: jnp.where(
@@ -1146,7 +1203,7 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
         (state, buffers, errors), _ = jax.lax.scan(
             lambda c, x: checkpointed_step(templates, land, c, x),
             (state, buffers, errors),
-            (xg, xp, slots) + per_step,
+            (xg, xp, slots) + per_step + (() if active is None else (active,)),
         )
         return state, buffers, errors
 
@@ -1170,7 +1227,9 @@ def _sharded(run_chunk, n_devices: int, default_template):
     mesh = Mesh(np.array(devices[:n_devices]), ("patch",))
     lead, behind, whole = Pspec("patch"), Pspec(None, "patch"), Pspec()
 
-    def wrapper(state, xg, xp, slots, buffers, params, weight, alive, gidx, template=None):
+    def wrapper(
+        state, xg, xp, slots, buffers, params, weight, alive, gidx, template=None, active=None
+    ):
         template = default_template if template is None else template
 
         def spec_tree(tree, spec):
@@ -1197,12 +1256,46 @@ def _sharded(run_chunk, n_devices: int, default_template):
         # per-device; every input with a patch axis is split explicitly (the parameters are
         # gathered per patch before), and the replicated outputs (record counts) are the same
         # on every device by construction
+        args = (state, xg, xp, slots, buffers, params, weight, alive, gidx, template)
+        if active is not None:  # (step,): the same on every device
+            in_specs, args = in_specs + (whole,), args + (active,)
         f = jax.shard_map(
             run_chunk, mesh=mesh, in_specs=in_specs, out_specs=out_specs, check_vma=False
         )
-        return f(state, xg, xp, slots, buffers, params, weight, alive, gidx, template)
+        return f(*args)
 
     return wrapper
+
+
+def place_inputs(batch: PatchBatch, tree):
+    """A chunk's inputs moved to the devices as the compiled chunk takes them: with
+    ``execution.devices`` > 1, every array with a patch or gridcell axis (axis 1, behind the
+    step or record axis) split into the devices' blocks, the others replicated (as
+    :func:`_sharded`'s ``in_specs``). Each device receives only its own block; arrays placed
+    on one device would hold the whole domain's forcing there (the out-of-memory stop of the
+    global run, decision 33)."""
+    if batch.n_devices == 1:
+        return jax.device_put(tree)
+    from jax.sharding import Mesh, NamedSharding
+    from jax.sharding import PartitionSpec as Pspec
+
+    mesh = Mesh(np.array(jax.devices()[: batch.n_devices]), ("patch",))
+    split, whole = NamedSharding(mesh, Pspec(None, "patch")), NamedSharding(mesh, Pspec())
+    return jax.tree.map(lambda a: jax.device_put(a, split if np.ndim(a) >= 2 else whole), tree)
+
+
+def read_chunk_inputs(batch: PatchBatch, first_step: int, n_steps: int, length=None):
+    """:func:`read_batch_inputs` padded to ``length`` steps (a short last chunk, decision 33;
+    None: not padded) and placed on the devices (:func:`place_inputs`). Runs on the reader
+    thread, so the transfer overlaps the running chunk."""
+    xg, xp = read_batch_inputs(batch, first_step, n_steps)
+    if length is not None and length != n_steps:
+        xg = pad_steps(xg, length)
+        if batch.land_fn is not None:  # grid runs: (per-step weights, monthly records)
+            xp = (pad_steps(xp[0], length), xp[1])
+        else:
+            xp = pad_steps(xp, length)
+    return place_inputs(batch, (xg, xp))
 
 
 def read_batch_inputs(batch: PatchBatch, first_step: int, n_steps: int):
@@ -1345,15 +1438,23 @@ def health_problems(state, template_state) -> list:
     return problems
 
 
-def restart_boundary(end: datetime.datetime, every) -> bool:
-    """Whether a chunk ending at ``end`` ends on a ``restart_every`` boundary
-    (``(n, "month")`` or ``(n, "year")``; None: never)."""
-    if every is None or (end.day, end.hour, end.minute, end.second) != (1, 0, 0, 0):
+def restart_boundary(start: datetime.datetime, end: datetime.datetime, every) -> bool:
+    """Whether a chunk from ``start`` to ``end`` reaches a ``restart_every`` boundary
+    (``(n, "month")`` or ``(n, "year")``; None: never): a boundary ``b`` with
+    ``start < b <= end``. The restart is written at that chunk's end, the first chunk end on
+    or after the boundary (decision 33; jax-gcm archives checkpoints the same way)."""
+    if every is None:
         return False
     n, unit = every
-    if unit == "month":
-        return (end.year * 12 + end.month - 1) % n == 0
-    return end.month == 1 and end.year % n == 0
+    month = start.year * 12 + start.month  # index of the first month start after start
+    while True:
+        y, m = divmod(month, 12)
+        b = datetime.datetime(y, m + 1, 1)
+        if b > end:
+            return False
+        if b > start and (((y * 12 + m) % n == 0) if unit == "month" else (m == 0 and y % n == 0)):
+            return True
+        month += 1
 
 
 def write_restart(path: Path, content: dict) -> None:
@@ -1646,11 +1747,14 @@ def run_streams(
     on_patch_error: str = "stop",
     max_failed_patch_fraction: float = 0.01,
     ignore_checks=(),
+    chunk_steps: Optional[int] = None,
 ) -> None:
-    """Run the model with output streams (plan §6.9): the first step step by step, then one
-    compiled chunk per calendar month accumulating every stream inside the scan. After each
-    chunk the state's health is checked, and a restart is written (``restart_path``) when the
-    chunk ends on a ``restart_every`` boundary and at the end of the run.
+    """Run the model with output streams (plan §6.9): the first step step by step, then
+    compiled chunks of ``chunk_steps`` steps (decision 33; a short last chunk padded, so one
+    program serves the run; None: calendar months) accumulating every stream inside the scan.
+    The next chunk's forcing is read and placed on the devices while one runs. After each
+    chunk the state's health is checked, and a restart is written (``restart_path``) at the
+    first chunk end on or after each ``restart_every`` boundary and at the end of the run.
 
     ``batch`` is a :class:`PatchBatch` (or one :class:`LegacyRun`, a batch of one patch): the
     patches are set up one by one and advanced together, the step batched over the patch
@@ -1784,26 +1888,40 @@ def run_streams(
     # (plan §6.9; jax-gcm overlaps I/O the same way).
     from concurrent.futures import ThreadPoolExecutor
 
-    schedule = month_chunks(run, first)
+    schedule, length = chunk_schedule(run, first, chunk_steps)
     reader = ThreadPoolExecutor(max_workers=1)
-    pending = reader.submit(read_batch_inputs, batch, *schedule[0]) if schedule else None
+    pending = reader.submit(read_chunk_inputs, batch, *schedule[0], length) if schedule else None
     for c, (first_step, n) in enumerate(schedule):
         xg, xp = pending.result()
         if c + 1 < len(schedule):
-            pending = reader.submit(read_batch_inputs, batch, *schedule[c + 1])
+            pending = reader.submit(read_chunk_inputs, batch, *schedule[c + 1], length)
         starts = step_starts(run, first_step, n)
         records = [S.chunk_records(starts, first_step, step_seconds, s.frequency) for s in streams]
+        # Fixed-length chunks (decision 33): every chunk has the same buffer and step-axis
+        # shapes (one compiled program): the most record slots a chunk can touch, padded
+        # steps (inactive) writing into the last record
+        n_run = n if length is None else length
+        n_slots = [
+            len(rc.keys) if length is None else max_chunk_records(s.frequency, length, step_seconds)
+            for s, rc in zip(streams, records)
+        ]
         buffers = tuple(
-            S.init_buffers(s.statistic, len(rc.keys), buffer_shapes(s, gv), jnp)
-            for s, rc, gv in zip(streams, records, gvars)
+            S.init_buffers(s.statistic, k, buffer_shapes(s, gv), jnp)
+            for s, k, gv in zip(streams, n_slots, gvars)
         )
-        slots = tuple(jnp.asarray(rc.index) for rc in records)
+        slots = tuple(jnp.asarray(pad_steps(rc.index, n_run)) for rc in records)
+        active = jnp.asarray(np.arange(n_run) < n)
         weight = jnp.asarray(batch.weight, dtype=jnp.float64)
         gidx = jnp.asarray(batch.runner_gidx)
         chunk_start_state = state
         t_chunk = _time.perf_counter()
         state, buffers, errors = runner(
-            state, xg, xp, slots, buffers, params, weight, jnp.asarray(alive), gidx
+            state, xg, xp, slots, buffers, params, weight, jnp.asarray(alive), gidx, active=active
+        )
+        del xg, xp  # the chunk's forcing is not kept on the devices while the next one runs
+        # the record slots this chunk used
+        buffers = tuple(
+            jax.tree.map(lambda a, k=len(rc.keys): a[:k], b) for b, rc in zip(buffers, records)
         )
         if batch.reader is not None:
             jax.block_until_ready(state)
@@ -1834,7 +1952,7 @@ def run_streams(
         for i, rc in enumerate(records):
             on_records(i, collectors[i].add_chunk(rc, real_part(buffers[i], batch)))
         last = first_step + n == run.ntimes
-        if restart_path is not None and (last or restart_boundary(end, restart_every)):
+        if restart_path is not None and (last or restart_boundary(starts[0], end, restart_every)):
             write_restart(
                 restart_path,
                 {

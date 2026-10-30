@@ -229,6 +229,31 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   step; `ignore_checks` removed from the grid example and tests. CHATS7 round-off only
   (`lhflx_canopy` <= 4.8e-16), reference regenerated.
 
+### 2026-10-30: global run out of GPU memory; fixed-length chunks (decision 33)
+
+- Global run (job 8008287, commit `aa43e33`): January to March done (setup 100 s, first step
+  872 s, ~2300 s per month = ~1000 s compiling + ~1300 s running, 46 000 patch-steps/s
+  including the compile; no patch excluded), then `RESOURCE_EXHAUSTED: [0] Failed to load
+  in-memory CUBIN ... out of memory` loading April's newly compiled program on device 0.
+  Restart on disk: 2000-04-01 (`runs/global2000/restart/`; it holds March's pending output:
+  a month's file is written when the next chunk completes its last daily record).
+- Diagnosis so far: (1) each month length (1487, 1392, 1488, 1440 steps) compiled a new
+  program and the persistent cache cannot store them; (2) the grid reader put each month's
+  forcing (~30 float64 fields per step and gridcell, ~5 GB a month) on device 0 unsplit, for
+  the next month too while one ran (prefetch); the error names device 0. Probes in
+  `probe/oom/` (scratch): a `sitecustomize.py` hook logging device memory per chunk, jobs on
+  1, 2 and 4 GPUs (chunks of 480, 480 and 95 steps) to measure memory per chunk, whether old
+  programs keep memory, and multi-GPU scaling (earlier: one A100 ~28 500 patch-steps/s at
+  65 536 patches, four ~51 000).
+- Maintainer: switch to 10-day chunks (jax-gcm's design: fixed `chunk_days`, calendar output
+  assembled on the host). Decision 33: `execution.chunk: N days` (default 10), last chunk
+  padded with inactive steps, fixed record slots, one program per run; restarts at the first
+  chunk end on or after each boundary; forcing placed on the devices split by patch in the
+  reader thread (`place_inputs`); the grid reader returns host arrays. Tests: fast tier,
+  bit-for-bit, noise twin, restart (now with padded chunks), padded chunks vs one chunk (every
+  step bit for bit, a record spanning chunks to 1e-15), devices, grid setup, stream runner,
+  patch exclusion.
+
 ## Next (resume here in a new session) — updated 2026-10-29 evening
 
 **State.** Branch `phase6/patches`, last commit `c26dc0d` (all pushed). Work in the Derecho

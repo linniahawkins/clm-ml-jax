@@ -1,9 +1,13 @@
-"""Monthly compiled chunks (plan decision 17): a chunk is the steps starting in one month."""
+"""Chunk schedules: calendar months (decision 17, ``execution.chunk: 1 month``), a chunk is
+the steps starting in one month; fixed-length chunks (decision 33, the default)."""
 
 import types
 
+import numpy as np
+import pytest
+
 from clm_src_utils.clm_time_manager import step_time
-from offline_executable.main import month_chunks
+from offline_executable.main import chunk_schedule, max_chunk_records, month_chunks, pad_steps
 
 
 def _run(start_ymd, ntimes, dtime=1800):
@@ -27,3 +31,47 @@ def test_step_ending_at_midnight_belongs_to_the_month_it_starts_in():
     # The step from 31 May 23:30 to 1 June 00:00 starts in May.
     run = _run(20070531, 49)
     assert month_chunks(run, 0) == [(0, 48), (48, 1)]
+
+
+# Fixed-length chunks (decision 33)
+
+
+def test_fixed_chunks_pad_the_last_one_to_the_chunk_length():
+    run = _run(20000101, 1 + 2 * 480 + 95)
+    chunks, length = chunk_schedule(run, 1, 480)
+    assert chunks == [(1, 480), (481, 480), (961, 95)] and length == 480
+
+
+def test_run_shorter_than_a_chunk_is_one_unpadded_chunk():
+    run = _run(20070501, 50)
+    assert chunk_schedule(run, 1, 480) == ([(1, 49)], 49)
+
+
+def test_resumed_run_keeps_the_chunks_and_rejects_another_chunk_length():
+    run = _run(20000101, 1 + 3 * 480)
+    assert chunk_schedule(run, 481, 480) == ([(481, 480), (961, 480)], 480)
+    with pytest.raises(ValueError, match="not the start"):
+        chunk_schedule(run, 500, 480)
+
+
+def test_month_schedule_is_unchanged():
+    run = _run(20070430, 3 * 48)
+    assert chunk_schedule(run, 1, None) == ([(1, 47), (48, 96)], None)
+
+
+def test_record_slots_cover_every_chunk_start():
+    for frequency, period in (("hourly", 2), ("daily", 48)):
+        for length in (1, 47, 48, 480):
+            worst = max(len({(k + s) // period for k in range(length)}) for s in range(period))
+            assert max_chunk_records(frequency, length, 1800) >= worst
+    assert max_chunk_records("daily", 480, 1800) == 11
+    assert max_chunk_records("step", 480, 1800) == 480
+    assert max_chunk_records("monthly", 480, 1800) == 2
+    assert max_chunk_records("yearly", 1, 1800) == 1
+
+
+def test_pad_steps_repeats_the_last_step():
+    a = np.arange(6.0).reshape(3, 2)
+    out = pad_steps({"a": a}, 5)["a"]
+    assert isinstance(out, np.ndarray) and out.shape == (5, 2)
+    np.testing.assert_array_equal(out[3:], [[4.0, 5.0], [4.0, 5.0]])

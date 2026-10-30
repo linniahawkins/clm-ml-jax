@@ -120,7 +120,9 @@ _OLD_FORCING_KEYS = {
 class ExecutionSection:
     """How the run is divided into compiled chunks and how often it saves restarts."""
 
-    chunk: str = "1 month"  # decision 17: one compiled chunk per calendar month
+    # Compiled chunk length (decision 33): "N days" (fixed length, one compiled program; a
+    # short last chunk is padded) or "1 month" (calendar months, each length compiles once)
+    chunk: str = "10 days"
     restart_every: Optional[str] = None  # "N month(s)" / "N year(s)"; null: end of run only
     # Pad the domain to this many patches / gridcells (weight-0 copies, not in the output), so
     # domains of different sizes share one compiled program; null: the domain's own counts
@@ -128,6 +130,17 @@ class ExecutionSection:
     gridcell_count: Optional[int] = None
     # Devices to spread the patches over (step 5: jax.shard_map; e.g. 4 on a Derecho GPU node)
     devices: int = 1
+
+
+def parse_chunk(text: str, key: str) -> Optional[int]:
+    """``"10 days"`` -> 10; ``"1 month"`` -> None (calendar months), decision 33."""
+    parts = str(text).split()
+    if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) >= 1:
+        if parts[1] in ("day", "days"):
+            return int(parts[0])
+        if parts[1] in ("month", "months") and int(parts[0]) == 1:
+            return None
+    raise ConfigError(f"{key}: {text!r}: expected e.g. '10 days' or '1 month'")
 
 
 def parse_every(text: Optional[str], key: str):
@@ -261,6 +274,12 @@ class Run:
     @property
     def output_directory(self) -> Path:
         return self.path(self.run_file.output.directory)
+
+    @property
+    def chunk_steps(self) -> Optional[int]:
+        """Model steps per compiled chunk (``execution.chunk``; None: calendar months)."""
+        days = parse_chunk(self.run_file.execution.chunk, "execution.chunk")
+        return None if days is None else days * 86400 // self.step_seconds
 
     @property
     def step_seconds(self) -> int:
@@ -463,6 +482,7 @@ class Run:
             "meta": _domain_meta(self.domain),
             "run_start": self.start.isoformat(),
             "restart_every": parse_every(self.run_file.execution.restart_every, "restart_every"),
+            "chunk_steps": self.chunk_steps,
             "restart_in": (
                 str(self.path(self.run_file.initial_conditions.restart_file, tower_name))
                 if self.run_file.initial_conditions.source == "restart"
@@ -725,11 +745,7 @@ def _check_supported(run_file: RunFile, source: str) -> None:
         raise ConfigError(
             f"{source}: initial_conditions.restart_file: required with source restart"
         )
-    if run_file.execution.chunk != "1 month":
-        raise ConfigError(
-            f"{source}: execution.chunk: only '1 month' (calendar-month chunks, decision 17) "
-            "is supported"
-        )
+    parse_chunk(run_file.execution.chunk, f"{source}: execution.chunk")
     parse_every(run_file.execution.restart_every, f"{source}: execution.restart_every")
     names = [st.name for st in run_file.output.streams]
     if len(set(names)) != len(names):

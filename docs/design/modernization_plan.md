@@ -36,7 +36,7 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 14 | Prescribed land data | LAI, SAI and soil water come from **user-supplied daily or monthly streams**. The CLM history file at the forcing interval, as used for CHATS7, remains supported. |
 | 15 | Acclimation temperature | **10-day running mean** of air temperature, carried in the model state. This is a science change that alters CHATS7 results slightly, so the reference is regenerated when it is adopted (Phase 4b). The Fortran CLM-ml v2 definition (mean over the whole run, which needs all forcing before the run starts) stays available as an option, for validation against Fortran only. |
 | 16 | Output | **Configurable and independent of the forcing and model step.** Several output streams, each with its own variables, frequency, statistic (mean, instantaneous, min, max), level (patch, gridcell) and file split. Statistics are accumulated during the run, so per-step values are never all held in memory. |
-| 17 | Chunk length | **Calendar months**, aligned to month starts (a chunk is the steps whose start time falls in one month); a run shorter than a month is one chunk. Chunks therefore have up to four full-month lengths plus partial first/last months; each distinct length compiles once (§6.9). As in jax-gcm, output is accumulated inside the compiled chunk, and the chunk length only sets forcing memory, restart and file frequency, and health checks. |
+| 17 | Chunk length | *(Superseded by decision 33; still available as `execution.chunk: 1 month`.)* **Calendar months**, aligned to month starts (a chunk is the steps whose start time falls in one month); a run shorter than a month is one chunk. Chunks therefore have up to four full-month lengths plus partial first/last months; each distinct length compiles once (§6.9). As in jax-gcm, output is accumulated inside the compiled chunk, and the chunk length only sets forcing memory, restart and file frequency, and health checks. |
 
 | 18 | Phase 5 approach | **Masks in place**: the existing modules keep their files, 1-based arrays and golden tests while becoming mask-aware. Moving processes to `clm_ml/physics/`, 0-based indexing and Fortran-filter removal move to Phase 7 (decided after Phase 4b). |
 | 19 | Different layer counts | **Masks**, so one compiled program serves every patch (simpler batching and sharding, gradients across mixed patches). Not grouping patches by layer structure. Cost: compute on padded layers (e.g. a 20-layer grass in 50 slots). |
@@ -53,6 +53,7 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 30 | Thin canopy layers (Phase 6b, issue 14) | **Every leafy layer keeps at least 0.01 m² m⁻² of plant area at every step, the missing part added as stem area** (model.yaml `canopy_layers.min_layer_plant_area`, 0 = CLM-ml v2). CLM-ml's 9-angle diffuse transmittance exceeds 1 below ~0.005 m² m⁻² per layer, which made the longwave equations unstable (runaway leaf temperatures) and created energy in up to a third of the vegetated area in winter. The value is CLM-ml v1's `dpai_min` (m² m⁻²), which v1 applied at setup; applied each step here so the layer structure stays fixed. Stems, not leaves, so no photosynthesis or transpiration is added and leaf area keeps its gradient. CHATS7 unchanged. Details and the options considered: `global_input.md` issue 14, G20. |
 | 31 | CLM's LAI/SAI cutoff (Phase 6b, issue 17) | **Not copied**: grid runs use the interpolated monthly LAI and SAI as given (not below 0), where CLM's satellite phenology sets values below 0.05 to 0. The cutoff guards CLM's big-leaf canopy against very small plant area, which the per-layer minimum plant area (decision 30) does here, and it is a jump that blocks gradients with respect to LAI and SAI. Small departure from CLM (values below 0.05 in ~8 % of patch-months; `global_input.md` G9). |
 | 32 | Canopy-top latent heat (Phase 6b, issue 12) | **The reported canopy latent heat flux is the sub-step average of `LatVap(tref)·etair(ncan)`**, not the averaged water vapor flux times the last sub-step's `LatVap(tref)` (Fortran). The two differ when the air crosses 0 °C within a step (vaporization vs sublimation), which failed the canopy energy balance check; the model's state and energy budget were consistent. CHATS7: round-off only. |
+| 33 | Chunk length (Phase 6b, global run) | **Fixed-length chunks, default 10 days** (`execution.chunk: N days`), replacing calendar months (decision 17) as jax-gcm does (`run.chunk_days`). A short last chunk is padded to the full length (inactive steps leave the state, output and checks unchanged) and output buffers always have the most record slots a chunk can touch, so **one program is compiled per run**; a run shorter than a chunk is one unpadded chunk. Calendar output is unchanged: records spanning chunks are merged on the host. Restarts are written at the first chunk end on or after each `restart_every` boundary. Each chunk's forcing goes to the devices already split by patch. Reason (measured, global 1° run on 4 A100s): every month length compiled anew (~1000 s each; these programs are too large for the persistent cache), about 40 % of each month's wall time, and a month of unsplit forcing (~5 GB, two months with the prefetch) sat on device 0, which ran out of memory loading April's program. Chunk length barely changes GPU throughput beyond a few days (seconds of host work per chunk against ~1 min of GPU time per simulated day). CHATS7 unchanged (one chunk); an output record spanning chunks differs from the one-chunk run by round-off (its partial sums are added on the host). |
 
 Smaller decisions: see §8.
 
@@ -199,7 +200,7 @@ domain:
   towers_file: null               # optional: your own towers.yaml
   min_patch_weight: 0.0           # drop patches covering less than this fraction of a gridcell
 execution:
-  chunk: 1 month                  # forcing read and output written per chunk; sets memory use
+  chunk: 10 days                  # one compiled program per run; sets forcing memory (decision 33)
   restart_every: 1 year           # write a restart file at these boundaries (null: end only)
 forcing:                          # streams; each has its own time axis, interpolated to the model step
   meteorology:
@@ -663,9 +664,12 @@ for each chunk:
 - **Chunk length** is a run setting (`execution.chunk`). Default: the whole run when it is
   short (a tower month), otherwise a few days to a month, limited by forcing memory (table
   above). Chunk boundaries should fall on output-file and forcing-file boundaries.
-  **Decided (decision 17): calendar months**, aligned to month starts; a chunk is the steps
-  whose start time falls in one month. Full months have 28–31 days and partial first/last
-  months other lengths, so at most six lengths each compile once.
+  **Decided (decision 33, replacing decision 17's calendar months): fixed length, default
+  10 days**, counted from the step after the initializing one; a short last chunk is padded
+  to the full length (its extra steps inactive), and stream buffers have a fixed number of
+  record slots, so one program serves the whole run. `execution.chunk: 1 month` keeps
+  calendar months (each month length compiles once). Restarts: the first chunk end on or
+  after each `restart_every` boundary.
 - **When compilation happens.** A compiled chunk program is reused for every chunk with the
   same input shapes and model options; new data do not trigger compilation. It recompiles
   only for a different chunk length, different array sizes (number of patches or layers), a
