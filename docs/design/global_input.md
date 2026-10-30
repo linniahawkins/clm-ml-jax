@@ -144,7 +144,7 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
    height), but misleading if output.
 9. **Tiny canopies**: grass and crop tops go down to 5 mm (surface-data heights with 10 + 10
    layers); not filtered.
-10. **Round-off amplification in real patches**: a 1e-15 relative change of LAI moves a
+10. **Round-off amplification in real patches** (*deferred to after the modernization, maintainer 2026-10-30; plan "After Phase 8: science issues"*): a 1e-15 relative change of LAI moves a
     July day of some 1° patches by up to ~8 W m⁻² in latent heat within hours of sunrise
     (largest for a needleleaf patch with CLM6's `dleaf` = 0.65 mm; `test_grid_setup.py`).
     CHATS7's noise twins differ by ≤ 4e-11, so these patches sit on a discrete switch

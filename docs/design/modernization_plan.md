@@ -1770,15 +1770,15 @@ from `clm5_defaults.yaml`); 10 + 10 canopy layers.
 6. ✅ **Regional test** (done 2026-10-29: results in `global_input.md`) (a few hundred gridcells, e.g. a box over North America): set up, run
    January and July 2000, write patch and gridcell output; failure rates with
    `on_patch_error: exclude`; memory and compile time.
-7. ◐ **Global 1° run, year 2000** on one 4-GPU node (`execution.devices: 4`): timing,
+7. ✅ **Global 1° run, year 2000** (closed 2026-10-30, maintainer: as it stands; the GPU work moves to a separate effort after Phase 8) on one 4-GPU node (`execution.devices: 4`): timing,
    memory, failure statistics; the ~15-minute compiles at this size (and why the compilation
    cache does not store these programs) addressed as needed. *Status (2026-10-30):* January to
    March 2000 ran (commit `aa43e33`, before decisions 31-32; no patch excluded; ~46 000
    patch-steps/s with the monthly compiles), then GPU memory ran out loading April's program
    (diagnosed: 2.3 GB of code per program, one per month length). Fixed by decision 33
    (fixed 10-day chunks) and by holding per-patch constants once; GPU scaling measured
-   (1/2/4 A100s). The rest of the year and the GPU check of the fixes are deferred with the
-   GPU work (step 1c, "GPU issues for long runs").
+   (1/2/4 A100s). The rest of the year and the GPU check of the fixes go with the GPU work
+   (step 1c, "GPU issues for long runs"; "After Phase 8: GPU performance").
 
 **Implementation decisions and open issues** (copying CLM wherever a choice came up, as the
 maintainer asked): `docs/design/global_input.md` (G1-G19, open issues 1-11).
@@ -1828,6 +1828,22 @@ for Phase 7.
 - An API reference generated from docstrings.
 - Update `CONTRIBUTING.md`: "add a process variant" replaces "mirror the Fortran module".
 - Version 1.0.0.
+
+### After Phase 8: science issues (maintainer, 2026-10-30)
+
+Science questions found in Phase 6b, to address after the modernization (details in
+`docs/design/global_input.md`, open issues):
+- **Issue 10, round-off amplification in real 1° patches**: a 1e-15 change of LAI moves latent
+  heat by up to ~8 W m⁻² after sunrise in some patches, so they sit on a discrete switch.
+  Locate it (routine by routine on perturbed vs unperturbed inputs, as for issue 14); it
+  limits bit-level regression of grid runs and will matter for gradients.
+- The other open issues of `global_input.md` stay with the maintainer's decisions there.
+
+### After Phase 8: GPU performance (a separate effort, maintainer 2026-10-30)
+
+The deferred GPU work: Phase 6 step 1c (kernel count per step) and "GPU issues for long runs"
+(2.3 GB compiled programs that cannot be cached, scaling over GPUs, startup), with the GPU
+check of decision 33 and a full-year global run.
 
 ### After Phase 8: option B (shared soil columns)
 

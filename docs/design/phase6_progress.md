@@ -286,8 +286,9 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
 
 **State.** Branch `phase6/patches` (all pushed). Work in the Derecho checkout
 `/glade/work/linnia/clm-ml-jax` (env `/glade/work/linnia/conda-envs/clm-ml-jax`). Phase 6b
-steps 1-6 done; step 7 (global run) partly done: January-March 2000 ran, then GPU memory ran
-out (diagnosed and fixed, decision 33 and the per-patch constants; entry 2026-10-30 above).
+steps 1-7 done; step 7 (global run) closed as it stands (maintainer, 2026-10-30): January-March
+2000 ran, then GPU memory ran out (diagnosed and fixed, decision 33 and the per-patch
+constants; entry 2026-10-30 above); the GPU work is a separate effort after Phase 8.
 Since the regional test: decisions 30-33, params files YAML only (`clm-ml params`, built-in
 `clm6`). All decisions: plan §0 (23-33); Phase 6b details, decisions G1-G20 and open issues
 1-17: `docs/design/global_input.md`.
@@ -297,7 +298,7 @@ for a bug, *diagnose first with probes (scratch, no code changes) and bring the 
 before changing code*; no shortcuts, hacks or dropping things that fail; science changes are
 the maintainer's decision; document every decision and issue so it is not lost.
 
-1. **GPU work deferred (maintainer, 2026-10-30)**: the long-run GPU issues are listed in the
+1. **GPU work deferred to a separate effort (maintainer, 2026-10-30)**: the long-run GPU issues are listed in the
    plan, Phase 6 step 1c, "GPU issues for long runs" (2.3 GB programs that cannot be cached,
    scaling over GPUs, startup). Deferred with them: the GPU check of `607fe1f`/`3dcea3c`
    (job script `probe/oom/verify33.pbs`, global domain, January 2000) and the rest of the
@@ -305,11 +306,8 @@ the maintainer's decision; document every decision and issue so it is not lost.
    was written with monthly chunks; one A100 is the efficient choice, ~10 h walltime).
    Outputs of the partial run: `runs/global2000/` (Jan-Feb files; restart 2000-04-01 holding
    March's pending output). Probe logs: `probe/oom/live_g{1,2,4}.log`, `smi_*.csv`.
-2. **Issue 10 (next, agreed)**: round-off amplification (a 1e-15 change of LAI moves latent
-   heat by ~8 W m-2 after sunrise in some 1° patches; `test_grid_setup.py` documents it).
-   Investigation only first, as for issue 14: find the discrete switch (compare routine by
-   routine on perturbed vs unperturbed inputs; probe pattern in `probe/issue14/common.py`,
-   `wrap.py`), then report to the maintainer before changing code.
+2. **Issue 10** (round-off amplification): moved to the science issues after the
+   modernization (maintainer, 2026-10-30; plan "After Phase 8: science issues").
 3. **Open issues awaiting the maintainer** (`global_input.md`): 1 Meier2022 roughness, 2
    noleap calendar, 3 frozen soil water as liquid, 4 no snowpack, 5 root biomass / canopy
    bottom, 6 spin-up, 7 meteorology interpolated in the chunk, 13 bare ground (options
@@ -317,8 +315,8 @@ the maintainer's decision; document every decision and issue so it is not lost.
    floor's kink in the LAI gradient (**maintainer asked to raise LAI differentiability
    again later**). Also: transpiration/evaporation latent heat outputs still use the last
    sub-step's latent heat (issue 12 note).
-4. **Closing Phase 6b** (maintainer's call: step 7 as it stands, Jan-Mar plus the GPU
-   findings, or after the deferred GPU work): record the Phase 7 requirements the global run
+4. **Closing Phase 6b** (step 7 closed as it stands): an adversarial review of Phase 6/6b
+   and what the unfinished items mean for Phase 7 (running 2026-10-30); record the Phase 7 requirements the global run
    revealed in `global_input.md`, run the end-of-phase tests as a CPU job (`tests/regression`
    and slow tests; the CHATS7 50-step CPU gradient test fails with issue 16, pre-existing),
    then discuss Phase 7 with the maintainer (standing rule: stop before a new phase).
