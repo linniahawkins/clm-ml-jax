@@ -1154,9 +1154,10 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
         gridcell axis (the step's time in grid runs) broadcast to them."""
         return jnp.take(a, gidx, 0) if a.ndim >= 1 else jnp.broadcast_to(a, (n_p,))
 
-    def step(template, land, carry, x):
+    def step(template, land, consts, carry, x):
         state, buffers, errors = carry
-        xg, xp, slots, params, weight, alive, gidx, *active = x
+        params, weight, alive, gidx = consts
+        xg, xp, slots, *active = x
         now, met, forcing_bef, forcing_next = jax.tree.map(lambda a: to_patches(a, gidx), xg)
         if land_fn is not None:  # grid runs: the step's CLM history record from the records
             xp = land_fn(xp, land, gidx)
@@ -1181,16 +1182,15 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
     def run_chunk(
         state, xg, xp, slots, buffers, params, weight, alive, gidx, template=template, active=None
     ):
-        n = jax.tree.leaves(xg)[0].shape[0]
         params = jax.tree.map(
             lambda p: jnp.where(
                 alive.reshape((-1,) + (1,) * (p.ndim - 1)), p, jax.lax.stop_gradient(p)
             ),
             params,
         )
-        per_step = jax.tree.map(
-            lambda p: jnp.broadcast_to(p, (n,) + p.shape), (params, weight, alive, gidx)
-        )
+        # the same at every step: held once, not copied along the step axis (that took
+        # ~29 numbers per patch per step of device memory: 8 GB for a 10-day global chunk)
+        consts = (params, weight, alive, gidx)
         errors = jnp.zeros((n_p, len(BALANCE_CHECKS)))
         # the groups' templates, cut once per chunk (not at every step)
         templates = tuple(
@@ -1201,9 +1201,9 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
         if land_fn is not None:
             xp, land = xp  # per-step weights (scanned), monthly records (chunk constant)
         (state, buffers, errors), _ = jax.lax.scan(
-            lambda c, x: checkpointed_step(templates, land, c, x),
+            lambda c, x: checkpointed_step(templates, land, consts, c, x),
             (state, buffers, errors),
-            (xg, xp, slots) + per_step + (() if active is None else (active,)),
+            (xg, xp, slots) + (() if active is None else (active,)),
         )
         return state, buffers, errors
 

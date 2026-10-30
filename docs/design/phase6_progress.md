@@ -252,7 +252,24 @@ done**, committing regularly (branch `phase6/patches`, push after the required t
   reader thread (`place_inputs`); the grid reader returns host arrays. Tests: fast tier,
   bit-for-bit, noise twin, restart (now with padded chunks), padded chunks vs one chunk (every
   step bit for bit, a record spanning chunks to 1e-15), devices, grid setup, stream runner,
-  patch exclusion.
+  patch exclusion. Commit `607fe1f`.
+- **Probe on 1 A100 (old code, global domain, chunks 480/480/95 steps; `probe/oom/live_g1.log`):**
+  - each compiled chunk program has **2.32 GB of GPU code** (`generated_code_size`), loaded on
+    every device and kept while the program is cached: GPU memory rose by exactly that when
+    the 95-step program loaded. With JAX's pool capped at 31.8 of 40 GB, four month programs
+    (9.3 GB of code) did not fit: **this is the April failure**. The code size is also over
+    protobuf's 2 GB limit, so these programs can never enter the persistent cache
+    (`proto serialization failed`) and every run compiles them (~840 s each). Why the code is
+    so large (unrolled loops in the physics?) belongs with the deferred GPU optimization
+    (step 1c: 31 600 kernels per step).
+  - temporary memory grew by ~17 MB per step (12.0 GB at 480 steps, 5.5 GB at 95): the
+    per-patch parameters, weights, alive flags and gridcell indices (~29 numbers per patch)
+    were broadcast along the step axis of the scan. Now held once (round-off only: CHATS7
+    differences at 1.18x the noise-twin spread at most, reference regenerated).
+  - **one A100 runs the whole 1° globe**: 72 575 patches, 816 s per 10 days (42 700
+    patch-steps/s), peak 21.2 GB; setup 98 s, first step 794 s. The 4-GPU global run gave
+    ~83 000 patch-steps/s without compile (~21 000 per GPU), so one GPU is about twice as
+    efficient per GPU-hour; 2- and 4-GPU probes pending.
 
 ## Next (resume here in a new session) — updated 2026-10-29 evening
 
@@ -311,7 +328,7 @@ Regional outputs: `runs/regional/` (Jan, Jul 2000).
 `global6b.pbs`, `recheck_dev.pbs`, `run_grid.py`, plus the Phase 6 ones). GPU: `-A UCLB0069`
 (`-q develop` starts quickly, 1.5 h max used; `-q main` waited ~3 h); CPU: `-A P93300041`.
 `qstat -u linnia` lists jobs (develop jobs too). Pipe job output through
-`grep --line-buffered` so lines are not lost.
+`grep --line-buffered` so lines are not lost, and **not through `cut`** (Derecho's `cut` buffers its output even under `stdbuf -oL`: nothing appears until the job ends); PBS writes `-o` logs only at the end, so tee live output to a scratch file.
 
 **Other checkout**: `/glade/u/home/linnia/clm-ml-jax/run_model/clm-ml-jax` (home) is on
 `phase6/patches` at an older commit with a git stash "profile_gpu WIP (1a/1b/10+2)" from the
