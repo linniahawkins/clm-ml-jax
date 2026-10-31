@@ -30,6 +30,18 @@ import jax.numpy as jnp
 import numpy as np
 
 from clm_ml.legacy.atm_forcing import AtmForcingRecord, AtmForcingWindow, GetAtmForcing
+from clm_ml.legacy.canopy_water import (  # noqa: F401
+    CanopyEvaporation,
+    CanopyInterception,
+    CanopyWettedFraction,
+)
+from clm_ml.legacy.longwave import LongwaveRadiation  # noqa: F401
+from clm_ml.legacy.plant_hydraulics import (  # noqa: F401
+    LeafHeatCapacity,
+    LeafWaterPotential,
+    PlantResistance,
+    SoilResistance,
+)
 from clm_ml.legacy.solar_radiation import SolarRadiation  # noqa: F401
 from clm_ml.physics.atm_forcing import clm_forcing_to_ml
 from clm_ml.physics.math import is_concrete
@@ -54,11 +66,6 @@ from multilayer_canopy.MLCanopyFluxesType import (  # noqa: F401
 from multilayer_canopy.MLCanopyNitrogenProfileMod import CanopyNitrogenProfile  # noqa: F401
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams, patch_setup
 from multilayer_canopy.MLCanopyTurbulenceMod import CanopyTurbulence  # noqa: F401
-from multilayer_canopy.MLCanopyWaterMod import (  # noqa: F401
-    CanopyEvaporation,
-    CanopyInterception,
-    CanopyWettedFraction,
-)
 from multilayer_canopy.MLclm_varcon import mmh2o, rgas  # noqa: F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf  # noqa: F401
@@ -72,14 +79,7 @@ from multilayer_canopy.MLLayersMod import keep, layers, pad_with_top
 from multilayer_canopy.MLLeafBoundaryLayerMod import (
     LeafBoundaryLayerBoth,
 )  # noqa: F401
-from multilayer_canopy.MLLeafHeatCapacityMod import LeafHeatCapacity  # noqa: F401
 from multilayer_canopy.MLLeafPhotosynthesisMod import LeafPhotosynthesis  # noqa: F401
-from multilayer_canopy.MLLongwaveRadiationMod import LongwaveRadiation  # noqa: F401
-from multilayer_canopy.MLPlantHydraulicsMod import (  # noqa: F401
-    LeafWaterPotential,
-    PlantResistance,
-    SoilResistance,
-)
 from multilayer_canopy.MLRungeKuttaMod import RungeKuttaIni, RungeKuttaUpdate  # noqa: F401
 from multilayer_canopy.MLWaterVaporMod import LatVap  # noqa: F401
 
@@ -596,8 +596,7 @@ def MLCanopyFluxes(
                 opts=opts,
             )
             inst = FluxProfileSolution(num_mlcan, filter_mlcan, inst, grid=grid, opts=opts)
-            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isun, inst, params, opts=opts)
-            inst = LeafWaterPotential(num_mlcan, filter_mlcan, isha, inst, params, opts=opts)
+            inst = LeafWaterPotential(num_mlcan, filter_mlcan, inst, params, opts=opts)
             inst = CanopyInterception(num_mlcan, filter_mlcan, inst, opts=opts)
             inst = CanopyEvaporation(num_mlcan, filter_mlcan, inst, opts=opts)
             if nrk_steps > 0:  # no-op after the last stage (irk > nrk)

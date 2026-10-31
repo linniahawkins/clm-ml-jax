@@ -152,18 +152,34 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   pass (1.5 min); process replay 7 pass; new unit tests, `test_imports`,
   `test_legacy_adapters` pass.
 
+- **Process 5, `longwave.py`, `canopy_water.py`, `leaf_heat_capacity.py`,
+  `plant_hydraulics.py` (C14): round-off change, reference re-recorded.** Physics on one
+  patch (0-based layers, leaves, soil levels); leaf water potential of sun and shade in one
+  call over the leaf axis (`MLCanopyFluxesMod` calls it once); adapters with the old names
+  and `DECLARED` reads/writes in `clm_ml/legacy/{longwave,canopy_water,plant_hydraulics}.py`;
+  the four legacy modules deleted. Every routine bit-identical under `jit` in isolation; the
+  chunk differs in 53 fields, worst 1.28x the twin spread (C10 pattern). Found: soil ice read
+  one level too deep in `SoilResistance` (no effect while ice is 0; open issue 19, kept).
+  Golden tests `WettedFraction`, `LeafHeatCapacity` repointed to the physics. New
+  `tests/clm_ml/test_physics_longwave.py`, `test_physics_canopy_water_hydraulics.py`.
+  Tests: lint; repointed golden 11 pass; new unit tests 16 pass, `test_imports` pass; before
+  re-recording: noise twin and process replay pass, bit for bit 53 fail; after: bit-for-bit
+  + noise twin 177 pass (1.1 min).
+
 ## Next (resume here)
 
 **Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2, session 2 (2026-10-31)
-processes 3-4 (both bit for bit); last commit = the one that wrote this.** Next session:
-**process 5** (scope table): `longwave.py`, `canopy_water.py`, `leaf_heat_capacity`,
-`plant_hydraulics.py` (sun/shade water potential over the leaf axis). Golden tests to
-repoint: `MLCanopyWaterMod_WettedFraction`, `MLLeafHeatCapacityMod_LeafHeatCapacity` (and
-any plant-hydraulics ones); process replay `LongwaveRadiation`. Longwave's Norman system
-uses `tridiag` without `min_pivot` (C9). If the session has room, start process 6
-(turbulence) only as a separate commit; otherwise stop after 5.
+processes 3-4 (bit for bit), session 3 (2026-10-31) process 5 (round-off, reference
+re-recorded, C14); last commit = the one that wrote this.** Next session: **process 6**
+(scope table): `turbulence.py` from `MLCanopyTurbulenceMod` (1 500 lines; the largest), the
+psihat RSL lookup table packaged as data and passed in as an input, not a module global.
+It holds the Obukhov-length solver (25 fixed secant steps with an implicit-function
+gradient, `x0 - (step - stop_gradient(step))`): a hand-written gradient moves, so run the
+focused CPU gradient test (`python tests/gradient_tier.py --focused`). Process replay
+`CanopyTurbulence`; golden tests of `MLCanopyTurbulenceMod` to repoint. One session for
+process 6 alone.
 
-Same pattern as processes 2-4 (C10, C12, C13): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
+Same pattern as processes 2-5 (C10, C12-C14): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
 fake containers holding only the declared fields. Expect round-off changes when loops become
 array operations even if every routine is bit-identical in isolation (C10): probe the routine
@@ -171,8 +187,8 @@ alone against the old code first (`probe72/compare.py` pattern, old files from g
 only the whole-chunk compile differs and the noise twin passes, re-record the reference in the
 same commit (D7) and log it. Constants through `clm_ml/physics/constants.py`.
 
-Open for the maintainer: C10 (reference re-recorded for the soil move, round-off only), open
-issue 18 (`wue_solver: brent` never used; decide at process 7). Earlier: C4, the removed
+Open for the maintainer: C10 and C14 (reference re-recorded for the soil and process-5 moves,
+round-off only), open issue 19 (soil ice index in `SoilResistance`, latent), open issue 18 (`wue_solver: brent` never used; decide at process 7). Earlier: C4, the removed
 diagnostics, C5-C8. Timing baseline for the end of 7.2: `p71-*` in
 `timing/results_model.jsonl` (forward ~27-28 ms/step, gradient ~604 ms/step).
 

@@ -64,7 +64,8 @@ def _import_jax_modules():
         "clm_ml.physics.math",
         "multilayer_canopy.MLLeafPhotosynthesisMod",
         "multilayer_canopy.MLCanopyTurbulenceMod",
-        "multilayer_canopy.MLLeafHeatCapacityMod",
+        "clm_ml.physics.leaf_heat_capacity",
+        "clm_ml.physics.canopy_water",
         "multilayer_canopy.MLLeafBoundaryLayerMod",
         "multilayer_canopy.MLRungeKuttaMod",
         "multilayer_canopy.MLclm_varcon",
@@ -244,25 +245,12 @@ def _adapt_get_psi_rsl(inp: dict) -> dict:
 
 
 def _adapt_wetted_fraction(inp: dict) -> dict:
-    """
-    CanopyWettedFraction inner math (single layer).
-
-    The public JAX function takes mlcanopy_type state; here we apply the
-    per-layer formula directly using constants from MLclm_varcon.
-    """
-    varcon = _get("multilayer_canopy.MLclm_varcon")
-    h2ocan = float(inp["h2ocan"])
-    dpai = float(inp["dpai"])
-    dlai = float(inp["dlai"])
-
-    if dpai <= 0.0:
-        return {"fwet": 0.0, "fdry": 0.0}
-
-    h2ocanmx = varcon.dewmx * dpai
-    fwet_base = max(h2ocan / h2ocanmx, 1.0e-30)
-    fwet = min(fwet_base**varcon.fwet_exponent, varcon.maximum_leaf_wetted_fraction)
-    fdry = (1.0 - fwet) * dlai / dpai
-    return {"fwet": fwet, "fdry": fdry}
+    """CanopyWettedFraction for a single layer (``clm_ml.physics.canopy_water``)."""
+    wetted_fraction = _get("clm_ml.physics.canopy_water").wetted_fraction
+    fwet, fdry = wetted_fraction(
+        jnp.array([inp["h2ocan"]]), jnp.array([inp["dpai"]]), jnp.array([inp["dlai"]])
+    )
+    return {"fwet": float(fwet[0]), "fdry": float(fdry[0])}
 
 
 def _adapt_leaf_boundary_layer(inp: dict) -> dict:
@@ -313,15 +301,10 @@ def _adapt_leaf_boundary_layer(inp: dict) -> dict:
 
 
 def _adapt_leaf_heat_capacity(inp: dict) -> dict:
-    """
-    LeafHeatCapacity inner kernel (_cpleaf_layer) for a single layer.
-
-    dpai is set to 1.0 so the layer is active (the mask dpai > 0 is True).
-    """
-    lbl_mod = _get("multilayer_canopy.MLLeafHeatCapacityMod")
-    sla = float(inp["sla"])
-    cpleaf = lbl_mod._cpleaf_layer(jnp.asarray(1.0), jnp.asarray(sla))
-    return {"cpleaf": float(cpleaf)}
+    """LeafHeatCapacity for a single layer with plant area (``dpai = 1``)."""
+    leaf_heat_capacity = _get("clm_ml.physics.leaf_heat_capacity").leaf_heat_capacity
+    cpleaf = leaf_heat_capacity(jnp.array([1.0]), jnp.asarray(float(inp["sla"])))
+    return {"cpleaf": float(cpleaf[0])}
 
 
 def _adapt_runge_kutta_ini(inp: dict) -> dict:

@@ -364,3 +364,53 @@ Why: the physics on plain arrays is the aim of 7.2; keeping Norman verbatim hono
 ("kept") without spending effort on a scheme to be redone and validated later.
 Alternatives: port Norman to 0-based in the physics module now (unvalidated code, its
 unrolled 2 x max_layers solve, against "no new unrolled loops"); delete it (D8 keeps it).
+
+### C14. Process 5: `longwave.py`, `canopy_water.py`, `leaf_heat_capacity.py`, `plant_hydraulics.py`; leaf water potential over the leaf axis (7.2, 2026-10-31)
+Context: scope 7.2 process 5 (longwave, canopy water, leaf heat capacity, plant hydraulics;
+sun/shade water potential over the leaf axis).
+Decision:
+- **Physics on one patch, 0-based** (layers on axis 0, leaves 0 sun / 1 shade, soil levels
+  0-based), each process returning plain arrays or a `NamedTuple`:
+  `longwave.norman` (-> `LongwaveFluxes`; registry `LONGWAVE_RADIATION = {"norman": ...}`,
+  the name model.yaml `physics.longwave_radiation` already uses), `canopy_water.
+  wetted_fraction`, `interception` (-> `Interception`), `evaporation`;
+  `plant_hydraulics.plant_resistance`, `soil_resistance` (-> `SoilResistance`),
+  `leaf_water_potential`; `leaf_heat_capacity.leaf_heat_capacity`. Parameters enter as
+  numbers, not the `CanopyParams` container; the time step `dtime` as an argument.
+- **Leaf heat capacity in its own module** (`physics/leaf_heat_capacity.py`; the scope names
+  the function, not a file): it is a leaf thermal property, unrelated to canopy water or
+  hydraulics. Its adapter `LeafHeatCapacity` lives with the hydraulics adapters
+  (`clm_ml/legacy/plant_hydraulics.py`), which are called with it at the start of each step
+  (one adapter module fewer for a 15-line transition shim).
+- **Leaf water potential over the leaf axis:** one call computes the sunlit and shaded leaves
+  ((layer, leaf) arrays); the legacy adapter `LeafWaterPotential` drops its leaf argument
+  and `MLCanopyFluxesMod` calls it once instead of twice (the two calls were independent).
+- **Longwave** keeps the legacy one-system formulation (all slots, sky row after the real
+  rows, identity rows; `tridiag` without `min_pivot`, as before, C9). `lwleaf` is returned
+  per leaf (equal for sun and shade, as Norman gives) so later consumers need no broadcast.
+  The adapter writes levels 0..ntop and keeps the levels above (unchanged behaviour).
+- **Adapters** in `clm_ml/legacy/{longwave,canopy_water,plant_hydraulics}.py` with the old
+  names and `DECLARED` reads/writes; the `jax.jit` wrappers of the legacy routines were
+  dropped (they run inside the compiled chunk). The old modules are deleted, no shim.
+- **Found, not fixed:** `SoilResistance` reads the ice of soil level `j + 1` for level `j`
+  (legacy translation; Fortran reads level `j`). No effect today (ice is always 0), kept
+  unchanged and recorded as open issue 19 in `global_input.md` for the maintainer.
+- **Golden tests repointed:** `MLCanopyWaterMod_WettedFraction` now calls
+  `canopy_water.wetted_fraction` (it re-implemented the formula in Python before),
+  `MLLeafHeatCapacityMod_LeafHeatCapacity` calls `leaf_heat_capacity`. No plant-hydraulics
+  golden data exist. New tests `tests/clm_ml/test_physics_longwave.py` (declared
+  reads/writes, energy conservation, radiative equilibrium of an isothermal canopy) and
+  `tests/clm_ml/test_physics_canopy_water_hydraulics.py` (declared reads/writes of the seven
+  adapters, water conservation of interception, evaporation, wetted-fraction limit, uptake
+  fractions summing to 1 above bedrock, leaf water potential relaxing to its steady state).
+- **Round-off change, reference re-recorded (D7):** every moved routine is bit-identical to
+  the old code under `jax.jit` on the same inputs (probe `probe73/compare.py`; eager calls
+  differ in last bits only because the old routines carried their own `jax.jit`), but the
+  compiled chunk is not: 53 fields differ from step 0, worst 1.28x the noise-twin spread
+  (`gs_leaf`, 3.8e-12; `probe73/ratio.py`), noise twin and process replay pass. As in C10,
+  XLA compiles the chunk differently; reference and twins re-recorded in this commit.
+- No gradient test: nothing with a hand-written gradient moved.
+Why: the aim of 7.2 (physics on plain arrays, files by process); the leaf axis halves the
+water-potential calls as the scope asks.
+Alternatives: leaf heat capacity inside `canopy_water.py` or `plant_hydraulics.py` (not
+the same process); fixing the ice index now (a science change inside a refactor).

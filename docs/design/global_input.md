@@ -314,3 +314,12 @@ Fortran); use the leaf water potential outputs instead.
     silently gives the bisection answer. Default runs (bisection, CHATS7) are unaffected. To be
     settled when photosynthesis moves (7.2 process 7): a traceable Brent, or `brent`
     registered as unsupported (a clear error, as D8 does for other untranslated variants).
+19. **Soil ice read one level too deep in `SoilResistance`** (found in Phase 7.2 process 5,
+    2026-10-31; not a Phase 6b issue). Fortran `MLPlantHydraulicsMod.F90::SoilResistance`
+    sets a level's maximum uptake to 0 if `h2osoi_ice(c,j) > 0`. The JAX translation reads
+    `h2osoi_ice_col[c, j]`, but that array holds level `j` at index `j - 1` (as
+    `clmData` writes it and the other soil routines read it), so it tests the ice of level
+    `j + 1`. **No effect on any current run:** ice is always 0 (issue 3). It would matter once
+    frozen soil is represented. Kept unchanged in the Phase 7 move (C14; a refactor does not
+    change science); the fix is one index in the adapter `clm_ml/legacy/plant_hydraulics.py`
+    (bit for bit while ice is 0). For the maintainer.
