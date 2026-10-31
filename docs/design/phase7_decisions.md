@@ -326,3 +326,41 @@ Why: the physics on plain per-patch values is what 7.3 needs (the forcing interp
 inside the chunk); the legacy window stays only as long as the host builds it.
 Alternatives: keep the window types in the physics module (their layout is the legacy one,
 replaced in 7.3); keep `TimeInterpolation2` (unreachable code, and Fortran refuses it).
+
+### C13. Process 4: `clm_ml/physics/solar_radiation.py`; Norman kept in the legacy adapter; `clm_ml/physics/layers.py` (7.2, 2026-10-31)
+Context: `MLSolarRadiationMod` moves to `clm_ml/physics/` (scope 7.2 process 4: two-stream,
+Norman registered as unsupported per D8, the 150-term sum as a scan in the same order).
+Decision:
+- **Physics on one patch, 0-based:** `canopy_optics` (leaf/stem optics, leaf angle, `kb`,
+  `tb`, `td`, `tbi`, sunlit fraction, two-stream parameters; returns `CanopyOptics`, 0 outside
+  the leafy layers, plus the sunlit-fraction check), `two_stream` (both sweeps as before;
+  returns `SolarFluxes` with levels = ground + layers, leaves 0 sun / 1 shade, and the solar
+  conservation error), `absorbed_par`. The layer grid is a `clm_ml.state.PatchLayers` (the
+  adapter builds it with the new `clm_ml.legacy.state.mlcanopy_layers`). Parameters enter as
+  plain arrays (0-based bands), not the `CanopyParams` container.
+- **The 150-term sum** (vegetation, sunlit and shaded absorption, 50 slots x 3) is a
+  `lax.scan` bottom to top with the same additions (`(veg + sun) + sha`).
+- **Registry:** `SOLAR_RADIATION = {"two_stream": two_stream, "norman": norman}`; `norman`
+  raises `NotImplementedError` (D8). The legacy Norman translation (`_Norman`, never
+  validated, stops at the first CHATS7 step) is moved unchanged into the adapter module
+  `clm_ml/legacy/solar_radiation.py` and still runs for `light_type = 1` (which `clm_ml.run`
+  refuses), so the code is kept for the fix after Phase 8 without porting unvalidated,
+  unrolled code into the physics package. The optics it needs (`rho`, `tau`, `omega`) come
+  from `canopy_optics`.
+- **Adapter:** `SolarRadiation` keeps its legacy arguments; writes leafy-layer values, 0 in the
+  other layers in use, keeps padding (as before); `DECLARED` reads/writes (the layer-grid
+  fields `dz/zs/zw_profile` are declared reads because `PatchLayers` holds them).
+  `leaf_optics_type = 1` still stops through `endrun` (unchanged).
+- **`clm_ml/physics/layers.py`:** `keep`, `pad_with_top`, `leafy_or_top_leafy` on 0-based
+  `PatchLayers` slots, for the processes that follow; `MLLayersMod` (1-based) stays for the
+  legacy code until process 10 (a small duplication for the transition).
+- **Constants** `rpi`, `J_to_umol`, `chil_min/max`, `kb_max` through `physics/constants.py`.
+- **Bit for bit** end to end (177 pass); the process replay of `SolarRadiation` passes.
+  `MLSolarRadiationMod.py` deleted, no shim. New `tests/clm_ml/test_physics_solar_radiation.py`
+  (declared reads/writes, energy conservation, Beer's law onto the ground, zero outside the
+  leaves, Norman refused).
+- No gradient test: nothing with a hand-written gradient moved (package-end tier covers it).
+Why: the physics on plain arrays is the aim of 7.2; keeping Norman verbatim honours D8
+("kept") without spending effort on a scheme to be redone and validated later.
+Alternatives: port Norman to 0-based in the physics module now (unvalidated code, its
+unrolled 2 x max_layers solve, against "no new unrolled loops"); delete it (D8 keeps it).

@@ -142,16 +142,28 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   bit-for-bit + noise twin 177 pass (1.6 min); process replay 7 pass; new unit tests and
   `test_imports` pass.
 
+- **Process 4, `clm_ml/physics/solar_radiation.py` (C13):** `canopy_optics`, `two_stream`
+  (the 150-term absorption sum as a `lax.scan`, same order), `absorbed_par` on one patch
+  (0-based `PatchLayers`, bands, leaves); `SOLAR_RADIATION` registry with `norman` refused
+  (D8), the legacy Norman translation kept unchanged in the adapter
+  `clm_ml/legacy/solar_radiation.py`; `clm_ml/physics/layers.py` (mask helpers, 0-based);
+  `legacy.state.mlcanopy_layers`; `MLSolarRadiationMod` deleted. Bit for bit. New
+  `tests/clm_ml/test_physics_solar_radiation.py`. Tests: lint; bit-for-bit + noise twin 177
+  pass (1.5 min); process replay 7 pass; new unit tests, `test_imports`,
+  `test_legacy_adapters` pass.
+
 ## Next (resume here)
 
-**Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2; last commit = the one
-that wrote this.** Next session: **processes 3-4** (scope table):
-3. `clm_ml/physics/atm_forcing.py` (`MLGetAtmForcingMod`: GetAtmForcing, TimeInterpolation3),
-   ready for 7.3. Process-replay routine `GetAtmForcing` (`tests/regression/process_io.py`).
-4. `clm_ml/physics/solar_radiation.py` (two-stream; Norman registered as unsupported, D8): the
-   150-term sum as a scan in the same order. Process replay `SolarRadiation`.
+**Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2, session 2 (2026-10-31)
+processes 3-4 (both bit for bit); last commit = the one that wrote this.** Next session:
+**process 5** (scope table): `longwave.py`, `canopy_water.py`, `leaf_heat_capacity`,
+`plant_hydraulics.py` (sun/shade water potential over the leaf axis). Golden tests to
+repoint: `MLCanopyWaterMod_WettedFraction`, `MLLeafHeatCapacityMod_LeafHeatCapacity` (and
+any plant-hydraulics ones); process replay `LongwaveRadiation`. Longwave's Norman system
+uses `tridiag` without `min_pivot` (C9). If the session has room, start process 6
+(turbulence) only as a separate commit; otherwise stop after 5.
 
-Same pattern as process 2 (C10): physics on plain 0-based arrays in `clm_ml/physics/`, legacy
+Same pattern as processes 2-4 (C10, C12, C13): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
 fake containers holding only the declared fields. Expect round-off changes when loops become
 array operations even if every routine is bit-identical in isolation (C10): probe the routine

@@ -30,6 +30,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from clm_ml.legacy.atm_forcing import AtmForcingRecord, AtmForcingWindow, GetAtmForcing
+from clm_ml.legacy.solar_radiation import SolarRadiation  # noqa: F401
 from clm_ml.physics.atm_forcing import clm_forcing_to_ml
 from clm_ml.physics.math import is_concrete
 from clm_src_main.abortutils import endrun  # noqa: F401
@@ -80,7 +81,6 @@ from multilayer_canopy.MLPlantHydraulicsMod import (  # noqa: F401
     SoilResistance,
 )
 from multilayer_canopy.MLRungeKuttaMod import RungeKuttaIni, RungeKuttaUpdate  # noqa: F401
-from multilayer_canopy.MLSolarRadiationMod import SolarRadiation  # noqa: F401
 from multilayer_canopy.MLWaterVaporMod import LatVap  # noqa: F401
 
 # ---------------------------------------------------------------------------

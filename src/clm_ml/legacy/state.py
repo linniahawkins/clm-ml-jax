@@ -172,14 +172,18 @@ def step_state_from_instances(insts, previous: State | None = None) -> StepState
 
 def patch_layers(insts) -> PatchLayers:
     """The :class:`PatchLayers` of the containers ``insts`` (counts in the legacy dtype)."""
-    ml = insts.mlcanopy
+    return mlcanopy_layers(insts.mlcanopy, 0)
+
+
+def mlcanopy_layers(ml, p: int) -> PatchLayers:
+    """The :class:`PatchLayers` of patch ``p`` of the multilayer canopy container ``ml``."""
     return PatchLayers(
-        n_layers=ml.ncan_canopy[0],
-        n_within=ml.ntop_canopy[0],
-        first_leafy=ml.nbot_canopy[0] - 1,
-        dz=get(ml.dz_profile, LAYER),
-        zs=get(ml.zs_profile, LAYER),
-        zw=get(ml.zw_profile, LEVEL),
+        n_layers=ml.ncan_canopy[p],
+        n_within=ml.ntop_canopy[p],
+        first_leafy=ml.nbot_canopy[p] - 1,
+        dz=ml.dz_profile[p, 1:],
+        zs=ml.zs_profile[p, 1:],
+        zw=ml.zw_profile[p, :],
     )
 
 

@@ -219,7 +219,7 @@ def _Norman(
     Reference: Bonan (2019) *Climate Change and Terrestrial Ecosystem
     Modeling*, Chapter 14.
 
-    The algorithm mirrors the solar :func:`MLSolarRadiationMod._Norman`
+    The algorithm mirrors the solar :func:`clm_ml.legacy.solar_radiation._Norman`
     structure but operates on a single spectral band (no waveband loop)
     and includes leaf thermal emission as an additional source term.
 
