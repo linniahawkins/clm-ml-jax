@@ -111,11 +111,60 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
 
 ## Next (resume here)
 
-**Package 7.1 done (2026-10-30); waiting for the maintainer's review** before 7.2. Points
-for the maintainer: C4 (bit for bit holds on CPU, so the reference was not re-recorded and
-option 2, the noise twin as the only gate, was not needed); the removed diagnostics
-(`phase7_removed_diagnostics.md`, 133 fields); C5-C8.
+**Package 7.1 done (2026-10-30, last commit `bdde552`); reported to the maintainer, who asked
+to start 7.2 in the next session.** Open review points they may still raise: C4 (bit for bit
+holds on CPU, so the reference was not re-recorded and option 2, the noise twin as the only
+gate, was not needed), the 133 removed diagnostics (`phase7_removed_diagnostics.md`), C5-C8.
 
-Then **package 7.2 (physics by process into `clm_ml/physics/`)**, scope §4: one commit per
-process in the scope's order (math, soil, atm forcing, solar radiation, ...), each bit for
-bit on CPU; timing test before and after.
+### Package 7.2: physics by process into `clm_ml/physics/` (scope §4)
+
+One commit per process in the scope's table order, each **bit for bit on CPU**; 2-3 processes
+per session (How to work, above). Each process gets: variants registered by name (plan §6.6),
+a docstring with `Fortran reference:` and its reads/writes, a test that the declared writes
+are what changes, and its golden tests repointed (`tests/fortran_validation/test_golden_jax.py`
+imports routines by module name; never edit the `golden_IO/*.json`).
+
+**First session: processes 1-2.**
+1. `clm_ml/physics/math.py` from `multilayer_canopy/MLMathToolsMod.py` (root finders
+   `hybrid`/`zbrent`/`bisection`, `quadratic`, `tridiag`, `tridiag_2eq`, `tridiag_scan`,
+   beta/gamma functions; 12 source files import it). Scope: `tridiag` as a scan (removes 48
+   unrolled ops). `tridiag_2eq` has a **hand-written gradient** (`custom_vjp`), so this commit
+   also runs `python tests/gradient_tier.py --focused`. Golden: `test_MLMathToolsMod_*` (7).
+   Before deciding how the old module names keep working during the move (re-export shim
+   vs. updating every import), log the choice as a C decision.
+2. `clm_ml/physics/soil.py` (clmData, SoilAlbedo, SurfaceResistance, SoilThermProp,
+   SoilWater, SoilTemperature): array operations instead of ~500 scalar updates (D5);
+   `SoilThermProp` computed once only if its two calls see the same inputs (check first,
+   with a probe).
+
+Before the first 7.2 commit, take the **timing baseline** at `bdde552` (already recorded:
+`p71-clm-ml-jax-*` in `timing/results_model.jsonl`, forward ~27-28 ms/step, gradient
+~604 ms/step) and compare at the end of 7.2 (discuss > 1.5x, scope risk table).
+
+### Practical notes for the session (learned in 7.0-7.1)
+
+- **Environment:** `export PATH=/glade/work/linnia/conda-envs/clm-ml-jax/bin:$PATH` (the
+  system Python has no numpy; black, ruff, pytest live there).
+- **CPU only:** login nodes have two A100s and JAX picks them by default. `tests/conftest.py`
+  forces the CPU for pytest; every probe script must set `JAX_PLATFORMS=cpu` itself. On the
+  GPU, fresh compiles differ by ~1e-11 (C4; open issue outside Phase 7).
+- **Per-commit command** (~1.5-3 min with a warm cache, ~10 min cold):
+  `python -m pytest tests/regression/test_end_to_end_regression.py -m regression -q -p no:cacheprovider -o addopts=""`
+  plus the moved routines' golden tests and `black --check --line-length 100 src tests timing && ruff check src tests timing`.
+- **Package end** (7.1 took): gradient tier 6 min, all `tests/regression` 53 min,
+  `tests/clm_ml` 0.5 min, golden 5 s. Script to copy:
+  `/glade/derecho/scratch/linnia/clm-ml-jax/logs7/package_end.sh` (sequential, logs in the
+  same directory). Timing before/after: `logs7/timing.sh` (a `git worktree` of the old commit
+  in scratch; `time_model.py` imports its own tree's `src`).
+- **Committing docs:** `docs/` is matched by an ignore rule: use `git add -u docs` for tracked
+  files and `git add -f` for new ones, and check `git status` after committing.
+- **Two layouts until step 10 of 7.2:** the physics still runs on the legacy containers
+  (1-based, patch axis of length 1); the step's input/output is the 0-based `StepState`
+  (`clm_ml/state.py`), converted in `clm_ml/legacy/state.py`; outputs read through
+  `clm_ml/legacy/view.py`. When a moved process changes what the step returns, change the
+  view, never the reference. The legacy container leaves the step at process 10
+  (`canopy.py`).
+- **Known quirk:** the legacy `.out` writer reads soil level 1 of a column axis of length 1;
+  it works only because JAX clamps out-of-range indices (C8). Don't convert the view to numpy.
+- **Never** scatter into a scan carry with array indices, add `jax.debug.callback`, or set the
+  gradient XLA flags for the regression tests (CLAUDE.md gotchas).

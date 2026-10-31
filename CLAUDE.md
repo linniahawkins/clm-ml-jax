@@ -448,7 +448,7 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
 | 5b | Mask-aware layers **in place** (same files, 1-based): one compiled step for any layer count (done; gradient padding test and GPU timing after Phase 6) |
 | 6 | Many patches and gridcells, **on Derecho (GPU)**: steps 0-6 (per-site data, batched patches, C3/C4 groups, devices, vectorized setup) done 2026-10-29; GPU optimization (step 1c) deferred; progress log `docs/design/phase6_progress.md` |
 | 6b | Real global input before Phase 7 (decisions 26-32): steps 1-6 done (grid loader, gridded forcing, setup, regional test), done 2026-10-30 (step 7 closed; review fixes, calendar decision 34); fixes: per-layer minimum plant area (30), no 0.05 LAI cutoff (31), canopy-top latent heat per sub-step (32); open issues in `global_input.md` |
-| 7 | Restructure (decision 35; `phase7_scope.md`): 7.0 preparation, 7.1 step state (0-based), 7.2 physics by process (`clm_ml/physics/`), 7.3 forcing in the chunk, 7.4 setup without globals, 7.5 netCDF restarts, 7.6 cleanup. Not started (2026-10-30) |
+| 7 | Restructure (decision 35; `phase7_scope.md`): 7.0 preparation, 7.1 step state (0-based), 7.2 physics by process (`clm_ml/physics/`), 7.3 forcing in the chunk, 7.4 setup without globals, 7.5 netCDF restarts, 7.6 cleanup. 7.0 and 7.1 done (2026-10-30); 7.2 next |
 | 8 | Docs and release |
 
 Decisions 18–21 (after Phase 4b): Phase 5 converts to masks in place; masks rather than grouping
