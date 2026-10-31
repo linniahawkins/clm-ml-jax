@@ -71,7 +71,7 @@ def ModelAdvance(
         step_time: Time information for this step
             (``clm_time_manager.StepTime``).
         forcing_bef, forcing_next: Multilayer canopy forcing at the previous
-            and next CLM steps (``MLGetAtmForcingMod.AtmForcingRecord``).
+            and next CLM steps (``clm_ml.legacy.atm_forcing.AtmForcingRecord``).
         initialize: True on the run's first time step.
         params: The patch's PFT parameters (``MLCanopyParamsMod.CanopyParams``); built from
             the PFT tables when omitted.

@@ -176,10 +176,13 @@ def replay(out_json: Path) -> None:
 
 class _Unpickler(pickle.Unpickler):
     """Reads recordings made before Phase 5b, whose ``GridInfo`` also held the layer counts
-    ``(p, ncan, ntop, nbot, c3)``: those are data in the container now."""
+    ``(p, ncan, ntop, nbot, c3)``: those are data in the container now. Classes of modules
+    moved in Phase 7.2 are read from their new modules (``MOVED``)."""
+
+    MOVED = {"multilayer_canopy.MLGetAtmForcingMod": "clm_ml.legacy.atm_forcing"}
 
     def find_class(self, module, name):
-        cls = super().find_class(module, name)
+        cls = super().find_class(self.MOVED.get(module, module), name)
         if name != "GridInfo":
             return cls
 

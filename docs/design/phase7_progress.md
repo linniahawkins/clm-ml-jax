@@ -134,6 +134,14 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   `clm_drv`'s `SoilThermProp` call (same inputs, checked in the code). Tests: lint;
   bit-for-bit + noise twin 177 pass (1.6 min); soil unit tests pass.
 
+- **Process 3, `clm_ml/physics/atm_forcing.py` (C12):** `atm_forcing` on one patch (0-based
+  bands), time interpolation registered by name (`none`, `three_point`; two-point dropped:
+  Fortran stops for it); `clm_forcing_to_ml` moved there; legacy adapter `GetAtmForcing` and
+  the legacy-layout forcing window in `clm_ml/legacy/atm_forcing.py`; `MLGetAtmForcingMod`
+  deleted. Bit for bit. New `tests/clm_ml/test_physics_atm_forcing.py`. Tests: lint;
+  bit-for-bit + noise twin 177 pass (1.6 min); process replay 7 pass; new unit tests and
+  `test_imports` pass.
+
 ## Next (resume here)
 
 **Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2; last commit = the one

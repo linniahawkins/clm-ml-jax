@@ -14,8 +14,9 @@ from typing import Callable, Optional
 import numpy as np
 
 from clm_ml.forcing import ClmHistoryForcing, Forcing, TowerForcing, chunk_run_steps
+from clm_ml.legacy.atm_forcing import AtmForcingRecord
+from clm_ml.physics.atm_forcing import clm_forcing_to_ml
 from clm_src_main.clm_varpar import inir, ivis, numrad
-from multilayer_canopy.MLGetAtmForcingMod import AtmForcingRecord, clm_forcing_to_ml
 from offline_driver.clmDataMod import ClmHistoryRecord, read_clm_history_series
 from offline_driver.TowerMetMod import TowerMet, as_tower_files, derive_tower_met
 

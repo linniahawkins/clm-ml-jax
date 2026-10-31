@@ -14,6 +14,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
+from clm_ml.legacy.atm_forcing import AtmForcingRecord
 from clm_ml.legacy.soil import (
     SoilAlbedo,
     SoilTemperature,
@@ -32,7 +33,6 @@ from clm_src_main.SiteType import site_or_modules
 from clm_src_utils.clm_time_manager import StepTime
 from multilayer_canopy.MLCanopyFluxesMod import MLCanopyFluxes  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import SOIL_TEMPERATURE, record_balance_error
-from multilayer_canopy.MLGetAtmForcingMod import AtmForcingRecord
 from offline_driver.clmDataMod import ClmHistoryRecord  # noqa: F401
 
 # ---------------------------------------------------------------------------

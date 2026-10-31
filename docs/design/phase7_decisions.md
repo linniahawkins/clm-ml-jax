@@ -292,3 +292,37 @@ Why: the inputs are the same arrays: between the calls only `SoilWater` (writes 
 write repeated the first's values. Confirmed by the bit-for-bit test (177 pass): the step's
 soil temperature, the only user of the second call, is unchanged.
 Alternatives: keep Fortran's two calls (twice the work for the same numbers).
+
+### C12. Process 3: `clm_ml/physics/atm_forcing.py`; the legacy forcing window in `clm_ml/legacy/atm_forcing.py` (7.2, 2026-10-31)
+Context: `MLGetAtmForcingMod` (`GetAtmForcing`, `TimeInterpolation2/3`, the forcing record
+and window types, `clm_forcing_to_ml`) moves to `clm_ml/physics/` (scope 7.2 process 3,
+"ready for 7.3").
+Decision:
+- **Physics:** `atm_forcing(bef, cur, nxt, zref, t_bef, t_cur, t_next, t_ml, *,
+  interpolation)` on one patch, 0-based shortwave bands, returning `AtmForcing` (the 15
+  `<name>_forcing` fields); inputs are per-patch `ForcingRecord`s. The time interpolation is a
+  variant registered by name, `TIME_INTERPOLATION = {"none", "three_point"}` (model.yaml
+  `interpolation`; Fortran `met_type` 0 and 3), applied field by field (`tree_map`; the
+  shortwave bands as one array instead of two scalar calls). `clm_forcing_to_ml` (Fortran
+  `GetCLMVar`'s unit conversion) moves to the physics module too.
+- **Two-point interpolation dropped:** `TimeInterpolation2` (Fortran `met_type = 2`) is not
+  moved. In CLM-ml v2 it stops the model (`endrun` before the interpolation), and the
+  configuration only accepts 0 and 3 (`clm_ml.config`, `legacy.namelist`). The adapter
+  raises `ValueError` for any other `met_type` (before: `endrun` for 2, an undefined-name
+  error for anything else).
+- **Adapter and legacy types:** `clm_ml/legacy/atm_forcing.py` keeps `GetAtmForcing` with its
+  legacy arguments (so `MLCanopyFluxes` only changes its import), `DECLARED` reads/writes,
+  and the legacy-layout `AtmForcingRecord`/`AtmForcingWindow` (patch axis, 1-based band
+  columns) used by the forcing builders; they go when the forcing is built inside the chunk
+  (7.3) and the containers leave the step (process 10). `MLGetAtmForcingMod.py` is deleted, no
+  shim (as C9). `tests/regression/process_io.py` reads the pickled window of the old module
+  from the new one (`_Unpickler.MOVED`), so the process replay keeps its recording.
+- **Constants:** `cpd`, `cpw`, `lapse_rate`, `mmdry`, `mmh2o`, `rgas`, `wind_forc_min`
+  re-exported from `MLclm_varcon` by `clm_ml/physics/constants.py` (as C10).
+- **Bit for bit** end to end (177 pass); the process replay of `GetAtmForcing` passes on the
+  recorded inputs. New `tests/clm_ml/test_physics_atm_forcing.py` (declared reads/writes on a
+  fake container, piecewise-linear interpolation, derived air properties).
+Why: the physics on plain per-patch values is what 7.3 needs (the forcing interpolated
+inside the chunk); the legacy window stays only as long as the host builds it.
+Alternatives: keep the window types in the physics module (their layout is the legacy one,
+replaced in 7.3); keep `TimeInterpolation2` (unreachable code, and Fortran refuses it).

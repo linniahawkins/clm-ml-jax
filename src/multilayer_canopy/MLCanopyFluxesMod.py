@@ -29,6 +29,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from clm_ml.legacy.atm_forcing import AtmForcingRecord, AtmForcingWindow, GetAtmForcing
+from clm_ml.physics.atm_forcing import clm_forcing_to_ml
 from clm_ml.physics.math import is_concrete
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import grav, spval  # noqa: F401
@@ -60,12 +62,6 @@ from multilayer_canopy.MLclm_varcon import mmh2o, rgas  # noqa: F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf  # noqa: F401
 from multilayer_canopy.MLFluxProfileSolutionMod import FluxProfileSolution  # noqa: F401
-from multilayer_canopy.MLGetAtmForcingMod import (  # noqa: F401
-    AtmForcingRecord,
-    AtmForcingWindow,
-    GetAtmForcing,
-    clm_forcing_to_ml,
-)
 from multilayer_canopy.MLinitVerticalMod import (  # noqa: F401
     getPADparameters,
     initVerticalProfiles,

@@ -204,8 +204,8 @@ def atm_records(met: dict, current: bool):
     """``AtmForcingRecord`` arrays (leading axes of ``met``, then the legacy patch axis of
     length 1) as ``clm_ml.legacy.forcing.atm_record_current`` (``current``: wind resultant,
     CO2 from partial pressure) or ``atm_record_next`` builds them, with the same arithmetic."""
+    from clm_ml.legacy.atm_forcing import AtmForcingRecord
     from clm_src_main.clm_varpar import inir, ivis, numrad
-    from multilayer_canopy.MLGetAtmForcingMod import AtmForcingRecord
 
     f = lambda x: np.asarray(x, dtype=float)  # noqa: E731
     if current:
