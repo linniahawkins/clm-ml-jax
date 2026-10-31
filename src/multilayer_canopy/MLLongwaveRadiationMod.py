@@ -14,7 +14,7 @@ Differentiability notes
 * All ``np.`` array operations replaced by ``jnp.``.
 * ``float()`` wrappers on JAX scalars removed.
 * The tridiagonal system is assembled as arrays over every layer slot and solved with
-  ``MLMathToolsMod.tridiag_scan`` (``lax.scan`` loops), so the compiled program does not
+  ``clm_ml.physics.math.tridiag`` (``lax.scan`` loops), so the compiled program does not
   grow with ``max_layers`` (plan Phase 6).
 """
 
@@ -26,6 +26,7 @@ from typing import Sequence
 import jax
 import jax.numpy as jnp
 
+from clm_ml.physics.math import tridiag  # noqa: E402
 from clm_src_main.abortutils import endrun  # noqa: E402, F401
 from clm_src_main.clm_varcon import sb  # noqa: E402, F401
 from clm_src_main.clm_varctl import iulog  # noqa: E402, F401
@@ -41,7 +42,6 @@ from multilayer_canopy.MLclm_varcon import emg  # noqa: E402, F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions  # noqa: E402
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: E402, F401
 from multilayer_canopy.MLLayersMod import layers  # noqa: E402
-from multilayer_canopy.MLMathToolsMod import tridiag, tridiag_scan  # noqa: E402, F401
 
 # ---------------------------------------------------------------------------
 # Public driver
@@ -159,7 +159,7 @@ def _Norman_patch(
     ctri = jnp.where(is_sky, 0.0, ctri)
     dtri = jnp.where(is_sky, _lwsky_p, dtri)
 
-    u = tridiag_scan(atri, btri, ctri, dtri)  # rows 1..m_max
+    u = tridiag(atri, btri, ctri, dtri)  # rows 1..m_max
 
     # Unknowns: up(0), dn(0), then up(ic_j), dn(ic_j) for each leafy layer
     ics_out = jnp.where(valid, ics, nlevmlcan + 1)  # unused slots write a dropped entry

@@ -14,6 +14,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
+from clm_ml.physics.math import tridiag
 from clm_src_biogeophys.SoilStateType import soilstate_type
 from clm_src_biogeophys.TemperatureType import temperature_type
 from clm_src_biogeophys.WaterDiagnosticBulkType import waterdiagnosticbulk_type
@@ -22,7 +23,6 @@ from clm_src_biogeophys.WaterType import water_type
 from clm_src_main.decompMod import bounds_type
 from clm_src_main.SiteType import site_or_modules
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type
-from multilayer_canopy.MLMathToolsMod import tridiag
 
 # Threshold for thin surface layer — Fortran line 33
 _thin_sfclayer: float = 1.0e-6
@@ -68,7 +68,7 @@ def SoilTemperature(
        - Layers 2 … nlevgrnd-1: interior implicit diffusion.
        - Layer nlevgrnd (bottom): zero heat flux lower boundary.
 
-    5. Solve with :func:`MLMathToolsMod.tridiag`.
+    5. Solve with :func:`clm_ml.physics.math.tridiag`.
     6. Energy conservation check: ``|gsoi - edif| < 1e-6 W/m²``.
 
     Args:
@@ -187,21 +187,18 @@ def SoilTemperature(
 
     # ------------------------------------------------------------------
     # Solve tridiagonal system — Fortran lines 145-149
-    # tridiag() expects 1-based arrays of size (n+1,): index 0 unused,
-    # data at indices 1..n.  Pass full slices [0:nlevgrnd+1].
+    # tridiag() takes 0-based rows: soil levels 1..nlevgrnd.
     # ------------------------------------------------------------------
     for fc in range(1, num_nolakec + 1):
         c = int(_filter_nolakec_np[fc - 1])
         u_sol = tridiag(
-            atri[c, 0 : nlevgrnd + 1],
-            btri[c, 0 : nlevgrnd + 1],
-            ctri[c, 0 : nlevgrnd + 1],
-            rtri[c, 0 : nlevgrnd + 1],
-            nlevgrnd,
+            atri[c, 1 : nlevgrnd + 1],
+            btri[c, 1 : nlevgrnd + 1],
+            ctri[c, 1 : nlevgrnd + 1],
+            rtri[c, 1 : nlevgrnd + 1],
+            min_pivot=1.0e-10,
         )
-        # u_sol has shape (nlevgrnd+1,) with data at indices 1..nlevgrnd
-        for j in range(1, nlevgrnd + 1):
-            t_soisno = t_soisno.at[c, j].set(u_sol[j])
+        t_soisno = t_soisno.at[c, 1 : nlevgrnd + 1].set(u_sol)
 
     # ------------------------------------------------------------------
     # Energy conservation check — Fortran lines 151-159: |gsoi - edif| < 1e-6 W/m2.

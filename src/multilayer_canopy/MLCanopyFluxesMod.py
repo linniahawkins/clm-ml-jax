@@ -29,6 +29,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from clm_ml.physics.math import is_concrete
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import grav, spval  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
@@ -77,7 +78,6 @@ from multilayer_canopy.MLLeafBoundaryLayerMod import (
 from multilayer_canopy.MLLeafHeatCapacityMod import LeafHeatCapacity  # noqa: F401
 from multilayer_canopy.MLLeafPhotosynthesisMod import LeafPhotosynthesis  # noqa: F401
 from multilayer_canopy.MLLongwaveRadiationMod import LongwaveRadiation  # noqa: F401
-from multilayer_canopy.MLMathToolsMod import is_concrete
 from multilayer_canopy.MLPlantHydraulicsMod import (  # noqa: F401
     LeafWaterPotential,
     PlantResistance,

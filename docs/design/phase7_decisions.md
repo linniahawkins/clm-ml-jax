@@ -198,3 +198,31 @@ Not done: an explicit field -> layout table in place of the name-based rule (rev
 readability nit); the rule covers 5 exceptions and the new test exercises every field.
 Why: the defects were real failures (KeyError in the issue-14 test; a crash in the global
 timing test); the guards make 7.2's moves fail loudly instead of silently.
+
+### C9. Process 1: `clm_ml/physics/math.py`; imports updated, no shim; dead root finders dropped (7.2, 2026-10-30)
+Context: `multilayer_canopy/MLMathToolsMod.py` moves to `clm_ml/physics/math.py` (scope 7.2
+process 1, `tridiag` as a scan); how the old module name keeps working, and what moves.
+Decision:
+- **No re-export shim:** the 10 importing modules and the golden tests import
+  `clm_ml.physics.math`; `MLMathToolsMod.py` is deleted. `test_imports` catches a stale import.
+- **Moved:** `is_concrete`, `bisection_traceable`, `quadratic`, `tridiag_2eq` (with its
+  `custom_vjp`, unchanged), the beta/gamma functions. **Not moved (deleted):** `hybrid`,
+  `zbrent`, `bisection` (Fortran's container-threading signature) and their `_scalar` copies,
+  `quadratic_py`: nothing calls them (only `noqa` imports and docstrings named them). Found
+  while checking this: `wue_solver: brent` is never used (open issue 18 in
+  `global_input.md`, for process 7).
+- **`tridiag`** is 0-based (D1) and a `lax.scan` (forward elimination and back substitution),
+  replacing both the 1-based unrolled `tridiag` and `tridiag_scan`. The unrolled one guarded
+  every pivot with `max(|bet|, 1e-10)` (not in Fortran); the scan does that only with
+  `min_pivot=1e-10`, which the solar radiation and soil temperature calls pass (as before);
+  longwave calls it without (as `tridiag_scan` did). The golden test runs Fortran's unguarded
+  form; `tests/clm_ml/test_physics_math.py` checks both against a dense solve and that the
+  guard changes nothing when pivots exceed it.
+- `_beta_function_incomplete_cf` raises `RuntimeError` on non-convergence instead of calling
+  the legacy `endrun` (`SystemExit`), so the module imports nothing from the legacy packages.
+- No variant registry for this module: it has no process variants (pure helpers).
+Why: a shim would be one more legacy name to remove in 7.6, and the callers are few; the
+dead finders could not run in a compiled step anyway (Python `while` on the container).
+Alternatives: a shim module re-exporting the names (keeps every import working, but leaves
+two names for each function until 7.6); keeping the guard always on (would change longwave
+round-off if a pivot ever fell below 1e-10, and departs further from Fortran).

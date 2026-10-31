@@ -26,6 +26,7 @@ import math
 import jax
 import jax.numpy as jnp
 
+from clm_ml.physics.math import quadratic
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import tfrz  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
@@ -66,10 +67,6 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
 )
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLLayersMod import layers, pad_with_top, restore_padding
-from multilayer_canopy.MLMathToolsMod import (
-    bisection,  # noqa: F401
-    quadratic,
-)
 from multilayer_canopy.MLWaterVaporMod import SatVap, SatVap_py  # noqa: F401
 
 # ---------------------------------------------------------------------------

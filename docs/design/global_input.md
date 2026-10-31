@@ -307,3 +307,10 @@ Fortran); use the leaf water potential outputs instead.
     0.01. The gradient with respect to SAI is zero in floored layers. Matters for
     calibration and sensitivity with respect to LAI/SAI (decision 7); a smooth alternative
     for either changes forward values near the threshold and is a science choice.
+18. **`wue_solver: brent` is accepted but not used** (found in Phase 7.2, 2026-10-30; not a
+    Phase 6b issue). Fortran `StomataOptimization` calls `zbrent` for `gs_solver = 1` and
+    `bisection` for `gs_solver = 2`; the JAX photosynthesis always runs the traceable bisection,
+    and no physics code reads `MLOptions.gs_solver`. So choosing `brent` (D9 keeps the option)
+    silently gives the bisection answer. Default runs (bisection, CHATS7) are unaffected. To be
+    settled when photosynthesis moves (7.2 process 7): a traceable Brent, or `brent`
+    registered as unsupported (a clear error, as D8 does for other untranslated variants).

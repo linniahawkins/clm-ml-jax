@@ -1,555 +1,26 @@
-"""
-JAX translation of MLMathToolsMod Fortran module.
+"""Mathematical tools: root finding, quadratic and tridiagonal solvers, beta distribution.
 
-Mathematical tools for the multilayer canopy model:
-root-finding (hybrid secant/Brent, Brent, bisection),
-quadratic solver, tridiagonal solvers (scalar and 2-equation
-coupled), log-gamma function, beta function, beta distribution
-PDF and CDF, and the incomplete beta continued fraction.
+Pure functions of their arguments (no model state). Used by the canopy processes
+(turbulence, photosynthesis, radiation, flux-profile solution, soil temperature) and by the
+setup (leaf and stem area profiles from beta distributions).
 
-Original Fortran module: MLMathToolsMod
-Fortran lines 1-330
+Fortran reference: CLM-ml v2 ``MLMathToolsMod.F90``. Fortran's root finders that call a
+function threading the canopy container (``hybrid``, ``zbrent``, ``bisection``) are not
+translated here: the time step uses traceable solvers written for each problem (Obukhov length,
+intercellular CO2, stomatal conductance) and :func:`bisection_traceable` (Phase 7 decision C9).
 """
 
 from __future__ import annotations
 
 import functools
-import math
-from typing import Callable, Tuple
+from typing import Tuple
 
 import jax
 import jax.numpy as jnp
 from jax import Array
 
-from clm_src_main.abortutils import endrun  # noqa: F401
-from clm_src_main.clm_varctl import iulog  # noqa: F401
-from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
-from multilayer_canopy.MLclm_varpar import nlevmlcan  # noqa: F401
-
-# Type alias for the function signature shared by all solvers.
-# Fortran abstract interface `func(p, ic, il, mlcanopy_inst, x, val)`
-# → Python callable returning (val, updated_mlcanopy_inst).
-FuncType = Callable[
-    [int, int, int, mlcanopy_type, float],
-    Tuple[float, mlcanopy_type],
-]
-
-# Stateless variant: pure Python scalar function x -> residual.
-# Used by the refactored photosynthesis/stomatal solver paths.
-ScalarFuncType = Callable[[float], float]
-
-
 # ---------------------------------------------------------------------------
-# Public: hybrid secant / Brent root finder
-# ---------------------------------------------------------------------------
-
-
-def hybrid(
-    msg: str,
-    p: int,
-    ic: int,
-    il: int,
-    mlcanopy_inst: mlcanopy_type,
-    func: FuncType,
-    xa: float,
-    xb: float,
-    tol: float,
-) -> Tuple[float, mlcanopy_type]:
-    """
-    Find the root of ``func`` using the secant method with Brent's
-    method as a robust fallback.
-
-    Mirrors Fortran function ``hybrid`` (lines 47-100).
-
-    Starting from initial estimates ``xa`` and ``xb``, the secant method
-    iterates until ``|dx| < tol``.  If the iterates bracket a root
-    (``f1 * f0 < 0``), :func:`zbrent` is called for the final result.
-    If convergence is not achieved within ``itmax = 40`` iterations,
-    the iterate with the smallest absolute function value is returned.
-
-    Args:
-        msg: Diagnostic string passed to :func:`zbrent` if called.
-        p: Patch index.
-        ic: Canopy layer index.
-        il: Sunlit (1) or shaded (2) leaf index.
-        mlcanopy_inst: Canopy container threaded through ``func``.
-        func: Callable ``(p, ic, il, mlcanopy_inst, x) → (val, mlcanopy_inst)``.
-        xa: First initial estimate.
-        xb: Second initial estimate.
-        tol: Convergence tolerance.
-
-    Returns:
-        Tuple ``(root, mlcanopy_inst)``.
-    """
-    itmax: int = 40  # Fortran: parameter itmax = 40
-
-    x0 = xa
-    f0, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, x0)
-    if f0 == 0.0:
-        return x0, mlcanopy_inst
-
-    x1 = xb
-    f1, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, x1)
-    if f1 == 0.0:
-        return x1, mlcanopy_inst
-
-    # Track the iterate with the smallest |f| — Fortran lines 71-75
-    if abs(f1) < abs(f0):
-        minx, minf = x1, f1
-    else:
-        minx, minf = x0, f0
-
-    # Secant iteration — Fortran lines 77-97
-    _iter = 0
-    while True:
-        _iter += 1
-        dx = -f1 * (x1 - x0) / (f1 - f0)
-        x = x1 + dx
-        if abs(dx) < tol:
-            x0 = x
-            break
-        x0 = x1
-        f0 = f1
-        x1 = x
-        f1, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, x1)
-        if abs(f1) < abs(minf):
-            minx, minf = x1, f1
-
-        # Root bracketed — switch to Brent — Fortran lines 86-89
-        if f1 * f0 < 0.0:
-            x0, mlcanopy_inst = zbrent(msg, p, ic, il, mlcanopy_inst, func, x0, x1, tol)
-            break
-
-        # Fallback to minimum — Fortran lines 91-95
-        if _iter > itmax:
-            f1, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, minx)
-            x0 = minx
-            break
-
-    return x0, mlcanopy_inst
-
-
-# ---------------------------------------------------------------------------
-# Public: hybrid secant / Brent root finder (stateless scalar variant)
-# ---------------------------------------------------------------------------
-
-
-def hybrid_scalar(
-    msg: str,
-    func: ScalarFuncType,
-    xa: float,
-    xb: float,
-    tol: float,
-) -> float:
-    """
-    Stateless version of :func:`hybrid`.
-
-    ``func`` is a pure Python callable ``func(x) -> float`` with no
-    JAX state threading.  Mirrors the same algorithm as :func:`hybrid`
-    but returns only the root as a float.
-    """
-    itmax: int = 40
-
-    x0 = xa
-    f0 = func(x0)
-    if f0 == 0.0:
-        return x0
-
-    x1 = xb
-    f1 = func(x1)
-    if f1 == 0.0:
-        return x1
-
-    if abs(f1) < abs(f0):
-        minx, minf = x1, f1
-    else:
-        minx, minf = x0, f0
-
-    _iter = 0
-    while True:
-        _iter += 1
-        dx = -f1 * (x1 - x0) / (f1 - f0)
-        x = x1 + dx
-        if abs(dx) < tol:
-            x0 = x
-            break
-        x0 = x1
-        f0 = f1
-        x1 = x
-        f1 = func(x1)
-        if abs(f1) < abs(minf):
-            minx, minf = x1, f1
-
-        if f1 * f0 < 0.0:
-            x0 = zbrent_scalar(msg, func, x0, x1, tol)
-            break
-
-        if _iter > itmax:
-            func(minx)
-            x0 = minx
-            break
-
-    return x0
-
-
-# ---------------------------------------------------------------------------
-# Public: Brent's method
-# ---------------------------------------------------------------------------
-
-
-def zbrent(
-    msg: str,
-    p: int,
-    ic: int,
-    il: int,
-    mlcanopy_inst: mlcanopy_type,
-    func: FuncType,
-    xa: float,
-    xb: float,
-    tol: float,
-) -> Tuple[float, mlcanopy_type]:
-    """
-    Find the root of ``func`` bracketed by ``[xa, xb]`` using
-    Brent's method.
-
-    Mirrors Fortran function ``zbrent`` (lines 102-160).
-
-    Args:
-        msg: Diagnostic string printed on error.
-        p: Patch index.
-        ic: Canopy layer index.
-        il: Sunlit (1) or shaded (2) leaf index.
-        mlcanopy_inst: Canopy container threaded through ``func``.
-        func: Callable ``(p, ic, il, mlcanopy_inst, x) → (val, mlcanopy_inst)``.
-        xa: Lower bracket.
-        xb: Upper bracket.
-        tol: Convergence tolerance.
-
-    Returns:
-        Tuple ``(root, mlcanopy_inst)``.
-    """
-    itmax: int = 50  # Fortran: parameter itmax = 50
-    eps: float = 1.0e-8  # Fortran: parameter eps = 1.e-08_r8
-
-    a = xa
-    b = xb
-    fa, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, a)
-    fb, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, b)
-
-    # Bracket check — Fortran lines 124-131
-    if (fa > 0.0 and fb > 0.0) or (fa < 0.0 and fb < 0.0):
-        print(f"{iulog}: zbrent: Root must be bracketed")
-        print(f"{iulog}: called from: {msg}")
-        print(f"{iulog}: {xa} {fa}")
-        print(f"{iulog}: {xb} {fb}")
-        endrun(msg=" ERROR: zbrent error")
-
-    c = b
-    fc = fb
-    d = 0.0
-    e = 0.0  # Initialised before use in first iteration
-
-    _iter = 0
-    while True:
-        if _iter == itmax:
-            break
-        _iter += 1
-
-        if (fb > 0.0 and fc > 0.0) or (fb < 0.0 and fc < 0.0):
-            c = a
-            fc = fa
-            d = b - a
-            e = d
-
-        if abs(fc) < abs(fb):
-            a = b
-            b = c
-            c = a
-            fa = fb
-            fb = fc
-            fc = fa
-
-        tol1 = 2.0 * eps * abs(b) + 0.5 * tol
-        xm = 0.5 * (c - b)
-
-        if abs(xm) <= tol1 or fb == 0.0:
-            break
-
-        if abs(e) >= tol1 and abs(fa) > abs(fb):
-            s = fb / fa
-            if a == c:
-                pp = 2.0 * xm * s
-                q = 1.0 - s
-            else:
-                q = fa / fc
-                r = fb / fc
-                pp = s * (2.0 * xm * q * (q - r) - (b - a) * (r - 1.0))
-                q = (q - 1.0) * (r - 1.0) * (s - 1.0)
-            if pp > 0.0:
-                q = -q
-            pp = abs(pp)
-            if 2.0 * pp < min(3.0 * xm * q - abs(tol1 * q), abs(e * q)):
-                e = d
-                d = pp / q
-            else:
-                d = xm
-                e = d
-        else:
-            d = xm
-            e = d
-
-        a = b
-        fa = fb
-        if abs(d) > tol1:
-            b = b + d
-        else:
-            b = b + jnp.copysign(tol1, xm)  # Fortran: b + sign(tol1, xm)
-
-        fb, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, b)
-        if fb == 0.0:
-            break
-
-    if _iter == itmax:
-        print(f"{iulog}: zbrent: Maximum number of iterations exceeded")
-        print(f"{iulog}: called from: {msg}")
-        endrun(msg=" ERROR: zbrent error")
-
-    return b, mlcanopy_inst
-
-
-# ---------------------------------------------------------------------------
-# Public: Brent's method (stateless scalar variant)
-# ---------------------------------------------------------------------------
-
-
-def zbrent_scalar(
-    msg: str,
-    func: ScalarFuncType,
-    xa: float,
-    xb: float,
-    tol: float,
-) -> float:
-    """
-    Stateless version of :func:`zbrent`.
-
-    ``func`` is a pure Python callable ``func(x) -> float``.
-    Returns the root as a float.
-    """
-    itmax: int = 50
-    eps: float = 1.0e-8
-
-    a = xa
-    b = xb
-    fa = func(a)
-    fb = func(b)
-
-    if (fa > 0.0 and fb > 0.0) or (fa < 0.0 and fb < 0.0):
-        print(f"{iulog}: zbrent_scalar: Root must be bracketed")
-        print(f"{iulog}: called from: {msg}")
-        print(f"{iulog}: {xa} {fa}")
-        print(f"{iulog}: {xb} {fb}")
-        endrun(msg=" ERROR: zbrent_scalar error")
-
-    c = b
-    fc = fb
-    d = 0.0
-    e = 0.0
-
-    _iter = 0
-    while True:
-        if _iter == itmax:
-            break
-        _iter += 1
-
-        if (fb > 0.0 and fc > 0.0) or (fb < 0.0 and fc < 0.0):
-            c = a
-            fc = fa
-            d = b - a
-            e = d
-
-        if abs(fc) < abs(fb):
-            a = b
-            b = c
-            c = a
-            fa = fb
-            fb = fc
-            fc = fa
-
-        tol1 = 2.0 * eps * abs(b) + 0.5 * tol
-        xm = 0.5 * (c - b)
-
-        if abs(xm) <= tol1 or fb == 0.0:
-            break
-
-        if abs(e) >= tol1 and abs(fa) > abs(fb):
-            s = fb / fa
-            if a == c:
-                pp = 2.0 * xm * s
-                q = 1.0 - s
-            else:
-                q = fa / fc
-                r = fb / fc
-                pp = s * (2.0 * xm * q * (q - r) - (b - a) * (r - 1.0))
-                q = (q - 1.0) * (r - 1.0) * (s - 1.0)
-            if pp > 0.0:
-                q = -q
-            pp = abs(pp)
-            if 2.0 * pp < min(3.0 * xm * q - abs(tol1 * q), abs(e * q)):
-                e = d
-                d = pp / q
-            else:
-                d = xm
-                e = d
-        else:
-            d = xm
-            e = d
-
-        a = b
-        fa = fb
-        if abs(d) > tol1:
-            b = b + d
-        else:
-            b = b + math.copysign(tol1, xm)
-
-        fb = func(b)
-        if fb == 0.0:
-            break
-
-    if _iter == itmax:
-        print(f"{iulog}: zbrent_scalar: Maximum number of iterations exceeded")
-        print(f"{iulog}: called from: {msg}")
-        endrun(msg=" ERROR: zbrent_scalar error")
-
-    return b
-
-
-# ---------------------------------------------------------------------------
-# Public: bisection root finder
-# ---------------------------------------------------------------------------
-
-
-def bisection(
-    msg: str,
-    p: int,
-    ic: int,
-    il: int,
-    mlcanopy_inst: mlcanopy_type,
-    func: FuncType,
-    xa: float,
-    xb: float,
-    tol: float,
-) -> Tuple[float, mlcanopy_type]:
-    """
-    Find the root of ``func`` bracketed by ``[xa, xb]`` using
-    bisection.
-
-    Mirrors Fortran function ``bisection`` (lines 162-210).
-
-    Args:
-        msg: Diagnostic string printed on error.
-        p: Patch index.
-        ic: Canopy layer index.
-        il: Sunlit (1) or shaded (2) leaf index.
-        mlcanopy_inst: Canopy container threaded through ``func``.
-        func: Callable ``(p, ic, il, mlcanopy_inst, x) → (val, mlcanopy_inst)``.
-        xa: Lower bracket.
-        xb: Upper bracket.
-        tol: Convergence tolerance.
-
-    Returns:
-        Tuple ``(root, mlcanopy_inst)``.
-    """
-    itmax: int = 100  # Fortran: parameter itmax = 100
-
-    a = xa
-    b = xb
-    fa, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, a)
-    fb, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, b)
-
-    # Bracket check — Fortran lines 184-190
-    if fa * fb > 0.0:
-        print(f"{iulog}: bisection error: Root must be bracketed")
-        print(f"{iulog}: called from: {msg}")
-        print(f"{iulog}: {xa} {fa}")
-        print(f"{iulog}: {xb} {fb}")
-        endrun(msg=" ERROR: bisection error")
-
-    c = a  # Initialise before while-loop to satisfy type checker
-    _iter = 1
-    while abs(b - a) > tol and _iter <= itmax:  # Fortran: do while
-        c = (a + b) / 2.0
-        fc, mlcanopy_inst = func(p, ic, il, mlcanopy_inst, c)
-        if fa * fc < 0.0:
-            b = c
-            fb = fc
-        else:
-            a = c
-            fa = fc
-        _iter += 1
-
-    if _iter > itmax:
-        print(f"{iulog}: bisection error: Maximum number of iterations exceeded")
-        print(f"{iulog}: called from: {msg}")
-        endrun(msg=" ERROR: bisection error")
-
-    return c, mlcanopy_inst
-
-
-# ---------------------------------------------------------------------------
-# Public: bisection root finder (stateless scalar variant)
-# ---------------------------------------------------------------------------
-
-
-def bisection_scalar(
-    msg: str,
-    func: ScalarFuncType,
-    xa: float,
-    xb: float,
-    tol: float,
-) -> float:
-    """
-    Stateless version of :func:`bisection`.
-
-    ``func`` is a pure Python callable ``func(x) -> float``.
-    Returns the root as a float.
-    """
-    itmax: int = 100
-
-    a = xa
-    b = xb
-    fa = func(a)
-    fb = func(b)
-
-    if fa * fb > 0.0:
-        print(f"{iulog}: bisection_scalar error: Root must be bracketed")
-        print(f"{iulog}: called from: {msg}")
-        print(f"{iulog}: {xa} {fa}")
-        print(f"{iulog}: {xb} {fb}")
-        endrun(msg=" ERROR: bisection_scalar error")
-
-    c = a
-    _iter = 1
-    while abs(b - a) > tol and _iter <= itmax:
-        c = (a + b) / 2.0
-        fc = func(c)
-        if fa * fc < 0.0:
-            b = c
-            fb = fc
-        else:
-            a = c
-            fa = fc
-        _iter += 1
-
-    if _iter > itmax:
-        print(f"{iulog}: bisection_scalar error: Maximum number of iterations exceeded")
-        print(f"{iulog}: called from: {msg}")
-        endrun(msg=" ERROR: bisection_scalar error")
-
-    return c
-
-
-# ---------------------------------------------------------------------------
-# Public: quadratic solver
+# Public: tracing helper
 # ---------------------------------------------------------------------------
 
 
@@ -563,10 +34,17 @@ def is_concrete(*values) -> bool:
     return not any(isinstance(v, jax.core.Tracer) for v in values)
 
 
+# ---------------------------------------------------------------------------
+# Public: bisection root finder (traceable)
+# ---------------------------------------------------------------------------
+
+
 @functools.partial(jax.jit, static_argnames=("func", "tol", "itmax"))
 def bisection_traceable(func, xa, xb, tol: float, itmax: int, c_init=None, args=()):
     """
     JAX-traceable bisection with the Fortran stopping rule.
+
+    Fortran reference: MLMathToolsMod.F90::bisection.
 
     Same iterations and result as Fortran ``bisection`` (MLMathToolsMod.F90,
     lines 249-310) and :func:`bisection_scalar`: halve while ``|b - a| > tol``
@@ -616,12 +94,17 @@ def bisection_traceable(func, xa, xb, tol: float, itmax: int, c_init=None, args=
     return c
 
 
+# ---------------------------------------------------------------------------
+# Public: quadratic solver
+# ---------------------------------------------------------------------------
+
+
 def quadratic(a: float, b: float, c: float) -> Tuple[float, float]:
     """
     Solve the quadratic equation ``a*x^2 + b*x + c = 0`` for its
     two roots using a numerically stable form.
 
-    Mirrors Fortran subroutine ``quadratic`` (lines 212-240).
+    Fortran reference: MLMathToolsMod.F90::quadratic.
 
     Uses the sign of ``b`` to choose the branch that avoids
     catastrophic cancellation:
@@ -665,79 +148,55 @@ def quadratic(a: float, b: float, c: float) -> Tuple[float, float]:
     return r1, r2
 
 
-def quadratic_py(a: float, b: float, c: float):
-    """Pure-Python version of :func:`quadratic` using ``math.sqrt``.
-
-    No JAX dispatch overhead — safe for use inside per-layer Python loops
-    where ``a``, ``b``, ``c`` are plain Python floats.
-    """
-    disc = b * b - 4.0 * a * c
-    if disc < 0.0:
-        disc = 0.0
-    sq = math.sqrt(disc)
-    if b >= 0.0:
-        q = -0.5 * (b + sq)
-    else:
-        q = -0.5 * (b - sq)
-    if abs(a) > 0.0:
-        r1 = q / a
-    else:
-        r1 = 1.0e36
-    if q != 0.0:
-        r2 = c / q
-    else:
-        r2 = 1.0e36
-    return r1, r2
-
-
 # ---------------------------------------------------------------------------
-# Public: scalar tridiagonal solver
+# Public: tridiagonal solver
 # ---------------------------------------------------------------------------
 
 
-def tridiag(a: Array, b: Array, c: Array, r: Array, n: int) -> Array:
+def tridiag(a: Array, b: Array, c: Array, r: Array, min_pivot: float | None = None) -> Array:
     """
-    Solve tridiagonal system of equations using Thomas algorithm.
+    Solve a tridiagonal system with the Thomas algorithm, as ``lax.scan`` loops.
 
-    Translated from Fortran TridiagonalMod.F90.
+    Fortran reference: MLMathToolsMod.F90::tridiag.
+
+    Row ``j`` (0-based) reads ``a[j] u[j-1] + b[j] u[j] + c[j] u[j+1] = r[j]``; ``a[0]`` and
+    ``c[-1]`` are not used. The arithmetic per row is Fortran's; the loops are scans, so the
+    compiled program does not grow with the number of rows.
 
     Args:
-        a: Lower diagonal coefficients [1:n]
-        b: Main diagonal coefficients [1:n]
-        c: Upper diagonal coefficients [1:n]
-        r: Right-hand side [1:n]
-        n: System size
+        a, b, c: Lower, main and upper diagonals, shape ``(n,)``.
+        r: Right-hand side, shape ``(n,)``.
+        min_pivot: If given, every pivot ``bet`` is replaced by ``max(|bet|, min_pivot)``
+            (the guard the solar radiation and soil temperature solves have used since the
+            translation; not in Fortran). ``None``: Fortran's unguarded pivots.
 
     Returns:
-        Solution vector [1:n]
-
-    Note:
-        Arrays use 1-based indexing in the algorithm (index 0 unused).
-        Input arrays should have shape (n+1,) to accommodate this.
+        The solution ``u``, shape ``(n,)``.
     """
-    # Allocate arrays (1-based indexing, so size n+1)
-    gam = jnp.zeros(n + 1, dtype=jnp.float64)
-    u = jnp.zeros(n + 1, dtype=jnp.float64)
+    a, b, c, r = (jnp.asarray(x) for x in (a, b, c, r))
 
-    # Forward elimination (Fortran lines similar to original)
-    # Guard pivot (bet) away from zero to keep ratio coefficients bounded.
-    # Physical systems have bet > 0 (positive definite diagonal dominance).
-    _eps_bet = jnp.asarray(1.0e-10)
-    bet = b[1]
-    bet_safe = jnp.maximum(jnp.abs(bet), _eps_bet)
-    u = u.at[1].set(r[1] / bet_safe)
+    def _pivot(bet):
+        return bet if min_pivot is None else jnp.maximum(jnp.abs(bet), min_pivot)
 
-    for j in range(2, n + 1):
-        gam = gam.at[j].set(c[j - 1] / bet_safe)
-        bet = b[j] - a[j] * gam[j]
-        bet_safe = jnp.maximum(jnp.abs(bet), _eps_bet)
-        u = u.at[j].set((r[j] - a[j] * u[j - 1]) / bet_safe)
+    def _forward(carry, row):
+        piv, u_prev, c_prev = carry
+        a_j, b_j, c_j, r_j = row
+        gam = c_prev / piv
+        piv = _pivot(b_j - a_j * gam)
+        u = (r_j - a_j * u_prev) / piv
+        return (piv, u, c_j), (gam, u)
 
-    # Backward substitution
-    for j in range(n - 1, 0, -1):
-        u = u.at[j].set(u[j] - gam[j + 1] * u[j + 1])
+    one, zero = jnp.ones((), dtype=b.dtype), jnp.zeros((), dtype=b.dtype)
+    # First row: gam = 0 / 1 = 0, bet = b[0] - a[0] * 0, u = (r[0] - a[0] * 0) / bet
+    _, (gam, u) = jax.lax.scan(_forward, (one, zero, zero), (a.at[0].set(0.0), b, c, r))
 
-    return u
+    def _back(u_next, row):
+        u_j, gam_next = row
+        u_j = u_j - gam_next * u_next
+        return u_j, u_j
+
+    _, u_head = jax.lax.scan(_back, u[-1], (u[:-1], gam[1:]), reverse=True)
+    return jnp.concatenate([u_head, u[-1:]])
 
 
 # ---------------------------------------------------------------------------
@@ -764,7 +223,7 @@ def _tridiag_2eq_fwd(
     vectors.  Also used as the plain (non-differentiable) implementation via
     the custom-VJP trampoline below.
 
-    Mirrors Fortran subroutine ``tridiag_2eq`` (lines 287-350).
+    Fortran reference: MLMathToolsMod.F90::tridiag_2eq.
     """
     t, q = _tridiag_2eq_solve(a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, n)
     return t, q
@@ -788,7 +247,7 @@ def tridiag_2eq(
     Solve the coupled tridiagonal system for air temperature ``t`` and
     water vapour mole fraction ``q`` at each canopy layer.
 
-    Mirrors Fortran subroutine ``tridiag_2eq`` (lines 287-350).
+    Fortran reference: MLMathToolsMod.F90::tridiag_2eq.
 
     The system at each layer ``i = 0, ..., n-1`` (0-based) is:
 
@@ -979,32 +438,6 @@ def _tridiag_2eq_solve(
     return jnp.concatenate([t, f1[-1:]]), jnp.concatenate([q, f2[-1:]])
 
 
-def tridiag_scan(a, b, c, r):
-    """Thomas algorithm for a tridiagonal system, as ``lax.scan`` loops (0-based rows; ``a[0]``
-    and ``c[-1]`` unused). The same arithmetic per row as Fortran ``tridiag``, without
-    growing the compiled program with the number of rows (plan Phase 6)."""
-
-    def _forward(carry, row):
-        bet, u_prev, c_prev = carry
-        a_j, b_j, c_j, r_j = row
-        gam = c_prev / bet
-        bet = b_j - a_j * gam
-        u = (r_j - a_j * u_prev) / bet
-        return (bet, u, c_j), (gam, u)
-
-    one, zero = jnp.ones((), dtype=b.dtype), jnp.zeros((), dtype=b.dtype)
-    # First row: gam = 0 / 1 = 0, bet = b[0] - a[0] * 0, u = (r[0] - a[0] * 0) / b[0]
-    _, (gam, u) = jax.lax.scan(_forward, (one, zero, zero), (a.at[0].set(0.0), b, c, r))
-
-    def _back(u_next, row):
-        u_j, gam_next = row
-        u_j = u_j - gam_next * u_next
-        return u_j, u_j
-
-    _, u_head = jax.lax.scan(_back, u[-1], (u[:-1], gam[1:]), reverse=True)
-    return jnp.concatenate([u_head, u[-1:]])
-
-
 tridiag_2eq.defvjp(_tridiag_2eq_fwd_rule, _tridiag_2eq_bwd_rule)
 
 
@@ -1018,7 +451,7 @@ def log_gamma_function(x: float) -> float:
     Return the natural logarithm of the gamma function, ``ln(Γ(x))``,
     using Lanczos's approximation.
 
-    Mirrors Fortran function ``log_gamma_function`` (lines 362-390).
+    Fortran reference: MLMathToolsMod.F90::log_gamma_function.
 
     Coefficients follow the Numerical Recipes implementation
     (Fortran lines 377-379).
@@ -1059,7 +492,7 @@ def beta_function(a: float, b: float) -> float:
     """
     Return the beta function ``B(a, b) = Γ(a)Γ(b)/Γ(a+b)``.
 
-    Mirrors Fortran function ``beta_function`` (lines 392-405).
+    Fortran reference: MLMathToolsMod.F90::beta_function.
 
     Args:
         a: First parameter (a > 0).
@@ -1081,7 +514,7 @@ def beta_distribution_pdf(a: float, b: float, x: float) -> float:
     Return the beta distribution probability density function,
     ``f(x; a, b)``.
 
-    Mirrors Fortran function ``beta_distribution_pdf`` (lines 407-425).
+    Fortran reference: MLMathToolsMod.F90::beta_distribution_pdf.
 
     .. code-block:: none
 
@@ -1108,7 +541,7 @@ def beta_distribution_cdf(a: float, b: float, x: float) -> float:
     Return the beta distribution cumulative distribution function,
     ``F(x; a, b) = I_x(a, b)``, using the incomplete beta function.
 
-    Mirrors Fortran function ``beta_distribution_cdf`` (lines 427-455).
+    Fortran reference: MLMathToolsMod.F90::beta_distribution_cdf.
 
     Uses the continued fraction representation via
     :func:`_beta_function_incomplete_cf`.  When
@@ -1152,8 +585,7 @@ def _beta_function_incomplete_cf(a: float, b: float, x: float) -> float:
     Evaluate the continued fraction representation of the incomplete
     beta function.
 
-    Mirrors Fortran function ``beta_function_incomplete_cf`` (private,
-    lines 457-510).
+    Fortran reference: MLMathToolsMod.F90::beta_function_incomplete_cf.
 
     Uses the modified Lentz algorithm with ``maxit = 100``,
     ``eps = 3e-7``, and ``fpmin = 1e-30``.
@@ -1206,5 +638,5 @@ def _beta_function_incomplete_cf(a: float, b: float, x: float) -> float:
         if abs(delta - 1.0) < eps:
             return h
 
-    endrun(msg=" ERROR: beta_function_incomplete_cf error")
-    return h  # Unreachable; satisfies type checker
+    # Fortran stops the model (endrun)
+    raise RuntimeError("beta_function_incomplete_cf: no convergence in maxit iterations")

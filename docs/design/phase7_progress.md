@@ -109,6 +109,18 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   forward 24.1-24.8 -> 26.8-28.4 ms/step (~1.1x, the adapters), gradient 585-606 -> 604
   ms/step (no change), peak memory 4.4-4.5 -> 4.3-4.6 GB. **Package 7.1 done.**
 
+### 7.2 Physics by process (started 2026-10-30)
+
+- **Process 1, `clm_ml/physics/math.py` (C9):** from `MLMathToolsMod.py` (deleted; the 10
+  importing modules and the golden tests import the new module, no shim). `tridiag` 0-based
+  as a `lax.scan` (replaces the unrolled 1-based `tridiag` and `tridiag_scan`; the pivot
+  guard as `min_pivot`, passed by the solar radiation and soil temperature solves). Unused
+  container-threading root finders not moved. Found: `wue_solver: brent` is never used (open
+  issue 18 in `global_input.md`, for process 7). New `tests/clm_ml/test_physics_math.py`.
+  Tests: lint; bit-for-bit + noise twin 177 pass (2.0 min); golden `MLMathToolsMod` 41 pass;
+  new unit tests and `test_imports` pass; focused CPU gradient test (`tridiag_2eq`'s
+  `custom_vjp` moved) 1 pass (3.2 min).
+
 ## Next (resume here)
 
 **Package 7.1 done (2026-10-30, last commit `bdde552`); reported to the maintainer, who asked

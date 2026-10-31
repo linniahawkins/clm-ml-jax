@@ -263,7 +263,7 @@ class Model:
             jnp.asarray(self._batch.runner_gidx),
             self._template,
         )
-        from multilayer_canopy.MLMathToolsMod import is_concrete
+        from clm_ml.physics.math import is_concrete
 
         if is_concrete(errors):  # not under jax.grad: Fortran's conservation checks
             M.check_batch_balance(

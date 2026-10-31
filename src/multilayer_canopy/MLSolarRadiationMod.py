@@ -30,6 +30,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
+from clm_ml.physics.math import is_concrete, tridiag  # noqa: F401
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import rpi as pi  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
@@ -47,7 +48,6 @@ from multilayer_canopy.MLclm_varcon import J_to_umol, chil_max, chil_min, kb_max
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
 from multilayer_canopy.MLLayersMod import keep, layers, pad_with_top
-from multilayer_canopy.MLMathToolsMod import is_concrete, tridiag  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Public driver
@@ -352,7 +352,7 @@ def _Norman(
     For each waveband ``ib`` and each patch ``p``, sets up a tridiagonal
     system of ``2*(nbot-to-ntop layers + soil)`` equations for the
     upward and downward diffuse fluxes at each layer interface and
-    solves it via :func:`MLMathToolsMod.tridiag`. The ordering of
+    solves it via :func:`clm_ml.physics.math.tridiag`. The ordering of
     equations follows the Fortran exactly: soil upward (m=1), soil
     downward (m=2), then for ``ic = nbot, ..., ntop-1`` upward (odd)
     and downward (even), finally top-layer upward and downward.
@@ -461,8 +461,8 @@ def _Norman(
                 dtri[m] = jnp.where(is_sky, _swskyd_ib, dtri[m])
 
             # Solve — Fortran line 345
-            utri = tridiag(atri, btri, ctri, dtri, m_max)
-            u = jnp.stack([utri[m] for m in range(1, m_max + 1)])
+            rows = [jnp.stack(x[1:]) for x in (atri, btri, ctri, dtri)]  # rows 1..m_max
+            u = tridiag(*rows, min_pivot=1.0e-10)
 
             ics_out = jnp.where(valid, ics, n_slots + 1)  # unused slots: dropped entry
             swupw_new = jnp.zeros(n_slots + 2).at[0].set(u[0]).at[ics_out].set(u[2::2][:n_slots])

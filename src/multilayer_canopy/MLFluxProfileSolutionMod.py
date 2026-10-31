@@ -15,6 +15,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
+from clm_ml.physics.math import tridiag_2eq  # noqa: F401
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import (
@@ -26,7 +27,6 @@ from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf  # noqa: F401
 from multilayer_canopy.MLLayersMod import keep, layers, pad_with_top
 from multilayer_canopy.MLLeafFluxesMod import LeafFluxes  # noqa: F401
-from multilayer_canopy.MLMathToolsMod import tridiag_2eq  # noqa: F401
 from multilayer_canopy.MLSoilFluxesMod import SoilFluxes  # noqa: F401
 from multilayer_canopy.MLWaterVaporMod import LatVap, SatVap  # noqa: F401
 

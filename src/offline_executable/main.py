@@ -53,11 +53,11 @@ from clm_ml.legacy.state import (  # noqa: E402
     state_from_instances,
     step_state_from_instances,
 )
+from clm_ml.physics.math import is_concrete  # noqa: E402
 from clm_src_cpl.lnd_comp_nuopc import InitializeRealize, ModelAdvance  # noqa: E402
 from clm_src_main.decompMod import bounds_type  # noqa: E402
 from multilayer_canopy.MLCanopyFluxesType import BALANCE_CHECKS, check_balance  # noqa: E402
 from multilayer_canopy.MLclm_varctl import DEFAULT_OPTIONS, MLOptions  # noqa: E402
-from multilayer_canopy.MLMathToolsMod import is_concrete  # noqa: E402
 
 # Root of the Python source tree  (…/clm-ml-jax/src)
 _SRC_ROOT = Path(__file__).resolve().parent.parent

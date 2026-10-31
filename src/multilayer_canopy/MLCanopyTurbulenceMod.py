@@ -40,6 +40,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from clm_ml.physics.math import (  # noqa: F401
+    bisection_traceable,
+    is_concrete,
+)
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import grav, vkc  # noqa: F401
 from clm_src_main.clm_varcon import pi as rpi
@@ -72,10 +76,6 @@ from multilayer_canopy.MLclm_varcon import (  # noqa: F401
 )
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLLayersMod import Layers, keep, layers, pad_with_top
-from multilayer_canopy.MLMathToolsMod import (  # noqa: F401
-    bisection_traceable,
-    is_concrete,
-)
 
 # Python-float aliases for aH12 elements — used inside _ObuFuncPure which is called
 # on every solver iteration; accessing aH12[i] (a JAX array) would force an XLA sync
@@ -811,7 +811,7 @@ def _obu_fixed_iter(init_obu, kwargs, sparse_canopy_type: int, n_iter: int = 25)
     """
     Fixed-iteration Obukhov-length solver via ``jax.lax.fori_loop``.
 
-    Replaces :func:`MLMathToolsMod.hybrid_scalar` (Python ``while``-loop)
+    Replaces Fortran's ``hybrid`` (MLMathToolsMod.F90; a Python ``while``-loop)
     with a ``jax.lax.fori_loop`` of exactly ``n_iter`` secant steps so the
     solver is ``jax.jit``-compatible.
 
@@ -1093,7 +1093,7 @@ def _RoughnessLength(p: int, mlcanopy_inst: mlcanopy_type) -> mlcanopy_type:
     """Roughness length for momentum, by bisection with the Fortran stopping rule.
 
     Mirrors Fortran subroutine ``RoughnessLength`` (via
-    :func:`MLMathToolsMod.bisection_traceable`). JAX-traceable.
+    :func:`clm_ml.physics.math.bisection_traceable`). JAX-traceable.
     """
     ztop_p = mlcanopy_inst.ztop_canopy[p]
     zdisp_p = mlcanopy_inst.zdisp_canopy[p]

@@ -61,7 +61,7 @@ def _import_jax_modules():
     mods = {}
     for name in [
         "multilayer_canopy.MLWaterVaporMod",
-        "multilayer_canopy.MLMathToolsMod",
+        "clm_ml.physics.math",
         "multilayer_canopy.MLLeafPhotosynthesisMod",
         "multilayer_canopy.MLCanopyTurbulenceMod",
         "multilayer_canopy.MLLeafHeatCapacityMod",
@@ -104,52 +104,47 @@ def _adapt_latvap(inp: dict) -> dict:
 
 
 def _adapt_quadratic(inp: dict) -> dict:
-    quadratic = _get("multilayer_canopy.MLMathToolsMod").quadratic
+    quadratic = _get("clm_ml.physics.math").quadratic
     r1, r2 = quadratic(inp["a"], inp["b"], inp["c"])
     return {"r1": float(r1), "r2": float(r2)}
 
 
 def _adapt_log_gamma(inp: dict) -> dict:
-    log_gamma_function = _get("multilayer_canopy.MLMathToolsMod").log_gamma_function
+    log_gamma_function = _get("clm_ml.physics.math").log_gamma_function
     return {"gammaln": float(log_gamma_function(inp["x"]))}
 
 
 def _adapt_beta_function(inp: dict) -> dict:
-    beta_function = _get("multilayer_canopy.MLMathToolsMod").beta_function
+    beta_function = _get("clm_ml.physics.math").beta_function
     return {"beta": float(beta_function(inp["a"], inp["b"]))}
 
 
 def _adapt_beta_pdf(inp: dict) -> dict:
-    beta_distribution_pdf = _get("multilayer_canopy.MLMathToolsMod").beta_distribution_pdf
+    beta_distribution_pdf = _get("clm_ml.physics.math").beta_distribution_pdf
     return {"beta_pdf": float(beta_distribution_pdf(inp["a"], inp["b"], inp["x"]))}
 
 
 def _adapt_beta_cdf(inp: dict) -> dict:
-    beta_distribution_cdf = _get("multilayer_canopy.MLMathToolsMod").beta_distribution_cdf
+    beta_distribution_cdf = _get("clm_ml.physics.math").beta_distribution_cdf
     return {"beta_cdf": float(beta_distribution_cdf(inp["a"], inp["b"], inp["x"]))}
 
 
 def _adapt_tridiag(inp: dict) -> dict:
-    """tridiag uses 1-based indexing: prepend a sentinel 0 to each array."""
-    tridiag = _get("multilayer_canopy.MLMathToolsMod").tridiag
+    """tridiag takes 0-based rows; the golden outputs are named u_1..u_n (Fortran's rows).
+    Fortran's unguarded pivots (the guarded variant: tests/clm_ml/test_physics_math.py)."""
+    tridiag = _get("clm_ml.physics.math").tridiag
     n = int(inp["n"])
 
-    # Golden arrays are 0-indexed length-n; JAX tridiag wants 1-based length-(n+1)
-    def _pad(key):
-        arr_raw = inp.get(key, [0.0] * n)
-        return jnp.array([0.0] + list(arr_raw), dtype=jnp.float64)
+    def _arr(key):
+        return jnp.array(inp.get(key, [0.0] * n)[:n], dtype=jnp.float64)
 
-    a = _pad("a")
-    b = _pad("b")
-    c = _pad("c")
-    r = _pad("r")
-    u = tridiag(a, b, c, r, n)
-    return {f"u_{i}": float(u[i]) for i in range(1, n + 1)}
+    u = tridiag(_arr("a"), _arr("b"), _arr("c"), _arr("r"))
+    return {f"u_{i + 1}": float(u[i]) for i in range(n)}
 
 
 def _adapt_tridiag_2eq(inp: dict) -> dict:
     """tridiag_2eq uses 0-based indexing; missing off-diagonal keys default to 0."""
-    tridiag_2eq = _get("multilayer_canopy.MLMathToolsMod").tridiag_2eq
+    tridiag_2eq = _get("clm_ml.physics.math").tridiag_2eq
     n = int(inp["n"])
 
     def _arr(key):

@@ -21,6 +21,7 @@ from typing import Sequence
 
 import jax.numpy as jnp
 
+from clm_ml.physics.math import beta_distribution_cdf  # noqa: F401
 from clm_src_biogeophys.CanopyStateType import canopystate_type  # noqa: F401
 from clm_src_biogeophys.FrictionVelocityMod import frictionvel_type  # noqa: F401
 from clm_src_main.abortutils import endrun  # noqa: F401
@@ -34,7 +35,6 @@ from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLclm_varcon import mmdry, mmh2o  # noqa: F401
 from multilayer_canopy.MLclm_varctl import MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
-from multilayer_canopy.MLMathToolsMod import beta_distribution_cdf  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Public: define canopy layer vertical structure
