@@ -130,38 +130,31 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   `tests/clm_ml/test_physics_soil.py` (declared reads/writes per adapter). Tests: lint;
   before re-recording: noise twin 88 pass, bit for bit 55 fail; after: bit-for-bit + noise
   twin 177 pass (1.2 min); `test_imports`, new unit tests pass.
+- **Soil thermal properties once per step (C11):** `SoilTemperature` uses the `tk`, `cv` of
+  `clm_drv`'s `SoilThermProp` call (same inputs, checked in the code). Tests: lint;
+  bit-for-bit + noise twin 177 pass (1.6 min); soil unit tests pass.
 
 ## Next (resume here)
 
-**Package 7.1 done (2026-10-30, last commit `bdde552`); reported to the maintainer, who asked
-to start 7.2 in the next session.** Open review points they may still raise: C4 (bit for bit
-holds on CPU, so the reference was not re-recorded and option 2, the noise twin as the only
-gate, was not needed), the 133 removed diagnostics (`phase7_removed_diagnostics.md`), C5-C8.
+**Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2; last commit = the one
+that wrote this.** Next session: **processes 3-4** (scope table):
+3. `clm_ml/physics/atm_forcing.py` (`MLGetAtmForcingMod`: GetAtmForcing, TimeInterpolation3),
+   ready for 7.3. Process-replay routine `GetAtmForcing` (`tests/regression/process_io.py`).
+4. `clm_ml/physics/solar_radiation.py` (two-stream; Norman registered as unsupported, D8): the
+   150-term sum as a scan in the same order. Process replay `SolarRadiation`.
 
-### Package 7.2: physics by process into `clm_ml/physics/` (scope §4)
+Same pattern as process 2 (C10): physics on plain 0-based arrays in `clm_ml/physics/`, legacy
+adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
+fake containers holding only the declared fields. Expect round-off changes when loops become
+array operations even if every routine is bit-identical in isolation (C10): probe the routine
+alone against the old code first (`probe72/compare.py` pattern, old files from git), then, if
+only the whole-chunk compile differs and the noise twin passes, re-record the reference in the
+same commit (D7) and log it. Constants through `clm_ml/physics/constants.py`.
 
-One commit per process in the scope's table order, each **bit for bit on CPU**; 2-3 processes
-per session (How to work, above). Each process gets: variants registered by name (plan §6.6),
-a docstring with `Fortran reference:` and its reads/writes, a test that the declared writes
-are what changes, and its golden tests repointed (`tests/fortran_validation/test_golden_jax.py`
-imports routines by module name; never edit the `golden_IO/*.json`).
-
-**First session: processes 1-2.**
-1. `clm_ml/physics/math.py` from `multilayer_canopy/MLMathToolsMod.py` (root finders
-   `hybrid`/`zbrent`/`bisection`, `quadratic`, `tridiag`, `tridiag_2eq`, `tridiag_scan`,
-   beta/gamma functions; 12 source files import it). Scope: `tridiag` as a scan (removes 48
-   unrolled ops). `tridiag_2eq` has a **hand-written gradient** (`custom_vjp`), so this commit
-   also runs `python tests/gradient_tier.py --focused`. Golden: `test_MLMathToolsMod_*` (7).
-   Before deciding how the old module names keep working during the move (re-export shim
-   vs. updating every import), log the choice as a C decision.
-2. `clm_ml/physics/soil.py` (clmData, SoilAlbedo, SurfaceResistance, SoilThermProp,
-   SoilWater, SoilTemperature): array operations instead of ~500 scalar updates (D5);
-   `SoilThermProp` computed once only if its two calls see the same inputs (check first,
-   with a probe).
-
-Before the first 7.2 commit, take the **timing baseline** at `bdde552` (already recorded:
-`p71-clm-ml-jax-*` in `timing/results_model.jsonl`, forward ~27-28 ms/step, gradient
-~604 ms/step) and compare at the end of 7.2 (discuss > 1.5x, scope risk table).
+Open for the maintainer: C10 (reference re-recorded for the soil move, round-off only), open
+issue 18 (`wue_solver: brent` never used; decide at process 7). Earlier: C4, the removed
+diagnostics, C5-C8. Timing baseline for the end of 7.2: `p71-*` in
+`timing/results_model.jsonl` (forward ~27-28 ms/step, gradient ~604 ms/step).
 
 ### Practical notes for the session (learned in 7.0-7.1)
 
@@ -180,7 +173,7 @@ Before the first 7.2 commit, take the **timing baseline** at `bdde552` (already 
   in scratch; `time_model.py` imports its own tree's `src`).
 - **Committing docs:** `docs/` is matched by an ignore rule: use `git add -u docs` for tracked
   files and `git add -f` for new ones, and check `git status` after committing.
-- **Two layouts until step 10 of 7.2:** the physics still runs on the legacy containers
+- **Two layouts until process 10 of 7.2:** the physics still runs on the legacy containers
   (1-based, patch axis of length 1); the step's input/output is the 0-based `StepState`
   (`clm_ml/state.py`), converted in `clm_ml/legacy/state.py`; outputs read through
   `clm_ml/legacy/view.py`. When a moved process changes what the step returns, change the

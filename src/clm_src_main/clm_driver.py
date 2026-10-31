@@ -310,6 +310,8 @@ def clm_drv(
         water_inst,
         mlcanopy_inst,
         step_time.dtime,
+        tk,
+        cv,
         site=site,
     )
     for p, err in soil_energy_error.items():  # Fortran stops; recorded, checked on the host

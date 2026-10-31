@@ -50,10 +50,9 @@ DECLARED = {
         ("soilstate.hk_l_col", "soilstate.smp_l_col"),
     ),
 }  # fmt: skip
-# SoilTemperature computes the thermal properties again (SoilThermProp), as Fortran
 DECLARED["SoilTemperature"] = (
-    tuple(sorted({*DECLARED["SoilThermProp"][0], "mlcanopy.gsoi_soil"})),
-    ("soilstate.thk_col", "temperature.t_soisno_col"),
+    ("site.z_col", "temperature.t_soisno_col", "mlcanopy.gsoi_soil"),
+    ("temperature.t_soisno_col",),
 )
 
 
@@ -269,36 +268,20 @@ def SoilTemperature(
     water_inst,
     mlcanopy_inst,
     dtime,
+    tk,
+    cv,
     site=None,
 ):
-    """Soil temperature of the non-lake columns after one step (``soil.soil_temperature``),
-    with the thermal properties computed again (``SoilThermProp``, as Fortran).
+    """Soil temperature of the non-lake columns after one step (``soil.soil_temperature``).
 
     Fortran reference: MLSoilTemperatureMod.F90::SoilTemperature. Standalone only (p == c).
+    Fortran computes the thermal properties again here (``SoilThermProp``); they are the
+    ``tk``, ``cv`` that ``clm_drv`` computed before the canopy fluxes (column, legacy level),
+    whose inputs do not change in between (Phase 7 decision C11).
     Returns ``(temperature_inst, soilstate_inst, {patch: energy conservation error})``.
     """
-    import jax.numpy as jnp
-
-    from clm_src_main import clm_varpar
-
     site = site_or_modules(site)
     lev = _levels()
-    nc = bounds.endc + 1
-    shape = (nc, clm_varpar.nlevgrnd + 1)
-    soilstate_inst, temperature_inst, tk, cv, _ = SoilThermProp(
-        bounds,
-        num_nolakec,
-        filter_nolakec,
-        jnp.zeros(shape, dtype=jnp.float64),
-        jnp.zeros(shape, dtype=jnp.float64),
-        jnp.zeros(nc, dtype=jnp.float64),
-        temperature_inst,
-        waterdiagnosticbulk_inst,
-        waterstatebulk_inst,
-        water_inst,
-        soilstate_inst,
-        site=site,
-    )
     t_soisno = temperature_inst.t_soisno_col
     energy_error = {}
     for f in range(num_nolakec):

@@ -114,9 +114,12 @@ def _run(name, k):
     if name == "SoilWater":
         return {"soilstate": adapters.SoilWater(B, 1, FILTER, s, w, site=k["site"])}
     if name == "SoilTemperature":
+        n = N_GRND + 1
+        tk = jnp.full((1, n), 1.5).at[0, N_GRND].set(0.0)
+        cv = jnp.full((1, n), 2.0e6)
         t, s, err = adapters.SoilTemperature(
             B, 1, FILTER, s, t, k["waterdiagnosticbulk"], w, k["water"], k["mlcanopy"], 1800.0,
-            site=k["site"],
+            tk, cv, site=k["site"],
         )  # fmt: skip
         assert abs(float(err[0])) < 1e-8  # the implicit solve conserves energy
         return {"temperature": t, "soilstate": s}

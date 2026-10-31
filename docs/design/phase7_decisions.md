@@ -280,3 +280,15 @@ Why: the physics written once on plain arrays is what 7.2 aims for; the adapters
 legacy step unchanged until process 10 and are deleted with it.
 Alternatives: adapters inside the old modules (keeps six legacy files alive for thin
 wrappers); declaring reads/writes only in docstrings (not testable).
+
+### C11. Soil thermal properties computed once per step (7.2, 2026-10-30)
+Context: scope 7.2 process 2: `SoilThermProp` once if its two calls (Fortran `clm_drv` before
+the canopy fluxes, and `SoilTemperature` after them) see the same inputs; check first.
+Decision: `clm_drv` passes its `tk`, `cv` to `SoilTemperature`, which no longer recomputes
+them (`clm_ml.legacy.soil.SoilTemperature(..., dtime, tk, cv)`).
+Why: the inputs are the same arrays: between the calls only `SoilWater` (writes `hk_l`,
+`smp_l`) and `MLCanopyFluxes` (returns only `mlcanopy`) run, and neither writes
+`t_soisno`, soil water, `h2osfc`, `h2osno` or the soil properties; the second call's `thk_col`
+write repeated the first's values. Confirmed by the bit-for-bit test (177 pass): the step's
+soil temperature, the only user of the second call, is unchanged.
+Alternatives: keep Fortran's two calls (twice the work for the same numbers).
