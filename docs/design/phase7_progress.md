@@ -91,7 +91,7 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
 - **Step results as `StepState` (C6, C7):** the step returns `StepState(state, diagnostics)`;
   output variables, validation streams, the first step and the legacy `.out` writer read it
   only through the legacy view (`legacy_view(template, step, layers)`). Removed fields (D6):
-  `phase7_removed_diagnostics.md` (134). Tests: lint; bit-for-bit + noise twin +
+  `phase7_removed_diagnostics.md` (134; 133 after C8). Tests: lint; bit-for-bit + noise twin +
   `test_clm_ml_equivalence` + `test_stream_runner` 180 pass.
 - **Independent review fixes (C8):** `td_profile` kept (issue-14 check); the view gives all
   state fields too; `clm-ml check` validates raw stream names against the view; `put` checks
@@ -99,15 +99,23 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   bit-for-bit + noise twin + equivalence + thin-layer (issue 14) 180 pass; adapter, acclimation
   and restart-utility unit tests pass.
 
+- **Mixed C3/C4 batch (risk 5):** a 3-patch batched run (C3 and C4 groups) at 7.0 and at
+  7.1: all 68 recorded arrays identical; `anet_leaf` differs only in fill values (>= 1e30) of
+  unused slots, every real value identical.
+- **Package end (2026-10-30, CPU):** gradient tier 8 pass (5.7 min); all of
+  `tests/regression -m regression` 207 pass (53 min, fresh compiles); `tests/clm_ml` 137 pass;
+  Fortran golden (not slow) 160 pass. Timing (`time_model.py --steps 8`, CPU, gradient XLA
+  flags, 7.0 and 7.1 alternated twice; `timing/results_model.jsonl`, labels `p71-*`):
+  forward 24.1-24.8 -> 26.8-28.4 ms/step (~1.1x, the adapters), gradient 585-606 -> 604
+  ms/step (no change), peak memory 4.4-4.5 -> 4.3-4.6 GB. **Package 7.1 done.**
+
 ## Next (resume here)
 
-**Package 7.0 done; waiting for the maintainer.** Decide first, before 7.1:
-1. **The bit-for-bit safety net** (log 7.0): the committed reference no longer matches the code
-   bit for bit (round-off only). Proposal: re-record the reference at the 7.0 commit with an
-   empty compilation cache, and make the bit-for-bit test (and `record_run.py`) always use a
-   fresh, test-only cache directory, so the compared programs never depend on what other runs
-   left in the shared cache; check that two recordings in separate processes are identical.
-2. Then **package 7.1 (the step state)**, scope §4: `StepState` (0-based, no patch axis),
-   boundary adapters, diagnostics cut (D6) with `phase7_removed_diagnostics.md`; the legacy
-   view maps the new state to the reference names; route the legacy `.out` writer through the
-   view (or retire it) first.
+**Package 7.1 done (2026-10-30); waiting for the maintainer's review** before 7.2. Points
+for the maintainer: C4 (bit for bit holds on CPU, so the reference was not re-recorded and
+option 2, the noise twin as the only gate, was not needed); the removed diagnostics
+(`phase7_removed_diagnostics.md`, 133 fields); C5-C8.
+
+Then **package 7.2 (physics by process into `clm_ml/physics/`)**, scope §4: one commit per
+process in the scope's order (math, soil, atm forcing, solar radiation, ...), each bit for
+bit on CPU; timing test before and after.
