@@ -446,6 +446,8 @@ Decision:
   `clm_ml.model`); that belongs with the step's new signature when the containers leave the
   step (process 10) and the setup without globals (7.4). The physics already takes them as
   an argument, so that change touches only the driver.
+  **Maintainer (2026-10-31): document it as a fix to make at process 10**; listed in
+  `phase7_progress.md`, "Fixes to make at process 10".
 - **Values rounded as stored:** `harman_finnigan` passes the canopy-top terms
   (`obu`, `beta`, `zdisp`, `PrSc`, `ustar`, `gac_to_hc`) through
   `jax.lax.optimization_barrier` before using them. Without it, XLA folded

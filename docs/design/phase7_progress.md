@@ -170,7 +170,7 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   on one patch (0-based layers), the psihat tables an argument (`RSLTables`; file moved to
   `src/clm_ml/data/psihat.nc`, read by `clm_ml/io/rsl_tables.py`; the `MLclm_varcon` arrays,
   module caches, `rslfile` and `LookupPsihatINI` gone), still a constant of the compiled
-  chunk until the step's signature changes (process 10 / 7.4). Canopy-top values rounded as
+  chunk until process 10 (maintainer: fix there, "Fixes to make at process 10" below). Canopy-top values rounded as
   stored (`optimization_barrier`: without it XLA folded `ustar / beta`, 1 ulp off in 2 of 6
   recorded calls; probe `probe74/compare.py`). Ground conductance by name (other
   `HF_extension_type` values now refused). Adapter `clm_ml/legacy/turbulence.py`;
@@ -206,9 +206,24 @@ If the routine alone differs by an ulp because an intermediate no longer round-t
 the container, XLA may be folding divisions across it: pass the values Fortran stores through
 `jax.lax.optimization_barrier` (C15).
 
+### Fixes to make at process 10 (maintainer's instructions)
+
+Items deferred to process 10 (the step driver, where the containers leave the step), each
+done and ticked in the process-10 commit:
+
+- [ ] **psihat tables as a run-time input of the compiled step** (maintainer, 2026-10-31;
+  C15). Today the legacy adapter passes `clm_ml.io.rsl_tables.default_rsl_tables()`, so the
+  tables are a constant of the compiled chunk. At process 10: pass `RSLTables` into the step
+  as an input (one copy per chunk, not per patch or per step: broadcast, `in_axes=None` under
+  `vmap`, replicated under `shard_map`) through `make_chunk_runner`, `make_stream_runner`,
+  `make_batch_runner`, the sharded wrapper (`_sharded`), the batched first step and
+  `clm_ml.model.Model`; drop `default_rsl_tables()` from the time step (keep it only as the
+  setup's default). Test: bit for bit (the values are the same; a constant becoming an
+  argument may change XLA's folding: probe as in C10/C15 if not) and the focused gradient test.
+
 Open for the maintainer: C10 and C14 (reference re-recorded for the soil and process-5 moves,
-round-off only), C15 (psihat tables still a compile-time constant of the chunk; the
-`optimization_barrier`), open issue 19 (soil ice index in `SoilResistance`, latent), open issue 18 (`wue_solver: brent` never used; decide at process 7). Earlier: C4, the removed
+round-off only), C15 (the `optimization_barrier`; the psihat tables as a step input is
+scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), open issue 18 (`wue_solver: brent` never used; decide at process 7). Earlier: C4, the removed
 diagnostics, C5-C8. Timing baseline for the end of 7.2: `p71-*` in
 `timing/results_model.jsonl` (forward ~27-28 ms/step, gradient ~604 ms/step).
 

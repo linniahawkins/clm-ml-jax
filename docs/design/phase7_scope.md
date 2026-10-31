@@ -118,7 +118,7 @@ change.
 | 7 | `leaf_boundary_layer.py`, `photosynthesis.py` | sun and shade as one vmapped call over the leaf axis (D5; halves the largest kernel) — round-off only if XLA fuses differently: check |
 | 8 | `flux_profile.py` (implicit solution, soil fluxes; WellMixed registered as unsupported, D8) | |
 | 9 | `nitrogen_profile.py`, `integrators.py` (RK) | |
-| 10 | `canopy.py`: the step driver (MLCanopyFluxes, accumulation, diagnostics) | the legacy container leaves the step here |
+| 10 | `canopy.py`: the step driver (MLCanopyFluxes, accumulation, diagnostics) | the legacy container leaves the step here; also the fixes listed in `phase7_progress.md` ("Fixes to make at process 10": psihat tables as a step input, C15) |
 
 Each process gets: variants registered by name (§6.6), a docstring with `Fortran reference:` and
 its reads/writes, a test that the declared writes are what changes, its golden tests repointed.
