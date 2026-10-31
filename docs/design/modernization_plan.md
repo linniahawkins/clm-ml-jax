@@ -1855,8 +1855,9 @@ Also: revisit the C3/C4 groups (decision 22), which trace the step twice in mixe
 ### After Phase 8: unsupported variants (maintainer, 2026-10-30)
 
 WellMixed flux-profile and dataset profiles (fail on traced layer counts) and Norman solar
-radiation stay registered but refuse to run (decision 35); make them run compiled and
-validate them against Fortran. Also Brent's method for the WUE stomatal optimization
+radiation stay registered but refuse to run (decision 35; `well_mixed` refused by `clm_ml.run`
+since Phase 7.2 process 8, C17: Fortran itself stops after WellMixed, "legacy code, not
+supported"); make them run compiled and validate them against Fortran. Also Brent's method for the WUE stomatal optimization
 (`wue_solver: brent`, Fortran `gs_solver = 1`): never translated as traceable code, refused
 since Phase 7.2 (maintainer, 2026-10-31; Phase 7 decision C16).
 

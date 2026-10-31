@@ -25,6 +25,7 @@ import netCDF4 as nc  # noqa: F401
 import numpy as np
 from jax import Array
 
+from clm_ml.physics.water_vapor import sat_vap
 from clm_src_biogeophys.FrictionVelocityMod import frictionvel_type  # noqa: F401
 from clm_src_main import GridcellType  # noqa: F401
 from clm_src_main.abortutils import endrun, handle_err  # noqa: F401
@@ -35,7 +36,6 @@ from clm_src_main.PatchType import patch  # noqa: F401
 from clm_src_main.wateratm2lndBulkType import wateratm2lndbulk_type  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import mlcanopy_type  # noqa: F401
 from multilayer_canopy.MLclm_varcon import mmdry, mmh2o  # noqa: F401
-from multilayer_canopy.MLWaterVaporMod import SatVap  # noqa: F401
 from offline_driver import TowerDataMod  # tower table, read when called (not copied at import)
 
 # ---------------------------------------------------------------------------
@@ -360,7 +360,7 @@ def derive_tower_met(raw: TowerMetRaw, tower_height: float) -> TowerMet:
     tref = raw.tbot
     qref = raw.qbot
     if round(raw.rhbot) != -999:
-        esat, _ = SatVap(tref)
+        esat, _ = sat_vap(tref)
         eair = (raw.rhbot / 100.0) * esat
         qref = mmh2o / mmdry * eair / (pref - (1.0 - mmh2o / mmdry) * eair)
     elif round(qref) != -999:

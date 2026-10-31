@@ -82,7 +82,8 @@ class _Raw:
 
     def latvap_tref(self) -> np.ndarray:
         """Molar latent heat of vaporization at the reference air temperature (J/mol),
-        MLWaterVaporMod.LatVap (recorded by the legacy worker as derived.latvap_tref)."""
+        clm_ml.physics.water_vapor.lat_vap (recorded by the legacy worker as derived.latvap_tref).
+        """
         if "derived.latvap_tref" in self.raw:
             return self.raw["derived.latvap_tref"]
         from clm_src_main.clm_varcon import hsub, hvap, tfrz

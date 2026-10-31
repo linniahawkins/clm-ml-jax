@@ -122,3 +122,8 @@ def test_norman_solar_radiation_is_not_supported(chats_run_dir):
 def test_brent_wue_solver_is_not_supported(chats_run_dir):
     with pytest.raises(ConfigError, match="brent is not supported"):
         load_run(chats_run_dir / "run.yaml", ["model.physics.wue_solver=brent"])
+
+
+def test_well_mixed_flux_profile_is_not_supported(chats_run_dir):
+    with pytest.raises(ConfigError, match="well_mixed is not supported"):
+        load_run(chats_run_dir / "run.yaml", ["model.physics.flux_profile_solution=well_mixed"])

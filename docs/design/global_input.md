@@ -328,3 +328,14 @@ Fortran); use the leaf water potential outputs instead.
     frozen soil is represented. Kept unchanged in the Phase 7 move (C14; a refactor does not
     change science); the fix is one index in the adapter `clm_ml/legacy/plant_hydraulics.py`
     (bit for bit while ice is 0). For the maintainer.
+20. **Fortran's checks of the implicit flux-profile solution are not run** (found in Phase 7.2
+    process 8, 2026-10-31; not a Phase 6b issue). Fortran
+    `MLFluxProfileSolutionMod.F90::ErrorCheck01`/`ErrorCheck02` stop the run when the
+    implicit solution disagrees with `LeafFluxes`/`SoilFluxes` or does not conserve energy
+    and water vapor in a layer, the canopy or at the ground (tolerance 1e-3 W m-2, 1e-6 K or
+    Pa). The legacy JAX translation ran them only with a debug flag that was off, so no JAX
+    run has checked them; the leaf and soil energy balances (`LeafFluxes`, `SoilFluxes`) are
+    recorded. Since Phase 7 (C17) `clm_ml.physics.flux_profile.implicit_errors` computes all
+    15 as array code and the unit test runs them. To check them in every run they would be
+    added to `BALANCE_CHECKS` (the state's `balance_error` grows, the reference is
+    re-recorded): a decision for the maintainer.

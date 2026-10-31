@@ -12,6 +12,8 @@ from clm_src_main.clm_varcon import (  # noqa: F401
     denh2o,
     denice,
     grav,
+    hsub,
+    hvap,
     rpi,
     sb,
     tfrz,

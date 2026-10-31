@@ -60,7 +60,7 @@ def _import_jax_modules():
 
     mods = {}
     for name in [
-        "multilayer_canopy.MLWaterVaporMod",
+        "clm_ml.physics.water_vapor",
         "clm_ml.physics.math",
         "clm_ml.physics.photosynthesis",
         "clm_ml.physics.turbulence",
@@ -93,13 +93,13 @@ def _get(mod_dotted: str):
 
 
 def _adapt_satvap(inp: dict) -> dict:
-    SatVap = _get("multilayer_canopy.MLWaterVaporMod").SatVap
+    SatVap = _get("clm_ml.physics.water_vapor").sat_vap
     es, desdt = SatVap(inp["t"])
     return {"es": float(es), "desdt": float(desdt)}
 
 
 def _adapt_latvap(inp: dict) -> dict:
-    LatVap = _get("multilayer_canopy.MLWaterVaporMod").LatVap
+    LatVap = _get("clm_ml.physics.water_vapor").lat_vap
     lam = LatVap(inp["t"])
     return {"lambda": float(lam)}
 

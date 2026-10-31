@@ -35,6 +35,7 @@ from clm_ml.legacy.canopy_water import (  # noqa: F401
     CanopyInterception,
     CanopyWettedFraction,
 )
+from clm_ml.legacy.flux_profile import FluxProfileSolution
 from clm_ml.legacy.leaf_boundary_layer import LeafBoundaryLayer  # noqa: F401
 from clm_ml.legacy.longwave import LongwaveRadiation  # noqa: F401
 from clm_ml.legacy.photosynthesis import LeafPhotosynthesis  # noqa: F401
@@ -48,6 +49,7 @@ from clm_ml.legacy.solar_radiation import SolarRadiation  # noqa: F401
 from clm_ml.legacy.turbulence import CanopyTurbulence  # noqa: F401
 from clm_ml.physics.atm_forcing import clm_forcing_to_ml
 from clm_ml.physics.math import is_concrete
+from clm_ml.physics.water_vapor import lat_vap
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_varcon import grav, spval  # noqa: F401
 from clm_src_main.clm_varctl import iulog  # noqa: F401
@@ -71,7 +73,6 @@ from multilayer_canopy.MLCanopyParamsMod import CanopyParams, patch_setup
 from multilayer_canopy.MLclm_varcon import mmh2o, rgas  # noqa: F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf  # noqa: F401
-from multilayer_canopy.MLFluxProfileSolutionMod import FluxProfileSolution  # noqa: F401
 from multilayer_canopy.MLinitVerticalMod import (  # noqa: F401
     getPADparameters,
     initVerticalProfiles,
@@ -79,7 +80,6 @@ from multilayer_canopy.MLinitVerticalMod import (  # noqa: F401
 )
 from multilayer_canopy.MLLayersMod import keep, layers, pad_with_top
 from multilayer_canopy.MLRungeKuttaMod import RungeKuttaIni, RungeKuttaUpdate  # noqa: F401
-from multilayer_canopy.MLWaterVaporMod import LatVap  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # JIT-compiled bef-state copy helper
@@ -1118,7 +1118,7 @@ def _MLAccumulateFluxes(
         # tref crosses freezing within the step)
         _acc1(
             mlcanopy_inst.etair_profile[p, mlcanopy_inst.ncan_canopy[p]]
-            * LatVap(mlcanopy_inst.tref_forcing[p])
+            * lat_vap(mlcanopy_inst.tref_forcing[p])
         )
 
         assert (i + 1) == nvar1d, f"_MLAccumulateFluxes: nvar1d mismatch ({i+1} != {nvar1d})"

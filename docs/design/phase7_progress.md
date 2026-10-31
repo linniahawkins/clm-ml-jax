@@ -196,22 +196,40 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   re-recording: noise twin pass, bit for bit 53 fail; process replay 7 pass; focused CPU
   gradient test 1 pass (2.2 min); after: bit-for-bit + noise twin 177 pass (1.2 min).
 
+- **Process 8, `clm_ml/physics/flux_profile.py`, `water_vapor.py` (C17): round-off change,
+  reference re-recorded.** Implicit flux-profile solution, leaf fluxes (both leaves at once)
+  and soil fluxes on one patch (0-based layers, leaves on axis 1), the legacy kernel's
+  arithmetic; `sat_vap`/`lat_vap` in `water_vapor.py` (all importers repointed);
+  `FLUX_PROFILE` with `well_mixed` refused (physics and `clm_ml.run`; Fortran stops for it
+  too); Fortran's `ErrorCheck01`/`ErrorCheck02` as `implicit_errors` (run by the unit test;
+  never run in the time step, before or now: open issue 20). Adapter
+  `clm_ml/legacy/flux_profile.py` (WellMixed translation kept there, then `endrun`);
+  `MLFluxProfileSolutionMod`, `MLSoilFluxesMod`, `MLLeafFluxesMod`, `MLWaterVaporMod`
+  deleted. On the recorded calls every written field is bit-identical to the old adapter
+  except `etair`/`stair` (up to 1.8e-13 relative: the compiled fusion recomputes
+  `eair = q pref` next to the subtraction; `optimization_barrier` does not survive to
+  fusion; `probe78`); end to end 53 fields differ, worst 1.33x the twin spread. Golden
+  `SatVap`/`LatVap` repointed. New `tests/clm_ml/test_physics_flux_profile.py` (6). Tests:
+  lint; fast golden 160 pass; `tests/clm_ml` 223 pass (`run.py` changed); before
+  re-recording: noise twin pass, bit for bit 53 fail; process replay 7 pass; after:
+  bit-for-bit + noise twin 177 pass (1.3 min); focused CPU gradient test 1 pass (2.3 min; a first try was killed, out of memory while the reference was recorded alongside).
+
 ## Next (resume here)
 
 **Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2, session 2 (2026-10-31)
 processes 3-4 (bit for bit), session 3 (2026-10-31) process 5 (round-off, reference
 re-recorded, C14), session 4 (2026-10-31) process 6 (turbulence, bit for bit, C15), session 5
 (2026-10-31) process 7 (boundary layer and photosynthesis, round-off, reference re-recorded,
-C16); last commit = the one that wrote this.** Next session: **process 8** (scope table):
-`flux_profile.py` from `MLFluxProfileSolutionMod` (the implicit coupled solution for air
-temperature, vapor pressure, leaf and ground temperature; `tridiag_2eq`) and
-`MLSoilFluxesMod`; WellMixed registered as unsupported (D8). Also decide where `SatVap`/
-`LatVap` (`MLWaterVaporMod`, used by photosynthesis, flux profile, canopy fluxes) go: probably
-`clm_ml/physics/water_vapor.py` in this process. Process replay `FluxProfileSolution`; check
-which golden tests cover it. `tridiag_2eq` has a `custom_vjp` (already in `physics.math`); if
-the solution's gradient construction moves, run the focused CPU gradient test.
+C16), session 6 (2026-10-31) process 8 (flux-profile solution and water vapor, round-off,
+reference re-recorded, C17); last commit = the one that wrote this.** Next session:
+**process 9** (scope table): `nitrogen_profile.py` (`MLCanopyNitrogenProfileMod`: the
+exponential Vcmax/Jmax/Rd/Kp profile and its integration check `NITROGEN`) and
+`integrators.py` (`MLRungeKuttaMod`: `RungeKuttaIni`, `RungeKuttaUpdate`, the Euler/RK
+tables; golden tests use `MLRungeKuttaMod`, see `test_golden_jax.py`). Process replay
+covers neither directly (check `ROUTINES` in `tests/regression/process_io.py`). The RK
+update touches the state integrated in the chunk scan: check the focused CPU gradient test.
 
-Same pattern as processes 2-7 (C10, C12-C16): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
+Same pattern as processes 2-8 (C10, C12-C17): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
 fake containers holding only the declared fields. Expect round-off changes when loops become
 array operations even if every routine is bit-identical in isolation (C10): probe the routine
@@ -220,7 +238,10 @@ only the whole-chunk compile differs and the noise twin passes, re-record the re
 same commit (D7) and log it. Constants through `clm_ml/physics/constants.py`.
 If the routine alone differs by an ulp because an intermediate no longer round-trips through
 the container, XLA may be folding divisions across it: pass the values Fortran stores through
-`jax.lax.optimization_barrier` (C15).
+`jax.lax.optimization_barrier` (C15). The barrier only blocks HLO simplification: if the
+compiled fusion recomputes a value next to its use (C17: check the optimized HLO,
+`jit(f).lower(...).compile().as_text()`, for `opt-barrier`), it does not help; then it is the
+C10 pattern (round-off, re-record).
 
 ### Fixes to make at process 10 (maintainer's instructions)
 
@@ -239,7 +260,7 @@ done and ticked in the process-10 commit:
 
 Open for the maintainer: C10 and C14 (reference re-recorded for the soil and process-5 moves,
 round-off only), C15 (the `optimization_barrier`; the psihat tables as a step input is
-scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), C16 (reference re-recorded for process 7, round-off only; process replay compares fields zero to round-off absolutely). Earlier: C4, the removed
+scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), C16 (reference re-recorded for process 7, round-off only; process replay compares fields zero to round-off absolutely). C17 (reference re-recorded for process 8, round-off only; `well_mixed` refused by `clm_ml.run`), open issue 20 (Fortran's implicit-solution checks never run in the step: record them in `BALANCE_CHECKS`?). Earlier: C4, the removed
 diagnostics, C5-C8. Timing baseline for the end of 7.2: `p71-*` in
 `timing/results_model.jsonl` (forward ~27-28 ms/step, gradient ~604 ms/step).
 

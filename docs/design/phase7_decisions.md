@@ -558,3 +558,63 @@ Alternatives: keep one call per leaf (bit for bit, but not the scope's leaf-axis
 twice the photosynthesis program); `vmap` of a scalar kernel (the old form; broadcasting
 keeps Python-float constants constant without care about how `vmap` passes unbatched
 arguments); a traceable Brent now (not validated against Fortran; maintainer chose refusal).
+
+### C17. Process 8: `clm_ml/physics/flux_profile.py` and `water_vapor.py`; `well_mixed` refused (7.2, 2026-10-31)
+Context: scope 7.2 process 8 (`MLFluxProfileSolutionMod`, with `MLSoilFluxesMod`; WellMixed
+registered as unsupported, D8); the progress log left open where `SatVap`/`LatVap`
+(`MLWaterVaporMod`) go, and `MLLeafFluxesMod` (called by Fortran's implicit solution and by
+WellMixed) is not named in the scope.
+Decision:
+- **`clm_ml/physics/water_vapor.py`**: `sat_vap`, `lat_vap` (same polynomials, same Horner
+  nesting, same `where` branches; elementwise on any shape). `SatVap_py` (a Python-float copy
+  nothing used) not moved. All importers repointed (photosynthesis, `MLCanopyFluxesMod`, the
+  tower forcing reader, the `.out` writer, the golden tests `SatVap`/`LatVap`); `hsub`,
+  `hvap` re-exported by `physics/constants.py`.
+- **`clm_ml/physics/flux_profile.py`** on one patch (0-based layers, leaves on axis 1):
+  `leaf_fluxes` (Fortran `LeafFluxes`, elementwise, both leaves at once), `soil_fluxes`
+  (`SoilFluxes`), `implicit` (`ImplicitFluxProfileSolution`; inputs grouped as `Canopy`,
+  `Ground`, `Reference`; result `FluxProfile` with `LeafFluxes`, `SoilFluxes` and the
+  implicit solution's own fluxes `ImplicitFluxes`). The arithmetic is the legacy kernel's,
+  which was already array code: padding with the top layer, identity rows after the top
+  layer, `tridiag_2eq` (its `custom_vjp` unchanged). The leaf fluxes are `leaf_fluxes` at
+  the solved profiles, as Fortran calls `LeafFluxes` there (the legacy kernel had inlined
+  the same formulas). `FLUX_PROFILE = {"implicit", "well_mixed"}`, `well_mixed` raising
+  `NotImplementedError` (D8 pattern; Fortran itself stops after WellMixed: "legacy code, not
+  supported"), and `clm_ml.run` stops with a `ConfigError` for
+  `physics.flux_profile_solution: well_mixed` (as for `norman`, `brent`).
+- **Fortran's checks of the implicit solution as a function, not in the step:**
+  `implicit_errors` computes the 15 checks of `ErrorCheck01` (implicit solution vs
+  `LeafFluxes`/`SoilFluxes`) and `ErrorCheck02` (conservation in each layer, the canopy and
+  at the ground) as array code; the unit test runs them. The legacy translation ran them only
+  with a debug flag (`DEBUG_FPS_CHECKS = False`, host loops), so the time step never did;
+  this is unchanged (adding them to `BALANCE_CHECKS` changes the state: open issue 20 in
+  `global_input.md`, for the maintainer). The flag and its host loops are gone.
+- **Adapter** `clm_ml/legacy/flux_profile.py::FluxProfileSolution` (the old name, imported by
+  `MLCanopyFluxesMod`; one `jax.jit` per patch as before): results in the layers in use,
+  padding kept; the unused leaf index 0 set to 0 in the layers in use (as the legacy code
+  wrote it); `cair` set in levels 0..ncan-1 as translated (numerics doc §4.5); `DECLARED`
+  reads/writes. The WellMixed legacy translation is kept in the adapter (runs, then
+  `endrun`, as Fortran), with its leaf and soil fluxes from `physics.leaf_fluxes`/
+  `soil_fluxes` (the legacy `LeafFluxes`/`SoilFluxes` had the same formulas) so that
+  `MLLeafFluxesMod` could go. `MLFluxProfileSolutionMod`, `MLSoilFluxesMod`,
+  `MLLeafFluxesMod`, `MLWaterVaporMod` deleted, no shim.
+- **Round-off change, reference re-recorded (D7):** on the six recorded calls the new
+  adapter equals the old one in every written field except `etair_profile` and
+  `stair_profile` (all layers, up to 1.8e-13 relative), eager and under `jit`
+  (`probe78/compare.py`). The old values equal numpy evaluated in source order on the
+  output `eair`; the new ones do not (`probe78/detail2.py`: un-jitted physics matches numpy,
+  jitted does not). The compiled HLO recomputes `eair = q pref` inside the fusion that forms
+  `-(eair(i+1) - eair(i)) / pref * gac` (no container write in between any more), where the
+  multiply and the subtraction are compiled together; the difference of two close vapor
+  pressures amplifies the last-bit change. An `optimization_barrier` (C15) does not help:
+  it is gone from the optimized HLO before fusion. End to end 53 fields differ from step 0,
+  worst 1.33x the noise-twin spread (`lwp_mean_profile`; `probe78/ratio.py`); noise twin and
+  process replay pass. Reference and twins re-recorded in this commit.
+Why: the scope's aim (physics on plain arrays by process, variants by name); keeping the
+legacy arithmetic in the same order keeps every field but the vertical vapor flux bit for bit
+in isolation; `well_mixed` refused because Fortran refuses it.
+Alternatives: keep `MLLeafFluxesMod` for WellMixed only (a dead module); recording the
+implicit-solution checks in `BALANCE_CHECKS` now (changes the state and the reference's
+`balance_error`; a decision for the maintainer, issue 20); fighting the fusion with
+container-like writes (fragile: the old code matched numpy only because of where XLA cut
+the fusions).

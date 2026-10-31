@@ -585,6 +585,11 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
             "traceable Brent solver (Phase 7 decision C16; global_input.md issue 18); use "
             "bisection"
         )
+    if config.physics.flux_profile_solution == "well_mixed":
+        raise ConfigError(
+            "model.yaml: physics.flux_profile_solution: well_mixed is not supported: Fortran "
+            "stops for it too (legacy code; Phase 7 decision D8); use implicit"
+        )
     model_step = config.numerics.step_seconds or run_file.time.step_seconds
     if run_file.domain.type == "grid":
         return _load_grid_run(

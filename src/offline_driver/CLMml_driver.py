@@ -489,6 +489,7 @@ def output(
         mlcan: Multilayer canopy state container (read-only).
         temperature_inst: Temperature state container (read-only).
     """
+    from clm_ml.physics.water_vapor import lat_vap
     from clm_src_main.abortutils import endrun  # noqa: F401
     from clm_src_main.clm_varcon import tfrz  # noqa: F401
     from clm_src_main.clm_varpar import inir, ivis, nlevsno  # noqa: F401
@@ -496,7 +497,6 @@ def output(
     from clm_src_utils.clm_time_manager import dtstep  # noqa: F401
     from multilayer_canopy.MLclm_varcon import mmdry, mmh2o  # noqa: F401
     from multilayer_canopy.MLclm_varpar import isha, isun  # noqa: F401
-    from multilayer_canopy.MLWaterVaporMod import LatVap  # noqa: F401
 
     missing_value: float = -999.0
     zero_value: float = 0.0
@@ -529,8 +529,8 @@ def output(
         float(mlcan.swskyb_forcing[p, inir]) + float(mlcan.swskyd_forcing[p, inir])
     )
 
-    lhflx_tr = float(mlcan.trveg_canopy[p]) * LatVap(float(mlcan.tref_forcing[p]))
-    lhflx_ev = float(mlcan.evveg_canopy[p]) * LatVap(float(mlcan.tref_forcing[p]))
+    lhflx_tr = float(mlcan.trveg_canopy[p]) * lat_vap(float(mlcan.tref_forcing[p]))
+    lhflx_ev = float(mlcan.evveg_canopy[p]) * lat_vap(float(mlcan.tref_forcing[p]))
 
     ic_top = int(mlcan.ntop_canopy[p])
     tair = float(mlcan.tair_profile[p, ic_top])
@@ -736,7 +736,7 @@ def output(
     _ntop_fp = int(mlcan.ntop_canopy[p])
     for ic in range(int(mlcan.ncan_canopy[p]), 0, -1):  # Fortran: do ic = ncan, 1, -1
         shf = float(mlcan.shair_profile[p, ic])
-        lhf = float(mlcan.etair_profile[p, ic]) * LatVap(float(mlcan.tref_forcing[p]))
+        lhf = float(mlcan.etair_profile[p, ic]) * lat_vap(float(mlcan.tref_forcing[p]))
         mflx = float(mlcan.mflx_profile[p, ic])
         # LW profiles are only computed for within-canopy layers (0..ntop).
         # Above-canopy layers retain spval; write 0.0 to match Fortran behavior.

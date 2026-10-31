@@ -67,8 +67,8 @@ from clm_ml.physics.constants import (
 )
 from clm_ml.physics.layers import pad_with_top
 from clm_ml.physics.math import quadratic
+from clm_ml.physics.water_vapor import sat_vap
 from clm_ml.state import PatchLayers
-from multilayer_canopy.MLWaterVaporMod import SatVap
 
 #: Stomatal conductance models by name (model.yaml ``physics.stomatal_conductance``; Fortran
 #: ``gs_type`` 0, 1, 2)
@@ -664,7 +664,7 @@ def leaf_photosynthesis(
 
     temp = temperature_parameters(acclimation, tacclim)
     rates = leaf_rates(tleaf, vcmax25, jmax25, rd25, kp25, temp, c3)
-    leaf_esat, _ = SatVap(tleaf)
+    leaf_esat, _ = sat_vap(tleaf)
     ceair = jnp.minimum(eair1, leaf_esat)
     if stomatal_conductance == "ball_berry":
         # hs stays above zero at low humidity
