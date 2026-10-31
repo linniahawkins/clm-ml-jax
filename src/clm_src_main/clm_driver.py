@@ -14,9 +14,14 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
-from clm_src_biogeophys.SoilWaterMovementMod import SoilWater  # noqa: F401
-from clm_src_biogeophys.SurfaceAlbedoMod import SoilAlbedo  # noqa: F401
-from clm_src_biogeophys.SurfaceResistanceMod import calc_soilevap_resis  # noqa: F401
+from clm_ml.legacy.soil import (
+    SoilAlbedo,
+    SoilTemperature,
+    SoilThermProp,
+    SoilWater,
+    calc_soilevap_resis,
+    clmData,
+)
 from clm_src_main.abortutils import endrun  # noqa: F401
 from clm_src_main.clm_instMod import ClmInstances
 from clm_src_main.clm_varpar import nlevgrnd, nlevsno  # noqa: F401
@@ -28,8 +33,7 @@ from clm_src_utils.clm_time_manager import StepTime
 from multilayer_canopy.MLCanopyFluxesMod import MLCanopyFluxes  # noqa: F401
 from multilayer_canopy.MLCanopyFluxesType import SOIL_TEMPERATURE, record_balance_error
 from multilayer_canopy.MLGetAtmForcingMod import AtmForcingRecord
-from multilayer_canopy.MLSoilTemperatureMod import SoilTemperature, SoilThermProp  # noqa: F401
-from offline_driver.clmDataMod import ClmHistoryRecord, clmData  # noqa: F401
+from offline_driver.clmDataMod import ClmHistoryRecord  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Public entry point

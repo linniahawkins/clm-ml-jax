@@ -120,6 +120,16 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   Tests: lint; bit-for-bit + noise twin 177 pass (2.0 min); golden `MLMathToolsMod` 41 pass;
   new unit tests and `test_imports` pass; focused CPU gradient test (`tridiag_2eq`'s
   `custom_vjp` moved) 1 pass (3.2 min).
+- **Process 2, `clm_ml/physics/soil.py` (C10): round-off change, reference re-recorded.**
+  The six soil routines as array functions on one column (0-based levels); legacy adapters
+  with the old names and `DECLARED` reads/writes in `clm_ml/legacy/soil.py` (`clm_driver`
+  changes only its imports); `SoilWaterMovementMod`, `SurfaceResistanceMod`,
+  `MLSoilTemperatureMod` deleted. Not bit for bit end to end (55 fields, worst 1.65x the twin
+  spread) although every routine is bit-identical in isolation: XLA compiles the chunk
+  differently (probes in `probe72`, C10). Reference and twins re-recorded (D7). New
+  `tests/clm_ml/test_physics_soil.py` (declared reads/writes per adapter). Tests: lint;
+  before re-recording: noise twin 88 pass, bit for bit 55 fail; after: bit-for-bit + noise
+  twin 177 pass (1.2 min); `test_imports`, new unit tests pass.
 
 ## Next (resume here)
 

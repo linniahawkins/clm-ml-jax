@@ -2,15 +2,14 @@
 JAX translation of SurfaceAlbedoMod Fortran module.
 
 Calculates ground surface (soil) albedo for the CLM land surface model.
-Provides time-constant initialization of soil color lookup tables and
-per-timestep soil albedo computation based on volumetric water content.
+Provides time-constant initialization of soil color lookup tables (the per-step soil
+albedo is ``clm_ml.physics.soil.soil_albedo``).
 
 Original Fortran module: SurfaceAlbedoMod
 Fortran lines 1-130
 """
 
 import jax.numpy as jnp
-import numpy as np
 from jax import Array
 
 from clm_src_biogeophys.SurfaceAlbedoType import surfalb_type  # noqa: F401
@@ -210,86 +209,3 @@ def SurfaceAlbedoInitTimeConst(bounds: bounds_type) -> None:
 
     albsat = _albsat
     albdry = _albdry
-
-
-# ---------------------------------------------------------------------------
-# Public: per-timestep soil albedo
-# ---------------------------------------------------------------------------
-
-
-def SoilAlbedo(
-    bounds: bounds_type,
-    num_nourbanc: int,
-    filter_nourbanc: np.ndarray,
-    waterstatebulk_inst: waterstatebulk_type,
-    surfalb_inst: surfalb_type,
-    site=None,
-) -> surfalb_type:
-    """
-    Compute ground surface (soil) albedo for non-urban columns.
-
-    Mirrors Fortran subroutine ``SoilAlbedo`` (lines 92-128).
-
-    Soil albedo is computed per waveband ``ib`` (1 = vis, 2 = nir) as:
-
-    .. code-block:: none
-
-        inc        = max(0.11 - 0.40 * h2osoi_vol(c,1), 0)
-        albsoib(c,ib) = min(albsat(soilcol,ib) + inc, albdry(soilcol,ib))
-        albsoid(c,ib) = albsoib(c,ib)
-
-    where ``soilcol = isoicol(c)`` is the soil color class of the column
-    and ``h2osoi_vol(c,1)`` is the top-layer volumetric water content.
-    Both direct-beam and diffuse albedos are set equal.
-
-    Args:
-        bounds: CLM column decomposition bounds.
-        num_nourbanc: Number of non-urban points in the column filter.
-        filter_nourbanc: 1-D array of non-urban column indices.
-            Fortran: ``integer, intent(in) :: filter_nourbanc(:)``.
-        waterstatebulk_inst: Bulk water state container supplying
-            ``h2osoi_vol_col`` (read-only).
-        surfalb_inst: Surface albedo container; ``albgrd_col`` and
-            ``albgri_col`` are updated and returned in a new instance.
-        site: Per-site data (``SiteType.site_type``: the soil colour class ``isoicol``, data
-            that index the ``albsat``/``albdry`` tables); default: this module's ``isoicol``.
-
-    Returns:
-        Updated :class:`surfalb_type` with direct-beam and diffuse
-        soil albedos populated.
-    """
-    # Unpack inputs (Fortran associate block, lines 112-117)
-    h2osoi_vol = waterstatebulk_inst.h2osoi_vol_col  # Volumetric water content (m3/m3)
-
-    albsoib = surfalb_inst.albgrd_col  # Direct beam albedo of ground (soil)
-    albsoid = surfalb_inst.albgri_col  # Diffuse albedo of ground (soil)
-    soil_color = site.isoicol_col if site is not None else isoicol
-
-    begc = bounds.begc
-
-    # Calculate soil albedo — Fortran lines 120-129
-    for ib in range(1, numrad + 1):  # Fortran: do ib = 1, numrad (1-based)
-        for f in range(num_nourbanc):  # Fortran: do f = 1, num_nourbanc
-            c = int(np.asarray(filter_nourbanc)[f])  # structure: static
-            ci = c - begc  # 0-based offset into isoicol
-
-            soilcol = soil_color[ci]  # Soil color class (1-based into albsat/albdry; data)
-
-            # Soil water correction — Fortran line 125
-            # h2osoi_vol_col uses j=1..nlevgrnd indexing (SoilInit/clmDataMod),
-            # so first soil layer is at index 1 (index 0 is unused/nan)
-            inc = jnp.maximum(0.11 - 0.40 * h2osoi_vol[ci, 1], 0.0)
-
-            # Albedo bounded by wet (albsat) and dry (albdry) limits
-            # Fortran lines 126-127
-            alb_val = jnp.minimum(
-                albsat[soilcol - 1, ib] + inc,
-                albdry[soilcol - 1, ib],
-            )
-            albsoib = albsoib.at[c, ib].set(alb_val)
-            albsoid = albsoid.at[c, ib].set(alb_val)  # diffuse = direct
-
-    return surfalb_inst._replace(
-        albgrd_col=albsoib,
-        albgri_col=albsoid,
-    )

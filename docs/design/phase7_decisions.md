@@ -226,3 +226,57 @@ dead finders could not run in a compiled step anyway (Python `while` on the cont
 Alternatives: a shim module re-exporting the names (keeps every import working, but leaves
 two names for each function until 7.6); keeping the guard always on (would change longwave
 round-off if a pivot ever fell below 1e-10, and departs further from Fortran).
+
+### C10. Process 2: `clm_ml/physics/soil.py` as array functions; legacy adapters in `clm_ml/legacy/soil.py` (7.2, 2026-10-30)
+Context: the soil routines of the step (`clmData`, `SoilAlbedo`, `calc_soilevap_resis`,
+`SoilThermProp`, `SoilWater`, `SoilTemperature`) move to `clm_ml/physics/soil.py` with array
+operations (D5) while the rest of the step still runs on the legacy containers.
+Decision:
+- **Physics:** six functions on one soil column, 0-based soil levels and bands (D1), arguments
+  and results only (`soil_water_from_history`, `soil_albedo`, `soil_evaporative_resistance`,
+  `soil_thermal_properties`, `soil_hydraulic_properties`, `soil_temperature`); each docstring
+  names the legacy fields it reads and writes. Per-level Python loops replaced by array
+  operations (same expression per element); the tridiagonal assembly keeps each row type's
+  own expression (selected with `where`); the energy-conservation sum is a `lax.scan` in
+  Fortran's order (bit for bit).
+- **Adapters:** `clm_ml/legacy/soil.py` keeps the six legacy names and arguments (so
+  `clm_driver` only changes its imports), slices the column out of the containers, calls the
+  physics and writes the results back to the same entries. `DECLARED` lists each adapter's
+  reads and writes; `tests/clm_ml/test_physics_soil.py` runs every adapter on fake containers
+  holding only the declared fields (an undeclared read fails; exactly the declared writes
+  change). This is the "declared writes" test of the scope for processes that still run on
+  the containers. The old modules `SoilWaterMovementMod`, `SurfaceResistanceMod`,
+  `MLSoilTemperatureMod` are deleted; `SoilAlbedo` leaves `SurfaceAlbedoMod` and `clmData`
+  leaves `clmDataMod` (their setup and file-reading parts stay until 7.4).
+- **Constants:** `clm_ml/physics/constants.py` re-exports the `clm_varcon` values (one place
+  for the processes; the definitions move there in 7.6).
+- **Snow layers:** the adapter no longer reads `ColumnType.col.snl`: Fortran `clm_drv` sets
+  `snl = 0` before `SoilThermProp`, so the snow water is always added to the top level's heat
+  capacity (the setup's `snl` is 0 too, so nothing changes).
+- **Legacy quirk kept:** `h2osoi_vol_col` has `nlevgrnd` entries indexed 1..nlevgrnd, so the
+  bottom level never had an entry (the old element writes past the end were silently dropped
+  by JAX). The adapter writes levels 1..nlevgrnd-1, as before. The old `clmData` then read
+  that missing entry (JAX clamps reads: the level above) for the bottom level's liquid water;
+  the physics uses the bottom level's own value. Identical for `CLM5_0` histories (the
+  bedrock levels are 0) — the only setting in use; it would differ for `CLM4_5`.
+- No variant registry: the soil routines have no alternatives in CLM-ml v2.
+- **Round-off change, reference re-recorded (D7, "vectorized soil loops"):** the move is not
+  bit for bit end to end: 55 of 88 fields differ by round-off from step 1 (`psis_soil`, 1 ulp)
+  and step 6 (`t_soisno_col`, 4e-13 K), worst 1.65x the noise twins' spread (allowed 2x;
+  noise twin passes on all fields). Probes (`/glade/derecho/scratch/linnia/clm-ml-jax/probe72`,
+  old routines from `a0af038` against the new ones on identical inputs): **every routine is
+  bit-identical in isolation** (eager, `jit`, `jit` + `vmap` over patches, traced `dtime`),
+  except the soil-temperature energy error under `jit` with a constant `dtime` (1e-14 W m-2,
+  XLA folding the constant; identical with `dtime` traced, as in runs). Swapping old routines
+  back into the full run: old `SoilWater` alone changes nothing; old `clmData` alone removes
+  the step-1 difference and old `SoilThermProp`/`SoilTemperature` the step-6 one. So the
+  differences come from XLA compiling the whole chunk differently once ~500 element updates
+  become a few array operations (fusion and the order of the sums that read these arrays, e.g.
+  `psis_soil` in plant hydraulics), not from any changed formula. Keeping the per-element
+  updates for a bit-for-bit move first would add a commit of code that D5 removes (and is not
+  certain to be bit for bit: the adapters' slicing changes the graph too). Reference and twins re-recorded on CPU with this
+  commit (`record_run.py --update-reference`).
+Why: the physics written once on plain arrays is what 7.2 aims for; the adapters keep the
+legacy step unchanged until process 10 and are deleted with it.
+Alternatives: adapters inside the old modules (keeps six legacy files alive for thin
+wrappers); declaring reads/writes only in docstrings (not testable).

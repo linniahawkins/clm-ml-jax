@@ -4,9 +4,8 @@ JAX translation of clmDataMod Fortran module.
 Read CLM forcing data for tower sites: leaf and stem area indices,
 volumetric soil moisture, and optional soil moisture adjustment factors
 from CLM netCDF history files. The records a run needs are read once
-before the time loop (:func:`read_clm_history_series`); :func:`clmData`
-installs one record and derives liquid water and ice content for each
-soil layer.
+before the time loop (:func:`read_clm_history_series`); ``clm_ml.legacy.soil.clmData``
+installs one record (``clm_ml.physics.soil.soil_water_from_history``).
 
 Original Fortran module: clmDataMod
 Fortran lines 1-250
@@ -25,7 +24,6 @@ from clm_src_biogeophys.WaterStateBulkType import waterstatebulk_type  # noqa: F
 from clm_src_main.abortutils import handle_err  # noqa: F401
 from clm_src_main.clm_varcon import denh2o, spval  # noqa: F401
 from clm_src_main.clm_varpar import nlevgrnd, nlevsoi  # noqa: F401
-from clm_src_main.SiteType import site_or_modules
 from offline_driver.clmSoilOptionMod import clm_phys, nlev_soil_adjust  # noqa: F401
 
 
@@ -62,149 +60,6 @@ def read_clm_history_series(
         if adjust is not None:
             adjust.close()
     return records
-
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
-
-
-def clmData(
-    record: ClmHistoryRecord,
-    begp: int,
-    endp: int,
-    begc: int,
-    endc: int,
-    soilstate_inst: soilstate_type,
-    waterstatebulk_inst: waterstatebulk_type,
-    canopystate_inst: canopystate_type,
-    surfalb_inst: surfalb_type,
-    site=None,
-) -> tuple[waterstatebulk_type, canopystate_type, surfalb_type]:
-    """
-    Read variables from a CLM netCDF history file for the current time
-    step and populate canopy state and bulk water state containers.
-
-    Mirrors Fortran subroutine ``clmData`` (lines 33-115).
-
-    The following quantities are derived:
-
-    - ``elai_patch``, ``esai_patch``: leaf/stem area index broadcast
-      to all patches from a single gridcell value.
-    - ``h2osoi_vol_col``: volumetric soil water, read from the CLM
-      history file and optionally multiplied by a moisture adjustment
-      factor. CLM4.5 files provide ``nlevgrnd`` layers; CLM5.0 files
-      provide ``nlevsoi`` layers (bedrock layers set to zero). For
-      CLM5.0, values are capped at ``watsat`` before deriving liquid
-      water.
-    - ``h2osoi_liq_col``: liquid water ``= h2osoi_vol * dz * denh2o``.
-    - ``h2osoi_ice_col``: set to zero for all layers.
-
-    Args:
-        record: CLM history values for this time step (from
-            :func:`read_clm_history_series`); its soil moisture adjustment
-            factor is used only when ``nlev_soil_adjust > 0``.
-        begp: First patch index.
-        endp: Last patch index.
-        begc: First column index.
-        endc: Last column index.
-        soilstate_inst: Soil state container supplying ``watsat_col``
-            (read-only).
-        waterstatebulk_inst: Bulk water state container; soil water
-            arrays are updated and returned in a new instance.
-        canopystate_inst: Canopy state container; ``elai_patch`` and
-            ``esai_patch`` are updated and returned in a new instance.
-        surfalb_inst: Surface albedo container (passed through
-            unchanged; included for interface parity with Fortran).
-        site: Per-site data (``SiteType.site_type``: ``dz``, ``nbedrock``); default: the
-            subgrid modules' values.
-
-    Returns:
-        Tuple of updated ``(waterstatebulk_inst, canopystate_inst,
-        surfalb_inst)``.
-    """
-    # Unpack inputs (Fortran associate block, lines 72-84)
-    site = site_or_modules(site)
-    dz = site.dz_col  # Soil layer thickness (m)
-    nbedrock = site.nbedrock_col  # Depth to bedrock index (data: a soil-layer mask)
-    watsat = soilstate_inst.watsat_col  # Porosity
-
-    elai = canopystate_inst.elai_patch  # Leaf area index (m2/m2)
-    esai = canopystate_inst.esai_patch  # Stem area index (m2/m2)
-    h2osoi_vol = waterstatebulk_inst.h2osoi_vol_col  # Volumetric soil water (m3/m3)
-    h2osoi_liq = waterstatebulk_inst.h2osoi_liq_col  # Liquid water (kg H2O/m2)
-    h2osoi_ice = waterstatebulk_inst.h2osoi_ice_col  # Ice lens (kg H2O/m2)
-
-    # ------------------------------------------------------------------
-    # Read CLM LAI and SAI for current time step — Fortran lines 87-91
-    # ------------------------------------------------------------------
-    elai_loc, esai_loc = record.elai, record.esai
-
-    # Broadcast single gridcell value to all patches — Fortran lines 89-91
-    for p in range(begp, endp + 1):  # Fortran: do p = begp, endp
-        elai = elai.at[p].set(elai_loc)
-        esai = esai.at[p].set(esai_loc)
-
-    # ------------------------------------------------------------------
-    # Read volumetric soil water for current time step — Fortran lines 93-94
-    # ------------------------------------------------------------------
-    h2osoi_clm45, h2osoi_clm50 = record.h2osoi_clm45, record.h2osoi_clm50
-
-    # ------------------------------------------------------------------
-    # Distribute soil water to all columns — Fortran lines 96-113
-    # ------------------------------------------------------------------
-    for c in range(begc, endc + 1):  # Fortran: do c = begc, endc
-        ci = c - begc  # 0-based column offset
-
-        if clm_phys == "CLM4_5":
-            # CLM4.5: nlevgrnd layers — Fortran lines 98-100
-            for j in range(1, nlevgrnd + 1):
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(h2osoi_clm45[j - 1])
-
-        elif clm_phys == "CLM5_0":
-            # CLM5.0: nlevsoi soil layers — Fortran lines 101-105
-            for j in range(1, nlevsoi + 1):
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(h2osoi_clm50[j - 1])
-            # Bedrock layers set to zero — Fortran lines 106-108
-            for j in range(nlevsoi + 1, nlevgrnd + 1):
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(0.0)
-
-        # Overwrite CLM soil moisture with adjustment factor — Fortran lines 110-115
-        if nlev_soil_adjust > 0:
-            h2osoi_factor = record.h2osoi_factor
-            for j in range(1, nlev_soil_adjust + 1):
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(h2osoi_vol[ci, j] * h2osoi_factor)
-
-        # Cap soil moisture at porosity for CLM5.0 — Fortran lines 117-121
-        # (Fortran: do j = 1, nbedrock(c); the bedrock depth is data, so every soil layer is
-        # visited and layers below bedrock keep their value; nbedrock <= nlevsoi)
-        if clm_phys == "CLM5_0":
-            for j in range(1, nlevsoi + 1):
-                h2osoi_vol = h2osoi_vol.at[ci, j].set(
-                    jnp.where(
-                        j <= nbedrock[c],
-                        jnp.minimum(h2osoi_vol[ci, j], watsat[c, j]),
-                        h2osoi_vol[ci, j],
-                    )
-                )
-
-        # Set liquid water and ice — Fortran lines 123-126
-        for j in range(1, nlevgrnd + 1):  # Fortran: do j = 1, nlevgrnd
-            h2osoi_liq = h2osoi_liq.at[ci, j - 1].set(h2osoi_vol[ci, j] * dz[c, j] * denh2o)
-            h2osoi_ice = h2osoi_ice.at[ci, j - 1].set(0.0)
-
-    return (
-        waterstatebulk_inst._replace(
-            h2osoi_vol_col=h2osoi_vol,
-            h2osoi_liq_col=h2osoi_liq,
-            h2osoi_ice_col=h2osoi_ice,
-        ),
-        canopystate_inst._replace(
-            elai_patch=elai,
-            esai_patch=esai,
-        ),
-        surfalb_inst,
-    )
 
 
 # ---------------------------------------------------------------------------
