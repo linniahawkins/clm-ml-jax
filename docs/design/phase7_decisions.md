@@ -414,3 +414,70 @@ Why: the aim of 7.2 (physics on plain arrays, files by process); the leaf axis h
 water-potential calls as the scope asks.
 Alternatives: leaf heat capacity inside `canopy_water.py` or `plant_hydraulics.py` (not
 the same process); fixing the ice index now (a science change inside a refactor).
+
+### C15. Process 6: `clm_ml/physics/turbulence.py`; the psihat tables as an argument, read from the package; values rounded as stored (7.2, 2026-10-31)
+Context: scope 7.2 process 6 (`MLCanopyTurbulenceMod`, 1 500 lines; "psihat table packaged as
+data, RSL lookup tables as an input, not a module global"). The legacy module filled 6
+arrays of `MLclm_varcon` and 16 module caches at initialization (`LookupPsihatINI`), which
+every psihat lookup read.
+Decision:
+- **Physics on one patch, 0-based** (`PatchLayers` slots): the Monin-Obukhov functions,
+  `lookup_psihat`, `prandtl_schmidt`, `psi_rsl` (and `psi_rsl_at` over heights),
+  `beta_stability`, `obukhov_terms` (one function for the residual and the write-back, which
+  the legacy code had twice), `obukhov_length` (25 secant steps, implicit-function
+  gradient, the same arithmetic), `roughness_length`, `wind_profile`,
+  `aerodynamic_conductance` (-> `Conductances`) and the process `harman_finnigan`
+  (-> `Turbulence`); registry `ROUGHNESS_SUBLAYER = {"harman_finnigan": ...}` (model.yaml
+  `physics.roughness_sublayer`). Fortran names became descriptive ones
+  (`GetBeta` -> `beta_stability`, `GetPrSc` -> `prandtl_schmidt`, `GetPsiRSL` -> `psi_rsl`),
+  each docstring keeping its `Fortran reference:`.
+- **The psihat tables:** `RSLTables` (momentum and scalar `PsihatTable`s: grids and values,
+  1-D grids instead of Fortran's `(nZ, 1)`/`(1, nL)` arrays) is an **argument** of every
+  routine that interpolates psihat. The file moved to `src/clm_ml/data/psihat.nc` (package
+  data, `pyproject.toml`); `clm_ml/io/rsl_tables.py` reads it (`read_rsl_tables(path)`,
+  checking each table's shape against its grids instead of Fortran's fixed 276 x 41) and
+  `default_rsl_tables()` caches the package's tables per process (immutable). The
+  `MLclm_varcon` table arrays, `nZ`/`nL`, `clm_varctl.rslfile` and `LookupPsihatINI` are
+  gone; `clm_initializeMod` reads the tables at initialization (fails early if missing).
+- **Not yet an input of the compiled step:** the legacy adapter passes
+  `default_rsl_tables()`, so the tables are a constant of the compiled chunk, as before.
+  Making them a runtime input means changing every chunk runner's signature
+  (`make_chunk_runner`, `make_stream_runner`, `make_batch_runner`, the sharded wrapper,
+  `clm_ml.model`); that belongs with the step's new signature when the containers leave the
+  step (process 10) and the setup without globals (7.4). The physics already takes them as
+  an argument, so that change touches only the driver.
+- **Values rounded as stored:** `harman_finnigan` passes the canopy-top terms
+  (`obu`, `beta`, `zdisp`, `PrSc`, `ustar`, `gac_to_hc`) through
+  `jax.lax.optimization_barrier` before using them. Without it, XLA folded
+  `u(h) = ustar / beta` with the division inside `ustar` (`(a / b) / beta -> a / (b beta)`),
+  1 ulp off the legacy value in 2 of the 6 recorded calls (`probe74/compare.py`); with it,
+  every recorded call is bit-identical, eager and compiled. Fortran stores these values
+  too (`ustar(p)`, ...), and the legacy code wrote them to the container. No effect on
+  gradients (the barrier is the identity for differentiation).
+- **Ground conductance by name:** `aerodynamic_conductance(..., ground_conductance)` with
+  `GROUND_CONDUCTANCE = ("extend_hf", "log_profile")` (model.yaml
+  `physics.ground_conductance`, Fortran `HF_extension_type` 1, 2); any other name raises
+  `ValueError`. Fortran has no default case (gac0 keeps its last value) and the
+  configuration accepts only 1 and 2, so the adapter now raises for other values instead of
+  carrying the previous conductance (unreachable through `clm_ml.run`, as C12's two-point
+  interpolation).
+- **Adapter:** `clm_ml/legacy/turbulence.py::CanopyTurbulence` with the legacy arguments
+  (the process replay and `MLCanopyFluxesMod` unchanged apart from the import); profiles
+  written in the layers in use, padding kept (as before); the `eta >= eta_max` warning
+  printed in step-by-step runs, from the physics' `eta`; `DECLARED` reads/writes. The
+  physics call is one `jax.jit` (as the legacy `_HF2008` was), so step-by-step runs don't
+  dispatch thousands of small operations. `MLCanopyTurbulenceMod.py` deleted, no shim.
+- **Golden tests repointed** (phim/phic, psim/psic, GetBeta, GetPrSc, GetPsiRSL: 59 pass).
+  New `tests/clm_ml/test_physics_turbulence.py`: declared reads/writes, the Obukhov length is
+  the residual's root or the Lc/L limit (stable to unstable), the wind profile gives `uref`
+  at `zref` and is continuous at the canopy top, the roughness length is its residual's root,
+  conductances and eddy diffusivities, the lookup on and beyond the grid, the Obukhov
+  length's implicit gradient against finite differences.
+- **Bit for bit** end to end (177 pass, no reference change).
+Why: the scope's aim (physics on plain arrays, the tables as data and an argument); keeping
+the tables a compile-time constant until the step's signature changes avoids touching five
+runners twice.
+Alternatives: thread the tables through the chunk runners now (twice the driver work, see
+above); tables per patch in `CanopyParams` (vmapped: 180 kB copied per patch); keep the
+1 ulp difference and re-record the reference (avoidable, and the stored-value rounding is
+what Fortran does).

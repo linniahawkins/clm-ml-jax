@@ -92,7 +92,7 @@ using Harman & Finnigan (2007, 2008).
   iterative solver and its ad-hoc "fixers".
 - **Turbulence.** First-order closure with the **Harman & Finnigan roughness sublayer (RSL)**:
   an exponential wind profile within the canopy, and RSL-modified similarity functions above it
-  (ψ̂ from the lookup table `rsl_lookup_tables/psihat.nc`).
+  (ψ̂ from the lookup table `src/clm_ml/data/psihat.nc`, passed to the physics as an argument).
   - β = u*/U(h) uses the Harman (2012) form, Eq. 2 of the 2026 paper, with CHATS fit a₁=0.89,
     a₂=−0.07, a₃=2.19, β_N=0.35.
   - Applicability bounds −2 ≤ L_c/L ≤ 1 (L_c = (c_d a)⁻¹, canopy length scale).
@@ -172,7 +172,6 @@ src/
   offline_driver/      tower table (TowerDataMod), forcing readers, CLMml_driver (output writer)
   offline_executable/  main.py (the `clm-ml-offline` entry point) and namelists nl.*
   input_files/         CHATS7 tower forcing and CLM history netCDF
-  rsl_lookup_tables/   psihat.nc
 tests/
   fortran_validation/  160+ routine-level tests against Fortran golden JSON (rtol 1e-9)
   regression/          end-to-end regression against committed reference (rtol 1e-6)

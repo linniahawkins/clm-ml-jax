@@ -166,29 +166,49 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   re-recording: noise twin and process replay pass, bit for bit 53 fail; after: bit-for-bit
   + noise twin 177 pass (1.1 min).
 
+- **Process 6, `clm_ml/physics/turbulence.py` (C15):** the Harman-Finnigan RSL turbulence
+  on one patch (0-based layers), the psihat tables an argument (`RSLTables`; file moved to
+  `src/clm_ml/data/psihat.nc`, read by `clm_ml/io/rsl_tables.py`; the `MLclm_varcon` arrays,
+  module caches, `rslfile` and `LookupPsihatINI` gone), still a constant of the compiled
+  chunk until the step's signature changes (process 10 / 7.4). Canopy-top values rounded as
+  stored (`optimization_barrier`: without it XLA folded `ustar / beta`, 1 ulp off in 2 of 6
+  recorded calls; probe `probe74/compare.py`). Ground conductance by name (other
+  `HF_extension_type` values now refused). Adapter `clm_ml/legacy/turbulence.py`;
+  `MLCanopyTurbulenceMod` deleted. Bit for bit. Golden tests repointed; new
+  `tests/clm_ml/test_physics_turbulence.py`. Tests: lint; golden turbulence 59 pass, all
+  fast golden GOLDEN; new unit tests 15 pass, `test_imports` pass; bit-for-bit + noise twin
+  177 pass (1.8 min); process replay 7 pass; focused CPU gradient test 1 pass (2.6 min).
+
 ## Next (resume here)
 
 **Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2, session 2 (2026-10-31)
 processes 3-4 (bit for bit), session 3 (2026-10-31) process 5 (round-off, reference
-re-recorded, C14); last commit = the one that wrote this.** Next session: **process 6**
-(scope table): `turbulence.py` from `MLCanopyTurbulenceMod` (1 500 lines; the largest), the
-psihat RSL lookup table packaged as data and passed in as an input, not a module global.
-It holds the Obukhov-length solver (25 fixed secant steps with an implicit-function
-gradient, `x0 - (step - stop_gradient(step))`): a hand-written gradient moves, so run the
-focused CPU gradient test (`python tests/gradient_tier.py --focused`). Process replay
-`CanopyTurbulence`; golden tests of `MLCanopyTurbulenceMod` to repoint. One session for
-process 6 alone.
+re-recorded, C14), session 4 (2026-10-31) process 6 (turbulence, bit for bit, C15); last
+commit = the one that wrote this.** Next session: **process 7** (scope table):
+`leaf_boundary_layer.py` (`MLLeafBoundaryLayerMod`) and `photosynthesis.py`
+(`MLLeafPhotosynthesisMod`), sun and shade as one vmapped call over the leaf axis (D5; halves
+the largest kernel; round-off only if XLA fuses differently: check). It holds the
+stomatal-conductance bisection and the intercellular-CO2 solver with implicit-function
+gradients (`_bisect_gs_ift`, `_ci_solver_scan_ift`): run the focused CPU gradient test.
+Decide open issue 18 (`wue_solver: brent` never used) with the maintainer there. Process
+replay `LeafPhotosynthesis`; golden tests of `MLLeafPhotosynthesisMod` and
+`MLLeafBoundaryLayerMod` to repoint (`_fth`, `_fth25`, `_RealizedRate`, ...). Probably one
+session (photosynthesis is ~the size of turbulence).
 
-Same pattern as processes 2-5 (C10, C12-C14): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
+Same pattern as processes 2-6 (C10, C12-C15): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
 fake containers holding only the declared fields. Expect round-off changes when loops become
 array operations even if every routine is bit-identical in isolation (C10): probe the routine
 alone against the old code first (`probe72/compare.py` pattern, old files from git), then, if
 only the whole-chunk compile differs and the noise twin passes, re-record the reference in the
 same commit (D7) and log it. Constants through `clm_ml/physics/constants.py`.
+If the routine alone differs by an ulp because an intermediate no longer round-trips through
+the container, XLA may be folding divisions across it: pass the values Fortran stores through
+`jax.lax.optimization_barrier` (C15).
 
 Open for the maintainer: C10 and C14 (reference re-recorded for the soil and process-5 moves,
-round-off only), open issue 19 (soil ice index in `SoilResistance`, latent), open issue 18 (`wue_solver: brent` never used; decide at process 7). Earlier: C4, the removed
+round-off only), C15 (psihat tables still a compile-time constant of the chunk; the
+`optimization_barrier`), open issue 19 (soil ice index in `SoilResistance`, latent), open issue 18 (`wue_solver: brent` never used; decide at process 7). Earlier: C4, the removed
 diagnostics, C5-C8. Timing baseline for the end of 7.2: `p71-*` in
 `timing/results_model.jsonl` (forward ~27-28 ms/step, gradient ~604 ms/step).
 

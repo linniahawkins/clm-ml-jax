@@ -48,9 +48,9 @@ def initialize_rsl_tables():
         # some HPC environments; suppress it so it doesn't abort the session.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
-            from multilayer_canopy.MLCanopyTurbulenceMod import LookupPsihatINI
+            from clm_ml.io.rsl_tables import default_rsl_tables
 
-            LookupPsihatINI()
+            default_rsl_tables()
         RSL_AVAILABLE = True
     except Exception as exc:
         RSL_AVAILABLE = False

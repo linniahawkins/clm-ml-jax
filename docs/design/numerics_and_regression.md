@@ -86,7 +86,7 @@ also faster (2.7 s per step, from 4.5 s). All changes alter round-off only: per-
 ## 2. Root solvers: forward values and implicit-function gradients
 
 **Context.** Three quantities are found by iterative root solvers: the Obukhov length
-(`_GetObu`), leaf intercellular CO₂ (`_ci_solver_scan_ift`) and stomatal conductance under
+(`clm_ml.physics.turbulence.obukhov_length`), leaf intercellular CO₂ (`_ci_solver_scan_ift`) and stomatal conductance under
 water-use-efficiency optimization (`_bisect_gs_ift`). Differentiating *through* the iterations
 gives wrong or exploding gradients (observed ~1e144 for the Obukhov solver), so the traceable
 code uses the implicit function theorem (IFT). If the solver finds `x*` with `F(x*; θ) = 0`, then
@@ -153,7 +153,8 @@ The model state is left as computed by the *last* function evaluation (the retur
 dummy).
 
 The JAX translation, in both its normal and traceable paths, instead runs **exactly 25 secant
-steps** from a single start (`_obu_fixed_iter`) and then recomputes the derived quantities from
+steps** from a single start (`clm_ml.physics.turbulence.obukhov_length`, Phase 7.2; before:
+`_obu_fixed_iter`) and then recomputes the derived quantities from
 that value. This predates the modernization. It is within the validated agreement with Fortran
 (CHATS7 May 2007: ≤ 2.5% per output column, r ≥ 0.9999), but it is not the Fortran algorithm.
 

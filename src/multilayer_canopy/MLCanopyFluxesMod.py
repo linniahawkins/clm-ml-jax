@@ -43,6 +43,7 @@ from clm_ml.legacy.plant_hydraulics import (  # noqa: F401
     SoilResistance,
 )
 from clm_ml.legacy.solar_radiation import SolarRadiation  # noqa: F401
+from clm_ml.legacy.turbulence import CanopyTurbulence  # noqa: F401
 from clm_ml.physics.atm_forcing import clm_forcing_to_ml
 from clm_ml.physics.math import is_concrete
 from clm_src_main.abortutils import endrun  # noqa: F401
@@ -65,7 +66,6 @@ from multilayer_canopy.MLCanopyFluxesType import (  # noqa: F401
 # Physics modules (translated elsewhere)
 from multilayer_canopy.MLCanopyNitrogenProfileMod import CanopyNitrogenProfile  # noqa: F401
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams, patch_setup
-from multilayer_canopy.MLCanopyTurbulenceMod import CanopyTurbulence  # noqa: F401
 from multilayer_canopy.MLclm_varcon import mmh2o, rgas  # noqa: F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
 from multilayer_canopy.MLclm_varpar import isha, isun, nleaf  # noqa: F401

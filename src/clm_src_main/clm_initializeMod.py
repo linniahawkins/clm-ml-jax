@@ -24,7 +24,6 @@ from clm_src_main.GridcellType import gridcell_type_Init  # noqa: F401
 from clm_src_main.initGridCellsMod import initGridCells  # noqa: F401
 from clm_src_main.PatchType import patch  # noqa: F401
 from multilayer_canopy import MLpftconMod  # noqa: F401
-from multilayer_canopy.MLCanopyTurbulenceMod import LookupPsihatINI
 
 # ---------------------------------------------------------------------------
 # Public: phase one initialization
@@ -61,7 +60,8 @@ def initialize2(bounds: bounds_type, max_layers: int) -> None:
     2. Read CLMml PFT parameter list and values
        (``MLpftcon.Init``).
     3. Initialize look-up tables for the CLMml roughness sublayer
-       psihat functions (``LookupPsihatINI``).
+       psihat functions (``clm_ml.io.rsl_tables.default_rsl_tables``: read once per
+       process, passed to the turbulence physics as an argument).
     4. Allocate memory for subgrid data structures
        (``grc.Init``, ``col.Init``, ``patch.Init``).
     5. Build the subgrid hierarchy of landunit, column, and patch
@@ -80,7 +80,9 @@ def initialize2(bounds: bounds_type, max_layers: int) -> None:
     MLpftconMod.MLpftcon = MLpftconMod.Init()
 
     # Initialize CLMml roughness sublayer psihat look-up tables — Fortran line 59
-    LookupPsihatINI()  # CLMml
+    from clm_ml.io.rsl_tables import default_rsl_tables
+
+    default_rsl_tables()  # CLMml
 
     # Allocate memory for subgrid data structures — Fortran lines 61-63
     GridcellType.grc = gridcell_type_Init(bounds.begg, bounds.endg)

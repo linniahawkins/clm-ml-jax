@@ -12,7 +12,6 @@ Fortran lines 1-110
 """
 
 import jax.numpy as jnp
-import numpy as np
 from jax import Array
 
 from clm_src_main.clm_varcon import spval  # noqa: F401
@@ -169,21 +168,5 @@ ra_max: float = 500.0  # Maximum aerodynamic resistance for a canopy layer (s/m)
 eta_max: float = 20.0  # Maximum value for "eta" parameter
 
 
-# ---------------------------------------------------------------------------
-# RSL psihat look-up table dimensions and arrays — Fortran lines 130-140
-# Populated by LookupPsihatINI; declared here as empty placeholders.
-# ---------------------------------------------------------------------------
-
-nZ: int = 276  # Number of z/h grid points in psihat tables
-nL: int = 41  # Number of (h-d)/L grid points in psihat tables
-
-# Momentum psihat table — Fortran: zdtgridM(nZ,1), dtLgridM(1,nL), psigridM(nZ,nL)
-# Using numpy arrays so element-wise access in _LookupPsihat does not trigger XLA syncs.
-zdtgridM: np.ndarray = np.zeros((nZ, 1), dtype=np.float64)  # (z-h)/(h-d) grid, momentum
-dtLgridM: np.ndarray = np.zeros((1, nL), dtype=np.float64)  # (h-d)/L    grid, momentum
-psigridM: np.ndarray = np.zeros((nZ, nL), dtype=np.float64)  # psihat values,   momentum
-
-# Heat psihat table — Fortran: zdtgridH(nZ,1), dtLgridH(1,nL), psigridH(nZ,nL)
-zdtgridH: np.ndarray = np.zeros((nZ, 1), dtype=np.float64)  # (z-h)/(h-d) grid, heat
-dtLgridH: np.ndarray = np.zeros((1, nL), dtype=np.float64)  # (h-d)/L    grid, heat
-psigridH: np.ndarray = np.zeros((nZ, nL), dtype=np.float64)  # psihat values,   heat
+# RSL psihat look-up tables (Fortran nZ, nL, zdtgridM, ...): read by
+# clm_ml.io.rsl_tables and passed to clm_ml.physics.turbulence as an argument (Phase 7 C15).

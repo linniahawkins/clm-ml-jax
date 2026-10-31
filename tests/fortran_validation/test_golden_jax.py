@@ -63,7 +63,7 @@ def _import_jax_modules():
         "multilayer_canopy.MLWaterVaporMod",
         "clm_ml.physics.math",
         "multilayer_canopy.MLLeafPhotosynthesisMod",
-        "multilayer_canopy.MLCanopyTurbulenceMod",
+        "clm_ml.physics.turbulence",
         "clm_ml.physics.leaf_heat_capacity",
         "clm_ml.physics.canopy_water",
         "multilayer_canopy.MLLeafBoundaryLayerMod",
@@ -194,47 +194,54 @@ def _adapt_realized_rate(inp: dict) -> dict:
 
 
 def _adapt_phim_monin_obukhov(inp: dict) -> dict:
-    turb = _get("multilayer_canopy.MLCanopyTurbulenceMod")
+    turb = _get("clm_ml.physics.turbulence")
     zeta = inp["zeta"]
     return {
-        "phim": float(turb._phim_monin_obukhov(zeta)),
-        "phic": float(turb._phic_monin_obukhov(zeta)),
+        "phim": float(turb.phim_monin_obukhov(zeta)),
+        "phic": float(turb.phic_monin_obukhov(zeta)),
     }
 
 
 def _adapt_psim_monin_obukhov(inp: dict) -> dict:
-    turb = _get("multilayer_canopy.MLCanopyTurbulenceMod")
+    turb = _get("clm_ml.physics.turbulence")
     zeta = inp["zeta"]
     return {
-        "psim": float(turb._psim_monin_obukhov(zeta)),
-        "psic": float(turb._psic_monin_obukhov(zeta)),
+        "psim": float(turb.psim_monin_obukhov(zeta)),
+        "psic": float(turb.psic_monin_obukhov(zeta)),
     }
 
 
 def _adapt_get_beta(inp: dict) -> dict:
-    turb = _get("multilayer_canopy.MLCanopyTurbulenceMod")
-    beta = turb._GetBeta(inp["beta_neutral"], inp["LcL"])
+    turb = _get("clm_ml.physics.turbulence")
+    beta = turb.beta_stability(inp["beta_neutral"], inp["LcL"])
     return {"beta": float(beta)}
 
 
 def _adapt_get_prsc(inp: dict) -> dict:
-    """_GetPrSc takes sparse_canopy_type as an argument (an MLOptions field)."""
-    turb = _get("multilayer_canopy.MLCanopyTurbulenceMod")
-    varcon = _get("multilayer_canopy.MLclm_varcon")
-    sparse_in = int(inp["sparse_canopy_type_in"])
-    PrSc = turb._GetPrSc(inp["beta_neutral"], varcon.beta_neutral_max, inp["LcL"], sparse_in)
+    """``prandtl_schmidt`` takes the sparse-canopy switch as an argument."""
+    turb = _get("clm_ml.physics.turbulence")
+    sparse_in = int(inp["sparse_canopy_type_in"]) == 1
+    PrSc = turb.prandtl_schmidt(inp["beta_neutral"], inp["LcL"], sparse_in)
     return {"PrSc": float(PrSc)}
 
 
 def _adapt_get_psi_rsl(inp: dict) -> dict:
-    """_GetPsiRSL uses RSL lookup tables (initialized in conftest)."""
+    """``psi_rsl`` with the package's RSL lookup tables (read in conftest)."""
     from tests.fortran_validation.conftest import RSL_AVAILABLE
 
     if not RSL_AVAILABLE:
         pytest.skip("RSL psihat lookup tables unavailable (netCDF4 load failed)")
-    turb = _get("multilayer_canopy.MLCanopyTurbulenceMod")
-    psim, psic, psim2, psim_hat2 = turb._GetPsiRSL(
-        inp["za"], inp["hc"], inp["disp"], inp["obu"], inp["beta"], inp["PrSc"]
+    turb = _get("clm_ml.physics.turbulence")
+    from clm_ml.io.rsl_tables import default_rsl_tables
+
+    psim, psic, psim2, psim_hat2 = turb.psi_rsl(
+        inp["za"],
+        inp["hc"],
+        inp["disp"],
+        inp["obu"],
+        inp["beta"],
+        inp["PrSc"],
+        default_rsl_tables(),
     )
     return {
         "psim": float(psim),
