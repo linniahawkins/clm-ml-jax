@@ -176,7 +176,7 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   `HF_extension_type` values now refused). Adapter `clm_ml/legacy/turbulence.py`;
   `MLCanopyTurbulenceMod` deleted. Bit for bit. Golden tests repointed; new
   `tests/clm_ml/test_physics_turbulence.py`. Tests: lint; golden turbulence 59 pass, all
-  fast golden GOLDEN; new unit tests 15 pass, `test_imports` pass; bit-for-bit + noise twin
+  fast golden 160 pass; new unit tests 15 pass, `test_imports` pass; bit-for-bit + noise twin
   177 pass (1.8 min); process replay 7 pass; focused CPU gradient test 1 pass (2.6 min).
 
 ## Next (resume here)
