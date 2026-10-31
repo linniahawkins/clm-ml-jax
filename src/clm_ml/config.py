@@ -158,7 +158,7 @@ class ModelConfig:
         describes the forcing data rather than the physics.
         """
         p, n, c = self.physics, self.numerics, self.canopy_layers
-        rk = _RK_CODES[n.integrator]
+        rk = INTEGRATOR_CODES[n.integrator]
         return {
             "gs_type": _GS_TYPE[p.stomatal_conductance],
             "gspot_type": int(p.water_stress_on_conductance),
@@ -206,7 +206,7 @@ class ModelConfig:
 
 
 _GS_TYPE = {"medlyn": 0, "ball_berry": 1, "wue": 2}
-_RK_CODES = {
+INTEGRATOR_CODES = {
     "euler": 10,
     "rk2_trapezoid": 21,
     "rk2_midpoint": 22,
@@ -221,7 +221,7 @@ _RK_CODES = {
 FORTRAN_CODES = {
     "gs_type": ("physics.stomatal_conductance", {v: k for k, v in _GS_TYPE.items()}),
     "light_type": ("physics.solar_radiation", {1: "norman", 2: "two_stream"}),
-    "runge_kutta_type": ("numerics.integrator", {v: k for k, v in _RK_CODES.items()}),
+    "runge_kutta_type": ("numerics.integrator", {v: k for k, v in INTEGRATOR_CODES.items()}),
     "flux_profile_type": ("physics.flux_profile_solution", {0: "well_mixed", 1: "implicit"}),
     "gb_type": (
         "physics.leaf_boundary_layer",

@@ -67,7 +67,9 @@ def _import_jax_modules():
         "clm_ml.physics.leaf_heat_capacity",
         "clm_ml.physics.canopy_water",
         "clm_ml.physics.leaf_boundary_layer",
-        "multilayer_canopy.MLRungeKuttaMod",
+        "clm_ml.physics.integrators",
+        "clm_ml.physics.nitrogen_profile",
+        "clm_ml.state",
         "multilayer_canopy.MLclm_varcon",
         "multilayer_canopy.MLclm_varctl",
         "clm_src_main.clm_varcon",
@@ -293,19 +295,17 @@ def _adapt_leaf_heat_capacity(inp: dict) -> dict:
 
 
 def _adapt_runge_kutta_ini(inp: dict) -> dict:
-    """RungeKuttaIni returns (a, b, c) coefficient arrays for the selected RK method.
+    """RungeKuttaIni: the Butcher tableau (a, b, c) of the Fortran default
+    ``runge_kutta_type = 41`` (``rk4``), as when the golden data were recorded.
 
-    The JAX arrays are 0-indexed; golden keys use 1-based indices.
-    Unused upper-triangular entries in ``a`` hold spval (1e36) matching Fortran.
+    The arrays are 0-based; golden keys use 1-based indices. Unused upper-triangular entries
+    in ``a`` hold spval (1e36) matching Fortran.
     """
-    rk_mod = _get("multilayer_canopy.MLRungeKuttaMod")
-    # Fortran default runge_kutta_type (41), as when the golden data were recorded
-    opts = _get("multilayer_canopy.MLclm_varctl").DEFAULT_OPTIONS
-    a, b, c = rk_mod.RungeKuttaIni(opts)  # returns (a, b, c) — note order
-    nrk = len(b)  # number of stages from array length
+    a, b, c = _get("clm_ml.physics.integrators").TABLEAUS["rk4"]
+    nrk = len(b)
     out = {}
     for i in range(1, nrk + 1):
-        out[f"b_{i}"] = float(b[i - 1])  # 0-based access
+        out[f"b_{i}"] = float(b[i - 1])
         out[f"c_{i}"] = float(c[i - 1])
     for i in range(1, nrk + 1):
         for j in range(1, nrk + 1):
@@ -314,60 +314,47 @@ def _adapt_runge_kutta_ini(inp: dict) -> dict:
 
 
 def _adapt_nitrogen_scale(inp: dict) -> dict:
-    """
-    Per-layer nitrogen scaling (NitrogenScale).
-
-    This logic is inline inside CanopyNitrogenProfile in JAX.  We
-    implement the documented formulas directly so the golden values can
-    be verified without requiring full mlcanopy_type state initialization.
-
-    Formulas (Bonan et al. 2021, supplemental eqs. 6-12):
-
-      fn = exp(-kn*pai_above) * (1 - exp(-kn*dpai)) / kn
-
-      leaf_optics_type == 0:
-        fn_sun = clump / (kn + kb*clump)
-                 * exp(-kn*pai_above) * tbi * (1 - exp(-(kn+kb*clump)*dpai))
-        fn_sha = fn - fn_sun
-        nscale_sun = fn_sun / (fracsun * dpai)
-        nscale_sha = fn_sha / ((1-fracsun) * dpai)
-
-      leaf_optics_type == 1:
-        nscale_sun = nscale_sha = fn / dpai
-    """
-    kn = float(inp["kn"])
-    pai_above = float(inp["pai_above"])
-    dpai = float(inp["dpai"])
-    kb = float(inp["kb"])
-    clump_fac = float(inp["clump_fac"])
-    fracsun = float(inp["fracsun"])
-    tbi = float(inp["tbi"])
-    leaf_optics_type = int(inp["leaf_optics_type_in"])
-
-    if dpai <= 0.0:
+    """NitrogenScale: the sunlit and shaded nitrogen scaling factors of one layer
+    (``physics.nitrogen_profile.nitrogen_scale``); 0 without plant area, as Fortran."""
+    physics = _get("clm_ml.physics.nitrogen_profile")
+    if float(inp["dpai"]) <= 0.0:
         return {"nscale_sun": 0.0, "nscale_sha": 0.0}
+    vary = int(inp["leaf_optics_type_in"]) == 1
+    v = {k: jnp.asarray(float(inp[k])) for k in ("kn", "pai_above", "dpai", "kb", "tbi",
+                                                  "fracsun", "clump_fac")}  # fmt: skip
+    fn, fn_sun = physics.nitrogen_fractions(
+        v["kn"], v["pai_above"], v["dpai"], v["kb"], v["tbi"], v["clump_fac"],
+        vary_with_height=vary,
+    )  # fmt: skip
+    sun, sha = physics.nitrogen_scale(fn, fn_sun, v["dpai"], v["fracsun"], vary_with_height=vary)
+    return {"nscale_sun": float(sun), "nscale_sha": float(sha)}
 
-    # L'Hôpital limit as kn→0: exp(-kn*pai_above)*(1-exp(-kn*dpai))/kn → dpai
-    if kn == 0.0:
-        fn = dpai
-    else:
-        fn = math.exp(-kn * pai_above) * (1.0 - math.exp(-kn * dpai)) / kn
 
-    if leaf_optics_type == 0:
-        fn_sun = (
-            clump_fac
-            / (kn + kb * clump_fac)
-            * math.exp(-kn * pai_above)
-            * tbi
-            * (1.0 - math.exp(-(kn + kb * clump_fac) * dpai))
-        )
-        fn_sha = fn - fn_sun
-        nscale_sun = fn_sun / (fracsun * dpai) if fracsun > 0.0 else 0.0
-        nscale_sha = fn_sha / ((1.0 - fracsun) * dpai) if fracsun < 1.0 else 0.0
-    else:
-        nscale_sun = nscale_sha = fn / dpai
-
-    return {"nscale_sun": nscale_sun, "nscale_sha": nscale_sha}
+def _adapt_canopy_nitrogen_profile(inp: dict) -> dict:
+    """CanopyNitrogenProfile of a C3 canopy without acclimation, the decay coefficient
+    given (``kn_val``); the scaling factors are the leaf Vcmax25 over ``vcmax25top``."""
+    physics = _get("clm_ml.physics.nitrogen_profile")
+    n = len(inp["dpai"])
+    ncan = int(inp["ncan"])
+    layers = _get("clm_ml.state").PatchLayers(
+        n_layers=jnp.asarray(ncan), n_within=jnp.asarray(ncan), first_leafy=jnp.asarray(0),
+        dz=jnp.zeros(n), zs=jnp.zeros(n), zw=jnp.zeros(n + 1),
+    )  # fmt: skip
+    dpai = jnp.asarray(inp["dpai"], dtype=jnp.float64)
+    top = float(inp["vcmax25top"])
+    r = physics.canopy_nitrogen_profile(
+        layers, dpai, *(jnp.asarray(inp[k], dtype=jnp.float64) for k in ("kb", "tbi", "fracsun")),
+        float(inp["lai"]), float(inp["sai"]), 0.0, top, float(inp["clump_fac"]),
+        c3=True, acclimation=False, kn_val=float(inp["kn"]),
+        vary_with_height=int(inp["leaf_optics_type_in"]) == 1,
+    )  # fmt: skip
+    numerical = float(jnp.sum(r.vcmax25_profile * dpai))
+    out = {"numerical": numerical, "analytical": numerical - float(r.integration_error)}
+    for ic in range(ncan):
+        out[f"nscale_sun_{ic + 1:02d}"] = float(r.vcmax25_leaf[ic, 0]) / top
+        out[f"nscale_sha_{ic + 1:02d}"] = float(r.vcmax25_leaf[ic, 1]) / top
+        out[f"vcmax25_profile_{ic + 1:02d}"] = float(r.vcmax25_profile[ic])
+    return out
 
 
 def _adapt_shr_orb_params(inp: dict) -> dict:
@@ -432,10 +419,9 @@ ADAPTERS: dict[str, Callable[[dict], dict]] = {
     "test_MLLeafHeatCapacityMod_LeafHeatCapacity.exe": _adapt_leaf_heat_capacity,
     "test_MLRungeKuttaMod_RungeKuttaIni.exe": _adapt_runge_kutta_ini,
     "test_MLCanopyNitrogenProfileMod_NitrogenScale.exe": _adapt_nitrogen_scale,
+    "test_MLCanopyNitrogenProfileMod_CanopyNitrogenProfile.exe": _adapt_canopy_nitrogen_profile,
     "test_shr_orb_mod_shr_orb_params.exe": _adapt_shr_orb_params,
     "test_shr_orb_mod_shr_orb_decl.exe": _adapt_shr_orb_decl,
-    # test_MLCanopyNitrogenProfileMod_CanopyNitrogenProfile.exe:
-    #   Requires full mlcanopy_type state initialization — covered separately.
 }
 
 

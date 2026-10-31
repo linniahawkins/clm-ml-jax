@@ -214,6 +214,23 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   re-recording: noise twin pass, bit for bit 53 fail; process replay 7 pass; after:
   bit-for-bit + noise twin 177 pass (1.3 min); focused CPU gradient test 1 pass (2.3 min; a first try was killed, out of memory while the reference was recorded alongside).
 
+- **Process 9, `clm_ml/physics/nitrogen_profile.py`, `integrators.py` (C18):** the
+  exponential nitrogen profile (both leaves at once, the integration error returned and
+  recorded as `NITROGEN` by the adapter) and the Runge-Kutta update on the six integrated
+  variables (`Integrated`) with the tableaus as numpy constants by model.yaml name
+  (`TABLEAUS`; `config.INTEGRATOR_CODES`, was `_RK_CODES`). Adapters
+  `clm_ml/legacy/nitrogen_profile.py`, `clm_ml/legacy/integrators.py`
+  (`RungeKuttaUpdate(irk, tableau, inst, grid)`, `integrator_tableau(opts)`);
+  `MLCanopyNitrogenProfileMod`, `MLRungeKuttaMod` deleted. Process replay translates the
+  recorded `RungeKuttaUpdate` arguments. Golden tests repointed; the 5
+  `CanopyNitrogenProfile` golden cases now run (were skipped). Bit for bit in isolation
+  and end to end (a first version, identical in isolation, moved the shaded leaves'
+  Vcmax25 by 1 ulp in the chunk: masks restored to the legacy order, `probe79`). New
+  `tests/clm_ml/test_physics_nitrogen_integrators.py` (15). Tests: lint; fast golden 165
+  pass; `tests/clm_ml` 238 pass (`config.py` changed); first try bit for bit 55 fail
+  (fixed, above); bit-for-bit + noise twin 177 pass (1.8 min); process replay 7 pass;
+  focused CPU gradient test 1 pass (2.8 min).
+
 ## Next (resume here)
 
 **Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2, session 2 (2026-10-31)
@@ -221,15 +238,20 @@ processes 3-4 (bit for bit), session 3 (2026-10-31) process 5 (round-off, refere
 re-recorded, C14), session 4 (2026-10-31) process 6 (turbulence, bit for bit, C15), session 5
 (2026-10-31) process 7 (boundary layer and photosynthesis, round-off, reference re-recorded,
 C16), session 6 (2026-10-31) process 8 (flux-profile solution and water vapor, round-off,
-reference re-recorded, C17); last commit = the one that wrote this.** Next session:
-**process 9** (scope table): `nitrogen_profile.py` (`MLCanopyNitrogenProfileMod`: the
-exponential Vcmax/Jmax/Rd/Kp profile and its integration check `NITROGEN`) and
-`integrators.py` (`MLRungeKuttaMod`: `RungeKuttaIni`, `RungeKuttaUpdate`, the Euler/RK
-tables; golden tests use `MLRungeKuttaMod`, see `test_golden_jax.py`). Process replay
-covers neither directly (check `ROUTINES` in `tests/regression/process_io.py`). The RK
-update touches the state integrated in the chunk scan: check the focused CPU gradient test.
+reference re-recorded, C17), session 7 (2026-10-31) process 9 (nitrogen profile and
+Runge-Kutta, bit for bit, C18); last commit = the one that wrote this.** Next session:
+**process 10** (scope table): `canopy.py`, the step driver (`MLCanopyFluxesMod`:
+`MLCanopyFluxes`, the sub-step loop and RK stages, `_MLAccumulateFluxes`,
+`_CanopyFluxesDiagnostics`, the sun/shade merge); the legacy container leaves the step here
+(the step reads and returns `StepState` directly; `clm_ml/legacy/state.py` conversions and
+the adapters of processes 2-9 go or shrink), plus the fixes listed below ("Fixes to make at
+process 10"). Probably more than one session: plan it first and split it (e.g. driver on
+plain arrays with the adapters still in place, then removing the container from the step,
+then the psihat fix), each ending at a commit. It is the last process of 7.2: package-end
+tests after it (CPU gradient tier, independent review, timing against `p71-*`), then stop
+and report to the maintainer.
 
-Same pattern as processes 2-8 (C10, C12-C17): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
+Same pattern as processes 2-9 (C10, C12-C18): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
 fake containers holding only the declared fields. Expect round-off changes when loops become
 array operations even if every routine is bit-identical in isolation (C10): probe the routine
@@ -242,6 +264,10 @@ the container, XLA may be folding divisions across it: pass the values Fortran s
 compiled fusion recomputes a value next to its use (C17: check the optimized HLO,
 `jit(f).lower(...).compile().as_text()`, for `opt-barrier`), it does not help; then it is the
 C10 pattern (round-off, re-record).
+Before re-recording, compare the run with the reference relative to the twin spread
+(`probe78/ratio.py`): a field the twins do not move that differs (C18: the moved routine's
+own output, e.g. `vcmax25_leaf`) points at the moved arithmetic itself, often fixable by
+keeping the legacy order of masks and operations.
 
 ### Fixes to make at process 10 (maintainer's instructions)
 
@@ -260,7 +286,7 @@ done and ticked in the process-10 commit:
 
 Open for the maintainer: C10 and C14 (reference re-recorded for the soil and process-5 moves,
 round-off only), C15 (the `optimization_barrier`; the psihat tables as a step input is
-scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), C16 (reference re-recorded for process 7, round-off only; process replay compares fields zero to round-off absolutely). C17 (reference re-recorded for process 8, round-off only; `well_mixed` refused by `clm_ml.run`), open issue 20 (Fortran's implicit-solution checks never run in the step: record them in `BALANCE_CHECKS`?). Earlier: C4, the removed
+scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), C16 (reference re-recorded for process 7, round-off only; process replay compares fields zero to round-off absolutely). C17 (reference re-recorded for process 8, round-off only; `well_mixed` refused by `clm_ml.run`), C18 (process 9, bit for bit; `kn_val` still a static option), open issue 20 (Fortran's implicit-solution checks never run in the step: record them in `BALANCE_CHECKS`?). Earlier: C4, the removed
 diagnostics, C5-C8. Timing baseline for the end of 7.2: `p71-*` in
 `timing/results_model.jsonl` (forward ~27-28 ms/step, gradient ~604 ms/step).
 

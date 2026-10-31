@@ -36,8 +36,10 @@ from clm_ml.legacy.canopy_water import (  # noqa: F401
     CanopyWettedFraction,
 )
 from clm_ml.legacy.flux_profile import FluxProfileSolution
+from clm_ml.legacy.integrators import RungeKuttaUpdate, integrator_tableau
 from clm_ml.legacy.leaf_boundary_layer import LeafBoundaryLayer  # noqa: F401
 from clm_ml.legacy.longwave import LongwaveRadiation  # noqa: F401
+from clm_ml.legacy.nitrogen_profile import CanopyNitrogenProfile
 from clm_ml.legacy.photosynthesis import LeafPhotosynthesis  # noqa: F401
 from clm_ml.legacy.plant_hydraulics import (  # noqa: F401
     LeafHeatCapacity,
@@ -68,7 +70,6 @@ from multilayer_canopy.MLCanopyFluxesType import (  # noqa: F401
 )
 
 # Physics modules (translated elsewhere)
-from multilayer_canopy.MLCanopyNitrogenProfileMod import CanopyNitrogenProfile  # noqa: F401
 from multilayer_canopy.MLCanopyParamsMod import CanopyParams, patch_setup
 from multilayer_canopy.MLclm_varcon import mmh2o, rgas  # noqa: F401
 from multilayer_canopy.MLclm_varctl import GridInfo, MLOptions
@@ -79,7 +80,6 @@ from multilayer_canopy.MLinitVerticalMod import (  # noqa: F401
     initVerticalStructure,
 )
 from multilayer_canopy.MLLayersMod import keep, layers, pad_with_top
-from multilayer_canopy.MLRungeKuttaMod import RungeKuttaIni, RungeKuttaUpdate  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # JIT-compiled bef-state copy helper
@@ -355,12 +355,9 @@ def MLCanopyFluxes(
         if initialize == "only":  # the batched first step runs the physics (Phase 6 step 6)
             return mlcanopy_inst
 
-    # Runge-Kutta coefficients — Fortran line 197 (computed on the first step
-    # and kept in module state; they depend only on runge_kutta_type, so they are
-    # computed here instead). Constants: evaluated eagerly even when this function is
-    # traced (RungeKuttaUpdate uses them as numpy values).
-    with jax.ensure_compile_time_eval():
-        ark, brk, crk = RungeKuttaIni(opts)
+    # Runge-Kutta coefficients — Fortran line 197 (computed on the first step and kept in
+    # module state; they depend only on runge_kutta_type): numpy constants
+    rk = integrator_tableau(opts)
 
     # ------------------------------------------------------------------
     # Copy CLM variables to mlcanopy container — Fortran line 201
@@ -583,16 +580,7 @@ def MLCanopyFluxes(
             inst = CanopyInterception(num_mlcan, filter_mlcan, inst, opts=opts)
             inst = CanopyEvaporation(num_mlcan, filter_mlcan, inst, opts=opts)
             if nrk_steps > 0:  # no-op after the last stage (irk > nrk)
-                inst = RungeKuttaUpdate(
-                    irk,
-                    ark,
-                    brk,
-                    crk,
-                    num_mlcan,
-                    filter_mlcan,
-                    inst,
-                    grid=grid,
-                )
+                inst = RungeKuttaUpdate(irk, rk, inst, grid)
             return inst
 
         stages = range(1, nrk_steps + 2)

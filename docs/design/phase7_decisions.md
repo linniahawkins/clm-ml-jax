@@ -618,3 +618,58 @@ implicit-solution checks in `BALANCE_CHECKS` now (changes the state and the refe
 `balance_error`; a decision for the maintainer, issue 20); fighting the fusion with
 container-like writes (fragile: the old code matched numpy only because of where XLA cut
 the fusions).
+
+### C18. Process 9: `clm_ml/physics/nitrogen_profile.py` and `integrators.py` (7.2, 2026-10-31)
+Context: scope 7.2 process 9 (`MLCanopyNitrogenProfileMod`, `MLRungeKuttaMod`); the scope
+does not say how the Runge-Kutta tableaus are chosen or what the integrated state looks like.
+Decision:
+- **`clm_ml/physics/nitrogen_profile.py`** on one patch (0-based layers, leaves on axis 1):
+  `canopy_top_rates` (Vcmax, Jmax, Rd, Kp at the canopy top; C3/C4 and acclimation as static
+  choices, Python branches instead of `jnp.where` on a constant), `decay_coefficient` (kn;
+  `kn_val` stays a static option, as before: making it a differentiable parameter is a
+  change of interface, not of structure), `nitrogen_scale` (Fortran's per-layer formulas,
+  elementwise), `canopy_nitrogen_profile` (all layers at once, top down, the legacy
+  arithmetic and order: the exclusive cumulative sum on the reversed axis, the 1e-30
+  floors); the integration error is returned and the adapter records it as `NITROGEN`. The
+  invalid-option `endrun` branches are gone (model.yaml offers only the valid ones; the
+  adapter raises on other codes).
+- **`clm_ml/physics/integrators.py`**: the tableaus as numpy constants registered by the
+  model.yaml names (`TABLEAUS`, `numerics.integrator`; `euler` has one stage and no update,
+  as Fortran never calls `RungeKuttaUpdate` for it); `config._RK_CODES` renamed
+  `INTEGRATOR_CODES` (public: the adapter maps Fortran codes to names with it).
+  `runge_kutta_update(stage, tableau, layers, bef, cur, increments)` on the six integrated
+  variables (`Integrated`: air temperature, vapor pressure, intercepted water, leaf
+  temperature, leaf water potential, ground temperature), the legacy arithmetic (earlier
+  stages summed, then this stage's term: the legacy order, not Fortran's one-by-one sum,
+  numerics doc §4 unchanged); it returns the state, this stage's increments and the stage
+  index; the adapter writes the increments into the container's stage axis as before.
+- **Adapters** `clm_ml/legacy/nitrogen_profile.py::CanopyNitrogenProfile` (one `jax.jit` of
+  the physics per call, as the legacy routine was jitted) and
+  `clm_ml/legacy/integrators.py::RungeKuttaUpdate(irk, tableau, inst, grid)` with
+  `integrator_tableau(opts)` (replaces `RungeKuttaIni`; the unused `c` and filter arguments
+  dropped); `DECLARED` reads/writes. The legacy leaf axis keeps its unused index 0 updated
+  with the leaves, as before. Both legacy modules deleted, no shim.
+- **Process replay**: the recorded `RungeKuttaUpdate(irk, a, b, c, num_filter, filter,
+  inst)` calls are replayed as `(irk, Tableau(a, b, c), inst)` (`process_io._new_arguments`).
+- **Golden tests**: `RungeKuttaIni` reads `TABLEAUS["rk4"]`; `NitrogenScale` calls
+  `nitrogen_scale` (it had re-implemented the formulas in the test); the
+  `CanopyNitrogenProfile` golden cases (5, skipped until now: "requires full container
+  initialization") run against `canopy_nitrogen_profile`.
+- **Bit for bit** in isolation (old HEAD files vs new adapters, every container field, eager
+  and `jit`, the six recorded RK calls at stages 1-5, the nitrogen profile on the three
+  recorded states with the default options, without acclimation, with
+  `leaf_optics_type = 1` and with `kn_val = 0.3`; `probe79/compare.py`). A first version
+  differed by 1 ulp with `leaf_optics_type = 1` (scaling factor from the unmasked `fn`);
+  that branch uses the masked `fn` as before. **End to end** a version that formed
+  `fn_sha = fn - fn_sun` before masking (identical in isolation) changed the shaded leaves'
+  `vcmax25_leaf` by 1 ulp inside the compiled chunk (117 values, from step 0; 55 fields
+  differed, worst 1.54x the twin spread; `probe79/cur.npz`), a field the twins do not move:
+  the subtraction compiled differently once it followed the multiplications directly
+  (probably a fused multiply-add; not checked in the HLO). `canopy_nitrogen_profile` masks
+  `fn` and `fn_sun` before combining them, as the legacy code: bit for bit end to end,
+  reference unchanged. The physics is therefore split as `nitrogen_fractions` (fn, fn_sun)
+  and `nitrogen_scale` (the factors; used by the golden test).
+Why: the scope's aim (physics on plain arrays by process, variants by name); the legacy
+arithmetic kept so nothing moves.
+Alternatives: tableaus as a pytree argument of the step (they are constants of the method,
+which is static); a differentiable `kn` (interface change, for the maintainer if wanted).

@@ -166,7 +166,8 @@ def replay(out_json: Path) -> None:
                 kwargs.update(_grid_kwargs(name, call["args"]))
             if "opts" in inspect.signature(getattr(F, name)).parameters:
                 kwargs.setdefault("opts", _chats7_options())  # explicit options (Phase 5a)
-            out = getattr(F, name)(*_to_jax(call["args"]), **_to_jax(kwargs))
+            args = _new_arguments(name, call["args"])
+            out = getattr(F, name)(*_to_jax(args), **_to_jax(kwargs))
             results.append(
                 {"step": call["step"], "max_rel_diff": _max_rel_diff(call["output"], out)}
             )
@@ -199,6 +200,18 @@ def _chats7_options():
     from multilayer_canopy.MLclm_varctl import DEFAULT_OPTIONS
 
     return DEFAULT_OPTIONS._replace(met_type=3)
+
+
+def _new_arguments(name: str, args) -> tuple:
+    """Recorded positional arguments in the current signature: ``RungeKuttaUpdate(irk, a, b,
+    c, num_filter, filter, inst)`` takes ``(irk, Tableau(a, b, c), inst)`` since Phase 7.2
+    process 9."""
+    if name == "RungeKuttaUpdate" and len(args) == 7:
+        from clm_ml.physics.integrators import Tableau
+
+        irk, a, b, c, _, _, inst = args
+        return (irk, Tableau(a, b, c), inst)
+    return tuple(args)
 
 
 # Routines that take the patch's parameters (Phase 3d); the recording predates them.
