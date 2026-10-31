@@ -483,3 +483,78 @@ Alternatives: thread the tables through the chunk runners now (twice the driver 
 above); tables per patch in `CanopyParams` (vmapped: 180 kB copied per patch); keep the
 1 ulp difference and re-record the reference (avoidable, and the stored-value rounding is
 what Fortran does).
+
+### C16. Process 7: `leaf_boundary_layer.py`, `photosynthesis.py`; sunlit and shaded leaves in one call; `wue_solver: brent` refused (7.2, 2026-10-31)
+Context: scope 7.2 process 7 (`MLLeafBoundaryLayerMod`, `MLLeafPhotosynthesisMod`, 2 000
+lines with four near-copies of the layer kernel: Medlyn/Ball-Berry and WUE, each with and
+without acclimation; "sun and shade as one vmapped call over the leaf axis ... round-off only
+if XLA fuses differently: check"); open issue 18 to settle with the maintainer.
+Decision:
+- **Physics on one patch, 0-based, layers on axis 0 and leaves on axis 1**, as array
+  (broadcasting) code rather than a `vmap` of a scalar kernel: one kernel instead of four (the
+  acclimation parameters are Python floats without acclimation, so they stay constants of the
+  compiled program as the closed-over values of the old kernels were).
+  `leaf_boundary_layer.leaf_boundary_layer` (-> `BoundaryLayerConductance`; regimes by name,
+  `REGIMES = ("laminar", "turbulent", "free_convection")`, the names model.yaml
+  `physics.leaf_boundary_layer` uses); `photosynthesis.leaf_photosynthesis`
+  (-> `Photosynthesis`, the 21 `*_leaf` fields) built from `ft`, `fth`, `fth25`,
+  `temperature_parameters`, `leaf_rates`, `electron_transport`, `realized_rate` (the pathway
+  and co-limitation as static switches instead of `jnp.where` on the `c3psn` value),
+  `photosynthesis_at_gs` (CiFuncGs), `stomata_efficiency`, the solvers `solve_ci` (40 secant
+  steps + Newton step) and `solve_gs_bisection` (20 halvings + Newton step), unchanged in
+  arithmetic, each docstring with its `Fortran reference:`. Stomatal models by name
+  (`STOMATAL_CONDUCTANCE = ("medlyn", "ball_berry", "wue")`). Parameters enter as numbers
+  (`iota`, `gs_min`, `psi50_gs`, `shape_gs`, `g0`, `g1`; C14), `stomatal_parameters` picks
+  `g0`, `g1` of the model from the PFT's `CanopyParams`. The photosynthesis pads its inputs
+  with the top layer's (takes `PatchLayers`), as the legacy routine did; the boundary layer
+  computes on every slot without padding, as before.
+- **One masking rule for absorbed PAR:** the old Medlyn/Ball-Berry kernels did not replace
+  `apar` by 1 in layers without plant area, the WUE kernels did; now all do. Forward values
+  are unchanged (every result of such a layer is zeroed, and the water-stress pass reads the
+  container's `apar`); it only removes a difference between copies.
+- **Issue 18 (maintainer, 2026-10-31): `wue_solver: brent` is refused**, not translated:
+  `WUE_SOLVER = ("bisection", "brent")` with `brent()` raising `NotImplementedError` (D8
+  pattern), and `clm_ml.run` stops with a `ConfigError` for `brent` with
+  `stomatal_conductance: wue` (Fortran ignores `gs_solver` for the other models, so does the
+  JAX). Listed in the plan under "After Phase 8: unsupported variants".
+- **Adapters** `clm_ml/legacy/leaf_boundary_layer.py::LeafBoundaryLayer` (both leaves; it
+  replaces `LeafBoundaryLayerBoth`) and `clm_ml/legacy/photosynthesis.py::LeafPhotosynthesis`
+  (`il = None`: both leaves in one call, used by `MLCanopyFluxesMod`; `il = isun/isha`: one
+  leaf, as the process replay records it); results written in the layers in use, padding
+  kept (as `restore_padding` did); `btran_soil = 1`, `g0_canopy`/`g1_canopy` for Medlyn and
+  Ball-Berry only; invalid option codes raise `ValueError` (Fortran `endrun`); `DECLARED`
+  reads/writes. Each physics call is one `jax.jit` (as the old kernels were). Both legacy
+  modules deleted, no shim. New constants re-exported by `physics/constants.py`; `SatVap`
+  still comes from `MLWaterVaporMod` (moves with the flux-profile solution or 7.6).
+- **Golden tests repointed** (`ft`, `fth`, `fth25`, `RealizedRate`, `LeafBoundaryLayer`; 160
+  fast golden tests pass). New `tests/clm_ml/test_physics_photosynthesis.py`: declared
+  reads/writes of both adapters (all three stomatal models), one leaf at a time = both,
+  regimes ordered and floored, diffusion equation, Ball-Berry and Medlyn satisfy their models
+  (Fortran's error checks; without co-limitation, because the water-stress pass recomputes
+  photosynthesis with `ac` and `aj` solved separately), the WUE optimum is the root of the
+  efficiency check, low light gives `gs_min`, the water-stress rule, C4 and the options,
+  `brent` refused, and d gs / d vcmax25 against finite differences for WUE and Medlyn (the
+  implicit-function gradients).
+- **Round-off change, reference re-recorded (D7):** under `jax.jit`, the new code called one
+  leaf at a time is bit-identical to the old code on the six recorded calls, and the boundary
+  layer is identical (probe `probe77/compare.py`). Computing both leaves in one (layer, 2)
+  array compiles differently (last bits of `je`, which the WUE efficiency check, a
+  difference of net photosynthesis 0.001 apart in gs, amplifies to ~3e-12 in gs): 53 fields
+  differ from step 0, worst 1.24x the noise-twin spread (`lhvegsha_canopy`;
+  `probe77/ratio.py`), noise twin and process replay pass. Reference and twins re-recorded
+  in this commit.
+- **Process replay: fields that are zero to round-off compared absolutely.** The replay of
+  `LeafPhotosynthesis` at night (step 14) failed with "relative difference 1.0" in `aj_leaf`
+  and `agross_leaf`: the recording (old code, run step by step) has 0, the new adapter
+  2.2e-16, because `aj = root + rd` with `root = -rd` in the dark; the old code compiled
+  gives the same 2.2e-16 (`probe77/replay14.py`: new = old under `jit` in every call), so
+  the running model did not change, only the adapter now compiles the whole routine.
+  Relative to a field whose largest value is 1e-16, any round-off reads as 1.
+  `process_io._max_rel_diff` now compares a field smaller than `ZERO_FIELD = 1e-12`
+  everywhere in the recorded call by its absolute difference; all other fields as before.
+Why: the scope's aim (physics on plain arrays, one kernel over the leaf axis instead of two
+calls and four copies); refusing `brent` is the maintainer's choice for issue 18.
+Alternatives: keep one call per leaf (bit for bit, but not the scope's leaf-axis call and
+twice the photosynthesis program); `vmap` of a scalar kernel (the old form; broadcasting
+keeps Python-float constants constant without care about how `vmap` passes unbatched
+arguments); a traceable Brent now (not validated against Fortran; maintainer chose refusal).

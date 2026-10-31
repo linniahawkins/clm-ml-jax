@@ -579,6 +579,12 @@ def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> R
             "was never validated and stops at the first CHATS7 step with a conservation error "
             "(plan, open issues of Phases 4-5); use two_stream"
         )
+    if config.physics.stomatal_conductance == "wue" and config.physics.wue_solver == "brent":
+        raise ConfigError(
+            "model.yaml: physics.wue_solver: brent is not supported: the JAX model has no "
+            "traceable Brent solver (Phase 7 decision C16; global_input.md issue 18); use "
+            "bisection"
+        )
     model_step = config.numerics.step_seconds or run_file.time.step_seconds
     if run_file.domain.type == "grid":
         return _load_grid_run(

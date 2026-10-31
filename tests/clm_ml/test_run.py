@@ -117,3 +117,8 @@ def test_cli_check_and_errors(chats_run_dir, capsys):
 def test_norman_solar_radiation_is_not_supported(chats_run_dir):
     with pytest.raises(ConfigError, match="norman is not supported"):
         load_run(chats_run_dir / "run.yaml", ["model.physics.solar_radiation=norman"])
+
+
+def test_brent_wue_solver_is_not_supported(chats_run_dir):
+    with pytest.raises(ConfigError, match="brent is not supported"):
+        load_run(chats_run_dir / "run.yaml", ["model.physics.wue_solver=brent"])

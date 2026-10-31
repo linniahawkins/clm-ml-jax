@@ -1856,7 +1856,9 @@ Also: revisit the C3/C4 groups (decision 22), which trace the step twice in mixe
 
 WellMixed flux-profile and dataset profiles (fail on traced layer counts) and Norman solar
 radiation stay registered but refuse to run (decision 35); make them run compiled and
-validate them against Fortran.
+validate them against Fortran. Also Brent's method for the WUE stomatal optimization
+(`wue_solver: brent`, Fortran `gs_solver = 1`): never translated as traceable code, refused
+since Phase 7.2 (maintainer, 2026-10-31; Phase 7 decision C16).
 
 ### After Phase 8: option B (shared soil columns)
 

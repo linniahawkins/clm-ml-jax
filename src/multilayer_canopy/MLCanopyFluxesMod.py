@@ -35,7 +35,9 @@ from clm_ml.legacy.canopy_water import (  # noqa: F401
     CanopyInterception,
     CanopyWettedFraction,
 )
+from clm_ml.legacy.leaf_boundary_layer import LeafBoundaryLayer  # noqa: F401
 from clm_ml.legacy.longwave import LongwaveRadiation  # noqa: F401
+from clm_ml.legacy.photosynthesis import LeafPhotosynthesis  # noqa: F401
 from clm_ml.legacy.plant_hydraulics import (  # noqa: F401
     LeafHeatCapacity,
     LeafWaterPotential,
@@ -76,10 +78,6 @@ from multilayer_canopy.MLinitVerticalMod import (  # noqa: F401
     initVerticalStructure,
 )
 from multilayer_canopy.MLLayersMod import keep, layers, pad_with_top
-from multilayer_canopy.MLLeafBoundaryLayerMod import (
-    LeafBoundaryLayerBoth,
-)  # noqa: F401
-from multilayer_canopy.MLLeafPhotosynthesisMod import LeafPhotosynthesis  # noqa: F401
 from multilayer_canopy.MLRungeKuttaMod import RungeKuttaIni, RungeKuttaUpdate  # noqa: F401
 from multilayer_canopy.MLWaterVaporMod import LatVap  # noqa: F401
 
@@ -575,25 +573,10 @@ def MLCanopyFluxes(
             inst = CanopyTurbulence(
                 nstep_ml, num_mlcan, filter_mlcan, inst, grid=grid, nstep=nstep, opts=opts
             )
-            # Both sun and shade in one fused GPU dispatch (2× fewer round-trips)
-            inst = LeafBoundaryLayerBoth(num_mlcan, filter_mlcan, inst, params, opts=opts)
+            # Sunlit and shaded leaves in one call each
+            inst = LeafBoundaryLayer(num_mlcan, filter_mlcan, inst, params, opts=opts)
             inst = LeafPhotosynthesis(
-                num_mlcan,
-                filter_mlcan,
-                isun,
-                inst,
-                grid=grid,
-                params=params,
-                opts=opts,
-            )
-            inst = LeafPhotosynthesis(
-                num_mlcan,
-                filter_mlcan,
-                isha,
-                inst,
-                grid=grid,
-                params=params,
-                opts=opts,
+                num_mlcan, filter_mlcan, None, inst, grid=grid, params=params, opts=opts
             )
             inst = FluxProfileSolution(num_mlcan, filter_mlcan, inst, grid=grid, opts=opts)
             inst = LeafWaterPotential(num_mlcan, filter_mlcan, inst, params, opts=opts)

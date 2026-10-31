@@ -179,23 +179,39 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   fast golden 160 pass; new unit tests 15 pass, `test_imports` pass; bit-for-bit + noise twin
   177 pass (1.8 min); process replay 7 pass; focused CPU gradient test 1 pass (2.6 min).
 
+- **Process 7, `leaf_boundary_layer.py`, `photosynthesis.py` (C16): round-off change,
+  reference re-recorded.** Sunlit and shaded leaves in one call (layers on axis 0, leaves on
+  axis 1, array code: one kernel instead of the four Medlyn/Ball-Berry/WUE x acclimation
+  copies); stomatal models and boundary layer regimes by name; parameters as numbers;
+  solvers `solve_ci`, `solve_gs_bisection` (same arithmetic, implicit-function gradients).
+  Issue 18 settled by the maintainer: `wue_solver: brent` refused (physics and `clm_ml.run`;
+  plan "After Phase 8: unsupported variants"). Adapters `clm_ml/legacy/leaf_boundary_layer.py`,
+  `clm_ml/legacy/photosynthesis.py` (`il = None` both leaves, or one leaf for the replay);
+  both legacy modules deleted. Per leaf under `jit` bit-identical to the old code; the
+  (layer, 2) call compiles differently: 53 fields differ, worst 1.24x the twin spread
+  (`probe77`). Process replay: fields zero to round-off in the recording now compared
+  absolutely (night `aj`, 2.2e-16 vs 0; the old code compiled gives the same). Golden tests
+  repointed; new `tests/clm_ml/test_physics_photosynthesis.py` (23). Tests: lint; fast golden
+  160 pass; new unit tests 23 pass, `tests/clm_ml` 216 pass (`run.py` changed); before
+  re-recording: noise twin pass, bit for bit 53 fail; process replay 7 pass; focused CPU
+  gradient test 1 pass (2.2 min); after: bit-for-bit + noise twin 177 pass (1.2 min).
+
 ## Next (resume here)
 
 **Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2, session 2 (2026-10-31)
 processes 3-4 (bit for bit), session 3 (2026-10-31) process 5 (round-off, reference
-re-recorded, C14), session 4 (2026-10-31) process 6 (turbulence, bit for bit, C15); last
-commit = the one that wrote this.** Next session: **process 7** (scope table):
-`leaf_boundary_layer.py` (`MLLeafBoundaryLayerMod`) and `photosynthesis.py`
-(`MLLeafPhotosynthesisMod`), sun and shade as one vmapped call over the leaf axis (D5; halves
-the largest kernel; round-off only if XLA fuses differently: check). It holds the
-stomatal-conductance bisection and the intercellular-CO2 solver with implicit-function
-gradients (`_bisect_gs_ift`, `_ci_solver_scan_ift`): run the focused CPU gradient test.
-Decide open issue 18 (`wue_solver: brent` never used) with the maintainer there. Process
-replay `LeafPhotosynthesis`; golden tests of `MLLeafPhotosynthesisMod` and
-`MLLeafBoundaryLayerMod` to repoint (`_fth`, `_fth25`, `_RealizedRate`, ...). Probably one
-session (photosynthesis is ~the size of turbulence).
+re-recorded, C14), session 4 (2026-10-31) process 6 (turbulence, bit for bit, C15), session 5
+(2026-10-31) process 7 (boundary layer and photosynthesis, round-off, reference re-recorded,
+C16); last commit = the one that wrote this.** Next session: **process 8** (scope table):
+`flux_profile.py` from `MLFluxProfileSolutionMod` (the implicit coupled solution for air
+temperature, vapor pressure, leaf and ground temperature; `tridiag_2eq`) and
+`MLSoilFluxesMod`; WellMixed registered as unsupported (D8). Also decide where `SatVap`/
+`LatVap` (`MLWaterVaporMod`, used by photosynthesis, flux profile, canopy fluxes) go: probably
+`clm_ml/physics/water_vapor.py` in this process. Process replay `FluxProfileSolution`; check
+which golden tests cover it. `tridiag_2eq` has a `custom_vjp` (already in `physics.math`); if
+the solution's gradient construction moves, run the focused CPU gradient test.
 
-Same pattern as processes 2-6 (C10, C12-C15): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
+Same pattern as processes 2-7 (C10, C12-C16): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
 fake containers holding only the declared fields. Expect round-off changes when loops become
 array operations even if every routine is bit-identical in isolation (C10): probe the routine
@@ -223,7 +239,7 @@ done and ticked in the process-10 commit:
 
 Open for the maintainer: C10 and C14 (reference re-recorded for the soil and process-5 moves,
 round-off only), C15 (the `optimization_barrier`; the psihat tables as a step input is
-scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), open issue 18 (`wue_solver: brent` never used; decide at process 7). Earlier: C4, the removed
+scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), C16 (reference re-recorded for process 7, round-off only; process replay compares fields zero to round-off absolutely). Earlier: C4, the removed
 diagnostics, C5-C8. Timing baseline for the end of 7.2: `p71-*` in
 `timing/results_model.jsonl` (forward ~27-28 ms/step, gradient ~604 ms/step).
 

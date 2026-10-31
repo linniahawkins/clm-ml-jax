@@ -314,6 +314,11 @@ Fortran); use the leaf water potential outputs instead.
     silently gives the bisection answer. Default runs (bisection, CHATS7) are unaffected. To be
     settled when photosynthesis moves (7.2 process 7): a traceable Brent, or `brent`
     registered as unsupported (a clear error, as D8 does for other untranslated variants).
+    **Settled (maintainer, 2026-10-31): refused.** `wue_solver: brent` with
+    `stomatal_conductance: wue` now stops with a clear error (`clm_ml.run`, and the physics:
+    `photosynthesis.WUE_SOLVER`); the option stays (D9); a traceable Brent validated against
+    Fortran is listed under "After Phase 8: unsupported variants" in the plan (Phase 7
+    decision C16).
 19. **Soil ice read one level too deep in `SoilResistance`** (found in Phase 7.2 process 5,
     2026-10-31; not a Phase 6b issue). Fortran `MLPlantHydraulicsMod.F90::SoilResistance`
     sets a level's maximum uptake to 0 if `h2osoi_ice(c,j) > 0`. The JAX translation reads

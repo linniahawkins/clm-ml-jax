@@ -220,8 +220,16 @@ def _grid_kwargs(name: str, args) -> dict:
     return kwargs
 
 
+#: A recorded field smaller than this everywhere is zero to round-off in that call (e.g. RuBP-
+#: limited photosynthesis at night, ``root + rd`` with ``root = -rd``): its differences are
+#: compared as absolute values, since relative to its own magnitude any round-off reads as 1
+#: (Phase 7 decision C16).
+ZERO_FIELD = 1e-12
+
+
 def _max_rel_diff(expected, actual) -> dict:
-    """Largest difference per field, relative to the field's magnitude (fields that differ)."""
+    """Largest difference per field, relative to the field's magnitude (fields that differ;
+    absolute for fields that are zero to round-off, ``ZERO_FIELD``)."""
     diffs = {}
     for field in expected._fields:
         x = np.asarray(getattr(expected, field), dtype=float)
@@ -232,7 +240,8 @@ def _max_rel_diff(expected, actual) -> dict:
         valid = np.isfinite(x) & (np.abs(x) < 1e30)
         if not valid.any():
             continue
-        scale = float(np.max(np.abs(x[valid]))) or 1.0
+        scale = float(np.max(np.abs(x[valid])))
+        scale = 1.0 if scale < ZERO_FIELD else scale
         d = float(np.max(np.abs(x[valid] - y[valid]))) / scale
         if d > 0:
             diffs[field] = d

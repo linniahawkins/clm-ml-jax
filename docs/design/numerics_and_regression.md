@@ -86,8 +86,8 @@ also faster (2.7 s per step, from 4.5 s). All changes alter round-off only: per-
 ## 2. Root solvers: forward values and implicit-function gradients
 
 **Context.** Three quantities are found by iterative root solvers: the Obukhov length
-(`clm_ml.physics.turbulence.obukhov_length`), leaf intercellular CO₂ (`_ci_solver_scan_ift`) and stomatal conductance under
-water-use-efficiency optimization (`_bisect_gs_ift`). Differentiating *through* the iterations
+(`clm_ml.physics.turbulence.obukhov_length`), leaf intercellular CO₂ (`clm_ml.physics.photosynthesis.solve_ci`) and stomatal conductance under
+water-use-efficiency optimization (`clm_ml.physics.photosynthesis.solve_gs_bisection`). Differentiating *through* the iterations
 gives wrong or exploding gradients (observed ~1e144 for the Obukhov solver), so the traceable
 code uses the implicit function theorem (IFT). If the solver finds `x*` with `F(x*; θ) = 0`, then
 `dx*/dθ = −(∂F/∂θ) / (∂F/∂x)`.
@@ -111,8 +111,8 @@ The forward value is exactly the solver's root, as in the running model. The gra
 unchanged.
 
 **Not applied (yet) to stomatal conductance and intercellular CO₂.** For these two, the running
-model itself uses the IFT helpers (`_bisect_gs_ift` in the WUE kernel; `_ci_solver_scan_ift` in
-the Medlyn/Ball–Berry kernels). So the Newton-shifted forward value *is* the validated
+model itself uses the IFT helpers (`solve_gs_bisection` for WUE; `solve_ci` for
+Medlyn/Ball–Berry). So the Newton-shifted forward value *is* the validated
 behavior. Removing the shift changes results (about 1e-5 relative in stomatal conductance), so
 it is listed in §4 as a deviation from Fortran to fix in a fidelity step.
 
@@ -168,7 +168,8 @@ Fortran `StomataOptimization` (MLLeafPhotosynthesisMod.F90, lines 798–850) fin
 `bisection` between `gsmin` and 2 mol m⁻² s⁻¹, stopping when the bracket is narrower than
 `tol = 0.001` mol m⁻² s⁻¹. It returns the last midpoint.
 
-The running JAX model (`_make_leaf_photo_kernel_wue` → `_bisect_gs_ift`) instead:
+The running JAX model (`clm_ml.physics.photosynthesis.solve_gs_bisection`; before Phase 7.2
+`_bisect_gs_ift`) instead:
 - does **20 halvings** and takes the final bracket's midpoint;
 - then applies one **Newton step** (part of its implicit-function gradient).
 
@@ -177,12 +178,13 @@ gs by up to 1e-2 relative in a test at dusk and midday (the size of the toleranc
 
 A tolerance-based `_StomataOptimization` that matched Fortran existed in the same module, but no
 run used it; it was deleted in Phase 3d with the other unused scalar copies. The fidelity step
-can use `MLMathToolsMod.bisection_traceable` (§3), which has Fortran's stopping rule.
+can use `clm_ml.physics.math.bisection_traceable` (§3), which has Fortran's stopping rule.
 
 ### 4.3 Intercellular CO₂ (Medlyn and Ball–Berry, `gs_type = 0, 1`; not the CHATS default)
 
 Fortran uses `hybrid` with `tol = 0.1` (mol/mol scaled). The running JAX model uses
-`_ci_solver_scan_ift`: 40 fixed secant steps followed by a Newton step.
+`clm_ml.physics.photosynthesis.solve_ci` (before Phase 7.2 `_ci_solver_scan_ift`): 40 fixed
+secant steps followed by a Newton step.
 
 ### 4.4 Runge–Kutta update skipped the top canopy-air layer (fixed)
 
@@ -222,7 +224,7 @@ changed only round-off produced jumps of the same kind. This was first read as a
 the model.
 
 **Cause.** The secant iteration of the Obukhov-length solver (`_obu_body_pure`; the same code is
-in the intercellular-CO₂ solver `_ci_solver_scan`) runs a fixed number of steps and does not stop
+in the intercellular-CO₂ solver, now `clm_ml.physics.photosynthesis._secant`) runs a fixed number of steps and does not stop
 once converged. After about five steps the residual is at round-off level (±1e-14). When two
 consecutive residuals come out *exactly equal*, the secant denominator `f1 − f0` is zero, and the
 code divided by a floor of 1e-30 instead:

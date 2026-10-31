@@ -62,11 +62,11 @@ def _import_jax_modules():
     for name in [
         "multilayer_canopy.MLWaterVaporMod",
         "clm_ml.physics.math",
-        "multilayer_canopy.MLLeafPhotosynthesisMod",
+        "clm_ml.physics.photosynthesis",
         "clm_ml.physics.turbulence",
         "clm_ml.physics.leaf_heat_capacity",
         "clm_ml.physics.canopy_water",
-        "multilayer_canopy.MLLeafBoundaryLayerMod",
+        "clm_ml.physics.leaf_boundary_layer",
         "multilayer_canopy.MLRungeKuttaMod",
         "multilayer_canopy.MLclm_varcon",
         "multilayer_canopy.MLclm_varctl",
@@ -172,24 +172,30 @@ def _adapt_tridiag_2eq(inp: dict) -> dict:
 
 
 def _adapt_ft(inp: dict) -> dict:
-    _ft = _get("multilayer_canopy.MLLeafPhotosynthesisMod")._ft
+    _ft = _get("clm_ml.physics.photosynthesis").ft
     return {"ans": float(_ft(inp["tl"], inp["ha"]))}
 
 
 def _adapt_fth(inp: dict) -> dict:
-    _fth = _get("multilayer_canopy.MLLeafPhotosynthesisMod")._fth
+    _fth = _get("clm_ml.physics.photosynthesis").fth
     return {"ans": float(_fth(inp["tl"], inp["hd"], inp["se"], inp["c"]))}
 
 
 def _adapt_fth25(inp: dict) -> dict:
-    _fth25 = _get("multilayer_canopy.MLLeafPhotosynthesisMod")._fth25
+    _fth25 = _get("clm_ml.physics.photosynthesis").fth25
     return {"ans": float(_fth25(inp["hd"], inp["se"]))}
 
 
 def _adapt_realized_rate(inp: dict) -> dict:
-    photo_mod = _get("multilayer_canopy.MLLeafPhotosynthesisMod")
-    colim_in = int(inp["colim_type_in"])
-    agross = photo_mod._RealizedRate(colim_in, inp["c3psn"], inp["ac"], inp["aj"], inp["ap"])
+    """``realized_rate`` takes the pathway and co-limitation as switches."""
+    photo = _get("clm_ml.physics.photosynthesis")
+    agross = photo.realized_rate(
+        inp["ac"],
+        inp["aj"],
+        inp["ap"],
+        c3=round(inp["c3psn"]) == 1,
+        colimitation=int(inp["colim_type_in"]) == 1,
+    )
     return {"agross": float(agross)}
 
 
@@ -261,50 +267,22 @@ def _adapt_wetted_fraction(inp: dict) -> dict:
 
 
 def _adapt_leaf_boundary_layer(inp: dict) -> dict:
-    """
-    LeafBoundaryLayer inner kernel (_gb_layer) for a single layer.
-
-    Computes molecular diffusivity correction from tref and pref, then
-    calls the per-layer kernel with gb_type set from the golden input.
-    gb_type is a module-local binding in MLLeafBoundaryLayerMod.
-    """
-    lbl_mod = _get("multilayer_canopy.MLLeafBoundaryLayerMod")
-    varcon = _get("multilayer_canopy.MLclm_varcon")
-    clm_var = _get("clm_src_main.clm_varcon")
-
-    d = float(inp["d"])
-    u = float(inp["u"])
-    tleaf = float(inp["tleaf"])
-    tair = float(inp["tair"])
-    tref = float(inp["tref"])
-    pref = float(inp["pref"])
-    rhomol = float(inp["rhomol"])
-    gb_in = int(inp["gb_type_in"])
-
-    tfrz = clm_var.tfrz
-    fac = 101325.0 / pref * (tref / tfrz) ** 1.81
-    visc = varcon.visc0 * fac
-    dh = varcon.dh0 * fac
-    dv = varcon.dv0 * fac
-    dc = varcon.dc0 * fac
-    dv_dh = dv / dh
-    dc_dh = dc / dh
-
-    gbh, gbv, gbc = lbl_mod._gb_layer(
-        gb_in,
-        jnp.asarray(1.0),  # dpai > 0 so the layer is active
-        jnp.asarray(u),
-        jnp.asarray(tair),
-        jnp.asarray(tleaf),
-        visc,
-        dh,
-        dv_dh,
-        dc_dh,
-        d,
-        rhomol,
+    """``leaf_boundary_layer`` for one layer with plant area and one leaf; the regime from
+    the golden input's ``gb_type``."""
+    lbl = _get("clm_ml.physics.leaf_boundary_layer")
+    regime = {1: "laminar", 2: "turbulent", 3: "free_convection"}[int(inp["gb_type_in"])]
+    g = lbl.leaf_boundary_layer(
+        jnp.array([1.0]),  # dpai > 0 so the layer is active
+        jnp.array([float(inp["u"])]),
+        jnp.array([float(inp["tair"])]),
+        jnp.array([[float(inp["tleaf"])]]),
+        float(inp["pref"]),
+        float(inp["tref"]),
+        float(inp["rhomol"]),
+        float(inp["d"]),
+        regime=regime,
     )
-
-    return {"gbh": float(gbh), "gbv": float(gbv), "gbc": float(gbc)}
+    return {"gbh": float(g.gbh[0, 0]), "gbv": float(g.gbv[0, 0]), "gbc": float(g.gbc[0, 0])}
 
 
 def _adapt_leaf_heat_capacity(inp: dict) -> dict:
