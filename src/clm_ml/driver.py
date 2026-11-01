@@ -372,8 +372,14 @@ def simulation(run) -> Simulation:
         n_steps=int(run.n_steps),
         calendar=run.calkindflag,
         options=options,
-        acclimation=run.config.physics.acclimation_temperature,
-        acclimation_days=float(run.config.physics.acclimation_days),
+        # the state's acclimation temperature: the whole-run mean, or the running mean (also
+        # carried when acclimation is off, as before; the photosynthesis does not use it then)
+        acclimation=(
+            "run_mean"
+            if run.config.processes.photosynthesis.temperature_acclimation == "run_mean"
+            else "running_mean"
+        ),
+        acclimation_days=float(run.config.processes.photosynthesis.acclimation_days),
         tables=default_rsl_tables(),
         max_layers=int(run.config.canopy_layers.max_layers),
         params_table=table,

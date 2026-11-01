@@ -48,17 +48,19 @@ def _towers() -> dict:
         "weight": 0.4,
         "canopy_height": 15.0,
         "root_biomass": 800.0,
-        "leaf_area_profile_beta": [3.0, 1.5],
-        "stem_area_profile_beta": [2.0, 1.5],
-        "n_layers_within": 8,
-        "n_layers_above": 6,
+        "area_profiles": {"leaf_beta": [3.0, 1.5], "stem_beta": [2.0, 1.5]},
+        "canopy_layers": {"within": 8, "above": 6},
     }
     a = copy.deepcopy(chats)
     a["patches"] = [dict(walnut, weight=0.6), needle]
     b = copy.deepcopy(chats)
     b.update(latitude=45.0, longitude=-100.0)
-    b["soil"].update(bedrock_depth=1.0, color_class=5, sand_percent=40.0, clay_percent=20.0)
-    b["patches"] = [dict(walnut, weight=1.0, n_layers_within=10, n_layers_above=8)]
+    b["soil"].update(
+        bedrock_depth=1.0,
+        color_class=5,
+        texture={"given_as": "percentages", "sand_percent": 40.0, "clay_percent": 20.0},
+    )
+    b["patches"] = [dict(walnut, weight=1.0, canopy_layers={"within": 10, "above": 8})]
     return {"SITEA": a, "SITEB": b}
 
 

@@ -41,7 +41,7 @@ convert_namelist(Path({namelist!r}), tmp)
 tower = yaml.safe_load(open({towers!r}))["CHATS7"]
 walnut = dict(tower["patches"][0], weight=0.6)
 needle = {{"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.4, "canopy_height": 15.0,
-          "root_biomass": 800.0, "n_layers_within": 8, "n_layers_above": 6}}
+          "root_biomass": 800.0, "canopy_layers": {{"within": 8, "above": 6}}}}
 tower["patches"] = [walnut, needle]
 edit(tmp, domain=lambda d: d.update(towers={{"MIXED": tower}}))
 

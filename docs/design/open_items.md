@@ -23,7 +23,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 |---|---|---|---|---|
 | **1. Science issues needing the maintainer's decision** |||||
 | O1 | ~~Soil texture class looked up one class too far~~ (closed: decision 92) | science issue (bug) | closed | M |
-| O2 | Missing `organic_matter` gives a negative organic fraction | science issue (bug) | 8a | M |
+| O2 | ~~Missing `organic_matter` gives a negative organic fraction~~ (closed: decision 93, organic matter required) | science issue (bug) | closed | M |
 | O3 | Soil ice read one level too deep in `SoilResistance` | science issue (bug, latent) | 8a | M |
 | O4 | Fortran's checks of the implicit flux-profile solution not run | science issue | 8a | M |
 | O5 | Solver stopping rules differ from Fortran (Obukhov, gs, ci) | science issue (fidelity) | 8a decide / after 8 fix | M |
@@ -117,6 +117,8 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** `global_input.md` issue 21; C27; Phase 7 "Next".
 
 ### O2. Missing `organic_matter` gives a negative organic fraction
+- **Closed 2026-11-01:** domain.yaml requires `organic_matter` (decision 93): a missing value
+  can no longer reach the -999 path (grid runs always read it from the surface data).
 - **Kind:** science issue (bug) · **Target:** 8a · **Decides:** M
 - **What:** towers.yaml allows `organic_matter: null`; it becomes -999, and the setup
   divides by 130 kg m⁻³ (`om_frac` = -7.7), so porosity, suction, b, conductivities and
@@ -626,6 +628,9 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 ---
 
 ## Recently closed (for reference, not open)
+
+- One way to say each setting (`processes`, choice keys, named fallbacks; `clm-ml check`
+  shows where each value comes from); organic matter required (O2) (decision 93; 2026-11-01).
 
 - Soil texture classes take their own values (O1, issue 21; decision 92; 2026-11-01).
 

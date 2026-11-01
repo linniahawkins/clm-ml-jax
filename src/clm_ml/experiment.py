@@ -4,7 +4,8 @@ folder with four complete files,
 
 - ``run.yaml`` (:mod:`clm_ml.run`): when, with which forcing and land data, what it writes;
 - ``domain.yaml`` (:mod:`clm_ml.domain`): where: towers or a grid;
-- ``model.yaml`` (:mod:`clm_ml.config`): how: physics schemes and numerics (static);
+- ``model.yaml`` (:mod:`clm_ml.config`): how: each process's parameterization and the
+  numerics (static);
 - ``params.yaml`` (:mod:`clm_ml.params`): which plants: every parameter of every PFT.
 
 :func:`load_experiment` reads a folder strictly (every key present; nothing read from the
@@ -38,7 +39,7 @@ from clm_ml.io.yaml_schema import (
 )
 from clm_ml.params import PFT_NAMES, Params
 from clm_ml.run import HEADER as RUN_HEADER
-from clm_ml.run import RunFile, TimeSection, parse_chunk, parse_every
+from clm_ml.run import RunFile, TimeSection, parse_chunk, parse_every, parse_length
 
 #: The four files of an experiment folder, by the prefix of their ``--set`` keys
 FILES = {"run": "run.yaml", "domain": "domain.yaml", "model": "model.yaml", "params": "params.yaml"}
@@ -365,27 +366,65 @@ class Experiment:
         )  # fmt: skip
 
     def summary(self) -> str:
-        """What ``clm-ml check`` prints."""
-        d, c = self.domain, self.config
+        """What ``clm-ml check`` prints: the values the run will use and where they come from
+        (where one setting decides another, e.g. layer counts)."""
+        from clm_ml.config import changed_options
+
+        d, c, rf = self.domain, self.config, self.run_file
         end = self.time_after(self.n_steps * self.step_seconds)
         lines = [
             f"Experiment: {self.base_dir}",
-            f"  time       {self.start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M}, "
-            f"{self.n_steps} steps of {self.step_seconds} s",
-            f"  domain     {self.domain_file.type}",
-            f"  gridcells  {d.n_gridcells}   patches {d.n_patches}",
+            f"  run        {self.start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M}: {self.n_steps} "
+            f"steps of {self.step_seconds} s (time.length: {rf.time.length})",
         ]
-        shown_patches = 20 if self.is_grid else d.n_patches
-        for i, n_layers in enumerate(d.layer_counts(c)[:shown_patches]):
-            g = d.patches.gridcell_index[i]
-            shown = "from CLM history" if n_layers == 0 else str(n_layers)
-            lines.append(
-                f"    patch {i}: {d.gridcells.names[g]}  {PFT_NAMES[d.patches.pft_index[i]]}  "
-                f"weight {d.patches.weight[i]:g}  canopy layers {shown} "
-                f"(max_layers {c.canopy_layers.max_layers})"
-            )
-        if shown_patches < d.n_patches:
-            lines.append(f"    ... ({d.n_patches - shown_patches} more patches)")
+        if not self.is_grid:
+            met = rf.forcing.meteorology
+            lines.append(f"  forcing    tower data every {met.interval_seconds} s, "
+                         f"{met.interpolation} within each step")  # fmt: skip
+        lines.append(f"  domain     {self.domain_file.type}: {d.n_gridcells} gridcell(s), "
+                     f"{d.n_patches} patch(es)")  # fmt: skip
+        layers = d.layer_counts_with_source(c)
+        if not self.is_grid:
+            p = 0
+            for name, tower in self.domain_file.towers.items():
+                soil, tex = tower.soil, tower.soil.texture
+                texture = (
+                    f"{tex.sand_percent:g} % sand, {tex.clay_percent:g} % clay (percentages)"
+                    if tex.given_as == "percentages" else f"{tex.texture_class} (class)"
+                )  # fmt: skip
+                bedrock = "none" if soil.bedrock_depth is None else f"{soil.bedrock_depth:g} m"
+                lines.append(
+                    f"  tower {name}: {tower.latitude:g} N, {tower.longitude:g} E, forcing height "
+                    f"{tower.measurement_height:g} m; soil {texture}, organic matter "
+                    f"{soil.organic_matter:g} kg m-3, colour {soil.color_class}, bedrock {bedrock}"
+                )
+                for patch in tower.patches:
+                    if patch.weight < self.domain_file.min_patch_weight:
+                        continue
+                    h = d.patches.canopy_height[p]
+                    height = ("PFT default" if isinstance(patch.canopy_height, str)
+                              else f"{h:g} m")  # fmt: skip
+                    profiles = "PFT default" if isinstance(patch.area_profiles, str) else "given"
+                    n, why = layers[p]
+                    lines.append(
+                        f"    patch {p}: {patch.pft}, weight {d.patches.weight[p]:g}, canopy "
+                        f"height {height}, root biomass {patch.root_biomass:g} g m-2, area "
+                        f"profiles {profiles}; {n} canopy layers ({why}; max_layers "
+                        f"{c.canopy_layers.max_layers})"
+                    )
+                    p += 1
+        else:
+            for i, (n, why) in enumerate(layers[:20]):
+                g = d.patches.gridcell_index[i]
+                lines.append(
+                    f"    patch {i}: {d.gridcells.names[g]}  {PFT_NAMES[d.patches.pft_index[i]]}  "
+                    f"weight {d.patches.weight[i]:g}  {n} canopy layers ({why})"
+                )
+            if d.n_patches > 20:
+                lines.append(f"    ... ({d.n_patches - 20} more patches)")
+        changed = changed_options(c)
+        lines.append("  model      " + ("differs from the defaults in: " + ", ".join(changed)
+                                        if changed else "all settings at their defaults"))  # fmt: skip
         unvalidated = c.non_default_options()
         if unvalidated:
             lines.append(
@@ -408,7 +447,8 @@ def load_experiment(folder: Path | str, overrides: tuple[str, ...] | list[str] =
     ``overrides`` change settings without editing the files, with the file named first, as
     on the command line (``clm-ml run --set``)::
 
-        load_experiment("my_site", ["run.time.days=7", "model.physics.stomatal_conductance=medlyn",
+        load_experiment("my_site", ["run.time.length=7 days",
+                                    "model.processes.stomatal_conductance.scheme=medlyn",
                                     "params.broadleaf_deciduous_temperate_tree.vcmax25=100"])
     """
     folder = Path(folder).resolve()
@@ -439,7 +479,7 @@ def _apply_overrides(data: dict, overrides, folder: Path) -> None:
         if prefix not in FILES or not rest:
             raise ConfigError(
                 f"--set {item!r}: name the file first: run., domain., model. or params. "
-                "(e.g. run.time.days=3)"
+                "(e.g. run.time.length=3 days)"
             )
         value = str(item)[len(prefix) + 1 :]
         if prefix == "params":  # params.<pft>.<name>=value
@@ -448,10 +488,12 @@ def _apply_overrides(data: dict, overrides, folder: Path) -> None:
             apply_overrides(data[prefix], [value], source=FILES[prefix])
 
 
-def _strict(cls, data: dict, folder: Path, name: str, context: Optional[str]):
+def _strict(cls, data: dict, folder: Path, name: str, context: Optional[str],
+            ignore_unused: bool = False):  # fmt: skip
     source = f"{folder.name}/{name}"
     try:
-        return from_dict(cls, data, source=source, strict=True, context=context)
+        return from_dict(cls, data, source=source, strict=True, context=context,
+                         ignore_unused=ignore_unused)  # fmt: skip
     except MissingKeys as exc:
         raise ConfigError(
             f"{exc}. Every setting must be listed: `clm-ml upgrade {folder}` adds missing keys "
@@ -469,9 +511,12 @@ def _experiment(data: dict, folder: Path, overrides: tuple) -> Experiment:
     kind = (data["domain"] or {}).get("type")
     if kind not in ("towers", "grid"):
         raise ConfigError(f"{folder.name}/domain.yaml: type: {kind!r} is not one of [towers, grid]")
-    run_file = _strict(RunFile, data["run"], folder, "run.yaml", kind)
-    domain_file = _strict(DomainFile, data["domain"], folder, "domain.yaml", kind)
-    config = _strict(ModelConfig, data["model"], folder, "model.yaml", None)
+    # a --set change may make a setting of the file unused (another choice): ignored then
+    unused = {k: any(str(o).startswith(k + ".") for o in overrides) for k in FILES}
+    run_file = _strict(RunFile, data["run"], folder, "run.yaml", kind, unused["run"])
+    domain_file = _strict(DomainFile, data["domain"], folder, "domain.yaml", kind,
+                          unused["domain"])  # fmt: skip
+    config = _strict(ModelConfig, data["model"], folder, "model.yaml", None, unused["model"])
     params = Params.from_data(data["params"], f"{folder.name}/params.yaml")
     source = f"{folder.name}/run.yaml"
 
@@ -503,22 +548,23 @@ def _experiment(data: dict, folder: Path, overrides: tuple) -> Experiment:
 
 
 def _check_model(config: ModelConfig) -> None:
-    if config.physics.solar_radiation == "norman":
+    ps = config.processes
+    if ps.radiation.solar == "norman":
         raise ConfigError(
-            "model.yaml: physics.solar_radiation: norman is not supported: its JAX translation "
+            "model.yaml: processes.radiation.solar: norman is not supported: its JAX translation "
             "was never validated and stops at the first CHATS7 step with a conservation error "
             "(plan, open issues of Phases 4-5); use two_stream"
         )
-    if config.physics.stomatal_conductance == "wue" and config.physics.wue_solver == "brent":
+    if ps.stomatal_conductance.scheme == "wue" and ps.stomatal_conductance.wue_solver == "brent":
         raise ConfigError(
-            "model.yaml: physics.wue_solver: brent is not supported: the JAX model has no "
-            "traceable Brent solver (Phase 7 decision C16; global_input.md issue 18); use "
-            "bisection"
+            "model.yaml: processes.stomatal_conductance.wue_solver: brent is not supported: the "
+            "JAX model has no traceable Brent solver (Phase 7 decision C16; global_input.md "
+            "issue 18); use bisection"
         )
-    if config.physics.flux_profile_solution == "well_mixed":
+    if ps.canopy_air.flux_profile_solution == "well_mixed":
         raise ConfigError(
-            "model.yaml: physics.flux_profile_solution: well_mixed is not supported: Fortran "
-            "stops for it too (legacy code; Phase 7 decision D8); use implicit"
+            "model.yaml: processes.canopy_air.flux_profile_solution: well_mixed is not "
+            "supported: Fortran stops for it too (legacy code; Phase 7 decision D8); use implicit"
         )
 
 
@@ -527,11 +573,11 @@ def _grid_domain(run_file, domain_file, config, params, folder, start, model_ste
     from clm_ml.grid import load_grid_domain
 
     src = f"{folder.name}/run.yaml"
-    if config.physics.acclimation_temperature != "running_mean":
+    if config.processes.photosynthesis.temperature_acclimation == "run_mean":
         raise ConfigError(
-            f"{folder.name}/model.yaml: physics.acclimation_temperature: grid runs need "
-            "running_mean (the Fortran whole-run mean needs all of a run's forcing before it "
-            "starts)"
+            f"{folder.name}/model.yaml: processes.photosynthesis.temperature_acclimation: "
+            "run_mean is not available for grid runs (the Fortran whole-run mean needs all of a "
+            "run's forcing before it starts)"
         )
     if run_file.output.legacy_ascii:
         raise ConfigError(f"{src}: output.legacy_ascii: not available for grid runs")
@@ -657,18 +703,16 @@ def _resolve_time(t: TimeSection, source: str, step_seconds: int) -> tuple[dt.da
 
     calendar = CALENDARS[t.calendar]
     start = _parse_datetime(t.start, "time.start")
-    given = [k for k in ("end", "days", "steps") if getattr(t, k) is not None]
-    if len(given) != 1:
-        raise ConfigError(f"{source}: time: give exactly one of end, days, steps (got {given})")
+    kind, value = parse_length(t.length, f"{source}: time.length")
     try:
-        if t.steps is not None:
-            n = t.steps
+        if kind == "steps":
+            n = value
             seconds_between(start, start, calendar)  # the start exists in the calendar
         else:
             seconds = (
-                seconds_between(start, _parse_datetime(t.end, "time.end"), calendar)
-                if t.end is not None
-                else t.days * 86400.0
+                seconds_between(start, _parse_datetime(value, "time.length"), calendar)
+                if kind == "until"
+                else value * 86400.0
             )
             n = seconds / step_seconds
             if n != int(n):
@@ -807,15 +851,125 @@ def new_experiment(folder: Path | str, preset: str, *, force: bool = False) -> P
     )  # fmt: skip
 
 
-#: Settings renamed or moved between versions, per file: old dotted key -> new dotted key
-#: (``clm-ml upgrade`` applies them; empty until a setting is renamed)
-RENAMED: dict[str, dict[str, str]] = {"run": {}, "domain": {}, "model": {}, "params": {}}
+#: model.yaml settings renamed or moved (decision 93): old dotted key -> new dotted key
+RENAMED_MODEL = {
+    "physics.stomatal_conductance": "processes.stomatal_conductance.scheme",
+    "physics.water_stress_on_conductance": "processes.stomatal_conductance.water_stress",
+    "physics.wue_solver": "processes.stomatal_conductance.wue_solver",
+    "physics.photosynthesis_colimitation": "processes.photosynthesis.colimitation",
+    "physics.acclimation_days": "processes.photosynthesis.acclimation_days",
+    "physics.roughness_sublayer": "processes.turbulence.roughness_sublayer",
+    "physics.sparse_canopy": "processes.turbulence.sparse_canopy",
+    "physics.ground_conductance": "processes.turbulence.ground_conductance",
+    "physics.leaf_boundary_layer": "processes.turbulence.leaf_boundary_layer",
+    "physics.flux_profile_solution": "processes.canopy_air.flux_profile_solution",
+    "physics.solar_radiation": "processes.radiation.solar",
+    "physics.longwave_radiation": "processes.radiation.longwave",
+    "physics.leaf_optics_vary_with_height": "processes.radiation.leaf_optics_vary_with_height",
+    "canopy_layers.min_plant_area_per_layer": "canopy_layers.merge_thin_layers_below",
+    "canopy_layers.min_layer_plant_area": "canopy_layers.minimum_leafy_layer_plant_area",
+}
+
+
+def _migrate(key: str, data: dict, report: list) -> dict:
+    """A file's contents in an earlier layout moved to the current one (decisions 91, 93):
+    renamed keys, one key for each choice, named words for the old nulls."""
+    name = FILES[key]
+    data = dict(data or {})
+
+    def note(text):
+        report.append(f"{name}: {text}")
+
+    if key == "model":
+        physics = data.get("physics")
+        if isinstance(physics, dict):
+            on, mode = physics.pop("temperature_acclimation", True), physics.pop(
+                "acclimation_temperature", "running_mean"
+            )
+            kn = physics.pop("nitrogen_decay_kn", None)
+            photo = data.setdefault("processes", {}).setdefault("photosynthesis", {})
+            photo["temperature_acclimation"] = mode if on else "none"
+            photo["nitrogen_profile"] = "computed" if kn is None else kn
+        for old, new in RENAMED_MODEL.items():
+            if _pop_dotted(data, old, into=new):
+                note(f"{old} -> {new}")
+        if isinstance(physics, dict):
+            if physics:
+                raise ConfigError(f"{name}: physics: unknown key(s) {sorted(physics)}")
+            data.pop("physics")
+        layers = data.get("canopy_layers") or {}
+        if "n_layers_within" in layers or "n_layers_above" in layers:
+            w, a = layers.pop("n_layers_within", None), layers.pop("n_layers_above", None)
+            layers["layer_counts"] = "from_spacing" if w is None else {"within": w, "above": a}
+            note("canopy_layers.n_layers_within/n_layers_above -> canopy_layers.layer_counts")
+    elif key == "run":
+        time = data.get("time") or {}
+        if "length" not in time and any(k in time for k in ("end", "days", "steps")):
+            end, days, steps = (
+                time.pop("end", None),
+                time.pop("days", None),
+                time.pop("steps", None),
+            )
+            given = [x for x in (end, days, steps) if x is not None]
+            if len(given) != 1:
+                raise ConfigError(f"{name}: time: give exactly one of end, days, steps")
+            time["length"] = (f"until {end}" if end is not None else
+                              f"{days:g} days" if days is not None else f"{steps} steps")  # fmt: skip
+            note(f"time.end/days/steps -> time.length: {time['length']}")
+        ex = data.get("execution") or {}
+        if "restart_every" in ex and ex["restart_every"] is None:
+            ex["restart_every"] = "end_of_run"
+        co2 = ((data.get("forcing") or {}).get("gridded") or {}).get("co2")
+        if isinstance(co2, dict) and "source" not in co2:
+            co2["source"] = "file" if co2.get("file") else "constant"
+    elif key == "domain":
+        for tname, tower in (data.get("towers") or {}).items():
+            if not isinstance(tower, dict):
+                continue
+            if tower.get("measurement_height", 0) is None:
+                tower["measurement_height"] = 30.0
+            soil = tower.get("soil") or {}
+            if "texture" not in soil and any(
+                k in soil for k in ("texture_class", "sand_percent", "clay_percent")
+            ):
+                cls_, sand, clay = (soil.pop(k, None) for k in
+                                    ("texture_class", "sand_percent", "clay_percent"))  # fmt: skip
+                soil["texture"] = (
+                    {"given_as": "percentages", "sand_percent": sand, "clay_percent": clay}
+                    if sand is not None and clay is not None
+                    else {"given_as": "class", "texture_class": cls_}
+                )
+                note(f"towers.{tname}.soil -> texture given as {soil['texture']['given_as']}")
+            if "organic_matter" in soil and soil["organic_matter"] is None:
+                raise ConfigError(
+                    f"{name}: towers.{tname}.soil.organic_matter: a value is required now (kg "
+                    "m-3; a missing value was read as -999, giving a negative organic fraction: "
+                    "open issue 22)"
+                )
+            for patch in tower.get("patches") or []:
+                if "canopy_height" in patch and patch["canopy_height"] is None:
+                    patch["canopy_height"] = "pft_default"
+                lb, sb = patch.pop("leaf_area_profile_beta", None), patch.pop(
+                    "stem_area_profile_beta", None
+                )
+                if lb is not None and sb is not None:
+                    patch["area_profiles"] = {"leaf_beta": lb, "stem_beta": sb}
+                elif lb is not None or sb is not None:
+                    note(f"towers.{tname}: a leaf or stem profile given alone is not used "
+                         "(Fortran needs both); area_profiles: pft_default")  # fmt: skip
+                w, a = patch.pop("n_layers_within", None), patch.pop("n_layers_above", None)
+                if w is not None:
+                    patch["canopy_layers"] = {"within": w, "above": a}
+        grid = data.get("grid")
+        if isinstance(grid, dict) and "region" in grid and grid["region"] is None:
+            grid["region"] = "whole_globe"
+    return data
 
 
 def upgrade_experiment(folder: Path | str) -> list[str]:
     """Rewrite an experiment folder in the current layout, every setting with its current
     explanation: the values the user set are kept, keys added since are written at their
-    defaults, renamed keys moved (:data:`RENAMED`); a folder in the layout before experiment
+    defaults, renamed or regrouped keys moved (:func:`_migrate`); a folder in the layout before experiment
     folders (run.yaml naming a params preset or file, towers and a model.yaml) becomes the four
     files. The old files are kept in ``folder/.previous/``. Returns what was done."""
     import shutil
@@ -833,11 +987,9 @@ def upgrade_experiment(folder: Path | str) -> list[str]:
     else:
         recipe, previous = {}, list(FILES.values())
         for key, name in FILES.items():
-            data = read_yaml(folder / name)
-            for old, new in RENAMED[key].items():
-                if _pop_dotted(data, old, into=new):
-                    report.append(f"{name}: {old} renamed {new}")
-            recipe[key] = data
+            recipe[key] = read_yaml(folder / name)
+    for key in ("run", "domain", "model"):
+        recipe[key] = _migrate(key, recipe[key], report)
     kind = (recipe["domain"] or {}).get("type")
     if kind not in ("towers", "grid"):
         raise ConfigError(f"{folder.name}/domain.yaml: type: {kind!r} is not one of [towers, grid]")

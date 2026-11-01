@@ -5,7 +5,7 @@ description: >-
   CHATS7, 1 May 2007: one day at the CHATS walnut orchard (Dixon, California), the CLM-ml v2
   test case of Bonan, Burns & Patton (2026). The quickest complete run.
 run:
-  time: {start: 2007-05-01T00:00, days: 1}
+  time: {start: 2007-05-01T00:00, length: 1 day}
   forcing:
     meteorology:
       files: [data/input_files/tower-forcing/CHATS7/2007-05.nc]

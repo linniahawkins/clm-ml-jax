@@ -28,7 +28,7 @@ def test_converted_50_steps(chats_run_dir):
     assert exp.n_steps == 50
     assert exp.domain.gridcells.names == ("CHATS7",)
     assert exp.run is exp.run_file and exp.model is exp.config
-    assert "canopy layers 46" in exp.summary()
+    assert "46 canopy layers" in exp.summary()
 
 
 def test_converted_folder_has_the_four_complete_files(chats_run_dir):
@@ -70,38 +70,51 @@ def test_all_chats_namelists_convert_and_load(tmp_path, name):
     load_experiment(convert_namelist(CHATS_NAMELISTS / name, tmp_path))
 
 
-def test_days_and_end_are_equivalent(chats_run_dir):
-    def by_days(d):
-        d["time"].update(steps=None, days=1)
-
-    def by_end(d):
-        d["time"].update(steps=None, days=None, end="2007-05-02T00:00")
-
-    assert load_experiment(_edit(chats_run_dir, "run.yaml", by_days)).n_steps == 48
-    assert load_experiment(_edit(chats_run_dir, "run.yaml", by_end)).n_steps == 48
+def test_lengths_in_days_steps_or_until_are_equivalent(chats_run_dir):
+    for length in ("1 day", "48 steps", "until 2007-05-02T00:00"):
+        _edit(chats_run_dir, "run.yaml", lambda d: d["time"].update(length=length))
+        assert load_experiment(chats_run_dir).n_steps == 48, length
 
 
 def test_overrides_name_the_file(chats_run_dir):
     walnut = "broadleaf_deciduous_temperate_tree"
-    exp = load_experiment(chats_run_dir, ["run.time.steps=10",
-                                          "model.physics.stomatal_conductance=medlyn",
+    exp = load_experiment(chats_run_dir, ["run.time.length=10 steps",
+                                          "model.processes.stomatal_conductance.scheme=medlyn",
                                           f"params.{walnut}.vcmax25=100"])  # fmt: skip
     assert exp.n_steps == 10
-    assert exp.config.physics.stomatal_conductance == "medlyn"
+    assert exp.config.processes.stomatal_conductance.scheme == "medlyn"
     assert exp.params.get(walnut, "vcmax25") == 100.0
     assert "not been validated" in exp.summary()
     with pytest.raises(ConfigError, match="name the file first"):
-        load_experiment(chats_run_dir, ["time.steps=10"])
+        load_experiment(chats_run_dir, ["time.length=10 steps"])
 
 
 @pytest.mark.parametrize(
     "name, change, message",
     [  # fmt: skip
-        ("run.yaml", lambda d: d["time"].update(days=1), "exactly one of end, days, steps"),
+        ("run.yaml", lambda d: d["time"].update(length="a day"), "expected e.g. '1 day'"),
+        ("run.yaml", lambda d: d["time"].update(days=1), "unknown key(s) ['days']"),
         ("run.yaml", lambda d: d["forcing"]["meteorology"].update(interval_seconds=1000),
          "must divide the forcing interval"),
         ("run.yaml", lambda d: d["initial_conditions"].update(source="restart"),
-         "restart_file: required"),
+         "missing key(s) initial_conditions.restart_file"),
+        # settings of a choice not made are refused (one way to say each thing)
+        ("run.yaml", lambda d: d["initial_conditions"].update(restart_file="r.nc"),
+         "restart_file: only used with source: restart"),
+        ("run.yaml", lambda d: d["forcing"]["vegetation"].update(files=["x.nc"]),
+         "only used with source: file"),
+        ("model.yaml", lambda d: d["canopy_layers"].update(layer_counts={"within": 10, "above": 5}),
+         "dz_tall: only used with layer_counts: from_spacing"),
+        ("model.yaml", lambda d: d["processes"]["stomatal_conductance"].update(scheme="medlyn"),
+         "wue_solver: only used with scheme: wue"),
+        ("domain.yaml", lambda d: d["towers"]["CHATS7"]["soil"]["texture"].update(given_as="class"),
+         "sand_percent: only used with given_as: percentages"),
+        ("domain.yaml", lambda d: d["towers"]["CHATS7"]["patches"][0].pop("root_biomass"),
+         "root_biomass"),
+        ("domain.yaml", lambda d: d["towers"]["CHATS7"]["patches"][0].update(root_biomass=None),
+         "root_biomass"),
+        ("domain.yaml", lambda d: d["towers"]["CHATS7"]["soil"].update(organic_matter=None),
+         "organic_matter"),
         ("run.yaml", lambda d: d["execution"].update(chunk="2 months"), "expected e.g. '10 days'"),
         ("run.yaml", lambda d: d["execution"].update(chunk="5 hours"), "expected e.g. '10 days'"),
         ("run.yaml", lambda d: d["execution"].update(restart_every="weekly"), "expected e.g."),
@@ -113,9 +126,9 @@ def test_overrides_name_the_file(chats_run_dir):
          "file not found for 2007-05"),
         ("run.yaml", lambda d: d["forcing"]["meteorology"].update(shortwave="cloudy"), "cloudy"),
         ("run.yaml", lambda d: d["forcing"]["vegetation"].update(source="file"),
-         "forcing.vegetation.files: required"),
-        ("run.yaml", lambda d: d["forcing"]["soil_water"].update(source="file", files="nope.nc"),
-         "file not found"),
+         "forcing.vegetation.files"),
+        ("run.yaml", lambda d: d["forcing"]["soil_water"].update(
+            source="file", files="nope.nc", interpolation="linear"), "file not found"),
         ("run.yaml", lambda d: d["forcing"]["vegetation"].update(source="monthly"), "monthly"),
         ("run.yaml", lambda d: d["time"].update(calendar="noleap"), "only for grid runs"),
         ("run.yaml", lambda d: d["time"].update(calendar="julian"), "calendar"),
@@ -124,6 +137,7 @@ def test_overrides_name_the_file(chats_run_dir):
         ("run.yaml", lambda d: d["time"].pop("calendar"), "clm-ml upgrade"),
         ("model.yaml", lambda d: d["numerics"].pop("integrator"),
          "missing key(s) numerics.integrator"),
+        ("model.yaml", lambda d: d.update(physics={}), "unknown key(s) ['physics']"),
         ("run.yaml", lambda d: d.update(params="chats"), "unknown key(s) ['params']"),
         ("run.yaml", lambda d: d["forcing"].update(gridded={}), "only for grid runs"),
         ("domain.yaml", lambda d: d.update(type="grid"), "only for towers runs"),
@@ -156,16 +170,19 @@ def test_cli_check_and_errors(chats_run_dir, capsys):
 
     assert main(["check", str(chats_run_dir)]) == 0
     assert "OK" in capsys.readouterr().out
-    assert main(["check", str(chats_run_dir), "--set", "run.time.steps=0"]) == 2
-    assert "at least one step" in capsys.readouterr().err
+    assert main(["check", str(chats_run_dir), "--set", "run.time.length=0 steps"]) == 2
+    assert "expected e.g." in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
     "setting, message",
     [
-        ("model.physics.solar_radiation=norman", "norman is not supported"),
-        ("model.physics.wue_solver=brent", "brent is not supported"),
-        ("model.physics.flux_profile_solution=well_mixed", "well_mixed is not supported"),
+        ("model.processes.radiation.solar=norman", "norman is not supported"),
+        ("model.processes.stomatal_conductance.wue_solver=brent", "brent is not supported"),
+        (
+            "model.processes.canopy_air.flux_profile_solution=well_mixed",
+            "well_mixed is not supported",
+        ),
     ],
 )
 def test_unsupported_schemes_are_refused(chats_run_dir, setting, message):
@@ -190,14 +207,15 @@ def test_new_from_a_preset(tmp_path, capsys):
 def test_upgrade_adds_missing_keys_and_keeps_values(chats_run_dir):
     def change(d):
         d["numerics"].pop("integrator")
-        d["physics"]["stomatal_conductance"] = "medlyn"
+        d["processes"]["stomatal_conductance"]["scheme"] = "medlyn"
+        d["processes"]["stomatal_conductance"].pop("wue_solver")
 
     _edit(chats_run_dir, "model.yaml", change)
     report = upgrade_experiment(chats_run_dir)
     assert any("numerics.integrator" in line for line in report)
     exp = load_experiment(chats_run_dir)
     assert exp.config.numerics.integrator == "rk4"
-    assert exp.config.physics.stomatal_conductance == "medlyn"
+    assert exp.config.processes.stomatal_conductance.scheme == "medlyn"
     assert (chats_run_dir / ".previous" / "model.yaml").exists()
 
 
@@ -224,3 +242,76 @@ def test_upgrade_converts_the_layout_before_experiment_folders(chats_run_dir, tm
     assert a.run_file.forcing.meteorology.interval_seconds == 1800
     for k in a.params.values:
         np.testing.assert_array_equal(a.params.values[k], b.params.values[k])
+
+
+def test_check_says_where_values_come_from(chats_run_dir):
+    text = load_experiment(chats_run_dir).summary()
+    assert "time.length: 50 steps" in text
+    assert "10 % sand, 35 % clay (percentages)" in text
+    assert "46 canopy layers (spacing 0.5 m, canopy 10 m, forcing height 23 m" in text
+    assert "all settings at their defaults" in text
+
+
+def test_upgrade_moves_the_earlier_keys(chats_run_dir):
+    """A folder written before decision 93 (physics section, end/days/steps, nulls for
+    defaults taken elsewhere, separate texture keys and layer counts) becomes the current one
+    with the same meaning."""
+
+    def old_model(d):
+        d.pop("processes")
+        d["physics"] = {
+            "stomatal_conductance": "wue",
+            "temperature_acclimation": True,
+            "acclimation_temperature": "run_mean",
+            "nitrogen_decay_kn": None,
+        }
+        layers = d["canopy_layers"]
+        layers.pop("layer_counts")
+        layers.update(
+            n_layers_within=None,
+            n_layers_above=None,
+            min_plant_area_per_layer=0.02,
+            min_layer_plant_area=0.0,
+        )
+        for k in ("merge_thin_layers_below", "minimum_leafy_layer_plant_area"):
+            layers.pop(k)
+
+    def old_domain(d):
+        tower = d["towers"]["CHATS7"]
+        tower["soil"].pop("texture")
+        tower["soil"].update(texture_class="silty clay loam", sand_percent=10.0, clay_percent=35.0)
+        patch = tower["patches"][0]
+        patch.pop("area_profiles")
+        patch.pop("canopy_layers")
+        patch.update(
+            leaf_area_profile_beta=[2.6, 1.3],
+            stem_area_profile_beta=[1.8, 1.3],
+            n_layers_within=12,
+            n_layers_above=8,
+            canopy_height=None,
+        )
+
+    def old_run(d):
+        d["time"].pop("length")
+        d["time"].update(steps=50, days=None, end=None)
+        d["execution"]["restart_every"] = None
+
+    _edit(chats_run_dir, "model.yaml", old_model)
+    _edit(chats_run_dir, "domain.yaml", old_domain)
+    _edit(chats_run_dir, "run.yaml", old_run)
+    report = upgrade_experiment(chats_run_dir)
+    assert any("physics.stomatal_conductance -> processes" in line for line in report)
+    exp = load_experiment(chats_run_dir)
+    photo = exp.config.processes.photosynthesis
+    assert (photo.temperature_acclimation, photo.nitrogen_profile) == ("run_mean", "computed")
+    layers = exp.config.canopy_layers
+    assert (layers.layer_counts, layers.merge_thin_layers_below,
+            layers.minimum_leafy_layer_plant_area) == ("from_spacing", 0.02, 0.0)  # fmt: skip
+    patch = exp.domain_file.towers["CHATS7"].patches[0]
+    assert patch.canopy_height == "pft_default"
+    assert (patch.canopy_layers.within, patch.canopy_layers.above) == (12, 8)
+    assert patch.area_profiles.leaf_beta == (2.6, 1.3)
+    assert exp.domain_file.towers["CHATS7"].soil.texture.given_as == "percentages"
+    assert (exp.run_file.time.length, exp.run_file.execution.restart_every) == (
+        "50 steps", "end_of_run",
+    )  # fmt: skip

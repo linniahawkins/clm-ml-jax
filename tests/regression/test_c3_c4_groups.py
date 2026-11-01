@@ -57,10 +57,9 @@ def test_c3_and_c4_patches_in_one_program(tmp_path):
     chats = chats7_tower()
     walnut = dict(chats["patches"][0], weight=0.5)
     grass = {"pft": "c4_grass", "weight": 0.3, "canopy_height": 0.5, "root_biomass": 400.0,
-             "n_layers_within": 5, "n_layers_above": 10}  # fmt: skip
+             "canopy_layers": {"within": 5, "above": 10}}  # fmt: skip
     needle = {"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.2,
-              "canopy_height": 15.0, "root_biomass": 800.0, "n_layers_within": 8,
-              "n_layers_above": 6}  # fmt: skip
+              "canopy_height": 15.0, "root_biomass": 800.0, "canopy_layers": {"within": 8, "above": 6}}  # fmt: skip
     mixed = copy.deepcopy(chats)
     mixed["patches"] = [walnut, grass, needle]
     jobs = {"mixed": {"MIXED": mixed}}

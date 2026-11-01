@@ -41,11 +41,11 @@ tmp = Path(tempfile.mkdtemp())
 chats = yaml.safe_load(open({towers!r}))["CHATS7"]
 walnut = chats["patches"][0]
 needle = {{"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.4, "canopy_height": 15.0,
-          "root_biomass": 800.0, "n_layers_within": 8, "n_layers_above": 6}}
+          "root_biomass": 800.0, "canopy_layers": {{"within": 8, "above": 6}}}}
 a = copy.deepcopy(chats); a["patches"] = [dict(walnut, weight=0.6), needle]
 b = copy.deepcopy(chats); b.update(latitude=45.0, longitude=-100.0)
 b["soil"].update(bedrock_depth=1.0, color_class=5)
-b["patches"] = [dict(walnut, weight=1.0, n_layers_within=10, n_layers_above=8)]
+b["patches"] = [dict(walnut, weight=1.0, canopy_layers={{"within": 10, "above": 8}})]
 sites = {{"SITEA": a, "SITEB": b}}
 
 def model(towers, pad):

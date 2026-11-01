@@ -18,6 +18,38 @@ towers:
     # REQUIRED.
     longitude: -121.84
 
+    # Forcing (reference) height (m).
+    # Fortran: tower_ht; default: 30.0.
+    measurement_height: 23.0
+
+    # The soil.
+    soil:
+      # The soil texture.
+      texture:
+        # How the texture is given: percentages or class.
+        # choices: percentages | class; default: percentages.
+        given_as: percentages
+
+        # Sand content (%).
+        # used with given_as: percentages; REQUIRED.
+        sand_percent: 10.0
+
+        # Clay content (%).
+        # used with given_as: percentages; REQUIRED.
+        clay_percent: 35.0
+
+      # Soil organic matter density (kg m-3), in the top 0.5 m.
+      # REQUIRED.
+      organic_matter: 50.0
+
+      # CLM soil colour class, 1 (light) to 20 (dark): soil albedo.
+      # default: 15.
+      color_class: 15
+
+      # Depth to bedrock (m); null: no bedrock.
+      # default: null.
+      bedrock_depth: 2.0
+
     # The patches on the tower's gridcell.
     patches:
     # Plant functional type (a name from params.yaml, e.g. broadleaf_deciduous_temperate_tree).
@@ -28,61 +60,31 @@ towers:
       # default: 1.0.
       weight: 1.0
 
-      # Canopy height (m); null: from the CLM history file.
-      # default: null.
+      # Canopy height (m), or pft_default (CLM's height of the PFT: 17 m needleleaf, 35/18/20 m
+      # broadleaf trees, 0.5 m shrubs and grasses).
+      # Fortran: tower_canht; htop_pft; default: pft_default.
       canopy_height: 10.0
 
-      # Root biomass (g m-2); null: the PFT default.
-      # default: null.
+      # Fine root biomass (g m-2).
+      # Fortran: tower_root; REQUIRED.
       root_biomass: 500.0
 
-      # Beta distribution (p, q) of leaf area with height; null: the PFT default.
-      # default: null.
-      leaf_area_profile_beta: [2.6, 1.3]
+      # Leaf and stem area profiles: pft_default, or {leaf_beta: [p, q], stem_beta: [p, q]} (both,
+      # as Fortran).
+      area_profiles:
+        # Leaf area (p, q).
+        # REQUIRED.
+        leaf_beta: [2.6, 1.3]
 
-      # Beta distribution (p, q) of stem area with height; null: the PFT default.
-      # default: null.
-      stem_area_profile_beta: [1.8, 1.3]
+        # Stem area (p, q).
+        # REQUIRED.
+        stem_beta: [1.8, 1.3]
 
-      # Canopy-air layers within the canopy for this patch; null: model.yaml canopy_layers. Set
-      # with n_layers_above (e.g. a short canopy under a tall tower; 5-10 layers within the canopy
-      # suffice for fluxes, Bonan et al. 2021).
-      # default: null.
-      n_layers_within: null
-
-      # Canopy-air layers above the canopy for this patch; null: model.yaml.
-      # default: null.
-      n_layers_above: null
-
-    # Forcing (reference) height (m); null: 30 m.
-    # Fortran: tower_ht; default: null.
-    measurement_height: 23.0
-
-    # The soil.
-    soil:
-      # USDA texture class (e.g. silty clay loam), used when sand and clay are null.
-      # default: null.
-      texture_class: silty clay loam
-
-      # Sand content (%).
-      # default: null.
-      sand_percent: 10.0
-
-      # Clay content (%).
-      # default: null.
-      clay_percent: 35.0
-
-      # Soil organic matter density (kg m-3).
-      # default: null.
-      organic_matter: 50.0
-
-      # CLM soil colour class, 1 (light) to 20 (dark): soil albedo.
-      # default: 15.
-      color_class: 15
-
-      # Depth to bedrock (m); null: none.
-      # default: null.
-      bedrock_depth: 2.0
+      # This patch's canopy-air layer counts: from_model_yaml (model.yaml canopy_layers), or
+      # {within: N, above: M}, which take precedence over model.yaml (e.g. a short canopy under a
+      # tall tower).
+      # default: from_model_yaml.
+      canopy_layers: from_model_yaml
 
 # Patches covering less than this fraction of their gridcell are left out (the others' weights
 # renormalized to sum to 1).

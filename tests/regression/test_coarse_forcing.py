@@ -47,7 +47,7 @@ def _run(workdir: Path, six_hourly: bool):
     from clm_ml.experiment import load_experiment
     from tests.experiment_tools import make_experiment
 
-    run = {"time": {"start": "2007-05-01T00:00", "days": DAYS, "steps": None}}
+    run = {"time": {"start": "2007-05-01T00:00", "length": f"{DAYS} days"}}
     run["output"] = {
         "directory": str(workdir / "out"),
         "streams": [{"name": "daily", "frequency": "daily", "statistic": "mean",

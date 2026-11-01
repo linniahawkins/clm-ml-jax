@@ -34,7 +34,7 @@ def test_too_few_max_layers_names_the_patch():
 
 
 def test_explicit_layer_counts():
-    config = ModelConfig.from_dict({"canopy_layers": {"n_layers_within": 10, "n_layers_above": 5}})
+    config = ModelConfig.from_dict({"canopy_layers": {"layer_counts": {"within": 10, "above": 5}}})
     domain = Domain.from_towers(CHATS7, params=PARAMS, config=config)
     assert domain.layer_counts(config) == [15]
 
@@ -44,9 +44,11 @@ MIXED:
   latitude: 45.0
   longitude: -85.0
   measurement_height: 30.0
+  soil: {texture: {given_as: class, texture_class: loam}, organic_matter: 20.0}
   patches:
-    - {pft: broadleaf_deciduous_temperate_tree, weight: 0.7, canopy_height: 21.0}
-    - {pft: c3_non-arctic_grass, weight: 0.3, canopy_height: 0.5}
+    - {pft: broadleaf_deciduous_temperate_tree, weight: 0.7, canopy_height: 21.0,
+       root_biomass: 500.0}
+    - {pft: c3_non-arctic_grass, weight: 0.3, canopy_height: 0.5, root_biomass: 400.0}
 """
 
 
@@ -59,7 +61,7 @@ def _towers(tmp_path, text=MIXED):
 # With the default spacing a 0.5 m grass patch gets 0.1 m layers all the way up to the 30 m
 # measurement height (300 layers), so mixed towers set layer counts explicitly.
 EXPLICIT_LAYERS = ModelConfig.from_dict(
-    {"canopy_layers": {"n_layers_within": 10, "n_layers_above": 10}}
+    {"canopy_layers": {"layer_counts": {"within": 10, "above": 10}}}
 )
 
 
@@ -99,6 +101,12 @@ def test_towers_in_order_of_the_file(tmp_path):
         (MIXED.replace("0.3", "0.4"), "weights sum to 1.1"),
         (MIXED.replace("c3_non-arctic_grass", "grass"), "unknown PFT 'grass'"),
         (MIXED.replace("  latitude: 45.0\n", ""), "MIXED.latitude: required key is missing"),
+        (MIXED.replace(", root_biomass: 400.0", ""), "root_biomass"),
+        (
+            MIXED.replace("given_as: class, texture_class: loam", "given_as: class"),
+            "texture.texture_class",
+        ),
+        (MIXED.replace("texture_class: loam", "texture_class: peat"), "peat"),
     ],
 )
 def test_invalid_towers(tmp_path, text, message):

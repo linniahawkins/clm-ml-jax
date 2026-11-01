@@ -227,6 +227,18 @@ fix; `new` then `run` reproduces the CHATS7 reference bit for bit; `upgrade` kee
 user value and turns today's layout into one that runs identically; the output's config copy
 reruns identically.
 
+## 12b. One way to say each setting (decision 93)
+
+- model.yaml's scheme choices are `processes`, grouped by process.
+- Alternatives are one choice key; the settings of a choice appear only with it
+  (`option(when={...})`) and the loader refuses the settings of a choice not made. A `--set`
+  change of a choice makes the file's settings of the old choice unused: they are ignored for
+  that run.
+- No null means "taken from elsewhere": named words (`pft_default`, `from_model_yaml`,
+  `computed`, `whole_globe`, `end_of_run`) or the default value itself; a null left means
+  "none" (no bedrock, no soil-water adjustment).
+- `clm-ml check` prints the values the run uses and where they come from.
+
 ## 13. Answers (maintainer, 2026-11-01)
 
 1. **File names:** `run`, `domain`, `model`, `params` (kept).

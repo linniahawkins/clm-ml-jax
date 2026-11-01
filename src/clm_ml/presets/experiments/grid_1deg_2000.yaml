@@ -7,7 +7,7 @@ description: >-
   domain.yaml grid.region for the whole globe (14 346 gridcells, 72 575 patches; use
   execution.devices: 4 on a 4-GPU node).
 run:
-  time: {start: 2000-01-01T00:00, end: 2001-01-01T00:00}
+  time: {start: 2000-01-01T00:00, length: until 2001-01-01T00:00}
   forcing:
     gridded:
       meteorology:
@@ -15,7 +15,7 @@ run:
         solar: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.Solr_Diffuse.{year}.nc
         precipitation: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.Prec.{year}.nc
         mask: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/domain.crujra.v2.5_0.5x0.5.c240722.nc
-      co2: {file: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/CO2field/fco2_datm_global_simyr_1700-2025_TRENDY_c260722.nc}
+      co2: {source: file, file: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/CO2field/fco2_datm_global_simyr_1700-2025_TRENDY_c260722.nc}
       soil: {files: "/glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.{year}-{month:02d}.nc"}
   output:
     directory: output
@@ -33,6 +33,6 @@ domain:
     land_mask: /glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.2000-01.nc
     region: {lat: [30, 50], lon: [-110, -80]}
 model:
-  canopy_layers: {n_layers_within: 10, n_layers_above: 10, max_layers: 20}
+  canopy_layers: {layer_counts: {within: 10, above: 10}, max_layers: 20}
   numerics: {on_patch_error: exclude, max_failed_patch_fraction: 0.05}
 params: clm6

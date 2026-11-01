@@ -38,20 +38,61 @@ def option(
     fortran: str = "",
     *,
     applies: str | None = None,
+    when: dict | None = None,
+    required: bool = False,
     hidden: bool = False,
     path: bool = False,
 ):
     """A setting of an experiment file: its default (none: required), what it means
     (``doc``, written into generated files), the Fortran variable it replaces, the kind of
-    run it applies to (``"towers"``/``"grid"``; None: every run), ``hidden`` (test-only: not
-    written, may be left out) and ``path`` (a file or directory, relative to the folder)."""
-    meta = {"doc": doc, "fortran": fortran, "applies": applies, "hidden": hidden, "path": path}
+    run it applies to (``"towers"``/``"grid"``; None: every run), ``when`` (it is used only
+    when a setting above it in the same section has one of the given values, e.g.
+    ``when={"source": "file"}``: otherwise it is not written and must not be given),
+    ``required`` (no default when it is used, though ``default`` fills it when it is not),
+    ``hidden`` (test-only: not written, may be left out) and ``path`` (a file or directory,
+    relative to the folder)."""
+    meta = {"doc": doc, "fortran": fortran, "applies": applies, "hidden": hidden, "path": path,
+            "when": when or {}, "required": required or default is dataclasses.MISSING}  # fmt: skip
     return dataclasses.field(default=default, metadata=meta)
 
 
 def _applies(field: dataclasses.Field, context: str | None) -> bool:
     want = field.metadata.get("applies")
     return want is None or context is None or want == context
+
+
+def _is_active(field: dataclasses.Field, get, context: str | None, inactive: set) -> bool:
+    """Whether ``field`` is used: it applies to this kind of run and every setting its
+    ``when`` names is used and has one of the given values (``get(name)``: its value)."""
+    if not _applies(field, context):
+        return False
+    for name, allowed in field.metadata.get("when", {}).items():
+        allowed = allowed if isinstance(allowed, tuple) else (allowed,)
+        if name in inactive or get(name) not in allowed:
+            return False
+    return True
+
+
+def _when_text(field: dataclasses.Field) -> str:
+    return " and ".join(
+        f"{k}: {' or '.join(map(str, v if isinstance(v, tuple) else (v,)))}"
+        for k, v in field.metadata.get("when", {}).items()
+    )
+
+
+def _default_of(field: dataclasses.Field):
+    return None if field.default is dataclasses.MISSING else field.default
+
+
+def active_fields(obj: Any, context: str | None) -> list:
+    """The fields of dataclass ``obj`` that are used (written, required), in order."""
+    out, inactive = [], set()
+    for f in dataclasses.fields(obj):
+        if _is_active(f, lambda n: getattr(obj, n), context, inactive):
+            out.append(f)
+        else:
+            inactive.add(f.name)
+    return out
 
 
 def read_yaml(path: Path) -> dict:
@@ -86,6 +127,7 @@ def from_dict(
     key: str = "",
     strict: bool = False,
     context: str | None = None,
+    ignore_unused: bool = False,
 ) -> T:
     """Build dataclass ``cls`` from ``data``, checking every field against its annotation.
 
@@ -93,17 +135,19 @@ def from_dict(
     make error messages point at the offending entry. ``strict``: every key that applies
     (``context``: the kind of run, ``"towers"`` or ``"grid"``) must be present, except hidden
     ones; keys for the other kind of run are errors. A strict load raises
-    :class:`MissingKeys` naming every missing key.
+    :class:`MissingKeys` naming every missing key. ``ignore_unused``: settings that are not
+    used (another choice made, e.g. by a ``--set`` change) are ignored instead of refused.
     """
     missing: list[str] = []
-    obj = _from_dict(cls, data, source=source, key=key, strict=strict, context=context,
-                     missing=missing)  # fmt: skip
+    obj = _from_dict(cls, data, source=source, key=key, strict=strict and not ignore_unused,
+                     context=context, missing=missing, complete=strict)  # fmt: skip
     if missing:
         raise MissingKeys(source, missing)
     return obj
 
 
-def _from_dict(cls, data, *, source, key, strict, context, missing):
+def _from_dict(cls, data, *, source, key, strict, context, missing, complete=None):
+    complete = strict if complete is None else complete
     where = f"{source}: {key}" if key else source
     if data is None:
         data = {}
@@ -117,36 +161,60 @@ def _from_dict(cls, data, *, source, key, strict, context, missing):
     if unknown:
         raise ConfigError(f"{where}: unknown key(s) {unknown}; allowed: {sorted(shown)}")
 
-    values = {}
+    values: dict = {}
+    inactive: set = set()
+
+    def get(name):
+        return values[name] if name in values else _default_of(fields[name])
+
     for name, field in fields.items():
         sub_key = f"{key}.{name}" if key else name
-        applies = _applies(field, context)
-        if name in data:
-            if strict and not applies:
+        if not _is_active(field, get, context, inactive):
+            inactive.add(name)
+            if name in data and strict:
+                if not _applies(field, context):
+                    raise ConfigError(
+                        f"{source}: {sub_key}: only for {field.metadata['applies']} runs "
+                        f"(this is a {context} run); remove it"
+                    )
                 raise ConfigError(
-                    f"{source}: {sub_key}: only for {field.metadata['applies']} runs "
-                    f"(this is a {context} run); remove it"
+                    f"{source}: {sub_key}: only used with {_when_text(field)} "
+                    f"(here {', '.join(f'{k}: {get(k)}' for k in field.metadata['when'])}); "
+                    "remove it"
                 )
+            values[name] = _default_of(field)  # not used (a non-strict load ignores it)
+            continue
+        if name in data:
             values[name] = _convert(hints[name], data[name], source=source, key=sub_key,
-                                    strict=strict, context=context, missing=missing)  # fmt: skip
-        elif field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING:
-            if not applies:
-                values[name] = None
-                continue
+                                    strict=strict, context=context, missing=missing,
+                                    complete=complete)  # fmt: skip
+            if values[name] is None and field.metadata.get("required"):
+                missing.append(sub_key)
+        elif field.metadata.get("required"):
             missing.append(sub_key)
-            raise (
-                MissingKeys(source, missing)
-                if strict
-                else ConfigError(f"{source}: {sub_key}: required key is missing")
-            )
-        elif strict and applies and not field.metadata.get("hidden"):
+            if field.default is dataclasses.MISSING:
+                raise (
+                    MissingKeys(source, missing)
+                    if strict
+                    else ConfigError(f"{source}: {sub_key}: required key is missing")
+                )
+            values[name] = _default_of(field)
+        elif complete and not field.metadata.get("hidden"):
             missing.append(sub_key)
+    if missing and not complete:
+        raise ConfigError(f"{source}: required key(s) missing: {', '.join(missing)}")
     return cls(**values)
 
 
 def _convert(annotation: Any, value: Any, *, source: str, key: str, strict: bool = False,
-             context: str | None = None, missing: list | None = None) -> Any:  # fmt: skip
-    sub = dict(strict=strict, context=context, missing=missing if missing is not None else [])
+             context: str | None = None, missing: list | None = None,
+             complete: bool | None = None) -> Any:  # fmt: skip
+    sub = dict(
+        strict=strict,
+        context=context,
+        missing=missing if missing is not None else [],
+        complete=strict if complete is None else complete,
+    )
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
     where = f"{source}: {key}"
@@ -154,6 +222,9 @@ def _convert(annotation: Any, value: Any, *, source: str, key: str, strict: bool
     if origin in (Union, types.UnionType):
         if value is None and type(None) in args:
             return None
+        sections = [a for a in args if dataclasses.is_dataclass(a)]
+        if isinstance(value, dict) and len(sections) == 1:  # a section: its own errors
+            return _convert(sections[0], value, source=source, key=key, **sub)
         errors = []
         for option in (a for a in args if a is not type(None)):
             try:
@@ -240,8 +311,11 @@ def render(obj: Any, header: str, *, context: str | None = None) -> str:
     import textwrap
 
     lines = []
-    for para in header.splitlines():
+    # the header's lines form paragraphs separated by blank lines, each wrapped anew
+    for para in " ".join(ln.strip() or "\n" for ln in header.splitlines()).split("\n"):
         lines += [f"# {w}".rstrip() for w in (textwrap.wrap(para, 94) or [""])]
+    while lines and lines[-1] == "#":
+        lines.pop()
     lines += _render_fields(obj, context, "")
     return "\n".join(lines) + "\n"
 
@@ -267,9 +341,8 @@ def flow(value: Any) -> str:
 def _render_fields(obj: Any, context: str | None, indent: str) -> list[str]:
     hints = typing.get_type_hints(type(obj))
     lines: list[str] = []
-    top = indent == ""
-    for f in dataclasses.fields(obj):
-        if f.metadata.get("hidden") or not _applies(f, context):
+    for f in active_fields(obj, context):
+        if f.metadata.get("hidden"):
             continue
         value = getattr(obj, f.name)
         doc = f.metadata.get("doc", "")
@@ -286,9 +359,11 @@ def _render_fields(obj: Any, context: str | None, indent: str) -> list[str]:
         if section:
             if doc:
                 lines += _comment(doc, indent)
+            if f.metadata.get("when"):
+                lines += _comment(f"(used with {_when_text(f)})", indent)
             lines.append(f"{indent}{f.name}:")
             if dataclasses.is_dataclass(value):
-                cls_doc = type(value).__doc__ if type(value).__doc__ and top and not doc else ""
+                cls_doc = type(value).__doc__ if type(value).__doc__ and not doc else ""
                 sub = _render_fields(value, context, indent + "  ")
                 if cls_doc and not cls_doc.startswith(type(value).__name__ + "("):
                     lines += _comment(cls_doc, indent + "  ")
@@ -316,9 +391,11 @@ def _render_fields(obj: Any, context: str | None, indent: str) -> list[str]:
         choices = _choices(hints[f.name])
         if choices:
             notes.append("choices: " + " | ".join(map(str, choices)))
+        if f.metadata.get("when"):
+            notes.append("used with " + _when_text(f))
         if f.metadata.get("fortran"):
             notes.append("Fortran: " + f.metadata["fortran"])
-        if f.default is dataclasses.MISSING:
+        if f.metadata.get("required"):
             notes.append("REQUIRED")
         elif not dataclasses.is_dataclass(f.default):
             notes.append(f"default: {flow(f.default)}")
@@ -335,13 +412,14 @@ def _strip_blank(lines: list[str]) -> list[str]:
 
 
 def _choices(hint: Any) -> tuple:
-    """The allowed values of a ``Literal[...]`` (or ``Optional[Literal]``) annotation."""
+    """The allowed values of a ``Literal[...]`` (or ``Optional[Literal]``) annotation; empty
+    when other values are allowed too (e.g. a number or a keyword)."""
     if typing.get_origin(hint) is Literal:
         return typing.get_args(hint)
     if typing.get_origin(hint) in (Union, types.UnionType):
-        for a in typing.get_args(hint):
-            if typing.get_origin(a) is Literal:
-                return typing.get_args(a)
+        args = [a for a in typing.get_args(hint) if a is not type(None)]
+        if len(args) == 1 and typing.get_origin(args[0]) is Literal:
+            return typing.get_args(args[0])
     return ()
 
 

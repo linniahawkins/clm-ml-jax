@@ -53,7 +53,7 @@ def run_case(
     *,
     params: str | None = None,
     legacy_ascii: bool = False,
-    physics: dict | None = None,
+    physics: dict | None = None,  # model.yaml processes sections, e.g. {"photosynthesis": {...}}
 ):
     """Run the reference case through ``clm_ml`` in ``workdir``.
 
@@ -84,7 +84,7 @@ def run_case(
     }  # fmt: skip
     make_experiment(
         workdir, namelist=REFERENCE_NAMELIST, run={"output": output},
-        model={"physics": physics} if physics else None, params=params,
+        model={"processes": physics} if physics else None, params=params,
     )  # fmt: skip
     run = load_experiment(workdir)
     return run, run.execute(quiet=True)

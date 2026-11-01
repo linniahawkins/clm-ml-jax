@@ -41,8 +41,8 @@ stream = S.StreamSpec("s", "step", "instantaneous", names)
 first, n = 12, 6
 
 a = Model.from_experiment(load_experiment(tmp))
-b = Model.from_experiment(load_experiment(tmp, ["model.canopy_layers.n_layers_within=10",
-                                              "model.canopy_layers.n_layers_above=10"]))
+b = Model.from_experiment(load_experiment(
+    tmp, ["model.canopy_layers.layer_counts={{within: 10, above: 10}}"]))
 layers = [int(np.asarray(m.constants().layers.n_layers).max()) for m in (a, b)]
 
 def chunk(model):

@@ -16,13 +16,13 @@ An experiment is a folder with four complete files (decision 91,
 |---|---|---|---|
 | `run.yaml` | when and with what: dates, calendar, forcing files (and the tower data interval), land-data sources, initial conditions, output streams, chunks, restarts, devices | `run.RunFile` (`TimeSection`, `ForcingSection`, `InitialConditionsSection`, `OutputSection`, `ExecutionSection`) | **host bookkeeping and data** (file names, dates). Run length and chunk length are host-side; the forcing they select is data |
 | `domain.yaml` | where: towers (location, forcing height, soil: texture, sand/clay, organic matter, colour, bedrock; patches: PFT, weight, canopy height, root biomass, beta profiles, optional layer counts) or a grid (`grid.GridSection`: CLM surface dataset, land mask, region) | `domain.DomainFile` -> `domain.Domain` (gridcells, patches, soil columns) | **data used at setup** (become `PatchConstants`) |
-| `model.yaml` | scheme choices and numerics (including the model step) | `config.ModelConfig` -> `options.MLOptions` -> `step.StepOptions` + `canopy.SubstepOptions` (`driver.step_options`) | **static**: changing any of them recompiles; none is differentiable |
+| `model.yaml` | `processes` (each process's parameterization), numerics (including the model step), canopy layers, soil | `config.ModelConfig` -> `options.MLOptions` -> `step.StepOptions` + `canopy.SubstepOptions` (`driver.step_options`) | **static**: changing any of them recompiles; none is differentiable |
 | `params.yaml` | every parameter of every PFT 1-16 | `params.Params` (specs in `PARAM_SPECS`) -> `params.CanopyParams` (25 fields), one row per PFT in the domain | **differentiable** (gradients come back per PFT), except the few read at setup (below) |
 
 Every option is declared once in the code (`yaml_schema.option`: explanation, Fortran name,
 the kind of run it applies to, hidden test settings, paths); `clm-ml new` writes the files
 from a preset (`src/clm_ml/presets/`: tower, params and experiment presets), and `configs/`
-holds the presets written out. `src/clm_ml/data/psihat.nc` is the only file the physics reads
+holds the presets written out. `src/clm_ml/data/psihat.nc` is the only file the processes read
 from the package.
 
 Three kinds of "value" (the JAX distinction):
@@ -71,7 +71,7 @@ Host -> chunk arrays: `chunk_inputs.forcing_inputs` (`chunk_inputs.py:104`).
 
 ### 2c. Time and orbit
 One clock for the run (decision 24; `calendar.py`, gregorian/noleap). Orbital parameters of the
-start year (`physics/orbit.shr_orb_params`) are static fields of `StepOptions` (`eccen`,
+start year (`processes/orbit.shr_orb_params`) are static fields of `StepOptions` (`eccen`,
 `mvelpp`, `lambm0`, `obliqr`); latitude/longitude are per-patch constants. Solar zenith angle:
 `step.solar_zenith` at the step's start.
 
@@ -98,7 +98,7 @@ Read at setup only (not differentiable through the run): `root_profile_beta` (ro
 `c3_photosynthesis` (C3/C4 group, static), PFT default canopy height / beta profiles.
 
 ### 2f. psihat tables
-`physics.turbulence.RSLTables` from `data/psihat.nc` (`io/rsl_tables.default_rsl_tables`): the
+`processes.turbulence.RSLTables` from `data/psihat.nc` (`io/rsl_tables.default_rsl_tables`): the
 RSL ψ̂ lookup; one copy per chunk (`tables=`; broadcast over patches), data.
 
 ### 2g. Initial conditions
@@ -129,7 +129,7 @@ RSL ψ̂ lookup; one copy per chunk (`tables=`; broadcast over patches), data.
 | `canopy.acclimation_steps` | () | – | steps in the running mean |
 | `soil.temperature` | (S,) | K | soil column |
 
-Inside a step, the sub-step's own carry (`physics/canopy.Substep`, ~100 work fields incl.
+Inside a step, the sub-step's own carry (`processes/canopy.Substep`, ~100 work fields incl.
 Runge-Kutta stage increments) exists only within the step.
 
 **`Diagnostics`** (`state.py:65`) — ~95 fields computed by every step, CLM-ml names: forcing at
@@ -175,23 +175,23 @@ from the configuration).
 4. **One step of one patch** (`driver.patch_step` → `step.step`, `step.py:215`), in order:
    1. acclimation running mean advanced with this step's `tref` (`driver.advance_acclimation`);
    2. soil water from the prescribed record (capped at porosity above bedrock;
-      `physics/soil.soil_water_from_history`);
-   3. soil albedo, evaporative resistance, thermal and hydraulic properties (`physics/soil`);
-   4. the canopy's forcing for the step (`physics/atm_forcing.clm_forcing_to_ml`), solar zenith
+      `processes/soil.soil_water_from_history`);
+   3. soil albedo, evaporative resistance, thermal and hydraulic properties (`processes/soil`);
+   4. the canopy's forcing for the step (`processes/atm_forcing.clm_forcing_to_ml`), solar zenith
       angle;
    5. plant area per layer for this step's LAI/SAI, with the per-layer minimum (decision 30;
       `canopy.plant_area`);
    6. soil and plant resistance, leaf-specific conductance, leaf heat capacity, soil-surface
-      humidity (`physics/plant_hydraulics`, `leaf_heat_capacity`);
-   7. **six 5-min sub-steps** (`lax.scan` over `canopy.substep`, `physics/canopy.py:939`), see
+      humidity (`processes/plant_hydraulics`, `leaf_heat_capacity`);
+   7. **six 5-min sub-steps** (`lax.scan` over `canopy.substep`, `processes/canopy.py:939`), see
       below;
    8. averages over the sub-steps (`canopy.average`), canopy totals and energy-balance checks
       (`canopy.canopy_totals`), sunlit/shaded leaves merged to the layer mean
       (`canopy.merge_sun_shade`);
    9. soil temperature (heat diffusion, ground heat flux from the canopy solution;
-      `physics/soil.soil_temperature`, `physics/soil.py:317`).
+      `processes/soil.soil_temperature`, `processes/soil.py:317`).
    Returns `StepState(state, diagnostics)`.
-5. **One sub-step** (`physics/canopy.substep`):
+5. **One sub-step** (`processes/canopy.substep`):
    - save the start-of-sub-step values (`save_start`);
    - `_radiation` (once per sub-step): forcing interpolated in time (3-point) and min wind
      (`atm_forcing.atm_forcing`); two-stream solar radiation (`solar_radiation.canopy_optics`,

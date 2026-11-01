@@ -60,7 +60,7 @@ Start from a preset; ready-made folders are in `configs/` (`configs/README.md`):
 clm-ml new my_site --from chats7_1day      # write the four complete files
 clm-ml check my_site                        # validate everything and print a summary
 clm-ml run my_site                          # run; one netCDF file per output stream
-clm-ml run my_site --set run.time.days=7 --set model.physics.stomatal_conductance=medlyn
+clm-ml run my_site --set 'run.time.length=7 days' --set model.processes.stomatal_conductance.scheme=medlyn
 clm-ml upgrade my_site                      # after updating clm-ml: add new settings
 ```
 
@@ -130,7 +130,7 @@ python timing/time_model.py       # the compiled chunk and its gradient; timing/
 
 ## Development
 
-### Adding a New Physics Module
+### Adding a New Process or Scheme
 
 1. Write the process as pure functions on 0-based arrays in `src/clm_ml/processes/` (one file
    per process, e.g. `photosynthesis.py`): everything it reads is an argument, everything it
@@ -143,19 +143,21 @@ python timing/time_model.py       # the compiled chunk and its gradient; timing/
    add unit tests in `tests/clm_ml/`.
 5. Register output variables in `src/clm_ml/outputs.py` (`VARIABLES`).
 
-### Adding a New Tower Site
+### Adding a New Tower
 
-Towers are entries of a `towers.yaml` (the built-in one, `src/clm_ml/data/towers.yaml`, holds
-CHATS7): location, forcing height and interval, soil, and the patches (PFT, weight, canopy
-height, root biomass, optional leaf/stem profiles and layer counts). A run names its towers
-and file with `domain.towers` and `domain.towers_file` in `run.yaml`.
+A tower is an entry of an experiment's `domain.yaml`: location, forcing height, soil (texture
+as percentages or a USDA class, organic matter, colour, bedrock) and its patches (PFT,
+weight, canopy height, root biomass, area profiles, layer counts). Start from a preset
+(`clm-ml new my_site --from chats7_1day`) and edit its `domain.yaml`; the forcing files and
+their interval go in `run.yaml`.
 
-### Configuration & Switches
+### Model options
 
-Physics schemes and numerics are in `model.yaml` (e.g. `physics.stomatal_conductance:
-medlyn | ball_berry | wue`, `numerics.integrator: rk4`); any key can be changed on the command
-line with `--set model.<section>.<key>=<value>`. Every setting is explained in each
-folder's `model.yaml` (e.g. `configs/chats7_1day/model.yaml`).
+How each process is represented is in `model.yaml` under `processes` (e.g.
+`processes.stomatal_conductance.scheme: wue | medlyn | ball_berry`), with `numerics`,
+`canopy_layers` and `soil`; any key can be changed on the command line with
+`--set model.<section>.<key>=<value>`. Every setting is explained in each folder's
+`model.yaml` (e.g. `configs/chats7_1day/model.yaml`).
 
 ---
 

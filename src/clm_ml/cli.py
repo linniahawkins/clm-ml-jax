@@ -11,7 +11,7 @@ params.yaml (decision 91; docs/design/experiment_folders.md).
                                             file (.nc), or copy a params file or preset
 
 ``--set`` changes one setting without editing the files, the file named first:
-``--set run.time.days=7``, ``--set model.physics.stomatal_conductance=medlyn``,
+``--set 'run.time.length=7 days'``, ``--set model.processes.stomatal_conductance.scheme=medlyn``,
 ``--set params.broadleaf_deciduous_temperate_tree.vcmax25=100``.
 """
 

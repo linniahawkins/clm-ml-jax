@@ -92,7 +92,7 @@ def acclimation_temperature(run, source, first_tref: float) -> float:
     """The initial acclimation temperature of a gridcell (K): the first step's air
     temperature (``running_mean``, decision 15), or the mean over the whole run, read chunk
     by chunk (``run_mean``, Fortran ``init_acclim``; validation only)."""
-    if run.config.physics.acclimation_temperature != "run_mean":
+    if run.config.processes.photosynthesis.temperature_acclimation != "run_mean":
         return (0.0 + float(first_tref)) / float(1)
     total, n, chunk = 0.0, run.n_steps, 1000
     for first in range(0, n, chunk):

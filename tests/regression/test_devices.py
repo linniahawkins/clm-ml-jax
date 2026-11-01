@@ -34,15 +34,15 @@ def _towers() -> dict:
     chats = chats7_tower()
     walnut = chats["patches"][0]
     grass = {"pft": "c4_grass", "weight": 0.3, "canopy_height": 0.5, "root_biomass": 400.0,
-             "n_layers_within": 5, "n_layers_above": 10}  # fmt: skip
+             "canopy_layers": {"within": 5, "above": 10}}  # fmt: skip
     needle = {"pft": "needleleaf_evergreen_temperate_tree", "weight": 1.0, "canopy_height": 15.0,
-              "root_biomass": 800.0, "n_layers_within": 8, "n_layers_above": 6}  # fmt: skip
+              "root_biomass": 800.0, "canopy_layers": {"within": 8, "above": 6}}  # fmt: skip
     a = copy.deepcopy(chats)
     a["patches"] = [dict(walnut, weight=0.7), grass]
     b = copy.deepcopy(chats)
     b.update(latitude=45.0, longitude=-100.0)
     b["soil"].update(bedrock_depth=1.0, color_class=5)
-    b["patches"] = [dict(walnut, weight=1.0, n_layers_within=10, n_layers_above=8)]
+    b["patches"] = [dict(walnut, weight=1.0, canopy_layers={"within": 10, "above": 8})]
     c = copy.deepcopy(chats)
     c["patches"] = [needle]
     return {"SITEA": a, "SITEB": b, "SITEC": c}

@@ -28,13 +28,11 @@ class TimeSection:
 
     start: str = option(doc="First model time, ISO date-time (e.g. 2007-05-01T00:00).",
                         fortran="start_ymd, start_tod")  # fmt: skip
-    end: Optional[str] = option(
-        None,
-        "End of the run, ISO date-time. Give exactly one of end, days and steps.",
+    length: str = option(
+        doc="How long the run lasts: a number of days (e.g. 1 day, 31 days), of model steps "
+        "(e.g. 48 steps), or until a date-time (e.g. until 2001-01-01T00:00).",
         fortran="stop_option, stop_n",
     )
-    days: Optional[float] = option(None, "Length of the run in days (or end, or steps).")
-    steps: Optional[int] = option(None, "Length of the run in model steps (or end, or days).")
     calendar: Literal["gregorian", "noleap"] = option(
         "gregorian",
         "Model calendar, as CTSM's GREGORIAN / NO_LEAP: dates, solar geometry, run length and "
@@ -115,9 +113,10 @@ class LandDataSection:
     source: Literal["clm_history", "file"] = option(
         "clm_history", "Where the values come from: the CLM history file, or files."
     )
-    files: Files = option((), "With source file: the netCDF file(s).", path=True)
+    files: Optional[Files] = option(None, "The netCDF file(s).", path=True,
+                                    when={"source": "file"}, required=True)  # fmt: skip
     interpolation: Literal["linear"] = option(
-        "linear", "Between the middles of the files' intervals."
+        "linear", "Between the middles of the files' intervals.", when={"source": "file"}
     )
 
 
@@ -149,6 +148,26 @@ class ForcingSection:
     )
 
 
+def parse_length(text: str, key: str):
+    """``time.length``: ``("days", 31.0)``, ``("steps", 48)`` or ``("until", "2001-01-01T00:00")``."""
+    words = str(text).split()
+    if len(words) == 2 and words[0] == "until":
+        return "until", words[1]
+    if len(words) == 2:
+        try:
+            n = float(words[0])
+        except ValueError:
+            n = None
+        if n is not None and n > 0 and words[1] in ("day", "days"):
+            return "days", n
+        if n is not None and n >= 1 and n == int(n) and words[1] in ("step", "steps"):
+            return "steps", int(n)
+    raise ConfigError(
+        f"{key}: {text!r}: expected e.g. '1 day', '31 days', '48 steps' or "
+        "'until 2001-01-01T00:00'"
+    )
+
+
 def parse_chunk(text: str, key: str) -> Optional[int]:
     """``"10 days"`` -> 10; ``"1 month"`` -> None (calendar months), decision 33."""
     parts = str(text).split()
@@ -161,8 +180,8 @@ def parse_chunk(text: str, key: str) -> Optional[int]:
 
 
 def parse_every(text: Optional[str], key: str):
-    """``"3 months"`` -> ``(3, "month")``; ``None`` -> ``None``."""
-    if text is None:
+    """``"3 months"`` -> ``(3, "month")``; ``"end_of_run"`` (or None) -> ``None``."""
+    if text is None or text == "end_of_run":
         return None
     parts = str(text).split()
     units = {"month": "month", "months": "month", "year": "year", "years": "year"}
@@ -182,8 +201,10 @@ class ExecutionSection:
         "or '1 month' (calendar months). Sets how much forcing is in memory and how often the "
         "checks run.",
     )
-    restart_every: Optional[str] = option(
-        None, "Restart files every 'N months' or 'N years'; null: at the end of the run only."
+    restart_every: str = option(
+        "end_of_run",
+        "When restart files are written: end_of_run, or every 'N months' or "
+        "'N years' (and at the end).",
     )
     devices: int = option(
         1, "Number of devices (e.g. 4 GPUs on a Derecho node) the patches are spread over."
@@ -204,8 +225,8 @@ class InitialConditionsSection:
         "from the CLM history (towers) or the monthly soil history (grid); restart: a restart "
         "file of an earlier run.",
     )
-    restart_file: Optional[str] = option(None, "With source restart: the restart file.",
-                                         path=True)  # fmt: skip
+    restart_file: Optional[str] = option(None, "The restart file.", path=True,
+                                         when={"source": "restart"}, required=True)  # fmt: skip
 
 
 @dataclasses.dataclass(frozen=True)

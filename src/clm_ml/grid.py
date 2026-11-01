@@ -50,7 +50,7 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional, Union
 
 import numpy as np
 
@@ -89,8 +89,10 @@ class GridSection:
     land_mask: str = option(
         doc="A CLM history file with landmask on the surface-data grid.", path=True
     )
-    region: Optional[RegionSection] = option(
-        None, "Only the gridcells in this box; null: the whole globe."
+    region: Union[Literal["whole_globe"], RegionSection] = option(
+        "whole_globe",
+        "The gridcells used: whole_globe, or those in a box {lat: [south, north], "
+        "lon: [west, east]}.",
     )
     root_biomass: float = option(500.0, "Root biomass of every patch (g m-2).")
     forcing_height: float = option(
@@ -138,8 +140,8 @@ def satellite_phenology_date(
     return add_seconds(step_start, step_seconds, calendar)
 
 
-def _in_region(lat, lon, region: Optional[RegionSection]):
-    if region is None:
+def _in_region(lat, lon, region):
+    if region is None or region == "whole_globe":
         return np.ones(lat.shape, dtype=bool)
     s, n = region.lat
     w, e = (float(x) % 360.0 for x in region.lon)
@@ -296,14 +298,14 @@ def load_grid_domain(
             f"matter or bedrock depth, e.g. {names[int(np.flatnonzero(bad_soil)[0])]}"
         )
     c = config.canopy_layers
-    if c.n_layers_within is None:
+    if isinstance(c.layer_counts, str):
         raise ConfigError(
-            "domain.type grid: set model.yaml canopy_layers.n_layers_within/n_layers_above "
-            "(constant layer counts, decision 28)"
+            "domain.yaml type grid: set model.yaml canopy_layers.layer_counts to "
+            "{within: N, above: M} (constant layer counts, decision 28)"
         )
-    if c.n_layers_within + c.n_layers_above > c.max_layers:
+    if c.layer_counts.within + c.layer_counts.above > c.max_layers:
         raise ConfigError(
-            f"model.yaml: canopy_layers: {c.n_layers_within} + {c.n_layers_above} layers "
-            f"exceed max_layers {c.max_layers}"
+            f"model.yaml: canopy_layers: {c.layer_counts.within} + {c.layer_counts.above} "
+            f"layers exceed max_layers {c.max_layers}"
         )
     return domain

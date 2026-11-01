@@ -1,7 +1,7 @@
 """
 Model configuration: the contents of ``model.yaml``.
 
-These settings choose physics schemes and numerics. They are *static*: changing any of
+These settings choose how each process is represented (parameterizations) and the numerics. They are *static*: changing any of
 them changes the compiled program, and none of them are differentiable. Numeric values
 that should be calibrated belong in ``params.yaml`` instead.
 
@@ -13,65 +13,103 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Union
 
 from clm_ml.io.yaml_schema import ConfigError, from_dict, option, read_yaml, render, to_dict
 
 
 @dataclasses.dataclass(frozen=True)
-class PhysicsOptions:
-    """Physics schemes. The defaults are CLM-ml v2 as run for CHATS (Bonan et al. 2026); the
-    JAX model is validated against Fortran with these."""
+class LayerCounts:
+    """Explicit numbers of canopy-air layers."""
 
-    stomatal_conductance: Literal["medlyn", "ball_berry", "wue"] = option(
-        "wue",
-        "Stomatal conductance model: water-use-efficiency optimization (iota) with the plant "
-        "hydraulics constraint (CLM-ml v2), or the Medlyn or Ball-Berry relation.",
-        "gs_type 0/1/2",
-    )
-    water_stress_on_conductance: bool = option(
-        True,
-        "Reduce stomatal conductance as leaf water potential falls, "
-        "gs = max(gs / (1 + (psi_leaf/psi50_gs)^shape_gs), gs_min) (Bonan et al. 2021, "
-        "supplement eq. 14).",
-        "gspot_type 1/0",
-    )
-    wue_solver: Literal["brent", "bisection"] = option(
-        "bisection",
-        "Root finder of the WUE optimization: bisection (CLM-ml v2). brent is refused (not "
-        "translated as traceable code; decisions.md).",
-        "gs_solver 1/2",
-    )
-    photosynthesis_colimitation: bool = option(
+    within: int = option(doc="Layers within the canopy.", fortran="nlayer_within")
+    above: int = option(doc="Layers above the canopy, up to the forcing height.",
+                        fortran="nlayer_above")  # fmt: skip
+
+
+@dataclasses.dataclass(frozen=True)
+class PhotosynthesisOptions:
+    """Leaf photosynthesis (Farquhar) and the leaf nitrogen profile through the canopy."""
+
+    colimitation: bool = option(
         True,
         "Co-limitation (smoothed minimum) of the Rubisco, light and product limited rates; false "
         "takes the plain minimum.",
         "colim_type 1/0",
     )
-    temperature_acclimation: bool = option(
-        True,
-        "Acclimation of the photosynthetic temperature responses (Kattge and Knorr 2007) to the "
-        "acclimation temperature below.",
-        "acclim_type 1/0",
-    )
-    acclimation_temperature: Literal["running_mean", "run_mean"] = option(
+    temperature_acclimation: Literal["running_mean", "run_mean", "none"] = option(
         "running_mean",
-        "The air temperature photosynthesis acclimates to: a running mean over "
-        "acclimation_days, carried in the state (as CLM), or the mean over the whole run "
-        "(Fortran CLM-ml v2; needs all forcing before the run starts: validation only).",
-        "run_mean = init_acclim (CLMml_driver)",
+        "Acclimation of the photosynthetic temperature responses (Kattge and Knorr 2007) to a "
+        "running mean of air temperature carried in the state (as CLM), to the mean over the "
+        "whole run (Fortran CLM-ml v2; needs all forcing before the run starts: validation "
+        "only), or none.",
+        "acclim_type 1/0; run_mean = init_acclim (CLMml_driver)",
     )
-    acclimation_days: float = option(10.0, "Length of the acclimation running mean (days).", "")
-    nitrogen_decay_kn: Optional[float] = option(
-        None,
-        "Leaf nitrogen (Vcmax25) decay coefficient through the canopy; null computes it from "
-        "Vcmax25 at the canopy top, exp(0.00963 Vcmax25 - 2.43) (Bonan et al. 2021).",
+    acclimation_days: float = option(
+        10.0,
+        "Length of the acclimation running mean (days).",
+        when={"temperature_acclimation": "running_mean"},
+    )
+    nitrogen_profile: Union[Literal["computed"], float] = option(
+        "computed",
+        "Decay coefficient of leaf nitrogen (Vcmax25) through the canopy: computed from Vcmax25 "
+        "at the canopy top, exp(0.00963 Vcmax25 - 2.43) (Bonan et al. 2021), or a number.",
         "kn_val (-999 = computed)",
     )
+
+
+@dataclasses.dataclass(frozen=True)
+class StomatalConductanceOptions:
+    """Stomatal conductance."""
+
+    scheme: Literal["wue", "medlyn", "ball_berry"] = option(
+        "wue",
+        "Water-use-efficiency optimization (iota) with the plant hydraulics constraint (CLM-ml "
+        "v2), or the Medlyn or Ball-Berry relation (their g0, g1 in params.yaml).",
+        "gs_type 2/0/1",
+    )
+    water_stress: bool = option(
+        True,
+        "Reduce stomatal conductance as leaf water potential falls, gs = max(gs / (1 + "
+        "(psi_leaf/psi50_gs)^shape_gs), gs_min) (Bonan et al. 2021, supplement eq. 14).",
+        "gspot_type 1/0",
+    )
+    wue_solver: Literal["bisection", "brent"] = option(
+        "bisection",
+        "Root finder of the WUE optimization: bisection (CLM-ml v2). brent is refused (not "
+        "translated as traceable code; decisions.md).",
+        "gs_solver 2/1",
+        when={"scheme": "wue"},
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class RadiationOptions:
+    """Radiative transfer through the canopy."""
+
+    solar: Literal["two_stream", "norman"] = option(
+        "two_stream",
+        "Shortwave radiation: two-stream, integrated over each layer. norman is refused (not "
+        "yet supported).",
+        "light_type 2/1",
+    )
+    longwave: Literal["norman"] = option("norman", "Longwave radiation: Norman (the only one).",
+                                         "longwave_type 1")  # fmt: skip
+    leaf_optics_vary_with_height: bool = option(
+        False,
+        "Leaf optical properties varying with height in the canopy (not supported).",
+        "leaf_optics_type 0/1",
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class TurbulenceOptions:
+    """Turbulence and aerodynamic conductances above and within the canopy, and the leaf
+    boundary layer."""
+
     roughness_sublayer: Literal["harman_finnigan"] = option(
         "harman_finnigan",
-        "Turbulence above and within the canopy: Harman and Finnigan roughness sublayer with "
-        "the psihat tables (the only scheme).",
+        "Harman and Finnigan roughness sublayer with the psihat tables (the only one).",
         "turb_type 1",
     )
     sparse_canopy: bool = option(
@@ -80,40 +118,43 @@ class PhysicsOptions:
         "canopy-top Prandtl number depend on the plant area index.",
         "sparse_canopy_type 1/0",
     )
-    ground_conductance: Literal["extend_hf", "log_profile"] = option(
+    ground_conductance: Literal["log_profile", "extend_hf"] = option(
         "log_profile",
         "Aerodynamic conductance of the lowest canopy layer to the ground: a log wind profile "
         "(CLM-ml v2), or the Harman-Finnigan exponential profile extended down to the ground.",
         "HF_extension_type 2/1",
     )
-    flux_profile_solution: Literal["well_mixed", "implicit"] = option(
+    leaf_boundary_layer: Literal["free_convection", "laminar", "turbulent"] = option(
+        "free_convection",
+        "Leaf boundary-layer conductance: forced plus free convection (CLM-ml v2), or laminar or "
+        "turbulent forced convection only.",
+        "gb_type 3/1/2",
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class CanopyAirOptions:
+    """Air temperature and vapour in the canopy layers."""
+
+    flux_profile_solution: Literal["implicit", "well_mixed"] = option(
         "implicit",
         "Coupled implicit solution of air temperature, vapour and leaf temperature in every "
         "layer. well_mixed is refused (Fortran calls it legacy, not supported).",
         "flux_profile_type 1/0",
     )
-    leaf_boundary_layer: Literal["laminar", "turbulent", "free_convection"] = option(
-        "free_convection",
-        "Leaf boundary-layer conductance: laminar forced convection, turbulent forced "
-        "convection, or forced plus free convection (CLM-ml v2).",
-        "gb_type 1/2/3",
-    )
-    solar_radiation: Literal["norman", "two_stream"] = option(
-        "two_stream",
-        "Shortwave radiation through the canopy: two-stream, integrated over each layer. "
-        "norman is refused (not yet supported).",
-        "light_type 2/1",
-    )
-    leaf_optics_vary_with_height: bool = option(
-        False,
-        "Leaf optical properties varying with height in the canopy (not supported).",
-        "leaf_optics_type 0/1",
-    )
-    longwave_radiation: Literal["norman"] = option(
-        "norman",
-        "Longwave radiation through the canopy: Norman (the only scheme).",
-        "longwave_type 1",
-    )
+
+
+@dataclasses.dataclass(frozen=True)
+class ProcessOptions:
+    """How each process is represented: the parameterizations (schemes) and their options.
+    The defaults are CLM-ml v2 as run for CHATS (Bonan et al. 2026), validated against
+    Fortran."""
+
+    photosynthesis: PhotosynthesisOptions = option(PhotosynthesisOptions(), "")
+    stomatal_conductance: StomatalConductanceOptions = option(StomatalConductanceOptions(), "")
+    radiation: RadiationOptions = option(RadiationOptions(), "")
+    turbulence: TurbulenceOptions = option(TurbulenceOptions(), "")
+    canopy_air: CanopyAirOptions = option(CanopyAirOptions(), "")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -178,7 +219,9 @@ class NumericsOptions:
 
 @dataclasses.dataclass(frozen=True)
 class CanopyLayerOptions:
-    """The vertical layers of the canopy air space, from the ground to the forcing height."""
+    """The vertical layers of the canopy air space, from the ground to the forcing height.
+    A patch's own layer counts (domain.yaml patches[].canopy_layers) take precedence over
+    these."""
 
     max_layers: int = option(
         50,
@@ -186,34 +229,40 @@ class CanopyLayerOptions:
         "masked). CHATS7 uses 46.",
         "nlevmlcan",
     )
+    layer_counts: Union[Literal["from_spacing"], LayerCounts] = option(
+        "from_spacing",
+        "Numbers of layers within and above the canopy: from_spacing (layers of dz_tall or "
+        "dz_short thickness), or explicit counts {within: N, above: M} (5-10 within the canopy "
+        "suffice for fluxes, Bonan et al. 2021).",
+        "nlayer_within, nlayer_above (0 = from spacing)",
+    )
     dz_tall: float = option(
-        0.5, "Layer thickness (m) for canopies taller than tall_canopy_threshold.", "dz_tall"
+        0.5,
+        "Layer thickness (m) for canopies taller than tall_canopy_threshold.",
+        "dz_tall",
+        when={"layer_counts": "from_spacing"},
     )
-    dz_short: float = option(0.1, "Layer thickness (m) for shorter canopies.", "dz_short")
+    dz_short: float = option(
+        0.1,
+        "Layer thickness (m) for shorter canopies.",
+        "dz_short",
+        when={"layer_counts": "from_spacing"},
+    )
     tall_canopy_threshold: float = option(
-        2.0, "Canopy height (m) above which dz_tall is used.", "dz_param"
+        2.0,
+        "Canopy height (m) above which dz_tall is used.",
+        "dz_param",
+        when={"layer_counts": "from_spacing"},
     )
-    n_layers_above: Optional[int] = option(
-        None,
-        "Explicit number of layers above the canopy; null = from the spacing. Set with "
-        "n_layers_within (both or neither); towers with short canopies under tall towers "
-        "need it (5-10 within-canopy layers suffice for fluxes, Bonan et al. 2021).",
-        "nlayer_above",
-    )
-    n_layers_within: Optional[int] = option(
-        None,
-        "Explicit number of layers within the canopy; null = from the spacing.",
-        "nlayer_within",
-    )
-    min_plant_area_per_layer: float = option(
+    merge_thin_layers_below: float = option(
         0.01,
-        "At setup, layers holding less than this fraction of the canopy's plant area are "
+        "At setup: layers holding less than this fraction of the canopy's plant area are "
         "emptied and their area given to the other layers.",
         "dpai_min",
     )
-    min_layer_plant_area: float = option(
+    minimum_leafy_layer_plant_area: float = option(
         0.01,
-        "Every leafy layer keeps at least this plant area (m2 m-2) at every step, the missing "
+        "At every step: every leafy layer keeps at least this plant area (m2 m-2), the missing "
         "part added as stem area: thinner layers transmit more diffuse radiation than they "
         "receive (decisions.md; CLM-ml v1's dpai_min). 0 reproduces CLM-ml v2.",
         "",
@@ -237,7 +286,7 @@ class SoilOptions:
 class ModelConfig:
     """Contents of ``model.yaml``; the defaults reproduce CLM-ml v2/CHATS."""
 
-    physics: PhysicsOptions = PhysicsOptions()
+    processes: ProcessOptions = ProcessOptions()
     numerics: NumericsOptions = NumericsOptions()
     canopy_layers: CanopyLayerOptions = CanopyLayerOptions()
     soil: SoilOptions = SoilOptions()
@@ -248,20 +297,19 @@ class ModelConfig:
                 "model.yaml: soil.columns: 'shared' (option B) is planned but not implemented; "
                 "use 'per_patch'"
             )
-        if self.physics.acclimation_days <= 0:
-            raise ConfigError("model.yaml: physics.acclimation_days must be positive")
+        if self.processes.photosynthesis.acclimation_days <= 0:
+            raise ConfigError(
+                "model.yaml: processes.photosynthesis.acclimation_days must be positive"
+            )
         if self.numerics.substep_seconds <= 0:
             raise ConfigError("model.yaml: numerics.substep_seconds must be positive")
         if not 0.0 <= self.numerics.max_failed_patch_fraction <= 1.0:
             raise ConfigError("model.yaml: numerics.max_failed_patch_fraction must be in [0, 1]")
         if self.canopy_layers.max_layers < 2:
             raise ConfigError("model.yaml: canopy_layers.max_layers must be at least 2")
-        within, above = self.canopy_layers.n_layers_within, self.canopy_layers.n_layers_above
-        if (within is None) != (above is None):
-            raise ConfigError(
-                "model.yaml: canopy_layers.n_layers_within and n_layers_above must be set "
-                "together (or both left null to use dz_tall/dz_short)"
-            )
+        counts = self.canopy_layers.layer_counts
+        if isinstance(counts, LayerCounts) and (counts.within < 1 or counts.above < 1):
+            raise ConfigError("model.yaml: canopy_layers.layer_counts: within and above >= 1")
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> "ModelConfig":
@@ -279,37 +327,49 @@ class ModelConfig:
 
     def replace(self, **dotted_changes) -> "ModelConfig":
         """Return a copy with options changed, e.g.
-        ``config.replace(**{"physics.stomatal_conductance": "medlyn"})``."""
+        ``config.replace(**{"processes.stomatal_conductance.scheme": "medlyn"})``."""
         data = to_dict(self)
         for dotted, value in dotted_changes.items():
-            section, _, name = dotted.partition(".")
-            if section not in data or not name:
+            *sections, name = dotted.split(".")
+            node = data
+            for part in sections:
+                if not isinstance(node.get(part), dict):
+                    raise ConfigError(f"replace: unknown option {dotted!r}")
+                node = node[part]
+            if not sections or name not in node:
                 raise ConfigError(f"replace: unknown option {dotted!r}")
-            data[section][name] = value
+            node[name] = value
         return ModelConfig.from_dict(data, source="replace()")
 
     def to_fortran_codes(self, interpolation: str) -> dict:
         """Values for the legacy ``MLclm_varctl`` module variables.
 
         ``interpolation`` comes from ``run.yaml`` (``forcing.meteorology.interpolation``), because it
-        describes the forcing data rather than the physics.
+        describes the forcing data rather than the processes.
         """
-        p, n, c = self.physics, self.numerics, self.canopy_layers
+        ps, n, c = self.processes, self.numerics, self.canopy_layers
+        ph, gs, rad, turb = ps.photosynthesis, ps.stomatal_conductance, ps.radiation, ps.turbulence
         rk = INTEGRATOR_CODES[n.integrator]
+        counts = c.layer_counts if isinstance(c.layer_counts, LayerCounts) else None
+        kn = ph.nitrogen_profile
         return {
-            "gs_type": _GS_TYPE[p.stomatal_conductance],
-            "gspot_type": int(p.water_stress_on_conductance),
-            "gs_solver": {"brent": 1, "bisection": 2}[p.wue_solver],
-            "colim_type": int(p.photosynthesis_colimitation),
-            "acclim_type": int(p.temperature_acclimation),
-            "kn_val": -999.0 if p.nitrogen_decay_kn is None else float(p.nitrogen_decay_kn),
+            "gs_type": _GS_TYPE[gs.scheme],
+            "gspot_type": int(gs.water_stress),
+            "gs_solver": {"brent": 1, "bisection": 2}[gs.wue_solver],
+            "colim_type": int(ph.colimitation),
+            "acclim_type": int(ph.temperature_acclimation != "none"),
+            "kn_val": -999.0 if kn == "computed" else float(kn),
             "turb_type": 1,
-            "sparse_canopy_type": int(p.sparse_canopy),
-            "HF_extension_type": {"extend_hf": 1, "log_profile": 2}[p.ground_conductance],
-            "flux_profile_type": {"well_mixed": 0, "implicit": 1}[p.flux_profile_solution],
-            "gb_type": {"laminar": 1, "turbulent": 2, "free_convection": 3}[p.leaf_boundary_layer],
-            "light_type": {"norman": 1, "two_stream": 2}[p.solar_radiation],
-            "leaf_optics_type": int(p.leaf_optics_vary_with_height),
+            "sparse_canopy_type": int(turb.sparse_canopy),
+            "HF_extension_type": {"extend_hf": 1, "log_profile": 2}[turb.ground_conductance],
+            "flux_profile_type": {"well_mixed": 0, "implicit": 1}[
+                ps.canopy_air.flux_profile_solution
+            ],
+            "gb_type": {"laminar": 1, "turbulent": 2, "free_convection": 3}[
+                turb.leaf_boundary_layer
+            ],
+            "light_type": {"norman": 1, "two_stream": 2}[rad.solar],
+            "leaf_optics_type": int(rad.leaf_optics_vary_with_height),
             "longwave_type": 1,
             "dtime_ml": float(n.substep_seconds),
             "runge_kutta_type": rk,
@@ -317,10 +377,10 @@ class ModelConfig:
             "dz_tall": float(c.dz_tall),
             "dz_short": float(c.dz_short),
             "dz_param": float(c.tall_canopy_threshold),
-            "nlayer_above": c.n_layers_above or 0,
-            "nlayer_within": c.n_layers_within or 0,
-            "dpai_min": float(c.min_plant_area_per_layer),
-            "layer_pai_floor": float(c.min_layer_plant_area),
+            "nlayer_above": counts.above if counts else 0,
+            "nlayer_within": counts.within if counts else 0,
+            "dpai_min": float(c.merge_thin_layers_below),
+            "layer_pai_floor": float(c.minimum_leafy_layer_plant_area),
             "max_layers": int(c.max_layers),
             "met_type": {"none": 0, "three_point": 3}[interpolation],
         }
@@ -331,20 +391,35 @@ class ModelConfig:
         The JAX translation has been validated against Fortran only with the defaults;
         other options are translated but not yet validated, so ``clm-ml check`` lists them.
         """
-        default, mine = to_dict(ModelConfig()), to_dict(self)
         return [
-            f"{section}.{name}"
-            for section, values in mine.items()
-            for name, value in values.items()
-            if value != default[section][name]
-            and section in ("physics", "numerics")
-            and name != "checkpoint_steps"
-        ]
+            k for k in changed_options(self)
+            if k.split(".")[0] in ("processes", "numerics") and k != "numerics.checkpoint_steps"
+            and not (k == "processes.photosynthesis.temperature_acclimation"
+                     and self.processes.photosynthesis.temperature_acclimation == "run_mean")
+        ]  # fmt: skip
+
+
+def changed_options(config: ModelConfig) -> list[str]:
+    """Dotted names of the settings that differ from the defaults (nested sections
+    flattened; a whole sub-section, e.g. explicit layer counts, counts as one setting)."""
+
+    def flat(d, prefix=""):
+        out = {}
+        for k, v in d.items():
+            key = f"{prefix}{k}"
+            if isinstance(v, dict) and k != "layer_counts":
+                out.update(flat(v, key + "."))
+            else:
+                out[key] = v
+        return out
+
+    default, mine = flat(to_dict(ModelConfig())), flat(to_dict(config))
+    return [k for k, v in mine.items() if v != default.get(k)]
 
 
 #: Header of model.yaml in an experiment folder
 HEADER = """\
-model.yaml: how the physics and numerics work. Part of an experiment folder (run.yaml,
+model.yaml: how each process is represented (parameterizations) and the numerics. Part of an experiment folder (run.yaml,
 domain.yaml, model.yaml, params.yaml). Every setting is listed; the defaults are CLM-ml v2 as
 run for CHATS (Bonan et al. 2026), the configuration validated against Fortran. Changing
 anything here recompiles the model; none of these settings is differentiable (calibrated
@@ -356,9 +431,7 @@ def model_yaml_text(config: ModelConfig, generated: str = "") -> str:
     explanation, its choices and the Fortran variable it replaces, as comments
     (:func:`clm_ml.io.yaml_schema.render`). The header lists the settings that differ from
     the defaults."""
-    default, mine = to_dict(ModelConfig()), to_dict(config)
-    changed = [f"{sec}.{k}" for sec, vals in mine.items() for k, v in vals.items()
-               if v != default[sec][k]]  # fmt: skip
+    changed = changed_options(config)
     differs = (
         "Differs from the defaults in: " + ", ".join(changed) + "."
         if changed
@@ -381,12 +454,15 @@ INTEGRATOR_CODES = {
 
 #: Fortran namelist/varctl codes -> readable model.yaml settings (used by ``clm-ml convert``).
 FORTRAN_CODES = {
-    "gs_type": ("physics.stomatal_conductance", {v: k for k, v in _GS_TYPE.items()}),
-    "light_type": ("physics.solar_radiation", {1: "norman", 2: "two_stream"}),
+    "gs_type": ("processes.stomatal_conductance.scheme", {v: k for k, v in _GS_TYPE.items()}),
+    "light_type": ("processes.radiation.solar", {1: "norman", 2: "two_stream"}),
     "runge_kutta_type": ("numerics.integrator", {v: k for k, v in INTEGRATOR_CODES.items()}),
-    "flux_profile_type": ("physics.flux_profile_solution", {0: "well_mixed", 1: "implicit"}),
+    "flux_profile_type": (
+        "processes.canopy_air.flux_profile_solution",
+        {0: "well_mixed", 1: "implicit"},
+    ),
     "gb_type": (
-        "physics.leaf_boundary_layer",
+        "processes.turbulence.leaf_boundary_layer",
         {1: "laminar", 2: "turbulent", 3: "free_convection"},
     ),
 }

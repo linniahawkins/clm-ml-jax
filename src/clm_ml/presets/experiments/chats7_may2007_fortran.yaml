@@ -5,7 +5,7 @@ description: >-
   CHATS7, May 2007: the run compared with Fortran CLM-ml v2 (tests/test_fortran_python_comparison.py):
   31 days with the Fortran acclimation temperature and the legacy .out files.
 run:
-  time: {start: 2007-05-01T00:00, days: 31}
+  time: {start: 2007-05-01T00:00, length: 31 days}
   forcing:
     meteorology:
       files: [data/input_files/tower-forcing/CHATS7/2007-05.nc]
@@ -25,5 +25,5 @@ domain:
   type: towers
   towers: [chats7]                 # presets/towers/chats7.yaml
 model:
-  physics: {acclimation_temperature: run_mean}
+  processes: {photosynthesis: {temperature_acclimation: run_mean}}
 params: chats                      # presets/params/chats.yaml

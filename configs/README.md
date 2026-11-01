@@ -19,7 +19,7 @@ setting listed with its explanation:
 ```bash
 clm-ml check configs/chats7_1day     # validate and summarize, no run
 clm-ml run configs/chats7_1day       # output in configs/chats7_1day/output/
-clm-ml run configs/chats7_1day --set run.time.days=3 --set model.physics.stomatal_conductance=medlyn
+clm-ml run configs/chats7_1day --set 'run.time.length=3 days' --set model.processes.stomatal_conductance.scheme=medlyn
 clm-ml new my_site --from chats7_1day   # your own copy to edit
 ```
 

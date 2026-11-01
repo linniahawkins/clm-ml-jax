@@ -49,12 +49,12 @@ def tower(lat, lon, ht, soil, patches):
     t = copy.deepcopy(chats); t.update(latitude=lat, longitude=lon, measurement_height=ht); t["soil"].update(soil); t["patches"] = patches; return t
 towers = {{
   "G1": tower(38.49, -121.84, 23.0, {{}}, [dict(walnut, weight=0.5),
-        {{"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.3, "canopy_height": 15.0, "root_biomass": 800.0, "n_layers_within": 8, "n_layers_above": 6}},
-        {{"pft": "c4_grass", "weight": 0.2, "canopy_height": 0.5, "root_biomass": 400.0, "n_layers_within": 5, "n_layers_above": 10}}]),
-  "G2": tower(45.0, -100.0, 23.0, {{"bedrock_depth": 1.0, "color_class": 5, "sand_percent": 40.0, "clay_percent": 20.0, "organic_matter": 20.0}},
-        [dict(walnut, weight=0.7, canopy_height=12.0, root_biomass=600.0, leaf_area_profile_beta=[3.0, 1.5], stem_area_profile_beta=[2.0, 1.5]),
-         {{"pft": "broadleaf_deciduous_boreal_tree", "weight": 0.3, "root_biomass": 500.0, "n_layers_within": 10, "n_layers_above": 4}}]),
-  "G3": tower(10.0, 20.0, 21.0, {{"texture_class": "loam", "sand_percent": None, "clay_percent": None, "bedrock_depth": 3.0, "color_class": 10}},
+        {{"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.3, "canopy_height": 15.0, "root_biomass": 800.0, "canopy_layers": {{"within": 8, "above": 6}}}},
+        {{"pft": "c4_grass", "weight": 0.2, "canopy_height": 0.5, "root_biomass": 400.0, "canopy_layers": {{"within": 5, "above": 10}}}}]),
+  "G2": tower(45.0, -100.0, 23.0, {{"bedrock_depth": 1.0, "color_class": 5, "texture": {{"given_as": "percentages", "sand_percent": 40.0, "clay_percent": 20.0}}, "organic_matter": 20.0}},
+        [dict(walnut, weight=0.7, canopy_height=12.0, root_biomass=600.0, area_profiles={{"leaf_beta": [3.0, 1.5], "stem_beta": [2.0, 1.5]}}),
+         {{"pft": "broadleaf_deciduous_boreal_tree", "weight": 0.3, "root_biomass": 500.0, "canopy_layers": {{"within": 10, "above": 4}}}}]),
+  "G3": tower(10.0, 20.0, 21.0, {{"texture": {{"given_as": "class", "texture_class": "loam"}}, "bedrock_depth": 3.0, "color_class": 10}},
         [dict(walnut, weight=0.6), {{"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.4, "canopy_height": 9.0, "root_biomass": 700.0}}]),
 }}
 edit(tmp, domain=lambda d: d.update(towers=towers))

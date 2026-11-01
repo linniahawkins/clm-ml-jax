@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import numpy as np
 
-from clm_ml.config import ModelConfig
+from clm_ml.config import LayerCounts, ModelConfig
 from clm_ml.grid import GridSection
 from clm_ml.io.yaml_schema import ConfigError, from_dict, option, read_yaml
 from clm_ml.params import PFT_NAMES, Params, pft_index
@@ -37,18 +37,56 @@ grid (a CLM surface dataset). Part of an experiment folder (run.yaml, domain.yam
 params.yaml). Every setting is listed; REQUIRED keys have no default. {generated}"""
 
 
+TextureClass = Literal[
+    "sand",
+    "loamy sand",
+    "sandy loam",
+    "silty loam",
+    "loam",
+    "sandy clay loam",
+    "silty clay loam",
+    "clay loam",
+    "sandy clay",
+    "silty clay",
+    "clay",
+]  # fmt: skip  (clm_ml.setup.tables.SOIL_TEXTURES)
+
+
+@dataclasses.dataclass(frozen=True)
+class TextureSpec:
+    """The soil texture: sand and clay percentages (hydraulic properties from CLM5's
+    formulas), or a USDA texture class (Clapp and Hornberger 1978 values)."""
+
+    given_as: Literal["percentages", "class"] = option(
+        "percentages", "How the texture is given: percentages or class."
+    )
+    sand_percent: Optional[float] = option(None, "Sand content (%).", required=True,
+                                           when={"given_as": "percentages"})  # fmt: skip
+    clay_percent: Optional[float] = option(None, "Clay content (%).", required=True,
+                                           when={"given_as": "percentages"})  # fmt: skip
+    texture_class: Optional[TextureClass] = option(
+        None, "USDA texture class.", required=True, when={"given_as": "class"}
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class SoilSpec:
     """The soil of the tower's column(s)."""
 
-    texture_class: Optional[str] = option(
-        None, "USDA texture class (e.g. silty clay loam), used when sand and clay are null."
+    texture: Optional[TextureSpec] = option(None, "The soil texture.", required=True)
+    organic_matter: Optional[float] = option(
+        None, "Soil organic matter density (kg m-3), in the top 0.5 m.", required=True
     )
-    sand_percent: Optional[float] = option(None, "Sand content (%).")
-    clay_percent: Optional[float] = option(None, "Clay content (%).")
-    organic_matter: Optional[float] = option(None, "Soil organic matter density (kg m-3).")
     color_class: int = option(15, "CLM soil colour class, 1 (light) to 20 (dark): soil albedo.")
-    bedrock_depth: Optional[float] = option(None, "Depth to bedrock (m); null: none.")
+    bedrock_depth: Optional[float] = option(None, "Depth to bedrock (m); null: no bedrock.")
+
+
+@dataclasses.dataclass(frozen=True)
+class AreaProfiles:
+    """Beta distributions (p, q) of leaf and stem area with height in the canopy."""
+
+    leaf_beta: tuple[float, float] = option(doc="Leaf area (p, q).")
+    stem_beta: tuple[float, float] = option(doc="Stem area (p, q).")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,23 +96,25 @@ class PatchSpec:
     pft: str = option(doc="Plant functional type (a name from params.yaml, e.g. "
                       "broadleaf_deciduous_temperate_tree).")  # fmt: skip
     weight: float = option(1.0, "Fraction of the gridcell; the weights of a tower sum to 1.")
-    canopy_height: Optional[float] = option(None, "Canopy height (m); null: from the CLM "
-                                            "history file.")  # fmt: skip
-    root_biomass: Optional[float] = option(None, "Root biomass (g m-2); null: the PFT default.")
-    leaf_area_profile_beta: Optional[tuple[float, float]] = option(
-        None, "Beta distribution (p, q) of leaf area with height; null: the PFT default."
+    canopy_height: Union[Literal["pft_default"], float] = option(
+        "pft_default",
+        "Canopy height (m), or pft_default (CLM's height of the PFT: 17 m needleleaf, 35/18/20 m "
+        "broadleaf trees, 0.5 m shrubs and grasses).",
+        "tower_canht; htop_pft",
     )
-    stem_area_profile_beta: Optional[tuple[float, float]] = option(
-        None, "Beta distribution (p, q) of stem area with height; null: the PFT default."
+    root_biomass: Optional[float] = option(None, "Fine root biomass (g m-2).", "tower_root",
+                                           required=True)  # fmt: skip
+    area_profiles: Union[Literal["pft_default"], AreaProfiles] = option(
+        "pft_default",
+        "Leaf and stem area profiles: pft_default, or {leaf_beta: [p, q], stem_beta: [p, q]} "
+        "(both, as Fortran).",
+        "tower_pbeta_lai, tower_pbeta_sai",
     )
-    n_layers_within: Optional[int] = option(
-        None,
-        "Canopy-air layers within the canopy for this patch; null: model.yaml "
-        "canopy_layers. Set with n_layers_above (e.g. a short canopy under a tall tower; "
-        "5-10 layers within the canopy suffice for fluxes, Bonan et al. 2021).",
-    )
-    n_layers_above: Optional[int] = option(
-        None, "Canopy-air layers above the canopy for this patch; null: model.yaml."
+    canopy_layers: Union[Literal["from_model_yaml"], LayerCounts] = option(
+        "from_model_yaml",
+        "This patch's canopy-air layer counts: from_model_yaml (model.yaml canopy_layers), or "
+        "{within: N, above: M}, which take precedence over model.yaml (e.g. a short canopy "
+        "under a tall tower).",
     )
 
 
@@ -84,11 +124,11 @@ class TowerSpec:
 
     latitude: float = option(doc="Latitude, degrees north.")
     longitude: float = option(doc="Longitude, degrees east.")
-    patches: tuple[PatchSpec, ...] = option(doc="The patches on the tower's gridcell.")
-    measurement_height: Optional[float] = option(
-        None, "Forcing (reference) height (m); null: 30 m.", fortran="tower_ht"
+    measurement_height: float = option(30.0, "Forcing (reference) height (m).", "tower_ht")
+    soil: Optional[SoilSpec] = option(None, "The soil.", required=True)
+    patches: Optional[tuple[PatchSpec, ...]] = option(
+        None, "The patches on the tower's gridcell.", required=True
     )
-    soil: SoilSpec = option(SoilSpec(), "The soil.")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -122,14 +162,11 @@ def check_towers(towers: dict[str, TowerSpec], source: str) -> None:
         for i, patch in enumerate(tower.patches):
             where = f"{source}: towers.{name}.patches[{i}]"
             pft_index(patch.pft, f"{where}.pft")
-            if (patch.n_layers_within is None) != (patch.n_layers_above is None):
-                raise ConfigError(
-                    f"{where}: n_layers_within and n_layers_above must be set together"
-                )
-            if patch.n_layers_within is not None and (
-                patch.n_layers_within < 1 or patch.n_layers_above < 1
-            ):
-                raise ConfigError(f"{where}: n_layers_within and n_layers_above must be >= 1")
+            counts = patch.canopy_layers
+            if isinstance(counts, LayerCounts) and (counts.within < 1 or counts.above < 1):
+                raise ConfigError(f"{where}.canopy_layers: within and above must be >= 1")
+            if patch.root_biomass <= 0:
+                raise ConfigError(f"{where}.root_biomass: must be positive")
 
 
 def load_towers(path: Path) -> dict[str, TowerSpec]:
@@ -231,16 +268,27 @@ class Domain:
                 c_rows.append(tower.soil)
 
         def nan(v):
-            return np.nan if v is None else v
+            return np.nan if v is None or isinstance(v, str) else v
 
-        def pair(v):
-            return (np.nan, np.nan) if v is None else v
+        def profile(p, which):
+            a = p.area_profiles
+            return (np.nan, np.nan) if isinstance(a, str) else getattr(a, which)
+
+        def counts(p, which):
+            c = p.canopy_layers
+            return 0 if isinstance(c, str) else getattr(c, which)
+
+        def texture(s, which):
+            t = s.texture
+            if which == "texture_class":
+                return t.texture_class if t.given_as == "class" else None
+            return getattr(t, which) if t.given_as == "percentages" else np.nan
 
         gridcells = Gridcells(
             names=tuple(names),
             latitude=np.array([t.latitude for t in g_rows]),
             longitude=np.array([t.longitude for t in g_rows]),
-            measurement_height=np.array([nan(t.measurement_height) for t in g_rows]),
+            measurement_height=np.array([float(t.measurement_height) for t in g_rows]),
         )
         patches = Patches(
             gridcell_index=np.array([g for g, _, _ in p_rows]),
@@ -248,17 +296,17 @@ class Domain:
             pft_index=np.array([PFT_NAMES.index(p.pft) for _, p, _ in p_rows]),
             weight=np.array([w for _, _, w in p_rows]),
             canopy_height=np.array([nan(p.canopy_height) for _, p, _ in p_rows]),
-            root_biomass=np.array([nan(p.root_biomass) for _, p, _ in p_rows]),
-            leaf_area_profile_beta=np.array([pair(p.leaf_area_profile_beta) for _, p, _ in p_rows]),
-            stem_area_profile_beta=np.array([pair(p.stem_area_profile_beta) for _, p, _ in p_rows]),
-            n_layers_within=np.array([p.n_layers_within or 0 for _, p, _ in p_rows]),
-            n_layers_above=np.array([p.n_layers_above or 0 for _, p, _ in p_rows]),
+            root_biomass=np.array([float(p.root_biomass) for _, p, _ in p_rows]),
+            leaf_area_profile_beta=np.array([profile(p, "leaf_beta") for _, p, _ in p_rows]),
+            stem_area_profile_beta=np.array([profile(p, "stem_beta") for _, p, _ in p_rows]),
+            n_layers_within=np.array([counts(p, "within") for _, p, _ in p_rows]),
+            n_layers_above=np.array([counts(p, "above") for _, p, _ in p_rows]),
         )
         columns = SoilColumns(
-            texture_class=tuple(s.texture_class for s in c_rows),
-            sand_percent=np.array([nan(s.sand_percent) for s in c_rows]),
-            clay_percent=np.array([nan(s.clay_percent) for s in c_rows]),
-            organic_matter=np.array([nan(s.organic_matter) for s in c_rows]),
+            texture_class=tuple(texture(s, "texture_class") for s in c_rows),
+            sand_percent=np.array([texture(s, "sand_percent") for s in c_rows], dtype=float),
+            clay_percent=np.array([texture(s, "clay_percent") for s in c_rows], dtype=float),
+            organic_matter=np.array([float(s.organic_matter) for s in c_rows]),
             color_class=np.array([s.color_class for s in c_rows]),
             bedrock_depth=np.array([nan(s.bedrock_depth) for s in c_rows]),
         )
@@ -279,29 +327,37 @@ class Domain:
     def layer_counts(self, config: ModelConfig) -> list[int]:
         """Number of canopy-air layers per patch (ground to measurement height).
 
-        Same rule as the legacy ``initVerticalStructure``, with the patch's explicit counts
-        (``domain.yaml``) in place of model.yaml's when set. Patches whose canopy height comes
-        from the CLM history file (NaN here) are counted when the run starts instead, and
-        reported as 0.
+        Same rule as the legacy ``initVerticalStructure``: the patch's own counts
+        (``domain.yaml``) when given, else model.yaml's explicit counts, else from the spacing;
+        a patch without its own canopy height takes its PFT's default height.
 
         Fortran reference: MLinitVerticalMod.F90, subroutine initVerticalStructure.
         """
+        return [n for n, _ in self.layer_counts_with_source(config)]
+
+    def layer_counts_with_source(self, config: ModelConfig) -> list[tuple[int, str]]:
+        """``(layers, where the count comes from)`` per patch (``clm-ml check``)."""
+        from clm_ml.setup.tables import default_canopy_height
+
         c = config.canopy_layers
-        counts = []
+        out = []
         own = self.patches.measurement_height
         for i, htop in enumerate(self.patches.canopy_height):
             zref = self.gridcells.measurement_height[self.patches.gridcell_index[i]]
             zref = zref if own is None else own[i]
             zref = 30.0 if np.isnan(zref) else zref  # legacy default for tower_ht = -999
-            if np.isnan(htop):
-                counts.append(0)
-            elif self.patches.n_layers_within[i] > 0:
-                counts.append(int(self.patches.n_layers_within[i] + self.patches.n_layers_above[i]))
-            elif c.n_layers_within is not None:
-                counts.append(c.n_layers_within + c.n_layers_above)
+            if np.isnan(htop) or htop <= 0.0:
+                htop = default_canopy_height(int(self.patches.pft_index[i]))
+            if self.patches.n_layers_within[i] > 0:
+                n = int(self.patches.n_layers_within[i] + self.patches.n_layers_above[i])
+                out.append((n, "the patch's own canopy_layers"))
+            elif isinstance(c.layer_counts, LayerCounts):
+                out.append((c.layer_counts.within + c.layer_counts.above,
+                            "model.yaml canopy_layers.layer_counts"))  # fmt: skip
             else:
                 dz = c.dz_tall if htop > c.tall_canopy_threshold else c.dz_short
                 ntop = round(htop / dz)
                 nabove = round((zref - htop) / (htop / ntop))
-                counts.append(ntop + nabove)
-        return counts
+                out.append((ntop + nabove, f"spacing {dz:g} m, canopy {htop:g} m, forcing "
+                                           f"height {zref:g} m"))  # fmt: skip
+        return out

@@ -67,13 +67,15 @@ def build_patches(domain, params, config, first: dict, acclimation_steps: float 
         pt.leaf_area_profile_beta, pt.stem_area_profile_beta, pft
     )
     own = np.asarray(pt.n_layers_within, dtype=int) > 0
-    within = np.where(own, pt.n_layers_within, layers_cfg.n_layers_within or 0).astype(int)
-    above = np.where(own, pt.n_layers_above, layers_cfg.n_layers_above or 0).astype(int)
+    counts = layers_cfg.layer_counts  # model.yaml: explicit counts, or from the spacing (0)
+    model_within, model_above = (0, 0) if isinstance(counts, str) else (counts.within, counts.above)
+    within = np.where(own, pt.n_layers_within, model_within).astype(int)
+    above = np.where(own, pt.n_layers_above, model_above).astype(int)
     zref = patch_heights(domain)
     grid = canopy.vertical_structure(
         zref, htop, lai_b, sai_b, within, above, max_layers, float(layers_cfg.dz_tall),
         float(layers_cfg.dz_short), float(layers_cfg.tall_canopy_threshold),
-        float(layers_cfg.min_plant_area_per_layer),
+        float(layers_cfg.merge_thin_layers_below),
     )  # fmt: skip
 
     # soil (initVertical, SoilStateInitTimeConst, SurfaceAlbedoInitTimeConst)

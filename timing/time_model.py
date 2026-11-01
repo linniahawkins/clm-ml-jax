@@ -41,7 +41,7 @@ def main() -> None:
         "--set",
         action="append",
         default=[],
-        help="override, the file named first (run.time.days=2, model.physics...)",
+        help="override, the file named first (run.time.length=2 days, model.processes...)",
     )
     args = parser.parse_args()
 

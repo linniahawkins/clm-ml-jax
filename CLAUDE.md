@@ -236,7 +236,7 @@ docs/design/           plan, decisions.md, open_items.md, model_overview.md, pha
   `clm_ml.driver`).
 - **C3/C4 is a static choice per group of patches** (decision 22), not per-patch data.
 - **Iterative solvers and padding:** compute on every layer slot, give padding the top
-  layer's inputs (`physics.layers.pad_with_top`), keep results with masks; no Python loops
+  layer's inputs (`processes.layers.pad_with_top`), keep results with masks; no Python loops
   over layers in the time step.
 - **Real 1° patches amplify round-off** (1e-15 in LAI -> ~8 W m-2 after sunrise): grid
   regression tests compare inputs exactly and outputs only through the night.
@@ -252,7 +252,7 @@ pip install -e ".[dev]"                     # dev extras include pytest-cov, whi
 
 clm-ml new my_site --from chats7_1day      # an experiment folder from a preset (configs/README.md)
 clm-ml check my_site                        # validate + summary, no run
-clm-ml run my_site [--set run.time.days=3]  # run (netCDF output, config copy in OUTPUT/config)
+clm-ml run my_site [--set 'run.time.length=3 days']  # run (netCDF output, config copy in OUTPUT/config)
 clm-ml upgrade my_site                      # rewrite with every current setting (also old layout)
 clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/   # namelist -> experiment folder
 clm-ml params ctsm60_params.nc -o p.yaml   # CLM parameter file -> complete params.yaml (preset clm6 = CTSM 6.0)
@@ -323,7 +323,7 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
 **Decisions:**
 - **Tower presets: CHATS7 only** (`src/clm_ml/presets/towers/chats7.yaml`). Other towers
   go in an experiment's `domain.yaml`, with explicit layer counts per patch
-  (`n_layers_within`/`n_layers_above`) where default spacing gives too many layers.
+  (`canopy_layers: {within: N, above: M}`) where default spacing gives too many layers.
 - **Names.** Import as `import clm_ml`. The install name is `clm-ml-jax`. The command-line tool
   is `clm-ml new | check | run | upgrade | convert | params`.
 - **Experiment folders** (decision 91, `docs/design/experiment_folders.md`): an experiment is
@@ -331,8 +331,12 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
   - `run.yaml`: when and with what (dates, calendar, forcing and land-data files and the
     tower forcing interval, initial conditions, output, chunks, restarts). Replaces the namelist.
   - `domain.yaml`: where (towers or a grid).
-  - `model.yaml`: scheme choices and numerics, including the model step. Static: changing
-    them recompiles.
+  - `model.yaml`: `processes` (each process's parameterization: photosynthesis, stomatal
+    conductance, radiation, turbulence, canopy air; not "physics"), numerics (including the
+    model step), canopy layers, soil. Static: changing them recompiles.
+  - One way to say each setting (decision 93): a choice key, with its settings shown and
+    allowed only for that choice (`option(when=...)`); named words instead of nulls that
+    meant "taken from elsewhere"; `clm-ml check` prints where each value comes from.
   - `params.yaml`: parameters **per PFT**, every parameter of every PFT 1-16 (no `extends`).
   - Strict: missing, unknown or misplaced keys are errors; `clm-ml upgrade` adds new keys at
     their defaults. Every option is declared once in the code with `yaml_schema.option`
@@ -415,7 +419,7 @@ internals later.
 **Layer counts.** With the default spacing, short canopies under tall towers get very many
 layers: above-canopy spacing equals within-canopy spacing, so a 0.5 m grass under a 30 m tower
 needs 300 layers. Bonan et al. (2021) found 5–10 within-canopy layers sufficient for fluxes;
-use explicit `n_layers_within`/`n_layers_above` for such towers.
+use explicit layer counts (`canopy_layers: {within: N, above: M}`) for such towers.
 
 ## Design guidance: jax-gcm
 

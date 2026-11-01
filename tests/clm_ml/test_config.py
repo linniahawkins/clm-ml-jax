@@ -29,7 +29,8 @@ def test_empty_file_gives_defaults(tmp_path):
 
 def test_readable_options_map_to_codes():
     config = ModelConfig.from_dict(
-        {"physics": {"stomatal_conductance": "medlyn", "solar_radiation": "norman"},
+        {"processes": {"stomatal_conductance": {"scheme": "medlyn"},
+                       "radiation": {"solar": "norman"}},
          "numerics": {"integrator": "euler"}}
     )  # fmt: skip
     codes = config.to_fortran_codes("three_point")
@@ -37,24 +38,40 @@ def test_readable_options_map_to_codes():
         0, 1, 10, 1,
     )  # fmt: skip
     assert config.non_default_options() == [
-        "physics.stomatal_conductance", "physics.solar_radiation", "numerics.integrator",
+        "processes.stomatal_conductance.scheme", "processes.radiation.solar",
+        "numerics.integrator",
     ]  # fmt: skip
+
+
+def test_choices_map_to_codes():
+    c = ModelConfig.from_dict({
+        "processes": {"photosynthesis": {"temperature_acclimation": "none",
+                                         "nitrogen_profile": 0.3}},
+        "canopy_layers": {"layer_counts": {"within": 10, "above": 5},
+                          "merge_thin_layers_below": 0.02,
+                          "minimum_leafy_layer_plant_area": 0.0},
+    }).to_fortran_codes("none")  # fmt: skip
+    assert (c["acclim_type"], c["kn_val"], c["nlayer_within"], c["nlayer_above"]) == (
+        0, 0.3, 10, 5,
+    )  # fmt: skip
+    assert (c["dpai_min"], c["layer_pai_floor"]) == (0.02, 0.0)
 
 
 @pytest.mark.parametrize(
     "data, message",
     [
         (
-            {"physics": {"stomatal_conductance": "jarvis"}},
-            "is not one of [medlyn, ball_berry, wue]",
+            {"processes": {"stomatal_conductance": {"scheme": "jarvis"}}},
+            "is not one of [wue, medlyn, ball_berry]",
         ),
-        ({"physics": {"stomatal_conductanse": "wue"}}, "unknown key(s) ['stomatal_conductanse']"),
+        ({"processes": {"stomatal_conductanse": {}}}, "unknown key(s) ['stomatal_conductanse']"),
         ({"numerics": {"substep_seconds": "fast"}}, "expected a number"),
-        ({"physics": {"sparse_canopy": 1}}, "expected true or false"),
+        ({"processes": {"turbulence": {"sparse_canopy": 1}}}, "expected true or false"),
         ({"soil": {"columns": "shared"}}, "option B"),
         # CLM soil layer structure only (C35)
         ({"soil": {"layer_structure": "clm4_5"}}, "unknown key(s) ['layer_structure']"),
-        ({"canopy_layers": {"n_layers_within": 10}}, "must be set together"),
+        ({"canopy_layers": {"layer_counts": {"within": 10}}}, "above: required key is missing"),
+        ({"physics": {}}, "unknown key(s) ['physics']"),
     ],
 )
 def test_invalid_settings_name_the_key(data, message):
@@ -64,10 +81,10 @@ def test_invalid_settings_name_the_key(data, message):
 
 
 def test_replace():
-    config = ModelConfig().replace(**{"physics.stomatal_conductance": "ball_berry"})
-    assert config.physics.stomatal_conductance == "ball_berry"
+    config = ModelConfig().replace(**{"processes.stomatal_conductance.scheme": "ball_berry"})
+    assert config.processes.stomatal_conductance.scheme == "ball_berry"
     with pytest.raises(ConfigError):
-        ModelConfig().replace(**{"physics.stomatal_conductance": "nope"})
+        ModelConfig().replace(**{"processes.stomatal_conductance.scheme": "nope"})
 
 
 def test_yaml_round_trip(tmp_path):

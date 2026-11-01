@@ -72,7 +72,8 @@ def main() -> None:
         t = copy.deepcopy(chats)
         sand = float(rng.uniform(5.0, 80.0))
         t.update(latitude=float(rng.uniform(-60.0, 75.0)), longitude=float(rng.uniform(-180, 180)))
-        t["soil"] = {"sand_percent": sand, "clay_percent": float(rng.uniform(5.0, 95.0 - sand)),
+        t["soil"] = {"texture": {"given_as": "percentages", "sand_percent": sand,
+                                 "clay_percent": float(rng.uniform(5.0, 95.0 - sand))},
                      "organic_matter": float(rng.uniform(0.0, 100.0)),
                      "color_class": int(rng.integers(1, 21)),
                      "bedrock_depth": float(rng.uniform(0.5, 10.0))}  # fmt: skip
@@ -81,7 +82,7 @@ def main() -> None:
         t["patches"] = [
             {"pft": PFTS[j][0], "weight": float(wi / w.sum()),
              "canopy_height": float(rng.uniform(*PFTS[j][2])), "root_biomass": PFTS[j][3],
-             "n_layers_within": int(rng.integers(5, 16)), "n_layers_above": int(rng.integers(5, 16))}
+             "canopy_layers": {"within": int(rng.integers(5, 16)), "above": int(rng.integers(5, 16))}}
             for j, wi in zip(kinds, w)
         ]  # fmt: skip
         towers[f"G{g}"] = t

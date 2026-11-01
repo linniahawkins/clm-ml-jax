@@ -76,11 +76,12 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> Path:
     stop_option = str(g.get("stop_option", "ndays")).strip()
     stop_n = int(g.get("stop_n", 1))
     if stop_option == "ndays":
-        time = {"start": start.isoformat(timespec="minutes"), "days": stop_n}
+        length = f"{stop_n} day" + ("s" if stop_n != 1 else "")
     elif stop_option == "nsteps":
-        time = {"start": start.isoformat(timespec="minutes"), "steps": stop_n}
+        length = f"{stop_n} step" + ("s" if stop_n != 1 else "")
     else:
         raise ConfigError(f"{namelist_path.name}: stop_option {stop_option!r} not supported")
+    time = {"start": start.isoformat(timespec="minutes"), "length": length}
     clm_phys = str(g.get("clm_phys", "CLM5_0")).strip()
     if clm_phys != "CLM5_0":
         raise ConfigError(
@@ -130,7 +131,7 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> Path:
     recipe = {
         "run": run,
         "domain": {"type": "towers", "towers": [tower]},  # the tower's preset
-        "model": {"canopy_layers": {"min_plant_area_per_layer": float(g.get("dpai_min", 0.01))}},
+        "model": {"canopy_layers": {"merge_thin_layers_below": float(g.get("dpai_min", 0.01))}},
         "params": "chats" if int(g.get("pftcon_val", 0)) == 1 else "clm5_defaults",
     }
     from clm_ml.experiment import compose, version, write_experiment

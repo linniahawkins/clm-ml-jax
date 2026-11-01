@@ -58,8 +58,8 @@ convert_namelist(Path({namelist!r}), tmp_b)
 tower = yaml.safe_load(open({towers!r}))["CHATS7"]
 tower.update(latitude=site_b["latitude"], longitude=site_b["longitude"])
 tower["soil"].update(bedrock_depth=site_b["bedrock_depth"], color_class=site_b["color_class"])
-tower["patches"][0].update(n_layers_within=site_b["n_layers_within"],
-                           n_layers_above=site_b["n_layers_above"])
+tower["patches"][0].update(canopy_layers={{"within": site_b["n_layers_within"],
+                                          "above": site_b["n_layers_above"]}})
 edit(tmp_b, domain=lambda d: d.update(towers={{"SITEB": tower}}))
 
 names = ("latent_heat_flux", "sensible_heat_flux", "gpp", "soil_temperature",

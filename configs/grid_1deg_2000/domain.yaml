@@ -18,7 +18,7 @@ grid:
   # REQUIRED.
   land_mask: /glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.2000-01.nc
 
-  # Only the gridcells in this box; null: the whole globe.
+  # The gridcells used: whole_globe, or those in a box {lat: [south, north], lon: [west, east]}.
   region:
     # Latitudes [south, north], degrees north.
     # default: [-90.0, 90.0].

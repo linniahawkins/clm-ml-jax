@@ -598,6 +598,34 @@ percentages: unchanged, bit for bit).
 Reason: a translation error; the model must compute what CLM-ml v2 computes.
 Source: `global_input.md` issue 21; open_items O1; C27.
 
+**93. One way to say each setting: `processes`, choice keys, named fallbacks**
+2026-11-01 · Phase 8a · maintainer · in force · Departure from Fortran: no
+model.yaml's scheme choices are `processes`, grouped by process (photosynthesis, stomatal
+conductance, radiation, turbulence, canopy air), not "physics" (many are biological); the code
+package `clm_ml/physics` is `clm_ml/processes`. Alternatives are one choice key whose
+settings appear only with that choice (`yaml_schema.option(when=...)`; the loader refuses the
+settings of a choice not made, the files show only those in use): run length is one key
+(`time.length: 1 day | 48 steps | until <date-time>`), soil texture is `given_as:
+percentages | class`, land-data files and the restart file appear only with their source,
+grid CO2 is `source: file | constant`, the model's layer spacing only with `layer_counts:
+from_spacing`, `wue_solver` only with the WUE scheme, `acclimation_days` only with the running
+mean (`temperature_acclimation: running_mean | run_mean | none` replaces two keys). Nulls that
+meant "taken from elsewhere" are named words (`canopy_height: pft_default`, `area_profiles:
+pft_default`, `canopy_layers: from_model_yaml`, `nitrogen_profile: computed`, `region:
+whole_globe`, `restart_every: end_of_run`) or plain defaults (forcing height 30 m); root
+biomass and organic matter are required. The two thin-layer settings are named by when they
+act (`merge_thin_layers_below`, at setup; `minimum_leafy_layer_plant_area`, every step).
+`clm-ml check` prints each value the run uses and where it comes from (e.g. layer counts);
+`clm-ml upgrade` moves earlier files to these forms.
+Found while doing it (documentation only, no change to results): a missing canopy height took
+the PFT's default height (CLM's `htop_pft`), not the CLM history file as the docs said; a
+missing root biomass was an error at setup (as Fortran's `endrun`), not a PFT default; a leaf
+or stem profile given alone was not used (Fortran needs both). Requiring organic matter
+closes open issue 22 for the files (a missing value can no longer reach the -999 path).
+Reason: one place and one form for each setting, so a user cannot set two things that
+silently override each other (maintainer).
+Source: maintainer, 2026-11-01; open_items O2.
+
 **56. Soil colour class 0 refused**
 2026-11-01 · Phase 7.4 review · implementation · in force · Departure from Fortran: (unclear: the legacy JAX code wrapped class 0 to class 20; whether Fortran does was not checked)
 A soil colour class of 0 is an error.

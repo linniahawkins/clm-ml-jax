@@ -45,7 +45,7 @@ def run(model):
 result = {{}}
 models = {{}}
 for name in {models!r}:
-    overrides = ["model.physics.stomatal_conductance=" + name]
+    overrides = ["model.processes.stomatal_conductance.scheme=" + name]
     models[name] = Model.from_experiment(load_experiment(tmp, overrides))
     result[name] = run(models[name])
 if len({models!r}) > 1:

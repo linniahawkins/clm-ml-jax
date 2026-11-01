@@ -9,7 +9,7 @@ Thresholds (from CLAUDE.md):
   - Pearson correlation >= 0.9999
 
 Run after a full-month CHATS7 May-2007 simulation (the Fortran reference covers May), with
-the Fortran acclimation temperature (``physics.acclimation_temperature: run_mean``; the
+the Fortran acclimation temperature (``processes.photosynthesis.temperature_acclimation: run_mean``; the
 default 10-day running mean, decision 15, departs from Fortran by design, by up to ~1%) and
 the legacy ASCII output (``output.legacy_ascii: true``): ``configs/chats7_may2007_fortran``::
 

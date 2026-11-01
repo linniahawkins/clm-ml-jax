@@ -43,8 +43,8 @@ def grid_run_files(tmp: Path, region: dict, start: str, days: float = 1, co2: di
     from tests.experiment_tools import make_experiment
 
     def run(d):
-        d["time"].update(start=start, days=days, end=None, steps=None)
-        d["forcing"]["gridded"]["co2"] = dict({"file": None, "ppm": None}, **(co2 or {"ppm": 383}))
+        d["time"].update(start=start, length=f"{days} days")
+        d["forcing"]["gridded"]["co2"] = dict({"source": "constant"}, **(co2 or {"ppm": 383}))
         d["output"] = output or {
             "directory": str(tmp / "out"),
             "streams": [{"name": "h", "frequency": "hourly",
@@ -89,7 +89,8 @@ for p in range(d.n_patches):
     c = d.columns
     towers[f"P{{p}}"] = {{"latitude": float(d.gridcells.latitude[g]), "longitude": float(d.gridcells.longitude[g]),
         "measurement_height": float(d.patches.measurement_height[p]),
-        "soil": {{"sand_percent": float(c.sand_percent[p]), "clay_percent": float(c.clay_percent[p]),
+        "soil": {{"texture": {{"given_as": "percentages", "sand_percent": float(c.sand_percent[p]),
+                              "clay_percent": float(c.clay_percent[p])}},
                  "organic_matter": float(c.organic_matter[p]), "color_class": int(c.color_class[p]),
                  "bedrock_depth": float(c.bedrock_depth[p])}},
         "patches": [{{"pft": PFT_NAMES[int(d.patches.pft_index[p])], "weight": 1.0,
@@ -248,7 +249,7 @@ def test_thin_layers_keep_minimum_plant_area(tmp_path):
     """Issue 14: a stems-only shrub (LAI 0, SAI 0.108) in Wyoming, January 2000, whose bottom
     layer held 0.0013 m2 m-2: CLM-ml's 9-angle diffuse transmittance exceeded 1 there and
     the leaf temperature ran away at a calm sunrise (13 January). With every leafy layer
-    kept at min_layer_plant_area (0.01, added as stems) the run completes (any failed check stops
+    kept at minimum_leafy_layer_plant_area (0.01, added as stems) the run completes (any failed check stops
     the run, the canopy energy balance below freezing included: issue 12), every leafy layer transmits less than it receives, and leaf temperatures stay
     physical."""
     out = _python(THIN_LAYER_SCRIPT.format(root=str(ROOT), tmp=str(tmp_path)))

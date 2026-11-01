@@ -40,7 +40,7 @@ at the end of the step plus one step), then ``elai = tlai`` and ``esai = tsai`` 
 burial: this model has no snow), not below 0. Unlike CLM, values below 0.05 are *not* set to
 0 (decision 31): CLM does it to protect its big-leaf canopy from very small plant area, which
 the minimum plant area of every leafy layer (model.yaml
-``canopy_layers.min_layer_plant_area``, decision 30) does here; without the cutoff LAI and SAI
+``canopy_layers.minimum_leafy_layer_plant_area``, decision 30) does here; without the cutoff LAI and SAI
 enter continuously, so the model is differentiable with respect to them.
 
 **Soil water**: ``H2OSOI`` from monthly CLM history files per gridcell (the CLM run's
@@ -102,12 +102,20 @@ class DatmStreamsSection:
 
 @dataclasses.dataclass(frozen=True)
 class Co2Section:
-    """Atmospheric CO2: a time series file or a constant (give one)."""
+    """Atmospheric CO2."""
 
-    file: Optional[str] = option(
-        None, "CO2 time series file (CO2, time with units and calendar).", path=True
+    source: Literal["file", "constant"] = option(
+        "file", "A CO2 time series file, or a constant value."
     )
-    ppm: Optional[float] = option(None, "Or a constant CO2 (ppm).")
+    file: Optional[str] = option(
+        None,
+        "CO2 time series file (CO2, time with units and calendar).",
+        path=True,
+        when={"source": "file"},
+        required=True,
+    )
+    ppm: Optional[float] = option(None, "Constant CO2 (ppm).", when={"source": "constant"},
+                                  required=True)  # fmt: skip
 
 
 @dataclasses.dataclass(frozen=True)
@@ -392,10 +400,8 @@ class Co2Stream:
     """Global CO2 (ppm): a ``co2tseries`` file, linear in time, or a constant."""
 
     def __init__(self, section: Co2Section, resolve):
-        self.ppm = section.ppm
-        if (section.file is None) == (section.ppm is None):
-            raise ConfigError("run.yaml: forcing.gridded.co2: give exactly one of file, ppm")
-        if section.file is not None:
+        self.ppm = section.ppm if section.source == "constant" else None
+        if section.source == "file":
             import netCDF4 as nc
 
             with nc.Dataset(resolve(section.file)) as ds:
