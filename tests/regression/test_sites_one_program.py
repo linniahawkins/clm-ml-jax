@@ -6,7 +6,7 @@ longitude, bedrock depth, soil colour class and explicit layer counts (towers.ya
 per-site value the time step reads (``SiteType.site_type`` and the layer counts) differs from
 CHATS7 (site A). In one process:
 
-- B's chunk run through A's compiled program (B's state, forcing and template as inputs)
+- B's chunk run through A's compiled program (B's state, forcing and constants as inputs)
   equals B's own run, and A's program does not compile again: the site data are inputs of the
   program, not constants baked into it (a mix-up, e.g. B reading A's bedrock depth, would show
   as a difference);
@@ -73,11 +73,11 @@ def own(model):
     return {{k: np.asarray(v).tolist() for k, v in out["s"].items()}}
 
 def site(model):
-    s = model._template.site
-    return {{"bedrock": int(np.asarray(s.nbedrock_col).ravel()[0]),  # (patch, column)
-             "color": int(np.asarray(s.isoicol_col).ravel()[0]),
-             "lat": float(np.asarray(s.latdeg_grc).ravel()[0]),
-             "layers": int(np.asarray(model._template.mlcanopy.ncan_canopy).max())}}
+    k = model.constants()  # PatchConstants, (patch, ...)
+    return {{"bedrock": int(np.asarray(k.nbedrock)[0]),
+             "albsat_vis": float(np.asarray(k.albsat)[0, 0]),
+             "lat": float(np.asarray(k.latdeg)[0]),
+             "layers": int(np.asarray(k.layers.n_layers).max())}}
 
 result = {{}}
 if {alone!r}:
@@ -92,7 +92,7 @@ else:
     result["b"] = own(b)
     result["compiled_before"] = runner._cache_size()
     _, via = b.run_chunk(b.initial_state(), b.forcing(first, n), first, streams=[stream],
-                         program=a)  # b's inputs (state, forcing, template) through a's program
+                         program=a)  # b's inputs (state, forcing, constants) through a's program
     result["b_via_a"] = {{k: np.asarray(v).tolist() for k, v in via["s"].items()}}
     result["compiled_after"] = runner._cache_size()
 print("RESULT" + json.dumps(result))
@@ -117,8 +117,11 @@ def test_one_compiled_program_for_different_sites():
     together, alone = _run(alone=False), _run(alone=True)
     # the two sites differ in every per-site field
     a, b = together["site_a"], together["site_b"]
-    assert a == {"bedrock": 12, "color": 15, "lat": 38.49, "layers": 46}
-    assert b["color"] == SITE_B["color_class"] and b["lat"] == SITE_B["latitude"]
+    from clm_ml.setup.tables import ALBSAT
+
+    assert a == {"bedrock": 12, "albsat_vis": ALBSAT[0][14], "lat": 38.49, "layers": 46}
+    assert b["albsat_vis"] == ALBSAT[0][SITE_B["color_class"] - 1]
+    assert b["lat"] == SITE_B["latitude"]
     assert b["bedrock"] < a["bedrock"]
     assert b["layers"] == SITE_B["n_layers_within"] + SITE_B["n_layers_above"]
 

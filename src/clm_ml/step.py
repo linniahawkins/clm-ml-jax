@@ -193,7 +193,7 @@ def solar_zenith(calday_beg, latdeg, londeg, options: StepOptions) -> Array:
     Fortran reference: MLCanopyFluxesMod.F90::GetCLMVar (lines 92-110).
     """
     from clm_ml.physics.constants import rpi as pi
-    from clm_share.shr_orb_mod import shr_orb_cosz, shr_orb_decl
+    from clm_ml.physics.orbit import shr_orb_cosz, shr_orb_decl
 
     declin, _ = shr_orb_decl(
         calday_beg, options.eccen, options.mvelpp, options.lambm0, options.obliqr

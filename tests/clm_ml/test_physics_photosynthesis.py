@@ -1,10 +1,7 @@
-"""clm_ml.physics.leaf_boundary_layer, clm_ml.physics.photosynthesis and their legacy adapters
-(Phase 7.2, process 7).
+"""clm_ml.physics.leaf_boundary_layer and clm_ml.physics.photosynthesis (Phase 7.2, process 7).
 
-The adapters run on fake multilayer canopy containers holding only the fields they declare
-(``DECLARED``): reading an undeclared field fails, and exactly the declared writes must
-change. The physics is checked against what its definitions imply (Fortran's error checks of
-the stomatal models and the diffusion equation, the WUE optimum is the root of the marginal
+The physics is checked against what its definitions imply (Fortran's error checks of the
+stomatal models and the diffusion equation, the WUE optimum is the root of the marginal
 efficiency check, the water-stress rule), sunlit and shaded leaves in one call against one
 call per leaf, and the stomatal conductance's implicit-function gradient against finite
 differences.
@@ -20,8 +17,6 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.legacy import leaf_boundary_layer as lbl_adapter  # noqa: E402
-from clm_ml.legacy import photosynthesis as adapter  # noqa: E402
 from clm_ml.physics import leaf_boundary_layer as lbl  # noqa: E402
 from clm_ml.physics import photosynthesis as ps  # noqa: E402
 from clm_ml.physics.constants import dh2o_to_dco2, gbh_min  # noqa: E402
@@ -37,9 +32,6 @@ Params = namedtuple(
 )
 PARAMS = Params(*(jnp.asarray(v) for v in (1e-4, 2.35, 0.01, 9.0, 375.0, 0.002, -1.6, 40.0,
                                            0.04)))  # fmt: skip
-Grid = namedtuple("Grid", "p c3")
-Opts = namedtuple("Opts", "gs_type gspot_type gs_solver colim_type acclim_type gb_type")
-OPTS = Opts(2, 1, 2, 1, 1, 3)
 
 
 def _layers():
@@ -79,101 +71,6 @@ def _run(inputs=None, **kw):
 
 
 LEAFY = np.flatnonzero(DPAI > 0)
-
-
-# ---------------------------------------------------------------------------
-# Adapters: declared reads and writes
-# ---------------------------------------------------------------------------
-
-
-def _fake_mlcanopy(declared, rng):
-    reads, writes = declared
-    fields = sorted({k.split(".")[1] for k in (*reads, *writes)})
-    n = N_SLOTS + 1
-    f = _inputs()
-
-    def shape(name):
-        if name.endswith("_leaf"):
-            return (1, n, 3)
-        return (1, n) if name.endswith("_profile") else (1,)
-
-    values = {k: jnp.asarray(rng.uniform(-1.0, -0.5, shape(k))) for k in fields}
-    for k in ("eair", "cair", "dpai"):
-        values[k + "_profile"] = jnp.concatenate([jnp.zeros(1), f[k]])[None]
-    for k in ("tleaf", "vcmax25", "jmax25", "rd25", "kp25", "apar", "gbc", "gbv", "lwp"):
-        values[k + "_leaf"] = jnp.zeros((1, n, 3)).at[0, 1:, 1:].set(f[k])
-    lay = _layers()
-    scalars = dict(o2ref_forcing=209.0, pref_forcing=101325.0, tacclim_forcing=293.0,
-                   tref_forcing=295.0, rhomol_forcing=41.0, ncan_canopy=NCAN,
-                   ntop_canopy=NTOP, nbot_canopy=NBOT)  # fmt: skip
-    values.update({k: jnp.array([v]) for k, v in scalars.items() if k in values})
-    values.update(
-        wind_profile=jnp.linspace(0.5, 3.0, n)[None],
-        tair_profile=jnp.full((1, n), 296.0),
-        dz_profile=jnp.concatenate([jnp.zeros(1), lay.dz])[None],
-        zs_profile=jnp.concatenate([jnp.zeros(1), lay.zs])[None],
-        zw_profile=lay.zw[None],
-    )
-    return namedtuple("mlcanopy", fields)(**{k: values[k] for k in fields})
-
-
-def _changed(before, after):
-    out = set()
-    for field in after._fields:
-        old, new = np.asarray(getattr(before, field)), np.asarray(getattr(after, field))
-        assert old.shape == new.shape, field
-        assert np.all(np.isfinite(new)), field
-        if not np.array_equal(old, new):
-            out.add(f"mlcanopy.{field}")
-    return out
-
-
-@pytest.mark.parametrize("gs_type", [0, 1, 2])
-def test_photosynthesis_adapter_reads_and_writes_what_it_declares(gs_type):
-    declared = adapter.DECLARED["LeafPhotosynthesis"]
-    before = _fake_mlcanopy(declared, np.random.default_rng(3))
-    after = adapter.LeafPhotosynthesis(
-        1, [0], None, before, PARAMS, Grid(0, True), opts=OPTS._replace(gs_type=gs_type)
-    )
-    expected = set(declared[1])
-    if gs_type == 2:  # g0, g1 are the Medlyn and Ball-Berry parameters
-        expected -= {"mlcanopy.g0_canopy", "mlcanopy.g1_canopy"}
-    assert _changed(before, after) == expected
-    for field in adapter._LEAF_FIELDS.values():  # ground slot, padding, leaf index 0 kept
-        a, b = np.asarray(getattr(after, field)), np.asarray(getattr(before, field))
-        np.testing.assert_array_equal(a[0, NCAN + 1 :], b[0, NCAN + 1 :])
-        np.testing.assert_array_equal(a[0, 0], b[0, 0])
-        np.testing.assert_array_equal(a[0, :, 0], b[0, :, 0])
-
-
-def test_photosynthesis_adapter_one_leaf_matches_both():
-    declared = adapter.DECLARED["LeafPhotosynthesis"]
-    before = _fake_mlcanopy(declared, np.random.default_rng(3))
-    both = adapter.LeafPhotosynthesis(1, [0], None, before, PARAMS, Grid(0, True), opts=OPTS)
-    one = before
-    for il in (1, 2):
-        one = adapter.LeafPhotosynthesis(1, [0], il, one, PARAMS, Grid(0, True), opts=OPTS)
-    for field in adapter._LEAF_FIELDS.values():
-        np.testing.assert_array_equal(getattr(one, field), getattr(both, field), err_msg=field)
-
-
-def test_photosynthesis_adapter_refuses_invalid_codes():
-    before = _fake_mlcanopy(adapter.DECLARED["LeafPhotosynthesis"], np.random.default_rng(3))
-    for bad in (dict(gs_type=3), dict(gs_solver=0), dict(colim_type=2)):
-        with pytest.raises(ValueError):
-            adapter.LeafPhotosynthesis(1, [0], None, before, PARAMS, Grid(0, True),
-                                       opts=OPTS._replace(**bad))  # fmt: skip
-
-
-def test_boundary_layer_adapter_reads_and_writes_what_it_declares():
-    declared = lbl_adapter.DECLARED["LeafBoundaryLayer"]
-    before = _fake_mlcanopy(declared, np.random.default_rng(4))
-    after = lbl_adapter.LeafBoundaryLayer(1, [0], before, PARAMS, opts=OPTS)
-    assert _changed(before, after) == set(declared[1])
-    for f in ("gbh_leaf", "gbv_leaf", "gbc_leaf"):
-        a, b = np.asarray(getattr(after, f)), np.asarray(getattr(before, f))
-        np.testing.assert_array_equal(a[0, :, 0], b[0, :, 0])
-        np.testing.assert_array_equal(a[0, 0], b[0, 0])
 
 
 # ---------------------------------------------------------------------------

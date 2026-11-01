@@ -1,14 +1,9 @@
-"""clm_ml.physics.turbulence and its legacy adapter (Phase 7.2, process 6).
+"""clm_ml.physics.turbulence (Phase 7.2, process 6).
 
-The adapter runs on a fake multilayer canopy container holding only the fields it declares
-(``clm_ml.legacy.turbulence.DECLARED``): reading an undeclared field fails, and exactly the
-declared writes must change. The physics is checked against what its definitions imply
-(the wind profile recovers the forcing wind and is continuous at the canopy top, the solvers
-find their roots) and the Obukhov length's implicit-function gradient against finite
-differences.
+The physics is checked against what its definitions imply (the wind profile recovers the
+forcing wind and is continuous at the canopy top, the solvers find their roots) and the Obukhov
+length's implicit-function gradient against finite differences.
 """
-
-from collections import namedtuple
 
 import jax
 import numpy as np
@@ -19,7 +14,6 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
 from clm_ml.io.rsl_tables import default_rsl_tables  # noqa: E402
-from clm_ml.legacy import turbulence as adapter  # noqa: E402
 from clm_ml.physics import turbulence as turb  # noqa: E402
 from clm_ml.physics.constants import vkc  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
@@ -28,9 +22,6 @@ from clm_ml.state import PatchLayers  # noqa: E402
 ZTOP, ZREF = 10.0, 23.0
 ZW = np.array([0.0, 2.5, 5.0, 7.5, 10.0, 14.0, 18.5, 23.0, 23.0])  # ground + layer tops
 N_SLOTS, NCAN, NTOP, NBOT = 8, 7, 4, 2  # legacy 1-based counts
-Grid = namedtuple("Grid", "p")
-Opts = namedtuple("Opts", "turb_type sparse_canopy_type HF_extension_type")
-OPTS = Opts(1, 1, 2)
 
 
 def _layers():
@@ -59,54 +50,6 @@ def _run(ground="log_profile", **forcing):
         f["uref"], f["thref"], f["thvref"], f["qref"], f["rhomol"], default_rsl_tables(),
         sparse_canopy=True, ground_conductance=ground,
     )  # fmt: skip
-
-
-def _fake_mlcanopy(rng):
-    reads, writes = adapter.DECLARED["CanopyTurbulence"]
-    fields = sorted({k.split(".")[1] for k in (*reads, *writes)})
-    n = N_SLOTS + 1
-    values = {
-        f: jnp.asarray(rng.uniform(-1.0, -0.5, (1, n) if f.endswith("_profile") else (1,)))
-        for f in fields
-    }
-    lay, f = _layers(), _forcing()
-    values.update(
-        {k + "_forcing": jnp.array([f[k]]) for k in
-         ("pref", "zref", "uref", "thref", "thvref", "qref", "rhomol")},
-        ztop_canopy=jnp.array([ZTOP]), lai_canopy=jnp.array([2.0]), sai_canopy=jnp.array([0.7]),
-        tair_profile=jnp.full((1, n), 294.0), eair_profile=jnp.full((1, n), 1619.0),
-        ncan_canopy=jnp.array([NCAN]), ntop_canopy=jnp.array([NTOP]),
-        nbot_canopy=jnp.array([NBOT]),
-        dz_profile=jnp.concatenate([jnp.zeros(1), lay.dz])[None],
-        zs_profile=jnp.concatenate([jnp.zeros(1), lay.zs])[None],
-        zw_profile=lay.zw[None],
-    )  # fmt: skip
-    return namedtuple("mlcanopy", fields)(**values)
-
-
-def test_adapter_reads_and_writes_what_it_declares():
-    before = _fake_mlcanopy(np.random.default_rng(5))
-    after = adapter.CanopyTurbulence(0, 1, [0], before, Grid(0), opts=OPTS)
-    changed = set()
-    for field in after._fields:
-        old, new = np.asarray(getattr(before, field)), np.asarray(getattr(after, field))
-        assert old.shape == new.shape, field
-        assert np.all(np.isfinite(new)), field
-        if not np.array_equal(old, new):
-            changed.add(f"mlcanopy.{field}")
-    assert changed == set(adapter.DECLARED["CanopyTurbulence"][1])
-    for f in ("wind_profile", "mflx_profile", "gac_profile", "kc_eddy_profile"):
-        # ground slot and padding kept
-        np.testing.assert_array_equal(
-            getattr(after, f)[0, NCAN + 1 :], getattr(before, f)[0, NCAN + 1 :]
-        )
-        assert getattr(after, f)[0, 0] == getattr(before, f)[0, 0]
-
-
-def test_adapter_refuses_unknown_ground_conductance():
-    with pytest.raises(ValueError):
-        adapter.CanopyTurbulence(0, 1, [0], _fake_mlcanopy(np.random.default_rng(5)), Grid(0),
-                                 opts=Opts(1, 1, 3))  # fmt: skip
 
 
 # canopy-top air colder (stable) .. warmer (unstable) than the reference air at 296 K, the

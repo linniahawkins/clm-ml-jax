@@ -6,18 +6,16 @@ import pytest
 from clm_ml.config import ModelConfig
 from clm_ml.domain import Domain, builtin_towers_path, load_towers
 from clm_ml.io.yaml_schema import ConfigError
-from clm_ml.legacy.tables import fresh_legacy_tower, tower_yaml_entry
 from clm_ml.params import Params
 
 PARAMS = Params.from_yaml("chats")
 
 
-def test_builtin_chats7_equals_legacy_tower_table():
+def test_builtin_towers_hold_chats7_only():
     import yaml
 
     shipped = yaml.safe_load(builtin_towers_path().read_text())
     assert list(shipped) == ["CHATS7"]
-    assert shipped["CHATS7"] == tower_yaml_entry(fresh_legacy_tower("CHATS7"))
 
 
 def test_chats7_domain_and_layer_count():

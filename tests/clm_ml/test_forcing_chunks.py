@@ -32,13 +32,8 @@ import datetime, json, sys
 import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
-from offline_driver import clmSoilOptionMod
-clmSoilOptionMod.clm_phys = "CLM5_0"
-clmSoilOptionMod.nlev_soil_adjust = 3
-from clm_src_main.clm_varpar import clm_varpar_init
-clm_varpar_init()
-from clm_ml.legacy.forcing import load_forcing
-from offline_driver.TowerMetMod import tower_first_record
+from clm_ml.tower_forcing import load_forcing
+from clm_ml.io.tower import tower_first_record
 
 tower = "input_files/tower-forcing/CHATS7/2007-05.nc"
 clm = "input_files/clm5_0/CHATS7/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc"
@@ -50,7 +45,8 @@ n_run = 200
 def load(first_step, n_steps):
     return load_forcing(tower, clm, adjust, first_record=first, run_n_steps=n_run,
                         first_step=first_step, n_steps=n_steps,
-                        history_index=lambda k: 1441 + k, tower_height=23.0)
+                        history_index=lambda k: 1441 + k, tower_height=23.0,
+                        layer_structure="clm5_0")
 
 def arrays(f):
     out = {}

@@ -462,7 +462,7 @@ class GridInputs:
                  n_steps, resolve=lambda p: Path(p), calendar="GREGORIAN"):  # fmt: skip
         import netCDF4 as nc
 
-        from clm_share.shr_orb_mod import shr_orb_params
+        from clm_ml.physics.orbit import shr_orb_params
 
         self.domain, self.start, self.calendar = domain, start, calendar
         self.step_seconds, self.n_steps = int(step_seconds), int(n_steps)
@@ -513,7 +513,7 @@ class GridInputs:
 
     def _cosz(self, t: dt.datetime, calendar: str) -> np.ndarray:
         """CDEPS ``shr_tInterp_getCosz`` at model time ``t`` for every gridcell."""
-        from clm_share.shr_orb_mod import shr_orb_decl
+        from clm_ml.physics.orbit import shr_orb_decl
 
         day = calday_in(t, calendar)
         declin, _ = shr_orb_decl(day, self.eccen, self.mvelpp, self.lambm0, self.obliqr)
@@ -665,20 +665,4 @@ def land_record(xw, land, gidx, nlevgrnd: int):
         h2osoi_clm45=jnp.full((n_p, nlevgrnd), spval, dtype=jnp.float64),
         h2osoi_clm50=h,
         h2osoi_factor=jnp.ones((n_p,), dtype=jnp.float64),  # no adjustment factor
-    )
-
-
-def land_record_np(lai_t, sai_t, h2osoi_g, nlevgrnd: int):
-    """:func:`land_record`'s values from already interpolated (P,) LAI/SAI and (P, levels)
-    soil water, with NumPy (the first step's record, at setup)."""
-    from clm_src_main.clm_varcon import spval
-    from offline_driver.clmDataMod import ClmHistoryRecord
-
-    elai, esai = exposed_area(lai_t, sai_t)
-    return ClmHistoryRecord(
-        elai=elai,
-        esai=esai,
-        h2osoi_clm45=np.full((len(elai), nlevgrnd), spval),
-        h2osoi_clm50=h2osoi_g,
-        h2osoi_factor=None,
     )

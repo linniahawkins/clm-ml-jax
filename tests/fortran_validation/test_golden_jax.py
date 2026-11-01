@@ -70,10 +70,8 @@ def _import_jax_modules():
         "clm_ml.physics.integrators",
         "clm_ml.physics.nitrogen_profile",
         "clm_ml.state",
-        "multilayer_canopy.MLclm_varcon",
-        "multilayer_canopy.MLclm_varctl",
-        "clm_src_main.clm_varcon",
-        "clm_share.shr_orb_mod",
+        "clm_ml.physics.constants",
+        "clm_ml.physics.orbit",
     ]:
         mods[name] = importlib.import_module(name)
     return mods
@@ -358,7 +356,7 @@ def _adapt_canopy_nitrogen_profile(inp: dict) -> dict:
 
 
 def _adapt_shr_orb_params(inp: dict) -> dict:
-    shr_orb_mod = _get("clm_share.shr_orb_mod")
+    shr_orb_mod = _get("clm_ml.physics.orbit")
     # shr_orb_params returns (eccen, obliq, mvelp, obliqr, lambm0, mvelpp)
     eccen, obliq, mvelp, obliqr, lambm0, mvelpp = shr_orb_mod.shr_orb_params(int(inp["iyear_AD"]))
     return {
@@ -380,7 +378,7 @@ def _adapt_shr_orb_decl(inp: dict) -> dict:
     delta and eccf (from decl).
     shr_orb_params returns (eccen, obliq, mvelp, obliqr, lambm0, mvelpp).
     """
-    shr_orb_mod = _get("clm_share.shr_orb_mod")
+    shr_orb_mod = _get("clm_ml.physics.orbit")
     eccen, obliq, mvelp, obliqr, lambm0, mvelpp = shr_orb_mod.shr_orb_params(int(inp["iyear_AD"]))
     delta, eccf = shr_orb_mod.shr_orb_decl(float(inp["calday"]), eccen, mvelpp, lambm0, obliqr)
     return {

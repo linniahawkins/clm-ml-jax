@@ -1,18 +1,18 @@
-"""Health checks, restart boundaries and restart files (offline_executable.main)."""
+"""Health checks, restart boundaries and restart files (clm_ml.driver)."""
 
 import datetime as dt
 
 import numpy as np
 import pytest
 
-from clm_ml.state import CanopyState, SoilState, State
-from offline_executable.main import (
+from clm_ml.driver import (
     RESTART_VERSION,
     check_health,
     read_restart,
     restart_boundary,
     write_restart,
 )
+from clm_ml.state import CanopyState, PatchLayers, SoilState, State
 
 
 def _state(tair=300.0, tleaf=(0.0, 295.0)):
@@ -31,15 +31,19 @@ def _state(tair=300.0, tleaf=(0.0, 295.0)):
     return State(canopy=canopy, soil=SoilState(temperature=np.array([285.0, 284.0])))
 
 
+#: two layers in use of three slots
+LAYERS = PatchLayers(np.array(2), np.array(2), np.array(0), np.ones(3), np.ones(3), np.ones(4))
+
+
 def test_health_check_passes_and_ignores_fill_values_and_zeros():
-    check_health(_state(), _state(), "test")
+    check_health(_state(), LAYERS, "test")
 
 
 def test_health_check_catches_nan_and_implausible_temperatures():
     with pytest.raises(RuntimeError, match="air_temperature: 1 non-finite"):
-        check_health(_state(tair=np.nan), _state(), "test")
+        check_health(_state(tair=np.nan), LAYERS, "test")
     with pytest.raises(RuntimeError, match=r"leaf_temperature: range 400.0-400.0 K"):
-        check_health(_state(tleaf=(0.0, 400.0)), _state(), "test")
+        check_health(_state(tleaf=(0.0, 400.0)), LAYERS, "test")
 
 
 def test_restart_boundaries():

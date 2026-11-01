@@ -28,16 +28,21 @@ def test_converted_50_steps(chats_run_dir):
     assert "canopy layers 46" in run.summary()
 
 
-def test_legacy_spec_matches_the_original_namelist(chats_run_dir):
+def test_run_reads_the_files_and_times_of_the_original_namelist(chats_run_dir):
     import f90nml
 
-    spec = load_run(chats_run_dir / "run.yaml").legacy_spec(None)["namelist"]
+    from clm_ml.setup.towers import gridcell_sources
+
+    run = load_run(chats_run_dir / "run.yaml")
     original = f90nml.read(str(CHATS_NAMELISTS / "nl.CHATS7.50steps"))["clmml_inparm"]
-    for key in ("tower_name", "start_ymd", "start_tod", "stop_n", "clm_start_ymd",
-                "clm_start_tod", "clm_phys", "nlev_soil_adjust", "met_type", "dpai_min"):  # fmt: skip
-        assert spec[key] == original[key], key
-    for key in ("fin_tower", "fin_clm", "fin_soil_adjust"):
-        assert spec[key].endswith(original[key].replace("../", "")), key
+    assert int(f"{run.start:%Y%m%d}") == original["start_ymd"]
+    assert run.n_steps == original["stop_n"]
+    assert run.config.soil.layer_structure == original["clm_phys"].lower()
+    (source,) = gridcell_sources(run)
+    assert source.tower_file.paths[0].endswith(original["fin_tower"].replace("../", ""))
+    assert source.clm_history_file.endswith(original["fin_clm"].replace("../", ""))
+    assert source.soil_adjust_file.endswith(original["fin_soil_adjust"].replace("../", ""))
+    assert source.history_index(0) == 1441  # 1 May 00:30 in the April-May history file
 
 
 @pytest.mark.parametrize("name", ["nl.CHATS7.1day", "nl.CHATS7.05.2007", "nl.CHATS7.50steps"])

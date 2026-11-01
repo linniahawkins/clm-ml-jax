@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import copy
 import shutil
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -109,9 +108,9 @@ def test_patches_batched(tmp_path):
         ),
         **{name: ({name: t}, [name]) for name, t in singles.items()},
     }  # fmt: skip
-    with ThreadPoolExecutor(max_workers=2) as pool:  # each run is its own process
-        futures = {k: pool.submit(_execute, tmp_path, k, *v) for k, v in jobs.items()}
-        out = {k: f.result() for k, f in futures.items()}
+    # one after the other: runs are in this process (Phase 7.4), and netCDF is not
+    # thread-safe
+    out = {k: _execute(tmp_path, k, *v) for k, v in jobs.items()}
     shutil.rmtree(tmp_path, ignore_errors=True)
 
     batch = out["batch"]["step"]

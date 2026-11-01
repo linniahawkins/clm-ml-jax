@@ -7,9 +7,11 @@ Seven patches on three gridcells with every towers.yaml input varied (as
 ``test_vector_setup``): two forcing heights, four PFTs (C3 and C4), sand/clay given or from
 the texture class, organic matter, soil colour, bedrock depth, canopy height given or the PFT
 default, root biomass, leaf/stem profiles given or the PFT default, explicit or default layer
-counts. The legacy reference is each patch's legacy setup with its first-step initialization
-(``worker.setup_batch_legacy``), read through ``clm_ml.legacy.step.patch_constants`` and
-``clm_ml.legacy.state.state_from_instances``.
+counts. The reference (``reference/setup_7patches.npz``) holds the legacy setup's values:
+each patch's legacy setup with its first-step initialization (``worker.setup_batch_legacy``)
+read through ``patch_constants`` and ``state_from_instances``, and the legacy readers'
+forcing of 48 steps, recorded at commit 1f1b651 (Phase 7.4e) before the legacy setup was
+deleted (``probe74d/record_setup.py``).
 """
 
 from __future__ import annotations
@@ -64,38 +66,28 @@ per_patch = {{k: v[gi] for k, v in first.items()}}
 new = build_patches(run.domain, run.params, run.config, per_patch, acclimation_steps=1.0)
 chunks = [s.chunk(0, 48) for s in sources]
 
-from clm_ml.legacy import worker
-from clm_ml.legacy.state import state_from_instances
-from clm_ml.legacy.step import patch_constants
-spec = run.legacy_spec(None)
-legacy = worker.setup_batch_legacy(spec)
-order = np.asarray(legacy.real_index)
-old_c = [patch_constants(legacy.inits[i][0]) for i in order]
-old_s = [state_from_instances(legacy.inits[i][0]) for i in order]
-bad = 0
+ref = np.load(ROOT / "tests/regression/reference/setup_7patches.npz")
+bad = n_cmp = 0
 def compare(name, a, b):
-    global bad
+    global bad, n_cmp
+    n_cmp += 1
     a, b = np.asarray(a), np.asarray(b)
     if a.shape != b.shape or not np.array_equal(a, b, equal_nan=True):
         bad += 1
         print("DIFF", name, a.shape, b.shape, a.dtype, b.dtype)
-for p in range(len(order)):
-    for (path, a), b in zip(jax.tree_util.tree_leaves_with_path(old_c[p]), jax.tree.leaves(jax.tree.map(lambda x: x[p], new.constants))):
-        compare(f"patch {{p}} constants{{jax.tree_util.keystr(path)}}", a, b)
-    for (path, a), b in zip(jax.tree_util.tree_leaves_with_path(old_s[p]), jax.tree.leaves(jax.tree.map(lambda x: x[p], new.state))):
-        compare(f"patch {{p}} state{{jax.tree_util.keystr(path)}}", a, b)
-c3_old = [legacy.grids[i].c3 for i in order]
-print("c3 equal:", c3_old == new.c3.tolist())
-# the forcing: the ported readers against the legacy run of each gridcell's first patch
-firsts = [int(np.flatnonzero(gi == g)[0]) for g in range(run.domain.n_gridcells)]
+for name, tree in (("constants", new.constants), ("state", new.state)):
+    for path, b in jax.tree_util.tree_leaves_with_path(tree):
+        key = name + jax.tree_util.keystr(path)
+        compare(key, ref[key], b)
+print("c3 equal:", ref["c3"].tolist() == new.c3.tolist())
 xbad = 0
-for g, p in enumerate(firsts):
-    old = legacy.runs[order[p]].load_chunk(0, 48).forcing
+for g, chunk in enumerate(chunks):
     for part in ("tower", "clm_history"):
-        for k, v in vars(getattr(old, part)).items():
-            w = getattr(getattr(chunks[g], part), k)
-            if (v is None) != (w is None) or (v is not None and not np.array_equal(v, w)):
-                xbad += 1; print("FORCING DIFF", g, part, k)
+        for k, v in vars(getattr(chunk, part)).items():
+            key = f"forcing{{g}}.{{part}}.{{k}}"
+            if (v is None) != (key not in ref.files) or (v is not None and not np.array_equal(ref[key], v)):
+                xbad += 1; print("FORCING DIFF", key)
+print("compared", n_cmp)
 print("setup fields differing:", bad, "; forcing fields differing:", xbad)
 """
 
@@ -108,3 +100,4 @@ def test_setup_equals_legacy_setup():
     out = run.stdout
     assert "setup fields differing: 0 ; forcing fields differing: 0" in out, out[-3000:]
     assert "c3 equal: True" in out, out[-3000:]
+    assert "compared 38" in out, out[-3000:]  # 28 constant and 10 state arrays (P, ...)

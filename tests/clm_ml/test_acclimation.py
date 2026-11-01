@@ -6,8 +6,8 @@ import types
 import jax.numpy as jnp
 import numpy as np
 
+from clm_ml.driver import advance_acclimation
 from clm_ml.state import CanopyState, SoilState, State
-from offline_executable.main import advance_acclimation
 
 
 def _state(mean, steps):
@@ -21,7 +21,7 @@ def _run(days, mode="running_mean"):
     return types.SimpleNamespace(
         acclimation=mode,
         acclimation_days=days,
-        time_of=lambda k: types.SimpleNamespace(dtime=86400),  # one step per day
+        step_seconds=86400,  # one step per day
     )
 
 

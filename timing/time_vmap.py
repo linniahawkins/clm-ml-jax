@@ -1,15 +1,15 @@
 """
 Timing test of ``vmap`` over patches (plan Phase 6, step 1b): the compiled CHATS7 chunk run on
-N identical copies of the patch, stacked along a new leading axis, without changing the physics.
+the patch and N - 1 identical copies (``execution.patch_count`` padding), batched over the
+patch axis as a domain runs (``clm_ml.model.Model``; Phase 7.4).
 
 Measures, for one N per process (so peak device memory is per N):
 
 - forward: one compiled chunk of ``--steps`` steps over N patches, run twice (the second run is
   the steady cost); patch-steps per second;
-- gradient (``--grad``): d(sum over patches of mean latent heat)/d(parameters), with the
-  parameters shared by all patches (as PFT parameters are), so the gradient adds up over them;
+- gradient (``--grad``): d(mean latent heat of the CHATS7 patch)/d(parameters);
 - peak device memory (``memory_stats``; GPU only) and peak resident set size;
-- check: every patch equals the unbatched run (largest relative difference).
+- check: the CHATS7 patch equals its one-patch run (largest relative difference).
 
 Appends one JSON line to ``timing/results_vmap.jsonl``.
 
@@ -43,11 +43,8 @@ def main() -> None:
     args = parser.parse_args()
 
     import jax
-    import jax.numpy as jnp
     import numpy as np
 
-    import offline_executable.main as M
-    from clm_ml import output_streams as S
     from clm_ml.legacy.namelist import convert_namelist
     from clm_ml.model import Model
     from clm_ml.output_streams import StreamSpec
@@ -55,71 +52,27 @@ def main() -> None:
 
     tmp = Path(tempfile.mkdtemp())
     convert_namelist(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day", tmp)
-    model = Model.from_run(load_run(tmp / "run.yaml", []))
-    # The one-patch program and inputs of the model's (only) patch, vmapped below over N
-    # identical copies (Model itself batches the patches of a domain)
-    from clm_ml.legacy.state import state_from_instances
-
-    legacy, filt = model._legacy, model._filt
-    insts = jax.tree.map(lambda x: x[0], model._template)
-    state, params = state_from_instances(insts), legacy.canopy_params
     first, n, npatch = 1, args.steps, args.patches
-    forcing = M.patch_inputs(legacy, legacy.load_chunk(first, n))
-
-    # The chunk's pieces, as Model.run_chunk builds them
+    # the CHATS7 patch and N - 1 padded copies of it (execution.patch_count; weight 0 for the
+    # copies, which compute everything all the same): one batched program, as a domain runs
+    extra = [f"execution.patch_count={npatch}"] if npatch > 1 else []
+    if args.devices > 1:
+        extra.append(f"execution.devices={args.devices}")
+    model = Model.from_run(load_run(tmp / "run.yaml", extra))
+    single = Model.from_run(load_run(tmp / "run.yaml"))
+    state, params, forcing = model.initial_state(), model.default_params(), model.forcing(first, n)
     stream = StreamSpec("s", "step", "mean", ("latent_heat_flux",))
-    max_layers = model.run.config.canopy_layers.max_layers
-    runner = M.make_stream_runner(legacy, insts, filt, (stream,), max_layers)
-    shapes = M.output_shapes(legacy, insts, stream.variables, max_layers)
-    starts = M.step_starts(legacy, first, n)
-    rc = S.chunk_records(starts, first, legacy.time_of(0).dtime, stream.frequency)
-    buffers = (S.init_buffers("mean", len(rc.keys), {v: shapes[v] for v in stream.variables}, jnp),)
-    slots = (jnp.asarray(rc.index),)
+    jax.block_until_ready((state, forcing))
 
-    def one_patch(state, forcing, template, params):
-        _, (b,), errors = runner(
-            state, forcing, slots, buffers, params, template, tables=legacy.rsl_tables
-        )
-        lh = b["sum"]["latent_heat_flux"] / b["count"].reshape(-1, 1)
-        return lh, errors
-
-    def stack(tree):
-        return jax.tree.map(lambda x: jnp.broadcast_to(x, (npatch,) + jnp.shape(x)).copy(), tree)
-
-    xs = (stack(state), stack(forcing), stack(insts))
-    if args.devices == 1:
-        batched = jax.jit(jax.vmap(one_patch, in_axes=(0, 0, 0, None)))
-
-        def forward(p):
-            return batched(*xs, p)
-
-    else:  # step 5: the patches split over devices, as make_batch_runner does
-        from jax.sharding import Mesh, NamedSharding
-        from jax.sharding import PartitionSpec as Pspec
-
-        mesh = Mesh(np.array(jax.devices()[: args.devices]), ("patch",))
-        lead = Pspec("patch")
-        sharded = jax.jit(
-            jax.shard_map(
-                jax.vmap(one_patch),
-                mesh=mesh,
-                in_specs=(lead, lead, lead, lead),
-                out_specs=(lead, lead),
-                check_vma=False,
-            )
-        )
-        xs = jax.device_put(xs, NamedSharding(mesh, lead))
-
-        def forward(p):  # the parameters per patch (their gradients sum outside the shard_map)
-            return sharded(*xs, stack(p))
-
-    jax.block_until_ready(xs)
+    def forward(p):
+        _, out = model.run_chunk(state, forcing, first, p, streams=[stream])
+        return out["s"]["latent_heat_flux"]  # (step, real patches): patch 0
 
     def loss(p):
-        return forward(p)[0].mean(axis=0).sum()  # sum over patches of the chunk-mean flux
+        return forward(p).mean()
 
     result = {"label": args.label, "patches": npatch, "steps": n, "devices": args.devices}
-    fns = [("forward", forward)] + ([("gradient", jax.jit(jax.grad(loss)))] if args.grad else [])
+    fns = [("forward", forward)] + ([("gradient", jax.grad(loss))] if args.grad else [])
     for name, fn in fns:
         times = []
         for _ in range(2):
@@ -131,12 +84,13 @@ def main() -> None:
         result[f"{name}_steady_per_step_ms"] = round(1000 * times[1] / n, 2)
         result[f"{name}_patch_steps_per_s"] = round(npatch * n / times[1], 1)
         if name == "forward":
-            lh, errors = out
-            ref, _ = jax.jit(one_patch)(state, forcing, insts, params)
-            ref = np.asarray(ref)
-            diff = np.abs(np.asarray(lh) - ref[None]) / np.maximum(np.abs(ref[None]), 1e-30)
+            _, ref = single.run_chunk(single.initial_state(), single.forcing(first, n), first,
+                                      streams=[stream])  # fmt: skip
+            ref = np.asarray(ref["s"]["latent_heat_flux"])
+            lh = np.asarray(out)
+            diff = np.abs(lh - ref) / np.maximum(np.abs(ref), 1e-30)
             result["max_rel_diff_vs_single"] = float(diff.max())
-            result["finite"] = bool(np.isfinite(np.asarray(lh)).all())
+            result["finite"] = bool(np.isfinite(lh).all())
         else:
             leaves = jax.tree.leaves(out)
             result["gradient_finite"] = bool(all(np.isfinite(np.asarray(x)).all() for x in leaves))

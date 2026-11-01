@@ -24,11 +24,44 @@ from __future__ import annotations
 import dataclasses
 from importlib import resources
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Mapping, NamedTuple, Optional
 
 import numpy as np
 
 from clm_ml.io.yaml_schema import ConfigError, read_yaml
+
+
+class CanopyParams(NamedTuple):
+    """Parameters of one patch's PFT (JAX scalars; spectral fields are ``[unused, vis, nir]``,
+    indexed by the 1-based waveband as in the tables)."""
+
+    # Photosynthesis and stomatal conductance
+    vcmax25: object
+    iota: object
+    gs_min: object
+    g0_ball_berry: object
+    g1_ball_berry: object
+    g0_medlyn: object
+    g1_medlyn: object
+    psi50_gs: object
+    shape_gs: object
+    # Plant hydraulics and roots
+    plant_conductance: object
+    plant_capacitance: object
+    root_radius: object
+    root_density: object
+    root_resistivity: object
+    # Leaf structure and radiation
+    leaf_dimension: object
+    leaf_angle_index: object
+    sla_top: object
+    leaf_emissivity: object
+    clumping_index: object
+    leaf_reflectance: object
+    leaf_transmittance: object
+    stem_reflectance: object
+    stem_transmittance: object
+
 
 #: CLM PFT names, in CLM index order (index 0 = not_vegetated). Only PFTs 1-16 have
 #: multilayer canopy parameters; CLM's crop PFTs (17-78) are not supported.
@@ -176,11 +209,9 @@ class Params:
 
     def canopy_params(self, pft: str):
         """The parameters of one PFT as the physics takes them
-        (``multilayer_canopy.MLCanopyParamsMod.CanopyParams``, JAX scalars). Spectral
+        (:class:`CanopyParams`, JAX scalars). Spectral
         ``[vis, nir]`` pairs become ``[0, vis, nir]`` (the physics indexes wavebands 1, 2)."""
         import jax.numpy as jnp
-
-        from multilayer_canopy.MLCanopyParamsMod import CanopyParams
 
         row = pft_index(pft, "canopy_params()")
         fields = {}

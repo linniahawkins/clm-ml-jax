@@ -302,11 +302,10 @@ class TowerReader:
 
 def step_options(run):
     """The time step's static choices (``clm_ml.step.StepOptions``) of a run."""
-    from clm_ml.legacy.canopy import substep_options
+    from clm_ml.options import MLOptions, substep_options
+    from clm_ml.physics.orbit import shr_orb_params
     from clm_ml.setup.soil import CLM_PHYS, SOIL_LEVELS
     from clm_ml.step import StepOptions
-    from clm_share.shr_orb_mod import shr_orb_params
-    from multilayer_canopy.MLclm_varctl import MLOptions
 
     f = run.run_file.forcing
     interpolation = (f.gridded if run.is_grid else f.meteorology).interpolation

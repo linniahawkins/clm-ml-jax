@@ -1,15 +1,10 @@
-"""clm_ml.physics.flux_profile, clm_ml.physics.water_vapor and the legacy adapter (Phase 7.2,
-process 8).
+"""clm_ml.physics.flux_profile and clm_ml.physics.water_vapor (Phase 7.2, process 8).
 
-The adapter runs on a fake multilayer canopy container holding only the fields it declares
-(``clm_ml.legacy.flux_profile.DECLARED``): reading an undeclared field fails, and exactly the
-declared writes must change. The physics is checked with Fortran's own checks of the
-implicit solution (``ErrorCheck01``: the leaf and soil fluxes equal those of the implicit
-solution; ``ErrorCheck02``: energy and water vapor are conserved in every layer, the canopy
-and at the ground), and padding slots must not change the solution.
+The physics is checked with Fortran's own checks of the implicit solution (``ErrorCheck01``:
+the leaf and soil fluxes equal those of the implicit solution; ``ErrorCheck02``: energy and
+water vapor are conserved in every layer, the canopy and at the ground), and padding slots
+must not change the solution.
 """
-
-from collections import namedtuple
 
 import jax
 import numpy as np
@@ -19,7 +14,6 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.legacy import flux_profile as adapter  # noqa: E402
 from clm_ml.physics import flux_profile as fp  # noqa: E402
 from clm_ml.physics import water_vapor as wv  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
@@ -28,8 +22,6 @@ from clm_ml.state import PatchLayers  # noqa: E402
 N_SLOTS, NCAN, NTOP, NBOT = 7, 6, 4, 2  # legacy 1-based counts
 DPAI = np.array([0.0, 0.6, 0.9, 0.5, 0.0, 0.0, 0.0])
 DTIME = 300.0
-Grid = namedtuple("Grid", "p")
-Opts = namedtuple("Opts", "flux_profile_type dtime_ml")
 # tolerances of Fortran's checks (W/m2 for fluxes, K and Pa for temperatures and pressure)
 TOLERANCE = dict(leaf_temperature=1e-6, soil_temperature=1e-6, soil_vapor_pressure=1e-6)
 
@@ -109,69 +101,6 @@ def test_leaf_and_soil_fluxes_close_their_energy_balance():
     s = fp.soil_fluxes(292.0, 1400.0, ground, ref)
     np.testing.assert_allclose(s.shsoi + s.lhsoi + s.gsoi, ground.rnsoi, atol=1e-9)
     np.testing.assert_allclose(s.lhsoi, s.etsoi * wv.lat_vap(ref.tref), rtol=1e-14)
-
-
-def _fake_mlcanopy(rng):
-    reads, writes = adapter.DECLARED["FluxProfileSolution"]
-    fields = sorted({k.split(".")[1] for k in (*reads, *writes)})
-    n = N_SLOTS + 1
-    canopy, ground, ref = _inputs(rng)
-    values = {}
-    for f in fields:
-        if f.endswith("_leaf"):
-            shape = (1, n, 3)
-        elif f.endswith("_profile"):
-            shape = (1, n)
-        elif f == "balance_error":
-            shape = (1, 13)
-        else:
-            shape = (1,)
-        values[f] = jnp.asarray(rng.uniform(-1.0, -0.5, shape))
-
-    def legacy(x):  # 0-based (layer, ...) -> legacy (1, layer + 1, ...), leaves at 1, 2
-        x = np.asarray(x)
-        if x.ndim == 2:
-            x = np.concatenate([np.zeros((N_SLOTS, 1)), x], axis=1)
-        return jnp.asarray(np.concatenate([np.zeros((1,) + x.shape[1:]), x])[None])
-
-    for name, value in canopy._asdict().items():
-        values[name + ("_leaf" if np.ndim(value) == 2 else "_profile")] = legacy(value)
-    for name, value in ground._asdict().items():
-        values[name + "_soil"] = jnp.asarray(value)[None]
-    for name, value in ref._asdict().items():
-        values[name + "_forcing"] = jnp.asarray(value)[None]
-    lay = _layers()
-    values.update(
-        ncan_canopy=jnp.array([NCAN]), ntop_canopy=jnp.array([NTOP]),
-        nbot_canopy=jnp.array([NBOT]), dz_profile=legacy(lay.dz), zs_profile=legacy(lay.zs),
-        zw_profile=lay.zw[None], co2ref_forcing=jnp.array([383.0]),
-        balance_error=-jnp.ones((1, 13)),
-    )  # fmt: skip
-    return namedtuple("mlcanopy", fields)(**values)
-
-
-def test_adapter_reads_and_writes_what_it_declares():
-    before = _fake_mlcanopy(np.random.default_rng(3))
-    after = adapter.FluxProfileSolution(1, (0,), before, Grid(0), opts=Opts(1, DTIME))
-    changed = set()
-    for field in after._fields:
-        old, new = np.asarray(getattr(before, field)), np.asarray(getattr(after, field))
-        assert old.shape == new.shape, field
-        assert np.all(np.isfinite(new)), field
-        if not np.array_equal(old, new):
-            changed.add(f"mlcanopy.{field}")
-    assert changed == set(adapter.DECLARED["FluxProfileSolution"][1])
-    # the padding slot kept; balance checks recorded and passed
-    for f in ("tair_profile", "shair_profile", "tleaf_leaf"):
-        np.testing.assert_array_equal(getattr(after, f)[0, NCAN + 1 :],
-                                      getattr(before, f)[0, NCAN + 1 :])  # fmt: skip
-    assert float(np.max(after.balance_error[0])) < 1e-9
-    # same values as the physics (the adapter is compiled: round-off)
-    canopy, ground, ref = _inputs(np.random.default_rng(3))
-    f = fp.implicit(canopy, ground, ref, _layers(), DTIME)
-    np.testing.assert_allclose(after.tair_profile[0, 1 : NCAN + 1], f.tair[:NCAN], rtol=1e-12)
-    np.testing.assert_allclose(after.trleaf_leaf[0, 1 : NCAN + 1, 1:], f.leaf.trleaf[:NCAN],
-                               rtol=1e-12, atol=1e-300)  # fmt: skip
 
 
 def test_well_mixed_is_refused():

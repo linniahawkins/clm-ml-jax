@@ -1,13 +1,6 @@
-"""clm_ml.physics.nitrogen_profile, clm_ml.physics.integrators and their legacy adapters
-(Phase 7.2, process 9).
-
-Each adapter runs on fake containers holding only the fields it declares (``DECLARED`` in
-``clm_ml.legacy.nitrogen_profile`` and ``clm_ml.legacy.integrators``): reading an undeclared
-field fails, and exactly the declared writes must change. The physics is checked against the
-analytical canopy integral and the definition of each Runge-Kutta method.
+"""clm_ml.physics.nitrogen_profile and clm_ml.physics.integrators (Phase 7.2, process 9),
+checked against the analytical canopy integral and the definition of each Runge-Kutta method.
 """
-
-from collections import namedtuple
 
 import jax
 import numpy as np
@@ -17,94 +10,11 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.legacy import integrators as rk_adapter  # noqa: E402
-from clm_ml.legacy import nitrogen_profile as nitrogen_adapter  # noqa: E402
 from clm_ml.physics import integrators, nitrogen_profile  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
 
 N_SLOTS = 6  # layer slots; legacy arrays have N_SLOTS + 1 entries (index 0 unused)
 N_CAN = 4  # layers in use (legacy slots 1..4)
-LEAFY = slice(1, 4)  # legacy slots with plant area
-N_STAGES = 5  # stage axis of the legacy increments (longer than rk4's 4 stages)
-N_CHECKS = 13
-Opts = namedtuple("Opts", "acclim_type leaf_optics_type kn_val runge_kutta_type")
-OPTS = Opts(1, 0, -999.0, 41)
-Params = namedtuple("Params", "vcmax25 clumping_index")
-PARAMS = Params(125.0, 0.85)
-Grid = namedtuple("Grid", "p c3")
-
-
-def _value(field, rng):
-    n = N_SLOTS + 1
-    name = field.split(".")[1]
-    if name in ("dpai_profile",):
-        v = np.zeros(n)
-        v[LEAFY] = [0.3, 0.5, 0.4]
-        v[N_CAN + 1 :] = 1.0e36  # padding holds fill values
-        return v[None]
-    special = {
-        "ncan_canopy": np.array([N_CAN]),
-        "ntop_canopy": np.array([3]),
-        "nbot_canopy": np.array([1]),
-        "lai_canopy": np.array([0.9]),
-        "sai_canopy": np.array([0.3]),
-        "tacclim_forcing": np.array([290.0]),
-        "kb_profile": np.full((1, n), 0.6),
-        "tbi_profile": np.linspace(0.3, 1.0, n)[None],
-        "fracsun_profile": np.linspace(0.2, 0.7, n)[None],
-        "balance_error": np.zeros((1, N_CHECKS)),
-        "tg_soil": np.array([288.0]),
-        "tg_bef_soil": np.array([287.5]),
-        "dtg_soil": rng.uniform(-0.2, 0.2, (1, N_STAGES)),
-    }
-    if name in special:
-        return special[name]
-    if name.endswith("_leaf"):
-        shape = (1, n, 3, N_STAGES) if name.startswith("d") and "_bef" not in name else (1, n, 3)
-        if name in ("dtleaf_leaf", "dlwp_leaf"):
-            return rng.uniform(-0.2, 0.2, shape)
-        return rng.uniform(1.0, 2.0, (1, n, 3))
-    if name in ("dtair_profile", "deair_profile", "dh2ocan_profile"):
-        return rng.uniform(-0.2, 0.2, (1, n, N_STAGES))
-    return rng.uniform(1.0, 2.0, (1, n))
-
-
-def _fakes(declared, rng):
-    fields = {}
-    for key in (*declared[0], *declared[1]):
-        fields[key.split(".")[1]] = jnp.asarray(_value(key, rng))
-    names = sorted(fields)
-    return namedtuple("mlcanopy", names)(**{f: fields[f] for f in names})
-
-
-CASES = {
-    "CanopyNitrogenProfile": (
-        nitrogen_adapter.DECLARED["CanopyNitrogenProfile"],
-        lambda ml: nitrogen_adapter.CanopyNitrogenProfile(
-            1, [0], ml, PARAMS, Grid(0, True), opts=OPTS
-        ),
-    ),
-    "RungeKuttaUpdate": (
-        rk_adapter.DECLARED["RungeKuttaUpdate"],
-        lambda ml: rk_adapter.RungeKuttaUpdate(
-            2, rk_adapter.integrator_tableau(OPTS), ml, Grid(0, True)
-        ),
-    ),
-}
-
-
-@pytest.mark.parametrize("name", CASES)
-def test_adapter_reads_and_writes_what_it_declares(name):
-    declared, call = CASES[name]
-    before = _fakes(declared, np.random.default_rng(5))
-    after = call(before)
-    changed = set()
-    for field in after._fields:
-        old, new = np.asarray(getattr(before, field)), np.asarray(getattr(after, field))
-        assert old.shape == new.shape, field
-        if not np.array_equal(old, new):
-            changed.add("mlcanopy." + field)
-    assert changed == set(declared[1])
 
 
 def _layers(n_layers=N_CAN):

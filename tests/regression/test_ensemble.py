@@ -3,8 +3,7 @@ Parameter ensemble: jax.vmap of a compiled chunk over a batch of CanopyParams.
 
 A member with the default parameters must reproduce the single run, and every member must
 give finite results. (Plan Phase 4: a 32-member, one-day vcmax25 ensemble runs in ~11 s on
-CPU; the members differ in the daytime as expected.) The model is initialized in a fresh
-process (module-level tables).
+CPU; the members differ in the daytime as expected.)
 """
 
 from __future__ import annotations
@@ -24,30 +23,22 @@ SCRIPT = """
 import json, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
-import offline_executable.main as M
-from tests.regression.record_run import write_portable_namelist
 import jax, jax.numpy as jnp, numpy as np
-from clm_ml.legacy.state import state_from_instances
-from multilayer_canopy.MLCanopyParamsMod import patch_setup
+jax.config.update("jax_enable_x64", True)
+from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.run import load_run
+from clm_ml.model import Model
 
-tmp = Path(tempfile.mkdtemp()); (tmp / "out").mkdir()
-nml = write_portable_namelist(Path({namelist!r}), tmp / "nl", tmp / "out")
-run = M.setup_run(M.read_namelist(str(nml)))
-inputs0 = M.step_inputs(run, run.load_chunk(0, 1), 0)
-st, filt = M.advance(run, run.insts, run.filt, inputs0, initialize=True)
-template, state0 = st, state_from_instances(st)
-n = 8
-xs = M.patch_inputs(run, run.load_chunk(1, n))
-runner = M.make_chunk_runner(run, template, filt, outputs="state")
-_, params = patch_setup(0, template.mlcanopy)
+tmp = Path(tempfile.mkdtemp())
+convert_namelist(Path({namelist!r}), tmp)
+model = Model.from_run(load_run(tmp / "run.yaml"))
+first, n = 1, 8
+state, forcing, table = model.initial_state(), model.forcing(first, n), model.default_params()
 factors = jnp.array([1.0, 0.8, 0.9, 1.2])
-ens = jax.tree.map(lambda x: jnp.broadcast_to(x, (4,) + jnp.shape(x)), params)
-ens = ens._replace(vcmax25=params.vcmax25 * factors)
-tables = run.rsl_tables
-final, _ = jax.jit(
-    jax.vmap(lambda s, x, p: runner(s, x, p, tables=tables), in_axes=(None, None, 0))
-)(state0, xs, ens)
-single, _ = runner(state0, xs, tables=tables)
+ens = jax.tree.map(lambda x: jnp.broadcast_to(x, (4,) + jnp.shape(x)), table)
+ens = ens._replace(vcmax25=table.vcmax25[None] * factors[:, None])
+final = jax.vmap(lambda p: model.run_chunk(state, forcing, first, p)[0])(ens)
+single, _ = model.run_chunk(state, forcing, first)
 diff = max(
     float(np.max(np.abs(np.asarray(a)[0] - np.asarray(b))) / (np.max(np.abs(np.asarray(b))) or 1))
     for a, b in zip(jax.tree.leaves(final), jax.tree.leaves(single))

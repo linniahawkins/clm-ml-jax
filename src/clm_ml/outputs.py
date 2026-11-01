@@ -86,8 +86,7 @@ class _Raw:
         """
         if "derived.latvap_tref" in self.raw:
             return self.raw["derived.latvap_tref"]
-        from clm_src_main.clm_varcon import hsub, hvap, tfrz
-        from multilayer_canopy.MLclm_varcon import mmh2o
+        from clm_ml.physics.constants import hsub, hvap, mmh2o, tfrz
 
         t = self["tref_forcing"]
         return self.xp.where(t > tfrz, hvap, hsub) * mmh2o

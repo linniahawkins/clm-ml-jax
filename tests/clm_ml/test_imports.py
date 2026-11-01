@@ -1,8 +1,7 @@
 """Every module in src/ imports without ImportError.
 
-Many legacy modules mark their imports ``# noqa: F401``, which hides a stale name
-(e.g. a removed function) from the linter until the model is run. This test finds them in
-seconds. It runs in a fresh process because importing legacy modules changes global state.
+A module imported only inside functions can hold a stale name (e.g. a removed function)
+that the linter does not see until the model runs; this test finds it in seconds.
 """
 
 import json
@@ -11,16 +10,7 @@ import sys
 
 from .conftest import SRC_DIR
 
-PACKAGES = [
-    "clm_ml",
-    "clm_src_biogeophys",
-    "clm_src_cpl",
-    "clm_src_main",
-    "clm_src_utils",
-    "multilayer_canopy",
-    "offline_driver",
-    "offline_executable",
-]
+PACKAGES = ["clm_ml"]
 
 _SCRIPT = """
 import importlib, json, pkgutil, sys

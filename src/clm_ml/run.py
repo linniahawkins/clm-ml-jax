@@ -14,11 +14,6 @@ from __future__ import annotations
 
 import dataclasses
 import datetime as dt
-import json
-import os
-import subprocess
-import sys
-import tempfile
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -312,7 +307,8 @@ class Run:
     def execute(
         self, *, write: bool = True, quiet: bool = False, return_outputs: bool = True
     ) -> dict:
-        """Run the model and (if ``write``) write the output streams configured in run.yaml:
+        """Run the model in this process and (if ``write``) write the output streams configured
+        in run.yaml:
         one netCDF file per stream, level and ``file_per`` period, each written as soon as
         its period is complete.
 
@@ -322,13 +318,7 @@ class Run:
         from clm_ml.outputs import Outputs
 
         out = self.run_file.output
-        out_dir = self.output_directory
-        with tempfile.TemporaryDirectory() as tmp:
-            arrays = self._run_in_process(write, return_outputs)
-            if write and out.legacy_ascii:
-                out_dir.mkdir(parents=True, exist_ok=True)
-                legacy = dict(self.legacy_spec(out_dir), mode="legacy_ascii")
-                self._run_worker(legacy, Path(tmp) / "unused.npz", quiet)
+        arrays = self._run_in_process(write, return_outputs)
 
         if not return_outputs:
             return {}
@@ -379,8 +369,26 @@ class Run:
                 for st, k in zip(out.streams, keys)
             ]
         collected: list[list] = [[] for _ in streams]
+        ascii_writer = None
+        if write and out.legacy_ascii:  # one patch (validation): an internal per-step stream
+            from clm_ml.io import legacy as legacy_io
+
+            streams.append(StreamSpec("_legacy_ascii", "step", "instantaneous",
+                                      legacy_io.VARIABLES))  # fmt: skip
+            levels.append(("patch",))
+            interpolation = self.run_file.forcing.meteorology.interpolation
+            ascii_writer = legacy_io.LegacyAsciiWriter(
+                self.output_directory, self.legacy_tower_name(0), self.start.year,
+                self.start.month, met_type=3 if interpolation == "three_point" else 0,
+                step_seconds=self.step_seconds, soil_z=sim.soil_depth[0],
+            )  # fmt: skip
 
         def on_records(i, records):
+            if i == len(keys):  # the legacy ASCII stream: patch 0, legacy patch axis
+                for key, _end, values in records:
+                    fields = {k: np.asarray(v)[0:1] for k, v in values.items()}
+                    ascii_writer.write(sim.time_of(int(key)).calday, fields)
+                return
             if writers is not None:
                 writers[i].add(records)  # files are written as their periods complete
             if return_outputs:
@@ -422,6 +430,8 @@ class Run:
         if writers is not None:
             for w in writers:
                 w.close()
+        if ascii_writer is not None:
+            ascii_writer.close()
         if self.is_grid:
             import jax
 
@@ -446,30 +456,6 @@ class Run:
             names += [x.name for x in VARIABLES] + ["soil_temperature"] if v == "all" else [v]
         return tuple(dict.fromkeys(names))
 
-    def _run_worker(self, spec: dict, out_file: Path, quiet: bool) -> None:
-        spec_file = out_file.with_suffix(".json")
-        spec_file.write_text(json.dumps(spec))
-        src_dir = Path(__file__).resolve().parents[1]
-        env = dict(os.environ)
-        env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(src_dir), env.get("PYTHONPATH")]))
-        subprocess.run(
-            [sys.executable, "-m", "clm_ml.legacy.worker", str(spec_file), str(out_file)],
-            cwd=src_dir,
-            env=env,
-            check=True,
-            stdout=subprocess.DEVNULL if quiet else None,
-        )
-
-    def patch_fortran_codes(self, patch: int, interpolation: str) -> dict:
-        """model.yaml's Fortran option codes, with patch ``patch``'s explicit layer counts
-        (towers.yaml ``n_layers_within``/``n_layers_above``) in place of model.yaml's when set."""
-        codes = self.config.to_fortran_codes(interpolation)
-        within = int(self.domain.patches.n_layers_within[patch])
-        if within > 0:
-            codes["nlayer_within"] = within
-            codes["nlayer_above"] = int(self.domain.patches.n_layers_above[patch])
-        return codes
-
     @property
     def name(self) -> str:
         """The run's name in file names: its tower, or ``domain`` for several gridcells."""
@@ -485,115 +471,6 @@ class Run:
         if int(np.sum(gidx == g)) == 1:
             return name
         return f"{name}#{int(np.sum(gidx[:patch] == g))}"
-
-    def _patch_spec(self, patch: int) -> dict:
-        """The per-patch part of the legacy spec: patch ``patch`` set up as a one-patch
-        legacy tower (its gridcell's forcing files, its own tower values and layer counts)."""
-        g = int(self.domain.patches.gridcell_index[patch])
-        tower_name = self.domain.gridcells.names[g]
-        f = self.run_file.forcing
-        clm_start = _parse_datetime(f.clm_history.start, "forcing.clm_history.start")
-        adjust = f.soil_water.adjustment
-        met = f.meteorology
-        tower_files = [str(p) for p in self.files(met.files, tower_name, "forcing.meteorology")]
-
-        def land_files(key):
-            section = getattr(f, key)
-            if section.source != "file":
-                return " "
-            return [str(p) for p in self.files(section.files, tower_name, f"forcing.{key}")]
-
-        namelist = {
-            "tower_name": self.legacy_tower_name(patch),
-            "start_ymd": int(f"{self.start:%Y%m%d}"),
-            "start_tod": self.start.hour * 3600 + self.start.minute * 60 + self.start.second,
-            "stop_option": "nsteps",
-            "stop_n": self.n_steps,
-            "clm_start_ymd": int(f"{clm_start:%Y%m%d}"),
-            "clm_start_tod": clm_start.hour * 3600 + clm_start.minute * 60,
-            "fin_tower": tower_files[0],
-            "fin_tower_files": tower_files,
-            "met_shortwave": met.shortwave,
-            "met_precipitation": met.precipitation,
-            "fin_clm": str(self.path(f.clm_history.file, tower_name)),
-            "clm_phys": {"clm5_0": "CLM5_0", "clm4_5": "CLM4_5"}[self.config.soil.layer_structure],
-            "fin_soil_adjust": str(self.path(adjust.file, tower_name)) if adjust else " ",
-            "fin_vegetation": land_files("vegetation"),
-            "fin_soil_water": land_files("soil_water"),
-            "nlev_soil_adjust": adjust.levels if adjust else 0,
-            "met_type": 3 if met.interpolation == "three_point" else 0,
-            "dpai_min": self.config.canopy_layers.min_plant_area_per_layer,
-            "pftcon_val": 0,
-            "dtstep_seconds": self.step_seconds,
-            "acclimation": self.config.physics.acclimation_temperature,
-            "acclimation_days": self.config.physics.acclimation_days,
-        }
-        return {
-            "namelist": namelist,
-            "varctl": self.patch_fortran_codes(patch, met.interpolation),
-            "tower_name": namelist["tower_name"],
-            "tower": _legacy_tower_values(self.domain, patch),
-        }
-
-    def legacy_spec(self, legacy_ascii_dir: Optional[Path], patch: int = 0) -> dict:
-        """Everything the legacy worker needs, as JSON-serializable values: patch ``patch``'s
-        setup at the top level (one-patch models, ``clm_ml.model``), every patch's in
-        ``patches``, and the domain's patch-gridcell map and weights in ``batch``. Grid runs
-        (``grid``): the worker reloads the run file and builds its prototypes from the
-        gridded data (``clm_ml.legacy.grid_setup``)."""
-        tower_name = self.domain.gridcells.names[0]
-        if self.is_grid:
-            spec = {
-                "grid": {"run_file": str(self.path_), "overrides": list(self.overrides)},
-                "tower_name": "domain",
-            }
-            patches = []
-        else:
-            spec = self._patch_spec(patch)
-            patches = [
-                spec if p == patch else self._patch_spec(p) for p in range(self.domain.n_patches)
-            ]
-        return {
-            **spec,
-            "patches": patches,
-            "batch": {
-                "gridcell_index": self.domain.patches.gridcell_index.tolist(),
-                "weight": self.domain.patches.weight.tolist(),
-                "n_gridcells": self.domain.n_gridcells,
-                "patch_count": self.run_file.execution.patch_count,
-                "gridcell_count": self.run_file.execution.gridcell_count,
-                "devices": self.run_file.execution.devices,
-            },
-            "file_prefix": self.name,
-            "on_patch_error": self.config.numerics.on_patch_error,
-            "max_failed_patch_fraction": self.config.numerics.max_failed_patch_fraction,
-            "ignore_checks": list(self.config.numerics.ignore_checks),
-            "params": {k: v.tolist() for k, v in self.params.values.items()},
-            "params_source": self.params.source,
-            "legacy_ascii_dir": str(legacy_ascii_dir) if legacy_ascii_dir else None,
-            "max_layers": self.config.canopy_layers.max_layers,
-            "streams": [
-                {
-                    "name": st.name,
-                    "frequency": st.frequency,
-                    "statistic": st.statistic,
-                    "variables": list(self.stream_variables(st)),
-                    "level": list(st.level),
-                    "file_per": st.file_per,
-                }
-                for st in self.run_file.output.streams
-            ],
-            "meta": _domain_meta(self.domain),
-            "run_start": self.start.isoformat(),
-            "calendar": self.calkindflag,
-            "restart_every": parse_every(self.run_file.execution.restart_every, "restart_every"),
-            "chunk_steps": self.chunk_steps,
-            "restart_in": (
-                str(self.path(self.run_file.initial_conditions.restart_file, tower_name))
-                if self.run_file.initial_conditions.source == "restart"
-                else None
-            ),
-        }
 
     def summary(self) -> str:
         """What ``clm-ml check`` prints."""
@@ -936,35 +813,3 @@ def _resolve_time(t: TimeSection, source: str, step_seconds: int) -> tuple[dt.da
     if int(n) < 1:
         raise ConfigError(f"{source}: time: the run must be at least one step long")
     return start, int(n)
-
-
-def _legacy_tower_values(domain: Domain, patch: int = 0) -> dict:
-    """Patch ``patch``'s tower values in ``TowerDataMod`` form (-999 = default): its
-    gridcell's location and forcing, its soil column, and its own vegetation."""
-    g, p, c = domain.gridcells, domain.patches, domain.columns
-    gi, ci = int(p.gridcell_index[patch]), int(p.column_index[patch])
-
-    def v(x):
-        x = float(x)
-        return -999.0 if np.isnan(x) else x
-
-    def pair(x):
-        return [-999.0, -999.0] if np.isnan(x).any() else [float(x[0]), float(x[1])]
-
-    return {
-        "tower_lat": v(g.latitude[gi]),
-        "tower_lon": v(g.longitude[gi]),
-        "tower_ht": v(g.measurement_height[gi]),
-        "tower_time": int(g.forcing_step_minutes[gi]),
-        "tower_tex": c.texture_class[ci] or "",
-        "tower_sand": v(c.sand_percent[ci]),
-        "tower_clay": v(c.clay_percent[ci]),
-        "tower_organic": v(c.organic_matter[ci]),
-        "tower_isoicol": int(c.color_class[ci]),
-        "tower_zbed": v(c.bedrock_depth[ci]),
-        "tower_pft": int(p.pft_index[patch]),
-        "tower_canht": v(p.canopy_height[patch]),
-        "tower_root": v(p.root_biomass[patch]),
-        "tower_pbeta_lai": pair(p.leaf_area_profile_beta[patch]),
-        "tower_pbeta_sai": pair(p.stem_area_profile_beta[patch]),
-    }

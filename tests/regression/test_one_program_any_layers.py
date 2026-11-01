@@ -4,7 +4,7 @@ Phase 5b done-when test: one compiled program serves patches with different laye
 Two CHATS7 models in one process with the same ``max_layers`` (50): the default layer
 spacing (46 layers: 20 within the canopy, 26 above) and explicit counts (10 within, 10
 above: 20 layers). The second model's chunk is run through the first model's compiled chunk
-(its state, forcing and template as inputs) and must give the second model's own results; the
+(its state, forcing and constants as inputs) and must give the second model's own results; the
 first model's program must not compile again (layer counts are data, not compile-time
 constants).
 """
@@ -43,7 +43,7 @@ first, n = 12, 6
 a = Model.from_run(load_run(tmp / "run.yaml"))
 b = Model.from_run(load_run(tmp / "run.yaml", ["model.canopy_layers.n_layers_within=10",
                                               "model.canopy_layers.n_layers_above=10"]))
-layers = [int(np.asarray(m._template.mlcanopy.ncan_canopy).max()) for m in (a, b)]
+layers = [int(np.asarray(m.constants().layers.n_layers).max()) for m in (a, b)]
 
 def chunk(model):
     return model.run_chunk(model.initial_state(), model.forcing(first, n), first,
@@ -54,7 +54,7 @@ runner = next(iter(a._runners.values()))
 _, own = chunk(b)  # b through its own program
 compiled_before = runner._cache_size()
 _, via_a = b.run_chunk(b.initial_state(), b.forcing(first, n), first, streams=[stream],
-                       program=a)  # b's inputs (state, forcing, template) through a's program
+                       program=a)  # b's inputs (state, forcing, constants) through a's program
 out = {{
     "layers": layers,
     "compiled_before": compiled_before,

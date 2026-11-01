@@ -5,7 +5,7 @@ One gridcell with two patches (the CHATS7 walnut, weight 0.6, and a needleleaf e
 weight 0.4). The needleleaf patch is made to fail by starting the run (a restart at the run's
 start) with its air temperatures set to NaN, so its state is non-finite after the first
 chunk. (A NaN parameter such as ``vcmax25`` does not make it fail: the photosynthesis guards
-close the stomata.) ``run_streams`` on the batch, against the same start without NaN:
+close the stomata.) ``clm_ml.driver.run_streams``, against the same start without NaN:
 
 - ``on_patch_error="stop"`` stops the run naming the failing patch;
 - ``"exclude"`` (allowed fraction 0.5) completes: the needleleaf outputs are fill values, the
@@ -36,7 +36,7 @@ sys.path.insert(0, {src!r})
 import yaml
 import jax, jax.numpy as jnp
 import numpy as np
-from clm_ml.legacy import worker
+from clm_ml import driver as D
 from clm_ml.legacy.namelist import convert_namelist
 from clm_ml.output_streams import StreamSpec
 from clm_ml.run import load_run
@@ -52,26 +52,21 @@ d = yaml.safe_load((tmp / "run.yaml").read_text())
 d["domain"].update(towers=["MIXED"], towers_file="towers.yaml")
 (tmp / "run.yaml").write_text(yaml.safe_dump(d))
 run = load_run(tmp / "run.yaml")
-batch = worker.setup_batch(run.legacy_spec(None))
-
-import offline_executable.main as M
-from clm_ml.legacy.state import batched_state
+sim = D.simulation(run).laid_out()
 stream = StreamSpec("s", "step", "mean", ("latent_heat_flux", "gpp"))
-good = batched_state(M.batched_first_step(batch)[0])
+good = jax.tree.map(jnp.asarray, sim.state0)  # before the first step
 c = good.canopy
 bad = good._replace(canopy=c._replace(air_temperature=c.air_temperature.at[1].set(jnp.nan)))
-start = M.step_starts(batch.run, 0, 1)[0]
+start = sim.start
 
 def run_with(state, policy, fraction):
     records = []
     try:
-        M.run_streams(batch, [stream], 50, lambda i, r: records.extend(r),
+        D.run_streams(sim, [stream], lambda i, r: records.extend(r),
                       restart={{"time": start, "state": state, "collectors": []}},
                       levels=[("patch", "gridcell")], on_patch_error=policy,
                       max_failed_patch_fraction=fraction)
-    except SystemExit as exc:
-        return {{"stopped": str(exc) or "stopped"}}
-    except RuntimeError as exc:
+    except RuntimeError as exc:  # clm_ml.checks.ModelError
         return {{"stopped": str(exc)}}
     out = {{}}
     for key in ("latent_heat_flux", "gridcell:latent_heat_flux"):
@@ -103,8 +98,7 @@ def test_failing_patch_stop_or_exclude():
     normal, excl = r["normal"], r["exclude"]
     assert "stopped" not in normal and "stopped" not in excl
     assert "MIXED#1" in r["stop"]["stopped"]  # stop: the failing patch is named
-    assert r["too_many"]["stopped"]  # endrun prints its message and exits
-    assert "1 of 2 patches failed" in run.stdout
+    assert "1 of 2 patches failed" in r["too_many"]["stopped"]
 
     lh = np.asarray(excl["latent_heat_flux"], dtype=float)  # (record, patch)
     lh_normal = np.asarray(normal["latent_heat_flux"], dtype=float)

@@ -76,7 +76,7 @@ import numpy as np, jax
 jax.config.update("jax_enable_x64", True)
 from tests.regression.test_grid_setup import grid_run_files
 from clm_ml.run import load_run
-from clm_ml.legacy import grid_setup
+from tests.regression import grid_tower_files as grid_setup
 from clm_ml.setup.grid import grid_inputs
 from clm_ml.params import PFT_NAMES
 tmp = Path({tmp!r})

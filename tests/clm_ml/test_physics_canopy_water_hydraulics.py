@@ -1,132 +1,26 @@
-"""clm_ml.physics.canopy_water, plant_hydraulics, leaf_heat_capacity and their legacy adapters
-(Phase 7.2, process 5).
-
-Each adapter runs on fake containers holding only the fields it declares
-(``DECLARED`` in ``clm_ml.legacy.canopy_water`` and ``clm_ml.legacy.plant_hydraulics``):
-reading an undeclared field fails, and exactly the declared writes must change. The physics
-is checked against what it must conserve.
-"""
+"""clm_ml.physics.canopy_water and plant_hydraulics (Phase 7.2, process 5), checked against
+what they must conserve."""
 
 from collections import namedtuple
 
 import jax
 import numpy as np
-import pytest
 
 jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.legacy import canopy_water as water_adapters  # noqa: E402
-from clm_ml.legacy import plant_hydraulics as hydraulics_adapters  # noqa: E402
 from clm_ml.physics import canopy_water, plant_hydraulics  # noqa: E402
 from clm_ml.physics.constants import dewmx, maximum_leaf_wetted_fraction, mmh2o  # noqa: E402
 
 N_SLOTS = 6  # layer slots; legacy arrays have N_SLOTS + 1 entries (index 0 unused)
-LEAFY = slice(2, 4)  # legacy slots with plant area
 N_SOI = 4  # soil levels; legacy arrays have N_SOI + 1 entries
 DTIME = 300.0
-Opts = namedtuple("Opts", "dtime_ml")
 Params = namedtuple(
     "Params",
     "plant_conductance plant_capacitance root_radius root_density root_resistivity sla_top",
 )
 PARAMS = Params(4.0, 2500.0, 0.29e-3, 0.31e6, 14.0, 0.03)
-
-
-@pytest.fixture(autouse=True)
-def _module_tables(monkeypatch):
-    """The soil layer count and the patch -> column map the soil adapter reads."""
-    from clm_src_main import clm_varpar
-
-    monkeypatch.setattr(clm_varpar, "nlevsoi", N_SOI)
-    monkeypatch.setattr(hydraulics_adapters, "patch", namedtuple("patch", "column")(jnp.array([0])))
-
-
-def _value(field, rng):
-    n = N_SLOTS + 1
-    if field in ("mlcanopy.dpai_profile", "mlcanopy.dlai_profile"):
-        v = np.zeros(n)
-        v[LEAFY] = [1.2, 0.9] if field == "mlcanopy.dpai_profile" else [0.8, 0.6]
-        return v[None]
-    special = {
-        "mlcanopy.fracsun_profile": rng.uniform(0.2, 0.8, (1, n)),
-        "mlcanopy.h2ocan_profile": rng.uniform(0.0, 0.2, (1, n)),
-        "mlcanopy.h2ocan_bef_profile": rng.uniform(0.0, 0.2, (1, n)),
-        "mlcanopy.evleaf_leaf": rng.uniform(-1e-4, 1e-4, (1, n, 3)),
-        "mlcanopy.trleaf_leaf": rng.uniform(0.0, 2e-3, (1, n, 3)),
-        "mlcanopy.lwp_bef_leaf": rng.uniform(-1.5, -0.5, (1, n, 3)),
-        "mlcanopy.lwp_leaf": rng.uniform(-1.0, -0.5, (1, n, 3)),
-        "mlcanopy.zs_profile": np.arange(n, dtype=float)[None],
-        "mlcanopy.qflx_rain_forcing": np.array([2e-3]),
-        "mlcanopy.qflx_snow_forcing": np.array([5e-4]),
-        "mlcanopy.lai_canopy": np.array([1.4]),
-        "mlcanopy.sai_canopy": np.array([0.7]),
-        "mlcanopy.rsoil_soil": np.array([0.5]),
-        "mlcanopy.psis_soil": np.array([-0.3]),
-        "mlcanopy.root_biomass_canopy": np.array([500.0]),
-        "mlcanopy.soil_et_loss_soil": rng.uniform(-1.0, -0.5, (1, N_SOI + 1)),
-        "site.dz_col": np.full((1, N_SOI + 1), 0.2),
-        "site.nbedrock_col": np.array([3]),
-        "soilstate.smp_l_col": rng.uniform(-3e4, -1e3, (1, N_SOI + 1)),
-        "soilstate.hk_l_col": rng.uniform(1e-6, 1e-4, (1, N_SOI + 1)),
-        "soilstate.rootfr_patch": np.full((1, N_SOI + 1), 0.25),
-        "waterstatebulk.h2osoi_ice_col": np.zeros((1, N_SOI + 1)),
-    }
-    container = field.split(".")[1]
-    if field in special:
-        return special[field]
-    return rng.uniform(-1.0, -0.5, (1, n) if container.endswith("_profile") else (1,))
-
-
-def _fakes(name, rng):
-    """Fake containers holding the fields adapter ``name`` declares."""
-    declared = {**water_adapters.DECLARED, **hydraulics_adapters.DECLARED}[name]
-    by_container = {}
-    for key in (*declared[0], *declared[1]):
-        container, field = key.split(".")
-        by_container.setdefault(container, {})[field] = jnp.asarray(_value(key, rng))
-    return {
-        c: namedtuple(c, sorted(fs))(**{f: fs[f] for f in sorted(fs)})
-        for c, fs in by_container.items()
-    }
-
-
-def _call(name, k):
-    w, h, ml = water_adapters, hydraulics_adapters, k["mlcanopy"]
-    opts = Opts(DTIME)
-    calls = {
-        "CanopyWettedFraction": lambda: w.CanopyWettedFraction(1, [0], ml),
-        "CanopyInterception": lambda: w.CanopyInterception(1, [0], ml, opts=opts),
-        "CanopyEvaporation": lambda: w.CanopyEvaporation(1, [0], ml, opts=opts),
-        "PlantResistance": lambda: h.PlantResistance(1, [0], ml, PARAMS),
-        "SoilResistance": lambda: h.SoilResistance(
-            1, [0], k["soilstate"], k["waterstatebulk"], ml, PARAMS, site=k["site"]
-        ),
-        "LeafWaterPotential": lambda: h.LeafWaterPotential(1, [0], ml, PARAMS, opts=opts),
-        "LeafHeatCapacity": lambda: h.LeafHeatCapacity(1, [0], ml, PARAMS),
-    }
-    return {"mlcanopy": calls[name]()}
-
-
-ADAPTERS = (*water_adapters.DECLARED, *hydraulics_adapters.DECLARED)
-
-
-@pytest.mark.parametrize("name", ADAPTERS)
-def test_adapter_reads_and_writes_what_it_declares(name):
-    before = _fakes(name, np.random.default_rng(11))
-    after = _call(name, before)
-    declared = {**water_adapters.DECLARED, **hydraulics_adapters.DECLARED}[name]
-    changed = set()
-    for container, inst in after.items():
-        for field in inst._fields:
-            old = np.asarray(getattr(before[container], field))
-            new = np.asarray(getattr(inst, field))
-            assert old.shape == new.shape, field
-            assert np.all(np.isfinite(new)), field
-            if not np.array_equal(old, new):
-                changed.add(f"{container}.{field}")
-    assert changed == set(declared[1])
 
 
 def _dpai():

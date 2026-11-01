@@ -12,8 +12,9 @@ import pytest
 jax.config.update("jax_enable_x64", True)  # before any model module is imported
 
 from clm_ml.forcing_interpolation import read_land_data  # noqa: E402
-from offline_driver.TowerMetMod import (  # noqa: E402
+from clm_ml.io.tower import (  # noqa: E402
     TowerFiles,
+    TowerMetError,
     read_tower_met_series,
     tower_first_record,
 )
@@ -57,7 +58,7 @@ def test_split_files_read_as_the_single_file(tmp_path):
 
 def test_gap_between_files_is_rejected(tmp_path):
     paths = _split(TOWER_FILE, tmp_path, 48, skip=(2,))
-    with pytest.raises(SystemExit):
+    with pytest.raises(TowerMetError, match="without gaps"):
         TowerFiles.open(paths, 1800)
 
 

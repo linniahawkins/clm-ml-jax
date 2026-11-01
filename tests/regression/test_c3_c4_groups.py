@@ -15,7 +15,6 @@ from __future__ import annotations
 import copy
 import shutil
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -69,9 +68,9 @@ def test_c3_and_c4_patches_in_one_program(tmp_path):
         t = copy.deepcopy(chats)
         t["patches"] = [dict(patch, weight=1.0)]
         jobs[name] = {name: t}
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {k: pool.submit(_execute, tmp_path, k, v) for k, v in jobs.items()}
-        out = {k: f.result() for k, f in futures.items()}
+    # one after the other: runs are in this process (Phase 7.4), and netCDF is not
+    # thread-safe
+    out = {k: _execute(tmp_path, k, v) for k, v in jobs.items()}
     shutil.rmtree(tmp_path, ignore_errors=True)
 
     mixed = out["mixed"]

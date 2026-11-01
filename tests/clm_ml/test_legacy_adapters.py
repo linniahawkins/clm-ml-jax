@@ -1,6 +1,6 @@
-"""The adapters between the legacy containers and the 0-based step state (Phase 7.1,
-``clm_ml.legacy.state``) and the legacy view's field list, on small fake containers: 4 layer
-slots, 3 soil levels, random values (so a block in the wrong place shows)."""
+"""The conversions between legacy container layouts and the 0-based step state
+(``clm_ml.legacy.state``) and the legacy view's field list, on small fake containers: 4 layer
+slots, 15 soil levels (the clm4_5 layout), random values (so a block in the wrong place shows)."""
 
 import functools
 from collections import namedtuple
@@ -13,23 +13,16 @@ import pytest
 from clm_ml.legacy import state as A
 from clm_ml.state import Diagnostics
 
-N_SLOTS, N_SOIL, N_CHECKS = 4, 3, 13
+N_SLOTS, N_SOIL, N_CHECKS = 4, 15, 13  # soil: nlevgrnd of clm4_5 (5 snow levels)
 #: diagnostics with a band axis and no layer axis: legacy (patch, 1 + band)
 BAND_FIELDS = ("swskyb_forcing", "swskyd_forcing", "albcan_canopy", "swveg_canopy",
                "swvegsun_canopy", "swvegsha_canopy")  # fmt: skip
 
 
-@pytest.fixture(autouse=True)
-def _soil_levels(monkeypatch):
-    from clm_src_main import clm_varpar
-
-    monkeypatch.setattr(clm_varpar, "nlevgrnd", N_SOIL)
-
-
 def _legacy_shape(layout) -> tuple:
     """The legacy shape (with the patch axis) of a field with ``layout``."""
     if isinstance(layout, A._SoilLevels):
-        return (1, 1 + N_SOIL + 2)  # 1-based levels and unused snow/extra slots
+        return (1, 5 + N_SOIL)  # legacy t_soisno_col: 20 slots for 15 ground levels
     shapes = {
         A.SCALAR: (1,),
         A.LAYER: (1, N_SLOTS + 1),

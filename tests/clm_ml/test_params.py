@@ -1,4 +1,5 @@
-"""params.yaml loading, and exact agreement with the legacy PFT tables."""
+"""params.yaml loading (the built-in files equalled the legacy PFT tables exactly when the
+legacy tables were deleted, Phase 7.4)."""
 
 import subprocess
 import sys
@@ -7,30 +8,11 @@ import numpy as np
 import pytest
 
 from clm_ml.io.yaml_schema import ConfigError
-from clm_ml.legacy.tables import fresh_legacy_pft_params, params_to_legacy
 from clm_ml.params import PFT_NAMES, Params
 
 from .conftest import SRC_DIR
 
 WALNUT = "broadleaf_deciduous_temperate_tree"
-
-
-def test_builtin_defaults_equal_legacy_tables():
-    """clm5_defaults.yaml reproduces pftconMod/MLpftconMod with pftcon_val = 0."""
-    legacy = fresh_legacy_pft_params(0)
-    params = Params.from_yaml("clm5_defaults")
-    for pft, entries in legacy.items():
-        for name, value in entries.items():
-            np.testing.assert_array_equal(params.get(pft, name), np.asarray(value, dtype=float))
-
-
-def test_chats_preset_equals_legacy_pftcon_val_1():
-    """chats.yaml reproduces the legacy tables with pftcon_val = 1."""
-    legacy = fresh_legacy_pft_params(1)
-    params = Params.from_yaml("chats")
-    for pft, entries in legacy.items():
-        for name, value in entries.items():
-            np.testing.assert_array_equal(params.get(pft, name), np.asarray(value, dtype=float))
 
 
 def test_chats_values_match_paper_table_2():
@@ -45,31 +27,6 @@ def test_chats_values_match_paper_table_2():
     np.testing.assert_array_equal(p.get(WALNUT, "leaf_reflectance"), [0.06, 0.42])
     np.testing.assert_array_equal(p.get(WALNUT, "leaf_transmittance"), [0.04, 0.43])
     np.testing.assert_array_equal(p.get(WALNUT, "stem_reflectance"), [0.21, 0.49])
-
-
-_DUMP = """
-import sys, numpy as np
-from clm_ml.legacy.tables import dump_legacy_pft_tables
-np.savez(sys.argv[2], **dump_legacy_pft_tables(int(sys.argv[1])))
-"""
-
-
-def _fresh_full_tables(pftcon_val, path):
-    subprocess.run([sys.executable, "-c", _DUMP, str(pftcon_val), str(path)],
-                   cwd=SRC_DIR, check=True)  # fmt: skip
-    with np.load(path) as data:
-        return {k: data[k] for k in data.files}
-
-
-def test_params_to_legacy_reproduces_full_legacy_tables(tmp_path):
-    """Injecting chats.yaml into the pftcon_val=0 tables gives the pftcon_val=1 tables,
-    including the untouched rows and unused columns (what the legacy adapter relies on)."""
-    base = _fresh_full_tables(0, tmp_path / "t0.npz")
-    target = _fresh_full_tables(1, tmp_path / "t1.npz")
-    injected = params_to_legacy(Params.from_yaml("chats"), base)
-    assert injected.keys() == target.keys()
-    for key in target:
-        np.testing.assert_array_equal(injected[key], target[key], err_msg=key)
 
 
 def test_extends_and_override(tmp_path):

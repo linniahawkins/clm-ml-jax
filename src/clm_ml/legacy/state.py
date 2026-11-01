@@ -78,10 +78,8 @@ def _diagnostic_layout(name: str, ndim: int) -> tuple:
 
 def _size(legacy, layout: tuple) -> tuple:
     """The new array's shape: the rest of each axis after its start (soil: nlevgrnd)."""
-    if isinstance(layout, _SoilLevels):
-        from clm_src_main import clm_varpar
-
-        return (clm_varpar.nlevgrnd,)
+    if isinstance(layout, _SoilLevels):  # nlevsno + nlevgrnd slots: 12 + 25 or 5 + 15
+        return ({37: 25, 20: 15}[legacy.shape[1]],)
     return tuple(n - s for n, s in zip(legacy.shape[1:], layout))
 
 

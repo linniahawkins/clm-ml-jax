@@ -27,7 +27,7 @@ import types
 import jax
 import jax.numpy as jnp
 
-from clm_src_main.clm_varcon import pi  # pi = rpi
+from clm_ml.physics.constants import rpi as pi
 
 # jax.numpy versions of the math functions used here, for traced arguments
 _JNP_MATH = types.SimpleNamespace(sin=jnp.sin, cos=jnp.cos, asin=jnp.arcsin)

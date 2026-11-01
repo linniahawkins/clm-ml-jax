@@ -88,7 +88,7 @@ def run_case(
     convert_namelist(REFERENCE_NAMELIST, workdir)
     run_yaml = workdir / "run.yaml"
     data = yaml.safe_load(run_yaml.read_text())
-    from clm_ml.legacy.worker import MLCANOPY_FIELDS, TEMPERATURE_FIELDS
+    from clm_ml.io.legacy import MLCANOPY_FIELDS, TEMPERATURE_FIELDS
 
     data["output"] = {
         "directory": str(workdir / "out"),

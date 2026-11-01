@@ -29,21 +29,10 @@ dev = [
 
 [project.scripts]
 clm-ml = "clm_ml.cli:main"
-clm-ml-offline = "offline_executable.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = [
-    "clm_ml*",
-    "clm_share*",
-    "clm_src_biogeophys*",
-    "clm_src_cpl*",
-    "clm_src_main*",
-    "clm_src_utils*",
-    "multilayer_canopy*",
-    "offline_driver*",
-    "offline_executable*",
-]
+include = ["clm_ml*"]
 
 [tool.black]
 line-length = 100

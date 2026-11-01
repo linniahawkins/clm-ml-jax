@@ -1097,3 +1097,37 @@ which the run loop does not otherwise keep).
   the last bit, as before). Together with `test_setup` (new tower setup = legacy tower
   setup) this keeps the chain to the Phase 6b grid setup. The chunk-input comparison moved
   from the run test into it.
+
+### C30. 7.4f: the legacy setup, worker, containers and Fortran-mirroring packages deleted (7.4, 2026-11-01)
+- **Deleted:** `offline_executable/main.py` (`clm-ml-offline`; its namelists stay as test
+  data), `clm_ml/legacy/{worker, vector_setup, grid_setup, forcing, step, tables}` and the
+  process adapters (`atm_forcing`, `canopy`, ... `turbulence`), and the packages
+  `clm_share`, `clm_src_biogeophys`, `clm_src_cpl`, `clm_src_main`, `clm_src_utils`,
+  `multilayer_canopy`, `offline_driver`. `src/` holds `clm_ml` and data. `clm_ml.legacy`
+  keeps `namelist.py` (`clm-ml convert`), `state.py` and `view.py` (the legacy layout of the
+  outputs and the reference, until 7.6).
+- **Moved into `clm_ml`:** the constants (`physics/constants.py`, now Python floats: no
+  array is created at import, so importing needs no JAX setting), the orbital functions
+  (`physics/orbit.py`, verbatim), `CanopyParams` (`params.py`), `MLOptions` and
+  `substep_options` (`options.py`), the conservation checks (`checks.py`, 7.4d), the
+  calendar (`calendar.py`, 7.4c), the tower and CLM history readers (`io/`, 7.4c), the
+  legacy ASCII writer (`io/legacy.py`).
+- **`output.legacy_ascii`** is written by the run itself: an internal per-step stream of the
+  fields the writer reads (patch 0), written step by step as records complete
+  (`io.legacy.LegacyAsciiWriter`). The six `.out` files of a CHATS7 day equal those of
+  `clm-ml-offline` at `1f1b651` except the sign of night-time zero GPP (`-0.000`/`0.000`,
+  round-off).
+- **Tests:** deleted `test_vector_setup` (legacy vs legacy), the process replay
+  (`process_io.py`, `test_process_io.py`, `reference/process_io.pkl.gz`), the adapter tests
+  in `tests/clm_ml/test_physics_*.py` (the physics tests kept), the tests comparing the
+  built-in params/towers with the legacy tables (equal when the tables were deleted),
+  `test_params_from_yaml` (params.yaml vs legacy tables in a run). `test_setup` compares the
+  new setup with a recorded copy of the legacy setup (`reference/setup_7patches.npz`,
+  recorded at `1f1b651` by `probe74d/record_setup.py`: seven patches' constants, initial
+  states, C3/C4 flags and the legacy readers' forcing). Rewritten on the driver/Model:
+  `test_stream_runner`, `test_ensemble`, `test_patch_exclusion`, `test_restart`,
+  `test_sites_one_program`, `test_one_program_any_layers`, `tests/test_differentiability.py`
+  (one `clm_ml.step.step`, the same loss and checks), the unit tests of calendar, chunks,
+  health checks, restarts, acclimation, readers. The grid tests' tower-file writer is a test
+  helper (`tests/regression/grid_tower_files.py`).
+- `Run.execute(quiet=...)` is kept (no effect: there is no subprocess any more).

@@ -24,7 +24,7 @@ DAYS = 4
 
 @pytest.fixture(scope="module")
 def data():
-    from offline_driver.TowerMetMod import read_tower_met_series, tower_first_record
+    from clm_ml.io.tower import read_tower_met_series, tower_first_record
 
     first = tower_first_record(str(TOWER_FILE), START, HALF)
     raws = read_tower_met_series(str(TOWER_FILE), [first + k for k in range(DAYS * 48)])

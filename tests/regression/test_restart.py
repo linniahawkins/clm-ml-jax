@@ -5,10 +5,10 @@ mean) that spans the restart; and a run in 23-step chunks, whose short last chun
 gives the same results as the run in one chunk: bit for bit at every step, to round-off
 (1e-15) for a record spanning chunks.
 
-The 50-step CHATS7 run in 23-step chunks: steps 1-23, 24-46 and 47-49 (padded to 23 steps).
-A restart is written after every chunk; the end-of-run restart rotates the one after the
-second chunk to ``.prev``, which the resumed run reads. Each run is a fresh process
-(module-level tables).
+The 50-step CHATS7 run in 23-step chunks: steps 0-22, 23-45 and 46-49 (padded to 23 steps;
+chunks start at the first step since Phase 7.4). A restart is written after every chunk; the
+end-of-run restart rotates the one after the second chunk to ``.prev``, which the resumed run
+reads.
 """
 
 from __future__ import annotations
@@ -29,20 +29,21 @@ SCRIPT = """
 import pickle, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
-import offline_executable.main as M
-from tests.regression.record_run import write_portable_namelist
+from clm_ml import driver as D
+from clm_ml.legacy.namelist import convert_namelist
 from clm_ml.output_streams import StreamSpec
+from clm_ml.run import load_run
 
-M.restart_boundary = lambda start, end, every: True
-tmp = Path(tempfile.mkdtemp()); (tmp / "out").mkdir()
-nml = write_portable_namelist(Path({namelist!r}), tmp / "nl", tmp / "out")
-run = M.setup_run(M.read_namelist(str(nml)))
+D.restart_boundary = lambda start, end, every: True
+tmp = Path(tempfile.mkdtemp())
+convert_namelist(Path({namelist!r}), tmp)
+sim = D.simulation(load_run(tmp / "run.yaml")).laid_out()
 streams = [StreamSpec("step", "step", "instantaneous", ("latent_heat_flux", "air_temperature")),
            StreamSpec("daily", "daily", "mean", ("latent_heat_flux",))]
 records = [[], []]
 restart_path = Path({restart!r})
-restart = M.read_restart(Path(str(restart_path) + ".prev")) if {resume!r} else None
-M.run_streams(run, streams, 50, lambda i, r: records[i].extend(r), restart=restart,
+restart = D.read_restart(Path(str(restart_path) + ".prev")) if {resume!r} else None
+D.run_streams(sim, streams, lambda i, r: records[i].extend(r), restart=restart,
               restart_path=None if {resume!r} else restart_path, chunk_steps={chunk!r})
 with open({out!r}, "wb") as fh:
     pickle.dump(records, fh)
@@ -72,11 +73,11 @@ def test_resume_from_mid_run_restart_reproduces_the_full_run(tmp_path):
     assert (tmp_path / "restart.pkl.prev").exists()  # the restart after the second chunk
     resumed = _run(tmp_path, resume=True)
 
-    # The record of step 46 was still pending (not yet emitted) when the restart was
-    # written, so the resumed run completes it: it returns steps 46-49.
+    # The record of step 45 was still pending (not yet emitted) when the restart was
+    # written, so the resumed run completes it: it returns steps 45-49.
     step_full, step_resumed = full[0], resumed[0]
-    assert len(step_full) == 50 and [r[0] for r in step_resumed] == list(range(46, 50))
-    for (k1, e1, v1), (k2, e2, v2) in zip(step_full[46:], step_resumed):
+    assert len(step_full) == 50 and [r[0] for r in step_resumed] == list(range(45, 50))
+    for (k1, e1, v1), (k2, e2, v2) in zip(step_full[45:], step_resumed):
         assert (k1, e1) == (k2, e2)
         for name in v1:
             np.testing.assert_array_equal(v1[name], v2[name], err_msg=f"step {k1} {name}")

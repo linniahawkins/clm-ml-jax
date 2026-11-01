@@ -385,6 +385,18 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   night; thin layers test unchanged. Tests: lint; `tests/clm_ml` + fast golden 420 pass;
   bit-for-bit + noise twin 177 pass; `test_grid_setup` 3 pass (2.2 min).
 
+- **7.4f, the legacy setup, worker, containers and Fortran-mirroring packages deleted
+  (C30).** `src/` holds `clm_ml` (and data); `clm-ml-offline` retired (`output.legacy_ascii`
+  written by the run itself, `clm_ml/io/legacy.py`: the `.out` files of a CHATS7 day equal
+  the legacy driver's but for the sign of night-time zero GPP); constants (Python floats),
+  orbit, `CanopyParams`, options moved into `clm_ml`. Tests: adapter tests and legacy-vs-
+  legacy tests deleted; `test_setup` against a recorded copy of the legacy setup
+  (`reference/setup_7patches.npz`); the tests that used the legacy driver rewritten on
+  `clm_ml.driver`/`Model`; parallel runs in tests made sequential (in-process netCDF is not
+  thread-safe); `test_devices` runs each case in its own process (device count fixed at JAX
+  start); timing scripts on the new API. Tests: lint; `tests/clm_ml` + fast golden 375
+  pass; all of `tests/regression` 199 pass (19.7 min); CPU gradient tier 8 pass (6.7 min).
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,

@@ -1,6 +1,6 @@
 """Output streams accumulated inside a compiled chunk agree with the variables computed
 afterwards (numpy) from each step's StepState, and a daily-mean stream equals the mean of
-the per-step values. The model is initialized in a fresh process (module-level tables)."""
+the per-step values."""
 
 from __future__ import annotations
 
@@ -16,63 +16,59 @@ pytestmark = pytest.mark.regression
 HERE = Path(__file__).resolve().parent
 
 SCRIPT = """
-import json, sys, tempfile, datetime as dt
+import json, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
-import offline_executable.main as M
-from tests.regression.record_run import write_portable_namelist
 import jax, jax.numpy as jnp, numpy as np
-from clm_ml.legacy.state import state_from_instances
+jax.config.update("jax_enable_x64", True)
+from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.run import load_run
+from clm_ml.model import Model
+from clm_ml import driver as D, step as S
+from clm_ml import output_streams as OS
 from clm_ml.legacy.view import view_series
-from clm_ml.legacy.state import patch_layers
-from clm_ml import output_streams as S
 from clm_ml.outputs import VARIABLES, _Raw
 
-tmp = Path(tempfile.mkdtemp()); (tmp / "out").mkdir()
-nml = write_portable_namelist(Path({namelist!r}), tmp / "nl", tmp / "out")
-run = M.setup_run(M.read_namelist(str(nml)))
-st, filt = M.advance(run, run.insts, run.filt, M.step_inputs(run, run.load_chunk(0, 1), 0),
-                     initialize=True)
-template, state0 = st, state_from_instances(st)
+tmp = Path(tempfile.mkdtemp())
+convert_namelist(Path({namelist!r}), tmp)
+model = Model.from_run(load_run(tmp / "run.yaml"))
+sim = model._sim
 first, n = 1, 49
-xs = M.patch_inputs(run, run.load_chunk(first, n))
-names = tuple(v.name for v in VARIABLES) + ("soil_temperature",)
-_, steps = M.make_chunk_runner(run, template, filt)(state0, xs, tables=run.rsl_tables)
-views = view_series(steps, patch_layers(template))  # (step, patch, ...) legacy fields of each step
+state, forcing = model.initial_state(), model.forcing(first, n)
+
+# each step's StepState (patch 0), then the variables computed afterwards with numpy
+one = lambda t: jax.tree.map(lambda a: jnp.asarray(a)[0], t)
+xg, xp = forcing
+xs = S.step_inputs(jax.tree.map(lambda a: a[:, 0], xg), jax.tree.map(lambda a: a[:, 0], xp))
+constants, params = one(jax.tree.map(jnp.asarray, sim.constants)), one(sim.patch_params())
+
+def body(s, x):
+    s = D.advance_acclimation(sim, s, x.tref)
+    r = S.step(s, x, constants, params, sim.tables, options=sim.options, c3=bool(sim.c3[0]))
+    return r.state, r
+
+_, steps = jax.jit(lambda s, xs: jax.lax.scan(body, s, xs))(one(state), xs)
+views = view_series(steps, constants.layers)  # (step, 1, ...) legacy fields of each step
 r = _Raw({{k: np.asarray(v) for k, v in views.items() if k.startswith("mlcanopy.")}}, 50)
 ref = {{v.name: np.asarray(v.compute(r), float)[:, 0] for v in VARIABLES}}
 
-def starts(k0, nn):
-    out = []
-    for k in range(k0, k0 + nn):
-        t = run.time_of(k)
-        out.append(dt.datetime(t.year, t.month, t.day) + dt.timedelta(seconds=t.tod - t.dtime))
-    return out
-
-specs = (S.StreamSpec("step", "step", "instantaneous", names),
-         S.StreamSpec("daily", "daily", "mean", ("latent_heat_flux",)))
-recs = [S.chunk_records(starts(first, n), first, 1800, s.frequency) for s in specs]
-shapes = M.output_shapes(run, template, names, 50)
-buffers = tuple(S.init_buffers(s.statistic, len(rc.keys), {{v: shapes[v] for v in s.variables}},
-                               jnp) for s, rc in zip(specs, recs))
-runner = M.make_stream_runner(run, template, filt, specs, 50)
-_, bufs, _ = runner(
-    state0, xs, tuple(jnp.asarray(rc.index) for rc in recs), buffers, tables=run.rsl_tables
-)
-step_vals = S.finish("instantaneous", bufs[0])
+names = tuple(v.name for v in VARIABLES) + ("soil_temperature",)
+specs = (OS.StreamSpec("step", "step", "instantaneous", names),
+         OS.StreamSpec("daily", "daily", "mean", ("latent_heat_flux",)))
+_, out = model.run_chunk(state, forcing, first, streams=specs)
 worst, nan_mismatch = 0.0, []
 for name, a in ref.items():
-    b = np.asarray(step_vals[name])[:, 0]
+    b = np.asarray(out["step"][name])[:, 0]
     v = np.isfinite(a)
     if not np.array_equal(v, np.isfinite(b)):
         nan_mismatch.append(name)
     elif v.any():
         worst = max(worst, float(np.max(np.abs(a[v] - b[v])) / (np.max(np.abs(a[v])) or 1)))
-lh = np.asarray(step_vals["latent_heat_flux"])[:, 0]
-daily = float(np.asarray(S.finish("mean", bufs[1])["latent_heat_flux"])[0, 0])
+lh = np.asarray(out["step"]["latent_heat_flux"])[:, 0]
+daily = np.asarray(out["daily"]["latent_heat_flux"])[:, 0]
 print("RESULT" + json.dumps({{"worst": worst, "nan_mismatch": nan_mismatch,
-                             "daily": daily, "daily_numpy": float(lh[:47].mean()),
-                             "counts": np.asarray(bufs[1]["count"]).tolist()}}))
+                             "daily": float(daily[0]), "daily_numpy": float(lh[:47].mean()),
+                             "n_daily": int(daily.shape[0])}}))
 """
 
 
@@ -90,5 +86,5 @@ def test_streams_match_post_hoc_outputs():
     assert not result["nan_mismatch"], result["nan_mismatch"]
     # Different compiled programs: round-off only (noise twins differ by ~5e-11).
     assert result["worst"] < 1e-10, result["worst"]
-    assert result["counts"] == [47.0, 2.0]
+    assert result["n_daily"] == 2  # 47 steps on 1 May, 2 on 2 May
     assert abs(result["daily"] - result["daily_numpy"]) <= 1e-12 * abs(result["daily_numpy"])

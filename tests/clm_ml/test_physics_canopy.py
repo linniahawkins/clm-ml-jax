@@ -1,12 +1,9 @@
-"""clm_ml.physics.canopy and its legacy adapters (Phase 7.2, process 10).
+"""clm_ml.physics.canopy (Phase 7.2, process 10) and the sub-step options
+(``clm_ml.options.substep_options``).
 
-Each adapter runs on fake containers holding only the fields it declares (``DECLARED`` in
-``clm_ml.legacy.canopy``): reading an undeclared field fails, and exactly the declared writes
-must change. The physics is checked against hand-computed canopy totals, the conservation of
-plant area and the definition of the sub-step average and the sunlit/shaded merge.
+The physics is checked against hand-computed canopy totals, the conservation of plant area and
+the definition of the sub-step average and the sunlit/shaded merge.
 """
-
-from collections import namedtuple
 
 import jax
 import numpy as np
@@ -16,157 +13,23 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.legacy import canopy as adapter  # noqa: E402
+from clm_ml.options import DEFAULT_OPTIONS, substep_options  # noqa: E402
 from clm_ml.physics import canopy  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
 
 N_SLOTS = 6  # layer slots; legacy arrays have N_SLOTS + 1 entries (index 0 unused/ground)
 N_CAN = 4  # layers in use (legacy slots 1..4; 0-based 0..3)
-N_CHECKS = 13
-_BAND_FIELDS = {"swskyb_forcing", "swskyd_forcing", "swsoi_soil", "swveg_canopy",
-                "swvegsun_canopy", "swvegsha_canopy", "albcan_canopy"}  # fmt: skip
-_LEVEL_BAND = {"swupw_profile", "swdwn_profile", "swbeam_profile"}
-Opts = namedtuple("Opts", "flux_profile_type")
-
-
-def _value(field, rng):
-    container, name = field.split(".")
-    n = N_SLOTS + 1
-    special = {
-        "ncan_canopy": np.array([N_CAN]),
-        "ntop_canopy": np.array([3]),
-        "nbot_canopy": np.array([1]),
-        "balance_error": np.zeros((1, N_CHECKS)),
-        "dz_profile": np.ones((1, n)),
-        "zs_profile": np.arange(n, dtype=float)[None],
-        "zw_profile": np.arange(n, dtype=float)[None],
-        "dpai_profile": np.array([[0.0, 0.3, 0.5, 0.4, 0.0, 1e36, 1e36]]),
-        "fracsun_profile": np.linspace(0.2, 0.7, n)[None],
-        "fwet_profile": np.full((1, n), 0.1),
-        "lai_canopy": np.array([0.9]),
-        "sai_canopy": np.array([0.3]),
-        "elai_patch": np.array([1.1]),
-        "esai_patch": np.array([0.4]),
-        "smp_l_col": np.full((1, 4), -1.0e4),
-        "t_soisno_col": np.full((1, 4), 290.0),
-        "tref_forcing": np.array([290.0]),
-    }
-    if name in special:
-        return special[name]
-    if container != "mlcanopy":
-        return rng.uniform(1.0, 2.0, (1,))
-    if name in _BAND_FIELDS:
-        return rng.uniform(1.0, 2.0, (1, 3))
-    if name in _LEVEL_BAND:
-        return rng.uniform(1.0, 2.0, (1, n, 3))
-    if name == "swleaf_leaf":
-        return rng.uniform(1.0, 2.0, (1, n, 3, 3))
-    if name.endswith("_leaf"):
-        return rng.uniform(1.0, 2.0, (1, n, 3))
-    if name.endswith("_profile"):
-        return rng.uniform(0.1, 0.9, (1, n))
-    return rng.uniform(1.0, 2.0, (1,))
-
-
-def _fakes(declared, rng):
-    fields = {}
-    for key in (*declared[0], *declared[1]):
-        container, name = key.split(".")
-        fields.setdefault(container, {})[name] = jnp.asarray(_value(key, rng))
-    return {c: namedtuple(c, sorted(f))(**{k: f[k] for k in sorted(f)}) for c, f in fields.items()}
-
-
-def _means(seed=11):
-    """Averages over the sub-steps (random values, every slot)."""
-    return _random_fluxes(np.random.default_rng(seed))
-
-
-CASES = {
-    "PlantAreaProfiles": lambda c: adapter.PlantAreaProfiles(
-        c["mlcanopy"], c["canopystate"], 0, 0.05
-    ),
-    "SoilSurfaceHumidity": lambda c: adapter.SoilSurfaceHumidity(
-        c["mlcanopy"], c["soilstate"], c["temperature"], 0, 0
-    ),
-    "WriteSubstepMeans": lambda c: adapter.WriteSubstepMeans(c["mlcanopy"], 0, _means()),
-    "CanopyFluxesDiagnostics": lambda c: adapter.CanopyFluxesDiagnostics(
-        c["mlcanopy"], 0, _means(), opts=Opts(1)
-    ),
-    "CanopyFluxesDiagnostics0": lambda c: adapter.CanopyFluxesDiagnostics(
-        c["mlcanopy"], 0, _means(), opts=Opts(0)
-    ),
-    "MergeSunShade": lambda c: adapter.MergeSunShade(c["mlcanopy"], 0),
-}
-
-
-@pytest.mark.parametrize("name", CASES)
-def test_adapter_reads_and_writes_what_it_declares(name):
-    declared = adapter.DECLARED[name.rstrip("0")]
-    before = _fakes(declared, np.random.default_rng(5))
-    after = CASES[name](before)
-    changed = set()
-    for field in after._fields:
-        old = np.asarray(getattr(before["mlcanopy"], field))
-        new = np.asarray(getattr(after, field))
-        assert old.shape == new.shape, field
-        if not np.array_equal(old, new):
-            changed.add("mlcanopy." + field)
-    assert changed == set(declared[1])
-
-
-def _substep_container(rng):
-    """A fake container holding the fields of ``canopy.Substep`` in the legacy layout."""
-    n, stages = N_SLOTS + 1, 5
-    shapes = {
-        "scalar": (1,), "band": (1, 3), "layer": (1, n), "level": (1, n),
-        "level_band": (1, n, 3), "leaf": (1, n, 3), "leaf_band": (1, n, 3, 3),
-        "stage": (1, stages), "layer_stage": (1, n, stages), "leaf_stage": (1, n, 3, stages),
-        "checks": (1, N_CHECKS),
-    }  # fmt: skip
-    fields = {
-        f: jnp.asarray(rng.uniform(1.0, 2.0, shapes[kind]))
-        for kind, names in canopy.SUBSTEP_KINDS.items()
-        for f in names
-    }
-    return namedtuple("mlcanopy", sorted(fields))(**{f: fields[f] for f in sorted(fields)})
-
-
-def test_substep_carry_round_trip_keeps_index_0():
-    ml = _substep_container(np.random.default_rng(3))
-    c = adapter.substep_from_container(ml, 0)
-    assert np.asarray(c.tleaf_leaf).shape == (N_SLOTS, 2)
-    assert np.asarray(c.swleaf_leaf).shape == (N_SLOTS, 2, 2)
-    assert np.asarray(c.swupw_profile).shape == (N_SLOTS + 1, 2)  # levels: ground included
-    assert np.asarray(c.dtleaf_leaf).shape == (N_SLOTS, 2, 5)
-    np.testing.assert_array_equal(np.asarray(c.tair_profile), np.asarray(ml.tair_profile[0, 1:]))
-    back = adapter.container_with_substep(ml, 0, c)
-    for f in ml._fields:
-        np.testing.assert_array_equal(np.asarray(getattr(back, f)), np.asarray(getattr(ml, f)))
-    # new values go to the 0-based slots; the unused index 0 keeps its value
-    c2 = jax.tree.map(lambda x: x + 1.0, c)
-    back = adapter.container_with_substep(ml, 0, c2)
-    np.testing.assert_array_equal(
-        np.asarray(back.tleaf_leaf[0, 0]), np.asarray(ml.tleaf_leaf[0, 0])
-    )
-    np.testing.assert_array_equal(np.asarray(back.tleaf_leaf[0, 1:, 0]),
-                                  np.asarray(ml.tleaf_leaf[0, 1:, 0]))  # fmt: skip
-    np.testing.assert_array_equal(np.asarray(back.tleaf_leaf[0, 1:, 1:]),
-                                  np.asarray(ml.tleaf_leaf[0, 1:, 1:]) + 1.0)  # fmt: skip
-    np.testing.assert_array_equal(np.asarray(back.lwupw_profile[0]),
-                                  np.asarray(ml.lwupw_profile[0]) + 1.0)  # fmt: skip
 
 
 def test_substep_options_refuse_unsupported_variants():
-    from multilayer_canopy.MLclm_varctl import DEFAULT_OPTIONS
-
-    o = adapter.substep_options(DEFAULT_OPTIONS._replace(met_type=3))
+    o = substep_options(DEFAULT_OPTIONS._replace(met_type=3))
     assert o.integrator == "rk4" and o.interpolation == "three_point"
     with pytest.raises(NotImplementedError):
-        adapter.substep_options(DEFAULT_OPTIONS._replace(met_type=3, light_type=1))
+        substep_options(DEFAULT_OPTIONS._replace(met_type=3, light_type=1))
     with pytest.raises(NotImplementedError):
-        adapter.substep_options(DEFAULT_OPTIONS._replace(met_type=3, flux_profile_type=0))
+        substep_options(DEFAULT_OPTIONS._replace(met_type=3, flux_profile_type=0))
     with pytest.raises(ValueError):
-        adapter.substep_options(DEFAULT_OPTIONS._replace(met_type=2))
+        substep_options(DEFAULT_OPTIONS._replace(met_type=2))
 
 
 def test_n_stages():

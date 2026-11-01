@@ -1,9 +1,5 @@
-"""clm_ml.physics.solar_radiation and its legacy adapter (Phase 7.2, process 4).
-
-The adapter runs on a fake multilayer canopy container holding only the fields it declares
-(``clm_ml.legacy.solar_radiation.DECLARED``): reading an undeclared field fails, and exactly
-the declared writes must change. The physics is checked against what it must conserve.
-"""
+"""clm_ml.physics.solar_radiation (Phase 7.2, process 4), checked against what it must
+conserve."""
 
 from collections import namedtuple
 
@@ -15,14 +11,11 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.legacy import solar_radiation as adapter  # noqa: E402
 from clm_ml.physics import solar_radiation as solar  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
 
 N_SLOTS = 6  # layer slots; legacy arrays have N_SLOTS + 1 entries (index 0 ground/unused)
 NCAN, NTOP, NBOT = 5, 3, 2  # legacy 1-based counts: leafy layers 2..3, padding slot 6
-Grid = namedtuple("Grid", "p")
-Opts = namedtuple("Opts", "leaf_optics_type light_type")
 Params = namedtuple(
     "Params",
     "leaf_reflectance leaf_transmittance stem_reflectance stem_transmittance "
@@ -41,55 +34,6 @@ def _profiles():
     dlai[NBOT : NTOP + 1] = [0.8, 1.2]
     dsai[NBOT : NTOP + 1] = [0.4, 0.3]
     return dlai, dsai
-
-
-def _fake_mlcanopy(rng):
-    reads, writes = adapter.DECLARED["SolarRadiation"]
-    fields = sorted({k.split(".")[1] for k in (*reads, *writes)})
-    n = N_SLOTS + 1
-    shapes = {"swleaf_leaf": (1, n, 3, 3), "apar_leaf": (1, n, 3), "balance_error": (1, 13)}
-    for f in ("swbeam_profile", "swdwn_profile", "swupw_profile"):
-        shapes[f] = (1, n, 3)
-    for f in ("swskyb_forcing", "swskyd_forcing", "albsoib_soil", "albsoid_soil", "swsoi_soil",
-              "swveg_canopy", "swvegsun_canopy", "swvegsha_canopy", "albcan_canopy"):  # fmt: skip
-        shapes[f] = (1, 3)
-    values = {}
-    for f in fields:
-        shape = shapes.get(f, (1, n) if f.endswith("_profile") else (1,))
-        values[f] = jnp.asarray(rng.uniform(-1.0, -0.5, shape))
-    dlai, dsai = _profiles()
-    values.update(
-        dlai_profile=jnp.asarray(dlai[None]),
-        dsai_profile=jnp.asarray(dsai[None]),
-        dpai_profile=jnp.asarray((dlai + dsai)[None]),
-        ncan_canopy=jnp.array([NCAN]),
-        ntop_canopy=jnp.array([NTOP]),
-        nbot_canopy=jnp.array([NBOT]),
-        solar_zen_forcing=jnp.array([0.6]),
-        swskyb_forcing=jnp.array([[0.0, 300.0, 280.0]]),
-        swskyd_forcing=jnp.array([[0.0, 60.0, 40.0]]),
-        albsoib_soil=jnp.array([[0.0, 0.1, 0.2]]),
-        albsoid_soil=jnp.array([[0.0, 0.1, 0.2]]),
-        balance_error=-jnp.ones((1, 13)),  # any recorded error (>= 0) changes it
-    )
-    return namedtuple("mlcanopy", fields)(**values)
-
-
-def test_adapter_reads_and_writes_what_it_declares():
-    before = _fake_mlcanopy(np.random.default_rng(5))
-    after = adapter.SolarRadiation(None, 1, [0], before, PARAMS, Grid(0), opts=Opts(0, 2))
-    changed = set()
-    for field in after._fields:
-        old, new = np.asarray(getattr(before, field)), np.asarray(getattr(after, field))
-        assert old.shape == new.shape, field
-        assert np.all(np.isfinite(new)), field
-        if not np.array_equal(old, new):
-            changed.add(f"mlcanopy.{field}")
-    assert changed == set(adapter.DECLARED["SolarRadiation"][1])
-    # padding slot (layer 6) kept, layers in use outside the leaves 0
-    np.testing.assert_array_equal(after.kb_profile[0, NCAN + 1 :], before.kb_profile[0, NCAN + 1 :])
-    assert float(after.kb_profile[0, NCAN]) == 0.0
-    assert float(np.max(after.balance_error[0])) < 1e-6  # conserves energy
 
 
 def _physics():

@@ -1,19 +1,22 @@
 """Chunk schedules: calendar months (decision 17, ``execution.chunk: 1 month``), a chunk is
 the steps starting in one month; fixed-length chunks (decision 33, the default)."""
 
+import datetime as dt
 import types
 
 import numpy as np
 import pytest
 
-from clm_src_utils.clm_time_manager import step_time
-from offline_executable.main import chunk_schedule, max_chunk_records, month_chunks, pad_steps
+from clm_ml.driver import Simulation, chunk_schedule, max_chunk_records, month_chunks, pad_steps
 
 
 def _run(start_ymd, ntimes, dtime=1800):
-    return types.SimpleNamespace(
-        ntimes=ntimes, time_of=lambda k: step_time(start_ymd, 0, dtime, k + 1)
-    )
+    """The clock of a simulation (the only part these functions use)."""
+    start = dt.datetime(start_ymd // 10000, start_ymd // 100 % 100, start_ymd % 100)
+    sim = types.SimpleNamespace(start=start, step_seconds=dtime, n_steps=ntimes,
+                                calendar="GREGORIAN")  # fmt: skip
+    sim.step_starts = lambda first, n: Simulation.step_starts(sim, first, n)
+    return sim
 
 
 def test_split_at_month_start():
@@ -33,30 +36,30 @@ def test_step_ending_at_midnight_belongs_to_the_month_it_starts_in():
     assert month_chunks(run, 0) == [(0, 48), (48, 1)]
 
 
-# Fixed-length chunks (decision 33)
+# Fixed-length chunks (decision 33), counted from the first step (Phase 7.4)
 
 
 def test_fixed_chunks_pad_the_last_one_to_the_chunk_length():
-    run = _run(20000101, 1 + 2 * 480 + 95)
-    chunks, length = chunk_schedule(run, 1, 480)
-    assert chunks == [(1, 480), (481, 480), (961, 95)] and length == 480
+    run = _run(20000101, 2 * 480 + 95)
+    chunks, length = chunk_schedule(run, 0, 480)
+    assert chunks == [(0, 480), (480, 480), (960, 95)] and length == 480
 
 
 def test_run_shorter_than_a_chunk_is_one_unpadded_chunk():
     run = _run(20070501, 50)
-    assert chunk_schedule(run, 1, 480) == ([(1, 49)], 49)
+    assert chunk_schedule(run, 0, 480) == ([(0, 50)], 50)
 
 
 def test_resumed_run_keeps_the_chunks_and_rejects_another_chunk_length():
-    run = _run(20000101, 1 + 3 * 480)
-    assert chunk_schedule(run, 481, 480) == ([(481, 480), (961, 480)], 480)
+    run = _run(20000101, 3 * 480)
+    assert chunk_schedule(run, 480, 480) == ([(480, 480), (960, 480)], 480)
     with pytest.raises(ValueError, match="not the start"):
         chunk_schedule(run, 500, 480)
 
 
 def test_month_schedule_is_unchanged():
     run = _run(20070430, 3 * 48)
-    assert chunk_schedule(run, 1, None) == ([(1, 47), (48, 96)], None)
+    assert chunk_schedule(run, 0, None) == ([(0, 48), (48, 96)], None)
 
 
 def test_record_slots_cover_every_chunk_start():
@@ -75,12 +78,3 @@ def test_pad_steps_repeats_the_last_step():
     out = pad_steps({"a": a}, 5)["a"]
     assert isinstance(out, np.ndarray) and out.shape == (5, 2)
     np.testing.assert_array_equal(out[3:], [[4.0, 5.0], [4.0, 5.0]])
-
-
-def test_run_started_from_a_restart_keeps_its_chunks_when_resumed():
-    # A run started from a restart at its start time runs step 0 in its first chunk
-    # (anchor 0); a restart written at one of its chunk ends resumes there (review R3).
-    run = _run(20000101, 3 * 480)
-    chunks, length = chunk_schedule(run, 0, 480, anchor=0)
-    assert chunks == [(0, 480), (480, 480), (960, 480)] and length == 480
-    assert chunk_schedule(run, 480, 480, anchor=0) == ([(480, 480), (960, 480)], 480)
