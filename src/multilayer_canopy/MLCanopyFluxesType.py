@@ -398,24 +398,22 @@ class mlcanopy_type(NamedTuple):
 #: The Fortran error checks recorded in ``balance_error``: (name, tolerance). The Fortran
 #: routines stop when the error exceeds the tolerance; compiled code cannot stop, so the
 #: errors are recorded and checked on the host (plan §6.8).
-BALANCE_CHECKS = (
-    ("leaf energy balance (LeafFluxes), W m-2", 1.0e-3),
-    ("total longwave conservation (Norman), W m-2", 1.0e-3),
-    ("canopy nitrogen integration (CanopyNitrogenProfile)", 1.0e-6),
-    ("soil energy balance (SoilFluxes), W m-2", 1.0e-3),
-    ("total solar radiation conservation (TwoStream), W m-2", 1.0e-6),
-    ("solar radiation conservation (Norman), W m-2", 1.0e-3),
-    ("plant area profile sums to LAI + SAI (MLCanopyFluxes), m2 m-2", 1.0e-6),
-    ("vegetation energy balance (CanopyFluxesDiagnostics 1), W m-2", 1.0e-3),
-    ("net radiation (CanopyFluxesDiagnostics 2), W m-2", 1.0e-3),
-    ("canopy energy balance (CanopyFluxesDiagnostics 3), W m-2", 1.0e-2),
-    ("radiation at the canopy top (CanopyFluxesDiagnostics 4), W m-2", 1.0e-3),
-    ("soil temperature energy conservation (SoilTemperature), W m-2", 1.0e-6),
-    ("sunlit and shaded fractions positive (SolarRadiation; 1 = violated)", 0.0),
+from clm_ml.checks import (  # noqa: E402,F401  (one definition, Phase 7.4)
+    BALANCE_CHECKS,
+    CANOPY_ENERGY_1,
+    CANOPY_ENERGY_2,
+    CANOPY_ENERGY_3,
+    CANOPY_ENERGY_4,
+    LEAF_ENERGY,
+    LONGWAVE,
+    NITROGEN,
+    NORMAN_SOLAR,
+    PLANT_AREA,
+    SOIL_ENERGY,
+    SOIL_TEMPERATURE,
+    SOLAR,
+    SUNLIT_FRACTION,
 )
-(LEAF_ENERGY, LONGWAVE, NITROGEN, SOIL_ENERGY, SOLAR, NORMAN_SOLAR, PLANT_AREA,
- CANOPY_ENERGY_1, CANOPY_ENERGY_2, CANOPY_ENERGY_3, CANOPY_ENERGY_4, SOIL_TEMPERATURE,
- SUNLIT_FRACTION) = range(len(BALANCE_CHECKS))  # fmt: skip
 
 #: Runge-Kutta stage axis of the increment arrays: room for the largest method (4 stages,
 #: runge_kutta_type 41) plus one, whatever the run's method (the update uses its own count).

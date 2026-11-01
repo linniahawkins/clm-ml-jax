@@ -1,9 +1,8 @@
 """
 The model in this Python process: initial state, compiled chunks, gradients (plan Phase 4).
 
-``Run.execute()`` runs the model in a separate process and writes files. :class:`Model` is
-for working in a notebook or script instead: it sets the model up in *this* process and
-exposes the pieces a calibration or sensitivity study needs::
+``Run.execute()`` runs the model and writes files. :class:`Model` is for working in a
+notebook or script instead: it exposes the pieces a calibration or sensitivity study needs::
 
     from clm_ml.run import load_run
     from clm_ml.model import Model
@@ -27,12 +26,9 @@ together, the time step batched over the patch axis (Phase 6 step 3): state and 
 a leading patch axis, and gridcell outputs (``gridcell:<variable>``) are the area-weighted
 sums of the patches.
 
-Options and parameters are held by each model (Phase 5a), and the per-site data the time
-step reads (soil geometry, bedrock depth, soil colour, latitude and longitude) are in its
-containers (Phase 6 step 2), so a process can hold several models, of the same or different
-towers, e.g. to compare schemes, parameter sets or sites. The soil layer structure
-(``soil.layer_structure``) is still fixed per process (array sizes chosen when the modules
-are imported).
+Each model holds its own options, parameters, constants and state (no module globals since
+Phase 7.4), so a process can hold several models, of the same or different towers and soil
+layer structures, e.g. to compare schemes, parameter sets or sites.
 """
 
 from __future__ import annotations
@@ -42,8 +38,6 @@ import warnings
 from typing import Optional, Sequence
 
 import numpy as np
-
-_PREPARED: Optional[str] = None  # soil layer structure this process is set up for
 
 # Gradients over a compiled chunk crash (segmentation fault) in XLA's newer CPU runtime
 # (the "thunk" runtime, default in JAX 0.6.2): reproduced with a 2-step chunk; the older
@@ -78,59 +72,44 @@ if _jax_older_than(0, 7) and "xla_cpu_use_thunk_runtime" not in os.environ.get("
 
 
 class Model:
-    """A run's patches set up in this process (Phase 6 step 3: any number of gridcells and
-    patches, the step batched over the patch axis). State, template and outputs have a
-    leading patch axis; the forcing comes per gridcell and per patch (:meth:`forcing`); the
-    parameters are a table with one row per PFT of the domain (:attr:`pft_names`), gathered
-    to the patches, so their gradients are per PFT (summed over each PFT's patches)."""
+    """A run's patches set up in this process (``clm_ml.driver.Simulation``; any number of
+    gridcells and patches, the step batched over the patch axis). State, constants and
+    outputs have a leading patch axis; the forcing comes per gridcell and per patch
+    (:meth:`forcing`); the parameters are a table with one row per PFT of the domain
+    (:attr:`pft_names`), gathered to the patches, so their gradients are per PFT (summed
+    over each PFT's patches)."""
 
-    def __init__(self, run, batch, template, filt, state):
-        from clm_ml.params import PFT_NAMES
-
+    def __init__(self, run, sim, state):
         self.run = run
-        self._batch = batch
-        self._legacy = batch.run  # the first patch's run: clock, options, structure
-        self._template = template
-        self._filt = filt
+        self._sim = sim
         self._state = state
         self._runners: dict = {}
-        pfts = [PFT_NAMES[int(i)] for i in run.domain.patches.pft_index]
-        self.pft_names: tuple = tuple(dict.fromkeys(pfts))
-        rows = np.array([self.pft_names.index(n) for n in pfts])
-        self._pft_rows = rows[batch.source]  # the batch's order (padding: the patch copied)
+        self.pft_names: tuple = sim.pft_names
 
     @classmethod
     def from_run(cls, run) -> "Model":
         """Set the model up in this process for ``run`` (a :class:`clm_ml.run.Run`): every
-        patch, each with its first (initializing) step."""
-        global _PREPARED
-        spec = run.legacy_spec(None)
-        key = spec["namelist"]["clm_phys"]
-        if _PREPARED is not None and _PREPARED != key:
-            raise RuntimeError(
-                f"this process holds models with {_PREPARED} soil layers; {key} needs a new "
-                "Python process: the soil layer structure fixes array sizes when the modules "
-                "are imported (or use Run.execute(), which runs in a separate process)"
-            )
-        from clm_ml.legacy import worker
+        patch, and its first step (run as a one-step chunk)."""
+        import jax.numpy as jnp
 
-        # Each patch installs its own tables and tower values before its setup; afterwards
-        # the model uses only what it holds (options, parameters, state).
-        _PREPARED = key
-        import offline_executable.main as M
-        from clm_ml.legacy.state import batched_state
+        from clm_ml import driver
 
-        batch = worker.setup_batch(spec)
-        max_layers = run.config.canopy_layers.max_layers
-        template, _ = M.batched_first_step(batch, (), max_layers)
-        filt = batch.init_filt if batch.inits is None else batch.inits[0][1]
-        return cls(run, batch, template, filt, batched_state(template))
+        ex = run.run_file.execution
+        sim = driver.simulation(run).laid_out(
+            int(ex.devices or 1), ex.patch_count, ex.gridcell_count
+        )
+        model = cls(run, sim, sim.state0)
+        forcing = model.forcing(0, 1)
+        state, _ = model._advance(jax_tree_asarray(sim.state0), forcing, 0, None, (), None, None,
+                                  None, None)  # fmt: skip
+        model._state = jax_tree_map(jnp.asarray, state)
+        return model
 
     # -- pieces ------------------------------------------------------------------------
 
     @property
     def n_patches(self) -> int:
-        return self._batch.n_patches
+        return self._sim.n_patches
 
     def initial_state(self):
         """The :class:`clm_ml.state.State` after the first step (the start of chunk 1), with
@@ -140,31 +119,34 @@ class Model:
     def default_params(self):
         """The :class:`CanopyParams` table from the run's params.yaml: one row per PFT of
         the domain (:attr:`pft_names`), leading axis."""
-        import offline_executable.main as M
-
-        return M.stack_patches([self.run.params.canopy_params(n) for n in self.pft_names])
+        return self._sim.params_table
 
     def patch_params(self, params):
         """A PFT table (:meth:`default_params`) gathered to the patches (leading patch axis)."""
-        import jax
-        import jax.numpy as jnp
-
-        rows = jnp.asarray(self._pft_rows)
-        return jax.tree.map(lambda x: jnp.take(x, rows, axis=0), params)
+        return self._sim.patch_params(params)
 
     def weights(self):
-        """The patches' area fractions of their gridcells, in the batch's order (domain order,
+        """The patches' area fractions of their gridcells, in the model's order (domain order,
         then padding patches with 0; device blocks with ``execution.devices``)."""
         import jax.numpy as jnp
 
-        return jnp.asarray(self._batch.weight, dtype=jnp.float64)
+        return jnp.asarray(self._sim.weight, dtype=jnp.float64)
+
+    def constants(self):
+        """The patches' :class:`clm_ml.step.PatchConstants` (leading patch axis)."""
+        return self._sim.constants
 
     def chunks(self) -> list:
         """``(first_step, n_steps)`` of the run's chunks after the first step
-        (``execution.chunk``, decision 33; the last one may be shorter)."""
-        import offline_executable.main as M
+        (``execution.chunk``, decision 33; the last one may be shorter; None: calendar
+        months)."""
+        from clm_ml import driver
 
-        return M.chunk_schedule(self._legacy, 1, self.run.chunk_steps)[0]
+        sim, steps = self._sim, self.run.chunk_steps
+        if steps is None:
+            return driver.month_chunks(sim, 1)
+        length = max(1, min(steps, sim.n_steps - 1))
+        return [(k, min(length, sim.n_steps - k)) for k in range(1, sim.n_steps, length)]
 
     def forcing(self, first_step: int, n_steps: int):
         """The forcing of run steps ``first_step ... first_step + n_steps - 1``: ``(xg, xp)``,
@@ -174,75 +156,42 @@ class Model:
         import jax
         import jax.numpy as jnp
 
-        import offline_executable.main as M
-
-        return jax.tree.map(jnp.asarray, M.read_batch_inputs(self._batch, first_step, n_steps))
+        return jax.tree.map(jnp.asarray, self._sim.read(first_step, n_steps))
 
     # -- running -----------------------------------------------------------------------
 
     def _runner(self, streams, gvars):
-        import offline_executable.main as M
+        from clm_ml import driver
 
         key = tuple((s.name, s.frequency, s.statistic, s.variables) for s in streams)
         if key not in self._runners:
-            max_layers = self.run.config.canopy_layers.max_layers
-            self._runners[key] = M.make_batch_runner(
-                self._batch, self._template, self._filt, streams, max_layers, gvars
-            )
+            self._runners[key] = driver.make_runner(self._sim, streams, gvars)
         return self._runners[key]
 
-    def run_chunk(
-        self,
-        state,
-        forcing,
-        first_step: int,
-        params=None,
-        streams: Sequence = (),
-        weights=None,
-        program: Optional["Model"] = None,
-        alive=None,
-        tables=None,
-    ):
-        """Advance ``state`` over the chunk starting at run step ``first_step`` (``forcing``
-        from :meth:`forcing`) as one compiled scan, accumulating ``streams``
-        (:class:`clm_ml.output_streams.StreamSpec`) inside it. ``params``: a PFT table
-        (:meth:`default_params`); ``weights``: the patches' area fractions (default
-        :meth:`weights`). ``program``: run this model's inputs through another model's
-        compiled program (same number of patches and layer slots). ``alive``: the patches
-        still in the run (default all; decision 25): the others are left out of gridcell
-        values and of parameter gradients. ``tables``: the psihat lookup tables
-        (``clm_ml.physics.turbulence.RSLTables``; default: the package's, read at setup).
-
-        Returns ``(state, {stream: {variable: (record, patch, ...), "gridcell:<variable>":
-        (record, gridcell, ...)}})`` with the chunk's records (partial records at the chunk's
-        ends included); the gridcell values are area-weighted sums over each gridcell's
-        patches, formed at every step (variables without a layer axis). Differentiable with
-        respect to the state, the forcing, the parameters and the weights."""
-        import jax
+    def _advance(self, state, forcing, first_step, params, streams, weights, program, alive,
+                 tables, constants=None):  # fmt: skip
         import jax.numpy as jnp
 
-        import offline_executable.main as M
+        from clm_ml import driver
         from clm_ml import output_streams as S
 
+        sim = self._sim
         streams = tuple(streams)
         params = self.default_params() if params is None else params
         weights = self.weights() if weights is None else weights
         alive = jnp.ones(self.n_patches, dtype=bool) if alive is None else jnp.asarray(alive)
         xg, xp = forcing
         n = int(xg.calday.shape[0])
-        n_g = self._batch.n_gridcells
-        max_layers = self.run.config.canopy_layers.max_layers
+        n_g = sim.n_gridcells
         names = sorted({v for s in streams for v in s.variables})
-        gvars = [M.gridcell_variables(s.variables, ("gridcell",)) for s in streams]
+        gvars = [driver.gridcell_variables(s.variables, ("gridcell",)) for s in streams]
         runner = (program or self)._runner(streams, gvars)
-        first_insts = jax.tree.map(lambda x: x[0], self._template)
-        shapes = {
-            v: (self.n_patches,) + sh[1:]
-            for v, sh in M.output_shapes(self._legacy, first_insts, names, max_layers).items()
-        }
-        starts = M.step_starts(self._legacy, first_step, n)
-        step_seconds = self._legacy.time_of(0).dtime
-        records = [S.chunk_records(starts, first_step, step_seconds, s.frequency) for s in streams]
+        shapes = {v: (self.n_patches,) + sh for v, sh in driver.output_shapes(sim, names).items()}
+        starts = sim.step_starts(first_step, n)
+        records = [
+            S.chunk_records(starts, first_step, sim.step_seconds, s.frequency, sim.calendar)
+            for s in streams
+        ]
 
         def buffer_shapes(s, gv):
             out = {v: shapes[v] for v in s.variables}
@@ -255,26 +204,19 @@ class Model:
         )
         slots = tuple(jnp.asarray(rc.index) for rc in records)
         state, buffers, errors = runner(
-            state,
-            xg,
-            xp,
-            slots,
-            buffers,
-            self.patch_params(params),
-            weights,
-            alive,
-            jnp.asarray(self._batch.runner_gidx),
-            self._template,
-            tables=self._legacy.rsl_tables if tables is None else tables,
-        )
+            state, xg, xp, slots, buffers, self.patch_params(params), weights, alive,
+            jnp.asarray(sim.runner_gidx),
+            jax_tree_map(jnp.asarray, sim.constants if constants is None else constants),
+            tables=sim.tables if tables is None else tables,
+        )  # fmt: skip
         from clm_ml.physics.math import is_concrete
 
         if is_concrete(errors):  # not under jax.grad: Fortran's conservation checks
-            M.check_batch_balance(
-                errors, self._batch, f"the chunk from run step {first_step}", np.asarray(alive)
+            driver.check_batch_balance(
+                errors, sim, f"the chunk from run step {first_step}", np.asarray(alive)
             )
         out = {}
-        for s, b in zip(streams, (M.real_part(b, self._batch) for b in buffers)):
+        for s, b in zip(streams, (driver.real_part(b, sim) for b in buffers)):
             if s.statistic == "mean":
                 count = b["count"]
                 out[s.name] = {
@@ -283,3 +225,47 @@ class Model:
             else:
                 out[s.name] = dict(b["value"])
         return state, out
+
+    def run_chunk(
+        self,
+        state,
+        forcing,
+        first_step: int,
+        params=None,
+        streams: Sequence = (),
+        weights=None,
+        program: Optional["Model"] = None,
+        alive=None,
+        tables=None,
+        constants=None,
+    ):
+        """Advance ``state`` over the chunk starting at run step ``first_step`` (``forcing``
+        from :meth:`forcing`) as one compiled scan, accumulating ``streams``
+        (:class:`clm_ml.output_streams.StreamSpec`) inside it. ``params``: a PFT table
+        (:meth:`default_params`); ``weights``: the patches' area fractions (default
+        :meth:`weights`). ``program``: run this model's inputs through another model's
+        compiled program (same number of patches, layer slots and soil levels). ``alive``:
+        the patches still in the run (default all; decision 25): the others are left out of
+        gridcell values and of parameter gradients. ``tables``: the psihat lookup tables
+        (``clm_ml.physics.turbulence.RSLTables``; default: the package's). ``constants``: the
+        patches' :class:`clm_ml.step.PatchConstants` (default :meth:`constants`).
+
+        Returns ``(state, {stream: {variable: (record, patch, ...), "gridcell:<variable>":
+        (record, gridcell, ...)}})`` with the chunk's records (partial records at the chunk's
+        ends included); the gridcell values are area-weighted sums over each gridcell's
+        patches, formed at every step (variables without a layer axis). Differentiable with
+        respect to the state, the forcing, the parameters and the weights."""
+        return self._advance(state, forcing, first_step, params, streams, weights, program,
+                             alive, tables, constants)  # fmt: skip
+
+
+def jax_tree_map(f, tree):
+    import jax
+
+    return jax.tree.map(f, tree)
+
+
+def jax_tree_asarray(tree):
+    import jax.numpy as jnp
+
+    return jax_tree_map(jnp.asarray, tree)

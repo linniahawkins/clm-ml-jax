@@ -662,8 +662,8 @@ def save_start(c: Substep, layers: PatchLayers) -> Substep:
 def _radiation(c: Substep, x: SubstepInputs, params, calday, opt: SubstepOptions, c3: bool):
     """Forcing, solar radiation and the nitrogen profile of the sub-step (once per
     sub-step, before the Runge-Kutta stages)."""
+    from clm_ml.checks import NITROGEN, SOLAR, SUNLIT_FRACTION
     from clm_ml.physics import atm_forcing, nitrogen_profile, solar_radiation
-    from multilayer_canopy.MLCanopyFluxesType import NITROGEN, SOLAR, SUNLIT_FRACTION
 
     lay = x.layers
     use = lay.in_use
@@ -732,6 +732,7 @@ def _stage(c: Substep, x: SubstepInputs, params, tables, opt: SubstepOptions, c3
 
     Fortran reference: MLCanopyFluxesMod.F90::MLCanopyFluxes (lines 295-328).
     """
+    from clm_ml.checks import LEAF_ENERGY, LONGWAVE, SOIL_ENERGY
     from clm_ml.physics import (
         canopy_water,
         flux_profile,
@@ -742,7 +743,6 @@ def _stage(c: Substep, x: SubstepInputs, params, tables, opt: SubstepOptions, c3
         plant_hydraulics,
         turbulence,
     )
-    from multilayer_canopy.MLCanopyFluxesType import LEAF_ENERGY, LONGWAVE, SOIL_ENERGY
 
     lay = x.layers
     use = lay.in_use

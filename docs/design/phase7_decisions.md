@@ -1033,3 +1033,48 @@ legacy meaning "not set").
   1 reproduces the legacy initialized state; runs will use 0 (7.4d), so that the first
   step's running-mean update sets the mean to that step's air temperature, which it already
   is (exactly: `t + (t - t) / 1`), and the first step needs no special case.
+
+### C28. 7.4d: tower runs on the new setup, in this process (7.4, 2026-10-31)
+- **`clm_ml/driver.py`** replaces the run path of `offline_executable.main` for runs through
+  `clm_ml`: `Simulation` (per-patch constants, initial state, PFT rows, C3 flags, gridcell
+  map, weights, names, soil depths; clock, `StepOptions`, acclimation settings, psihat
+  tables, the PFT parameter table, the forcing reader; `padded`/`blocked`/`laid_out` as
+  `PatchBatch`), `simulation(run)` (setup with `clm_ml.setup`; tower forcing through
+  `TowerReader`: one `TowerForcingSource` per gridcell, the land data per patch from its
+  gridcell), `make_runner` (the batched chunk; `constants` is an input, so another layer
+  grid or soil reuses the program: C23 b), `run_streams`, the checks and restarts.
+  `step_options(run)` builds `StepOptions` from the run (orbital parameters of the start
+  year, soil structure, adjustment levels) without module globals.
+- **The first step is an ordinary step.** The setup gives the state before the first step
+  with `acclimation_steps = 0`, so the running-mean update leaves the acclimation
+  temperature at the first step's air temperature (exactly) and counts the step; every
+  chunk is the same compiled program, from step 0 (fixed chunks counted from step 0; a run
+  of 50 steps is one chunk of 50 instead of a first step and a chunk of 49). No separate
+  batched first-step program, no eager first step (the legacy one compiled ~500 small
+  programs).
+- **Health check by layer masks.** It compared the state with the template's state to know
+  which entries are meaningful; now the layers in use (`PatchLayers.n_layers`) and every soil
+  level and scalar are checked, and temperatures of exactly 0 (leafless layers) are skipped.
+- **Errors raise `clm_ml.checks.ModelError`** (a `RuntimeError`) instead of `SystemExit`
+  (Fortran's `endrun`), since runs are in-process.
+- **Restart format version 5** (chunks counted from step 0, no `chunk_anchor`); still a
+  pickle until 7.5.
+- **`Run.execute`** sets up and runs tower runs in this process (`_run_in_process`: the
+  output writers, restarts and records as the worker did); grid runs keep the legacy worker
+  until 7.4e, `output.legacy_ascii` until 7.4f. `output_streams.chunk_records` takes the
+  calendar (it read the legacy time manager's global).
+- **`clm_ml.model.Model`** on `Simulation`: same public API (state after the first step,
+  run as a one-step chunk at setup; PFT table; `forcing`; `run_chunk`), plus
+  `constants()` and a `constants=` argument of `run_chunk`; the legacy attributes
+  (`_template`, `_legacy`, `_batch`, `_filt`) are gone. Tower models only until 7.4e.
+- **Round-off change, reference re-recorded (D7):** the first step was the legacy container
+  step (eager), now the compiled step of the chunk; and the chunk is one step longer. Noise
+  twin passed before re-recording; 53 fields the twins move differ within 1.43x the twin
+  spread; 15 they do not by 1-2 ulps (the solar zenith angle at 7 daytime steps and the
+  solar fields after it, with identical inputs: the C21 pattern; the first step's soil
+  temperature by 1.7e-15). `probe74d/`.
+Why: 7.4 (setup without globals): the run path no longer needs the legacy setup, the
+containers or a worker process for tower runs.
+Alternatives: keeping a separate first-step program (no reason now; it cost a compile per
+run); keeping the template's health-check reference (needs the state after the first step,
+which the run loop does not otherwise keep).

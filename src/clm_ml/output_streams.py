@@ -76,8 +76,11 @@ def chunk_records(
     first_step_index: int,
     step_seconds: int,
     frequency: str,
+    calendar: str = "GREGORIAN",
 ) -> ChunkRecords:
-    from clm_src_utils import clm_time_manager as tm
+    """The records the steps starting at ``step_starts`` belong to (``calendar``: the model
+    calendar, ``clm_ml.calendar``)."""
+    from clm_ml.calendar import add_seconds
 
     keys, index, ends = [], [], []
     for k, start in enumerate(step_starts):
@@ -86,7 +89,7 @@ def chunk_records(
             keys.append(key)
             ends.append(None)
         index.append(len(keys) - 1)
-        ends[-1] = tm.add_seconds(start, step_seconds, tm.calkindflag)  # model calendar
+        ends[-1] = add_seconds(start, step_seconds, calendar)  # model calendar
     return ChunkRecords(tuple(keys), np.asarray(index, dtype=np.int32), tuple(ends))
 
 

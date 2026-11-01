@@ -324,14 +324,17 @@ class Run:
         out = self.run_file.output
         out_dir = self.output_directory
         with tempfile.TemporaryDirectory() as tmp:
-            raw_file = Path(tmp) / "streams.npz"
-            spec = self.legacy_spec(None)
-            spec["output_dir"] = str(out_dir) if write else None
-            spec["return_records"] = return_outputs
-            spec["restart_out"] = str(self.restart_path) if write else None
-            self._run_worker(spec, raw_file, quiet)
-            with np.load(raw_file) as data:
-                arrays = {key: data[key] for key in data.files}
+            if self.is_grid:  # grid runs: the legacy setup in a worker until Phase 7.4e
+                raw_file = Path(tmp) / "streams.npz"
+                spec = self.legacy_spec(None)
+                spec["output_dir"] = str(out_dir) if write else None
+                spec["return_records"] = return_outputs
+                spec["restart_out"] = str(self.restart_path) if write else None
+                self._run_worker(spec, raw_file, quiet)
+                with np.load(raw_file) as data:
+                    arrays = {key: data[key] for key in data.files}
+            else:
+                arrays = self._run_in_process(write, return_outputs)
             if write and out.legacy_ascii:
                 out_dir.mkdir(parents=True, exist_ok=True)
                 legacy = dict(self.legacy_spec(out_dir), mode="legacy_ascii")
@@ -348,6 +351,88 @@ class Run:
             records = {k[len(prefix) :]: v for k, v in arrays.items() if k.startswith(prefix)}
             results[stream.name] = Outputs.from_records(records, meta)
         return results
+
+    def _run_in_process(self, write: bool, return_outputs: bool) -> dict:
+        """Set the run up and run it in this process (``clm_ml.driver``), writing the output
+        files as their periods complete. Returns the records as arrays
+        (``"<stream>/<key>"``) and ``"static.soil_depth"``."""
+        from clm_ml import driver
+        from clm_ml.output_streams import StreamSpec
+        from clm_ml.outputs import StreamFileWriter, domain_meta, records_to_arrays
+
+        out = self.run_file.output
+        ex = self.run_file.execution
+        sim = driver.simulation(self).laid_out(
+            int(ex.devices or 1), ex.patch_count, ex.gridcell_count
+        )
+        streams = [
+            StreamSpec(st.name, st.frequency, st.statistic, self.stream_variables(st))
+            for st in out.streams
+        ]
+        levels = [tuple(st.level) for st in out.streams]
+        keys = [
+            tuple(s.variables)
+            + tuple(f"gridcell:{n}" for n in driver.gridcell_variables(s.variables, level))
+            for s, level in zip(streams, levels)
+        ]
+        meta = dict(domain_meta(self.domain), soil_depth=sim.soil_depth)
+        writers = None
+        if write:
+            writers = [
+                StreamFileWriter(st, k, meta, self.output_directory, self.name, self.start)
+                for st, k in zip(out.streams, keys)
+            ]
+        collected: list[list] = [[] for _ in streams]
+
+        def on_records(i, records):
+            if writers is not None:
+                writers[i].add(records)  # files are written as their periods complete
+            if return_outputs:
+                collected[i].extend(records)
+
+        def save_extra():
+            # the output files in progress; a restart holds what the next run needs, not the
+            # records so far (review R6)
+            return {"writers": [w.state() for w in writers] if writers is not None else None}
+
+        def restore_extra(saved):
+            if saved is not None and writers is not None and saved.get("writers") is not None:
+                for w, ws in zip(writers, saved["writers"]):
+                    w.restore(ws)
+
+        ic = self.run_file.initial_conditions
+        restart = None
+        if ic.source == "restart":
+            name = self.domain.gridcells.names[0]
+            restart = driver.read_restart(self.path(ic.restart_file, name))
+        every = parse_every(ex.restart_every, "restart_every")
+        numerics = self.config.numerics
+        driver.run_streams(
+            sim,
+            streams,
+            on_records,
+            restart=restart,
+            restart_path=self.restart_path if write else None,
+            restart_every=tuple(every) if every else None,
+            save_extra=save_extra,
+            restore_extra=restore_extra,
+            levels=levels,
+            on_patch_error=numerics.on_patch_error,
+            max_failed_patch_fraction=numerics.max_failed_patch_fraction,
+            ignore_checks=tuple(numerics.ignore_checks),
+            chunk_steps=self.chunk_steps,
+        )
+        if writers is not None:
+            for w in writers:
+                w.close()
+        arrays = {"static.soil_depth": sim.soil_depth}
+        if return_outputs:
+            for stream, stream_keys, records in zip(streams, keys, collected):
+                if not records:
+                    raise RuntimeError(f"output stream {stream.name} produced no records")
+                for key, value in records_to_arrays(records, stream_keys).items():
+                    arrays[f"{stream.name}/{key}"] = value
+        return arrays
 
     def stream_variables(self, stream) -> tuple[str, ...]:
         """A stream's variable names, with ``all`` expanded."""

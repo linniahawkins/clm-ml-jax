@@ -1890,7 +1890,9 @@ def run_streams(
         first = anchor = 1
         values = first_values
         for i, (spec, gv) in enumerate(zip(streams, gvars)):
-            rec = S.chunk_records(step_starts(run, 0, 1), 0, step_seconds, spec.frequency)
+            rec = S.chunk_records(
+                step_starts(run, 0, 1), 0, step_seconds, spec.frequency, tm.calkindflag
+            )
             buffers = S.init_buffers(spec.statistic, 1, buffer_shapes(spec, gv), jnp)
             vals = {n: jnp.asarray(values[n]) for n in spec.variables}
             vals.update({k: jnp.asarray(v) for k, v in gridcell_sums(values, gv).items()})
@@ -1943,7 +1945,10 @@ def run_streams(
         if c + 1 < len(schedule):
             pending = reader.submit(read_chunk_inputs, batch, *schedule[c + 1], length)
         starts = step_starts(run, first_step, n)
-        records = [S.chunk_records(starts, first_step, step_seconds, s.frequency) for s in streams]
+        records = [
+            S.chunk_records(starts, first_step, step_seconds, s.frequency, tm.calkindflag)
+            for s in streams
+        ]
         # Fixed-length chunks (decision 33): every chunk has the same buffer and step-axis
         # shapes (one compiled program): the most record slots a chunk can touch, padded
         # steps (inactive) writing into the last record

@@ -27,18 +27,18 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
+from clm_ml.checks import (  # the conservation checks' indices
+    BALANCE_CHECKS,
+    CANOPY_ENERGY_1,
+    PLANT_AREA,
+    SOIL_TEMPERATURE,
+)
 from clm_ml.physics import canopy, soil
 from clm_ml.physics.atm_forcing import ForcingRecord, clm_forcing_to_ml
 from clm_ml.physics.layers import keep
 from clm_ml.physics.leaf_heat_capacity import leaf_heat_capacity
 from clm_ml.physics.plant_hydraulics import plant_resistance, soil_resistance
 from clm_ml.state import CanopyState, Diagnostics, PatchLayers, SoilState, State, StepState
-from multilayer_canopy.MLCanopyFluxesType import (  # the conservation checks' indices
-    BALANCE_CHECKS,
-    CANOPY_ENERGY_1,
-    PLANT_AREA,
-    SOIL_TEMPERATURE,
-)
 
 
 class StepOptions(NamedTuple):

@@ -362,6 +362,20 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   maintainer (`global_input.md` issues 21, 22). Tests: lint; `tests/clm_ml` + fast golden 420
   pass; bit-for-bit + noise twin 177 pass; `test_setup` pass.
 
+- **7.4d, tower runs on the new setup, in-process (C28): reference re-recorded
+  (round-off).** New `clm_ml/driver.py` (`Simulation`, `simulation(run)`, `make_runner`,
+  `run_streams`, checks, restarts; from `offline_executable.main` without containers or
+  template: the constants are an input of the compiled chunk, C23 b), `clm_ml/checks.py`
+  (conservation checks, `ModelError`). `Run.execute` runs tower runs in this process (grid
+  runs keep the worker until 7.4e; `legacy_ascii` keeps it until 7.4f); `clm_ml.model.Model`
+  on `Simulation`. The first step is an ordinary step of the first chunk (the setup gives
+  the state before it; acclimation counts start at 0). Before re-recording: noise twin
+  pass; 68 fields not bit for bit: 53 the twins move, within 1.43x the twin spread; 15 they
+  do not, by 1-2 ulps (solar zenith angle at 7 daytime steps and the solar fields after it,
+  as in C21; soil temperature of the first step, 1.7e-15). Recording the reference and both
+  twins: 15 s (legacy path: minutes). Tests: lint; `tests/clm_ml` + fast golden 420 pass;
+  bit-for-bit + noise twin 177 pass (37 s); focused CPU gradient test pass (1.9 min).
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,
