@@ -200,6 +200,7 @@ class Model:
         weights=None,
         program: Optional["Model"] = None,
         alive=None,
+        tables=None,
     ):
         """Advance ``state`` over the chunk starting at run step ``first_step`` (``forcing``
         from :meth:`forcing`) as one compiled scan, accumulating ``streams``
@@ -208,7 +209,8 @@ class Model:
         :meth:`weights`). ``program``: run this model's inputs through another model's
         compiled program (same number of patches and layer slots). ``alive``: the patches
         still in the run (default all; decision 25): the others are left out of gridcell
-        values and of parameter gradients.
+        values and of parameter gradients. ``tables``: the psihat lookup tables
+        (``clm_ml.physics.turbulence.RSLTables``; default: the package's, read at setup).
 
         Returns ``(state, {stream: {variable: (record, patch, ...), "gridcell:<variable>":
         (record, gridcell, ...)}})`` with the chunk's records (partial records at the chunk's
@@ -262,6 +264,7 @@ class Model:
             alive,
             jnp.asarray(self._batch.runner_gidx),
             self._template,
+            tables=self._legacy.rsl_tables if tables is None else tables,
         )
         from clm_ml.physics.math import is_concrete
 

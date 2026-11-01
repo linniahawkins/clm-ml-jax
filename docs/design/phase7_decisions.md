@@ -863,3 +863,31 @@ Alternatives: splitting 10c into soil routines first and the canopy set-up secon
 would still need the container boundary; one probe covered the whole step); keeping the
 template's error floor (no reason; not recorded); computing the constants inside each step
 (slicing the template under the step's `vmap` and checkpoint every step).
+
+### C22. Process 10d: the psihat tables as an input of the compiled step (7.2, 2026-10-31)
+
+- **What:** the roughness-sublayer psihat tables (`RSLTables`) are an argument of
+  `clm_ml.physics.canopy.substep` and `clm_ml.step.step` (next to `params`), of
+  `state_step`'s step and of every compiled chunk: `make_chunk_runner`,
+  `make_stream_runner`, `make_batch_runner` (not batched under `vmap`: `in_axes=None`),
+  the sharded wrapper (`_sharded`, replicated) and `clm_ml.model.Model.run_chunk`
+  (new optional `tables`, default the run's). The time step no longer calls
+  `default_rsl_tables()`.
+- **Where the tables come from:** `LegacyRun.rsl_tables`, set at setup to
+  `default_rsl_tables()` (the package's `psihat.nc`, read once per process). The first
+  (initializing) step, legacy `MLCanopyFluxes`, keeps `default_rsl_tables()` as a constant
+  until the setup leaves the containers (7.4), as planned.
+- **`tables` is a required keyword argument of the compiled chunks**, not a default:
+  `jax.jit` bakes a Python default value that the caller does not pass into the program as
+  a constant (checked), which is what this process removes. Callers (the run loops,
+  `Model`, `test_stream_runner`, `test_ensemble`, `timing/time_vmap.py`,
+  `timing/time_global.py`) pass `tables=run.rsl_tables`. Under `jax.vmap` keyword
+  arguments are always mapped, so the ensemble test closes over the tables.
+- **Bit for bit:** the CHATS7 bit-for-bit + noise twin test passes unchanged (no
+  re-recording). The lowered chunk takes the two 276x41 tables as parameters and holds no
+  276x41 constant (`probe710d/consts.py`).
+Why: maintainer's instruction (process 10 fixes, C15): the tables are data, so another
+table file needs no recompilation and the tables can be differentiated or swapped.
+Alternatives: a Python wrapper filling in the default (hides the input; loses the jitted
+function's methods used by tests, `_cache_size`); tables inside `CanopyParams` (they are
+not per-PFT parameters; they would be gathered and batched per patch).

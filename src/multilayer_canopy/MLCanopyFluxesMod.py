@@ -33,6 +33,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from clm_ml.io.rsl_tables import default_rsl_tables
 from clm_ml.legacy.atm_forcing import (
     AtmForcingRecord,
     AtmForcingWindow,
@@ -429,6 +430,9 @@ def MLCanopyFluxes(
         for t in (calday_interp_bef, calday_interp_cur, calday_interp_next)
     )
     inputs = substep_inputs(mlcanopy_inst, p, forcing_window, times)
+    # The first (initializing) step keeps the package's psihat tables as a constant until the
+    # setup leaves the containers (Phase 7.4); the time step takes them as an input (C22)
+    tables = default_rsl_tables()
 
     if masterproc and is_concrete(nstep) and nstep == 1:
         print(
@@ -458,7 +462,9 @@ def MLCanopyFluxes(
 
         def _scan_body(carry, calday_ml):
             return (
-                canopy.substep(carry, calday_ml, inputs, params, options=sub_options, c3=c3),
+                canopy.substep(
+                    carry, calday_ml, inputs, params, tables, options=sub_options, c3=c3
+                ),
                 None,
             )
 
@@ -474,7 +480,7 @@ def MLCanopyFluxes(
                 and (nstep_ml == 1 or nstep_ml == num_ml_steps or (nstep_ml % progress_stride == 0))
             ):
                 print(f"MLCanopyFluxes: sub-step {nstep_ml}/{num_ml_steps}", flush=True)
-            carry = _substep(carry, calday_ml, inputs, params, options=sub_options, c3=c3)
+            carry = _substep(carry, calday_ml, inputs, params, tables, options=sub_options, c3=c3)
     end, sums = carry
     mlcanopy_inst = container_with_substep(mlcanopy_inst, p, end)
 

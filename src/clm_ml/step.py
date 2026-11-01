@@ -188,6 +188,7 @@ def step(
     inputs: StepInputs,
     constants: PatchConstants,
     params,
+    tables,
     *,
     options: StepOptions,
     c3: bool,
@@ -201,7 +202,9 @@ def step(
     ``jax.checkpoint``); the averages over the sub-steps, the canopy totals, the
     sunlit/shaded merge; the soil temperature. The conservation checks of the step are
     recorded in ``diagnostics.balance_error`` (checked on the host). ``params``: the patch's
-    PFT parameters (``CanopyParams``); ``c3`` (static): the photosynthetic pathway.
+    PFT parameters (``CanopyParams``); ``tables``: the psihat lookup tables
+    (``clm_ml.physics.turbulence.RSLTables``, one copy for all patches and steps of a chunk);
+    ``c3`` (static): the photosynthetic pathway.
 
     Fortran reference: clm_driver.F90::clm_drv; MLCanopyFluxesMod.F90::MLCanopyFluxes,
     GetCLMVar.
@@ -292,7 +295,10 @@ def step(
     sub_options = options.substep
 
     def body(carry, calday):
-        return canopy.substep(carry, calday, sub_inputs, params, options=sub_options, c3=c3), None
+        return (
+            canopy.substep(carry, calday, sub_inputs, params, tables, options=sub_options, c3=c3),
+            None,
+        )
 
     import os
 

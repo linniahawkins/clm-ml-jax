@@ -693,13 +693,13 @@ def _radiation(c: Substep, x: SubstepInputs, params, calday, opt: SubstepOptions
     return c._replace(balance_error=errors)
 
 
-def _stage(c: Substep, x: SubstepInputs, params, opt: SubstepOptions, c3: bool, stage):
+def _stage(c: Substep, x: SubstepInputs, params, tables, opt: SubstepOptions, c3: bool, stage):
     """One Runge-Kutta stage (1-based ``stage``; the last one, after the method's stages,
-    only computes the fluxes): the canopy processes, then the state update.
+    only computes the fluxes): the canopy processes, then the state update. ``tables``: the
+    psihat lookup tables (``turbulence.RSLTables``).
 
     Fortran reference: MLCanopyFluxesMod.F90::MLCanopyFluxes (lines 295-328).
     """
-    from clm_ml.io.rsl_tables import default_rsl_tables
     from clm_ml.physics import (
         canopy_water,
         flux_profile,
@@ -746,7 +746,7 @@ def _stage(c: Substep, x: SubstepInputs, params, opt: SubstepOptions, c3: bool, 
     t = turbulence.harman_finnigan(
         lay, c.tair_profile, c.eair_profile, c.pref_forcing, x.ztop, x.lai, x.sai, x.zref,
         c.uref_forcing, c.thref_forcing, c.thvref_forcing, c.qref_forcing, c.rhomol_forcing,
-        default_rsl_tables(),
+        tables,
         sparse_canopy=opt.sparse_canopy, ground_conductance=opt.ground_conductance,
     )  # fmt: skip
     c = c._replace(
@@ -911,6 +911,7 @@ def substep(
     calday,
     inputs: SubstepInputs,
     params,
+    tables,
     *,
     options: SubstepOptions,
     c3: bool,
@@ -919,7 +920,8 @@ def substep(
     start saved, the forcing interpolated, solar radiation and the nitrogen profile, then
     the canopy processes and the state update for each Runge-Kutta stage (one
     ``lax.scan``), and the sub-step's fluxes added to the sums. ``carry``: the
-    :class:`Substep` values and the sums of :class:`SubstepFluxes`.
+    :class:`Substep` values and the sums of :class:`SubstepFluxes`. ``tables``: the psihat
+    lookup tables (``turbulence.RSLTables``), an input like ``params``.
 
     Fortran reference: MLCanopyFluxesMod.F90::MLCanopyFluxes (lines 261-330) and
     MLTimeStepFluxIntegration (the sums).
@@ -928,7 +930,7 @@ def substep(
     c = save_start(c, inputs.layers)
     c = _radiation(c, inputs, params, calday, options, c3)
     c, _ = jax.lax.scan(
-        lambda c, stage: (_stage(c, inputs, params, options, c3, stage), None),
+        lambda c, stage: (_stage(c, inputs, params, tables, options, c3, stage), None),
         c,
         jnp.arange(1, n_stages(options.integrator) + 1),
     )

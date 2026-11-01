@@ -153,7 +153,16 @@ def main() -> None:
         buffers = (S.init_buffers("mean", len(rc.keys), shapes, jnp),)
         t0 = time.perf_counter()
         state2, out, errors = runner(
-            state, xg, xp, (jnp.asarray(rc.index),), buffers, params, weight, alive, gi
+            state,
+            xg,
+            xp,
+            (jnp.asarray(rc.index),),
+            buffers,
+            params,
+            weight,
+            alive,
+            gi,
+            tables=batch.run.rsl_tables,
         )
         jax.block_until_ready(out)
         times.append(time.perf_counter() - t0)

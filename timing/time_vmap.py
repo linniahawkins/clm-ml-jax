@@ -80,7 +80,9 @@ def main() -> None:
     slots = (jnp.asarray(rc.index),)
 
     def one_patch(state, forcing, template, params):
-        _, (b,), errors = runner(state, forcing, slots, buffers, params, template)
+        _, (b,), errors = runner(
+            state, forcing, slots, buffers, params, template, tables=legacy.rsl_tables
+        )
         lh = b["sum"]["latent_heat_flux"] / b["count"].reshape(-1, 1)
         return lh, errors
 

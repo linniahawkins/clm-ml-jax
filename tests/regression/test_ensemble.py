@@ -44,8 +44,11 @@ _, params = patch_setup(0, template.mlcanopy)
 factors = jnp.array([1.0, 0.8, 0.9, 1.2])
 ens = jax.tree.map(lambda x: jnp.broadcast_to(x, (4,) + jnp.shape(x)), params)
 ens = ens._replace(vcmax25=params.vcmax25 * factors)
-final, _ = jax.jit(jax.vmap(runner, in_axes=(None, None, 0)))(state0, xs, ens)
-single, _ = runner(state0, xs)
+tables = run.rsl_tables
+final, _ = jax.jit(
+    jax.vmap(lambda s, x, p: runner(s, x, p, tables=tables), in_axes=(None, None, 0))
+)(state0, xs, ens)
+single, _ = runner(state0, xs, tables=tables)
 diff = max(
     float(np.max(np.abs(np.asarray(a)[0] - np.asarray(b))) / (np.max(np.abs(np.asarray(b))) or 1))
     for a, b in zip(jax.tree.leaves(final), jax.tree.leaves(single))

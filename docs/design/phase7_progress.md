@@ -284,21 +284,31 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   pass; focused CPU gradient test 1 pass (2.2 min). Forward timing CPU 15.6 ms/step
   (`p710c-check`; `p71` 24-25).
 
+- **Process 10d, the psihat tables as an input of the compiled step (C22): bit for bit.**
+  `RSLTables` is an argument of `canopy.substep`, `clm_ml.step.step`, `state_step`'s step
+  and the compiled chunks (`make_chunk_runner`, `make_stream_runner`, `make_batch_runner`
+  with `in_axes=None`, `_sharded` replicated; required keyword `tables`), from
+  `LegacyRun.rsl_tables` (setup default `default_rsl_tables()`); `Model.run_chunk` takes an
+  optional `tables`. The first step keeps the package tables as a constant until 7.4. The
+  lowered chunk has the two tables as parameters, no 276x41 constant
+  (`probe710d/consts.py`). Tests: lint; `tests/clm_ml` + fast golden 420 pass; bit-for-bit +
+  noise twin 177 pass (1.4 min); `test_stream_runner` + `test_ensemble` 2 pass; focused CPU
+  gradient test 1 pass (2.3 min).
+
 ## Next (resume here)
 
 **Package 7.2 in progress. Sessions 1-7 (2026-10-30/31) did processes 1-9; session 8
-planned process 10 (C19) and did 10a; session 9 did 10b (C20); session 10 (2026-10-31) did
-10c (the time step on the step state, `clm_ml/step.py`, C21, round-off, reference
-re-recorded); last commit = the one that wrote this.** Next session: **process 10d**, the
-psihat tables as a run-time input of the compiled step (below, "Fixes to make at process
-10"): `RSLTables` into `clm_ml.step.step` (an argument next to `params`, passed down to
-`canopy.substep` and the turbulence) through `state_step`, `make_chunk_runner`,
-`make_stream_runner`, `make_batch_runner` (`in_axes=None` under `vmap`), `_sharded`
-(replicated), `clm_ml.model.Model`; the first step (legacy `MLCanopyFluxes`) may keep
-`default_rsl_tables()` until 7.4. Bit for bit expected (probe as in C10/C15 if not), focused
-gradient test. Then the package-end tests (CPU gradient tier, the feature tests 7.2 touched,
-independent review of the package's diff, timing against `p71-*` with gradient), stop and
-report to the maintainer.
+planned process 10 (C19) and did 10a; session 9 did 10b (C20); session 10 did 10c (C21);
+session 11 (2026-10-31) did 10d (the psihat tables as an input of the compiled step, C22,
+bit for bit). All 7.2 processes are done; last commit = the one that wrote this.** Next:
+the **package-end tests** of 7.2: the CPU gradient tier (`python tests/gradient_tier.py`),
+the feature tests 7.2 touched (`test_stream_runner`, `test_ensemble`,
+`test_patches_batched`, `test_c3_c4_groups`, `test_sites_one_program`,
+`test_patch_padding`, `test_one_program_any_layers`, `test_model_patches`, the process
+replay), an independent review of the package's diff (`git diff <start of 7.2>..HEAD`, a
+reviewer agent that sees the diff only), timing against `p71-*` with gradient
+(`logs7/timing.sh`; forward ~27-28 ms/step, gradient ~604 ms/step; discuss a slowdown
+above ~1.5x), then stop and report to the maintainer.
 
 Same pattern as processes 2-9 (C10, C12-C18): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
@@ -323,7 +333,7 @@ keeping the legacy order of masks and operations.
 Items deferred to process 10 (the step driver, where the containers leave the step), each
 done and ticked in the process-10 commit:
 
-- [ ] **psihat tables as a run-time input of the compiled step** (maintainer, 2026-10-31;
+- [x] **psihat tables as a run-time input of the compiled step** (done in 10d, C22) (maintainer, 2026-10-31;
   C15). Today the legacy adapter passes `clm_ml.io.rsl_tables.default_rsl_tables()`, so the
   tables are a constant of the compiled chunk. At process 10: pass `RSLTables` into the step
   as an input (one copy per chunk, not per patch or per step: broadcast, `in_axes=None` under
@@ -334,8 +344,7 @@ done and ticked in the process-10 commit:
   argument may change XLA's folding: probe as in C10/C15 if not) and the focused gradient test.
 
 Open for the maintainer: C10 and C14 (reference re-recorded for the soil and process-5 moves,
-round-off only), C15 (the `optimization_barrier`; the psihat tables as a step input is
-scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), C16 (reference re-recorded for process 7, round-off only; process replay compares fields zero to round-off absolutely). C17 (reference re-recorded for process 8, round-off only; `well_mixed` refused by `clm_ml.run`), C18 (process 9, bit for bit; `kn_val` still a static option), C19 (process 10 split into 10a-10d; 10a re-recorded the reference, 4 fields at the last bit; 28 diagnostics no longer computed), C20 (10b re-recorded the reference, round-off; the step no longer writes the unused legacy index 0, so the reference's index-0 entries are now setup fill values; Norman/well-mixed stop before the step; 27 more work values not written), open issue 20 (Fortran's implicit-solution checks never run in the step: record them in `BALANCE_CHECKS`?), C21 (10c re-recorded the reference, round-off; each step's checks start from zero instead of the first step's errors; `mlcan_to_clm = 1` refused). Earlier: C4, the removed
+round-off only), C15 (the `optimization_barrier`; the psihat tables as a step input done in 10d, C22), open issue 19 (soil ice index in `SoilResistance`, latent), C16 (reference re-recorded for process 7, round-off only; process replay compares fields zero to round-off absolutely). C17 (reference re-recorded for process 8, round-off only; `well_mixed` refused by `clm_ml.run`), C18 (process 9, bit for bit; `kn_val` still a static option), C19 (process 10 split into 10a-10d; 10a re-recorded the reference, 4 fields at the last bit; 28 diagnostics no longer computed), C20 (10b re-recorded the reference, round-off; the step no longer writes the unused legacy index 0, so the reference's index-0 entries are now setup fill values; Norman/well-mixed stop before the step; 27 more work values not written), open issue 20 (Fortran's implicit-solution checks never run in the step: record them in `BALANCE_CHECKS`?), C21 (10c re-recorded the reference, round-off; each step's checks start from zero instead of the first step's errors; `mlcan_to_clm = 1` refused), C22 (10d, bit for bit: the psihat tables an input of the compiled chunks, `tables=` required; the first step keeps them as a constant until 7.4). Earlier: C4, the removed
 diagnostics, C5-C8. Timing baseline for the end of 7.2: `p71-*` in
 `timing/results_model.jsonl` (forward ~27-28 ms/step, gradient ~604 ms/step).
 

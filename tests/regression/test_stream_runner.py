@@ -37,7 +37,7 @@ first, n = 1, 49
 chunk = run.load_chunk(first, n)
 xs = M.stack_step_inputs([M.step_inputs(run, chunk, k) for k in range(first, first + n)])
 names = tuple(v.name for v in VARIABLES) + ("soil_temperature",)
-_, steps = M.make_chunk_runner(run, template, filt)(state0, xs)
+_, steps = M.make_chunk_runner(run, template, filt)(state0, xs, tables=run.rsl_tables)
 views = view_series(template, steps)  # (step, patch, ...) legacy fields of each step
 r = _Raw({{k: np.asarray(v) for k, v in views.items() if k.startswith("mlcanopy.")}}, 50)
 ref = {{v.name: np.asarray(v.compute(r), float)[:, 0] for v in VARIABLES}}
@@ -56,7 +56,9 @@ shapes = M.output_shapes(run, template, names, 50)
 buffers = tuple(S.init_buffers(s.statistic, len(rc.keys), {{v: shapes[v] for v in s.variables}},
                                jnp) for s, rc in zip(specs, recs))
 runner = M.make_stream_runner(run, template, filt, specs, 50)
-_, bufs, _ = runner(state0, xs, tuple(jnp.asarray(rc.index) for rc in recs), buffers)
+_, bufs, _ = runner(
+    state0, xs, tuple(jnp.asarray(rc.index) for rc in recs), buffers, tables=run.rsl_tables
+)
 step_vals = S.finish("instantaneous", bufs[0])
 worst, nan_mismatch = 0.0, []
 for name, a in ref.items():
