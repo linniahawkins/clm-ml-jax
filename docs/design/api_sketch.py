@@ -1,4 +1,8 @@
 """
+HISTORICAL: the API proposed before Phase 1, kept as the design record. It is not the API of
+the code: the code has experiment folders (``clm_ml.load_experiment``, ``Experiment``,
+``Model``; ``docs/design/experiment_folders.md``) and none of the functions below.
+
 Proposed public API for ``clm_ml`` (design sketch v4: signatures only, no implementation).
 
 Read alongside ``modernization_plan.md`` (vocabulary in §3.1) and the YAML files in

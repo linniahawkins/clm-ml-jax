@@ -1,12 +1,16 @@
 # CLM-ML-JAX Modernization Plan
 
-**Status:** v4. Phases 0–2 done (branches `phase0/safety-net`, `phase1/config-api`,
-`phase2/forcing-time`). v3 added the gridcell/patch structure (§3.1). v4 makes memory
-independent of run length (forcing streams, chunked runs, output streams; §6.9), makes the
-model time step configurable, and adopts a 10-day running-mean acclimation temperature.
+**Status (2026-11-01):** Phases 0-7 done; Phase 8a (housekeeping before the documentation)
+in progress on `phase8a/housekeeping`, then 8b (documentation and release). Every decision is
+in [`decisions.md`](decisions.md), every open item in [`open_items.md`](open_items.md), the
+model as it is now in [`model_overview.md`](model_overview.md). This plan is the design record
+(v4: gridcell/patch structure §3.1, memory independent of run length §6.9, configurable model
+step, 10-day acclimation); where it differs from the code, the code and those three documents
+are current.
 
 **Companion files:**
-- [`api_sketch.py`](api_sketch.py): the proposed Python API, as typed signatures with docstrings.
+- [`api_sketch.py`](api_sketch.py): the API proposed before Phase 1 (historical; the API now
+  is `clm_ml.load_experiment`, `Experiment`, `Model`).
 - [`../../configs/`](../../configs/): runnable `run.yaml`/`model.yaml` files (Phase 8a,
   replacing the design-era `examples/`).
 - [`timing.md`](timing.md): timing-test results.
@@ -651,15 +655,15 @@ for each chunk:
 ```
 
 - **Two separate time scales** (as in jax-gcm, `jcm/model.py` and `jcm/runners.py`):
-  - **Output interval, inside the compiled scan.** A chunk is a *nested* scan: an outer loop
-    over output records, and inside it an inner loop over the model steps between records.
-    The inner loop accumulates each output stream's statistic (running sum for a mean,
-    min/max, or the instantaneous value) in the scan's carry and keeps no per-step values,
-    so memory scales with the number of output records in the chunk, not the number of
-    steps. `jax.checkpoint` wraps the inner step (as jax-gcm does) so gradients over a chunk
-    store only the state at each step, not every intermediate value. With several output
-    streams of different frequencies, the inner loop runs at the model step and each stream
-    emits a record when its own interval completes.
+  - **Output interval, inside the compiled scan.** As built (Phase 4, kept since): a chunk is
+    one scan over its model steps; for each output stream the host gives every step the
+    index of the output record it belongs to, and the step adds its value into that record's
+    slot in the scan's carry (running sum for a mean, min/max, or the instantaneous value).
+    No per-step values are kept, so memory scales with the number of output records in the
+    chunk, not the number of steps, as jax-gcm's nested scan (outer loop over records, inner
+    over steps) would give; one scan serves several streams of different frequencies at once.
+    `jax.checkpoint` wraps the step (as jax-gcm does) so gradients over a chunk store only the
+    state at each step, not every intermediate value.
   - **Chunk length, outside it.** The chunk is host bookkeeping: how much forcing is in
     memory, how often restart files and output files are written, and how often the state's
     health is checked. jax-gcm runs the whole integration as one compiled call by default
@@ -700,7 +704,7 @@ for each chunk:
   only the gridcells its patches belong to, so no single process holds global forcing.
 
 **Output streams** (decision 16). Each stream accumulates its statistic during the scan
-(the inner loop above): running sums for means, running min/max, or the instantaneous value at
+(into its record slots, above): running sums for means, running min/max, or the instantaneous value at
 the output time. Only
 completed output records leave the device. They are written per chunk to files split as
 configured. Output frequency is independent of the forcing interval, model step and chunk
@@ -877,7 +881,7 @@ Progress:
   the noise twins); reference regenerated in compiled mode. **Interim:** each chunk still
   returns every step's full canopy container (~0.21 MB per step per patch, ~10 MB per day per
   patch) so the legacy text output can be written; fine for a tower, impossible globally.
-  Replaced by the nested scan with output accumulation (§6.9).
+  Replaced by output accumulated inside the scan (§6.9).
 - ✅ Forcing is read per chunk (with halo records), and the whole-run acclimation mean is summed
   over the forcing read chunk by chunk (same order, bit for bit). Peak memory footprint is flat
   with run length: 4.3 GB for 2 days, 4.2 GB for 20 days of CHATS7 (one month of forcing
@@ -1912,8 +1916,8 @@ Milestones for users:
 | 1 | Minimum Python version | **3.10** |
 | 2 | Default `max_layers` | **50.** CHATS7 needs 46 layers with the default spacing: a 10 m canopy at 0.5 m gives 20 layers inside it, plus 26 above it up to the 23 m measurement height. Patches needing more fail at load time with a message naming them, and can raise `max_layers` in `model.yaml` (the Fortran limit was `nlevmlcan = 100`). **Resolved by row 9:** only CHATS7 is built in. (For reference: with default spacing, 9 of the 15 legacy towers need more than 50 (US-Ha1 60, US-Me2 64, US-UMB 92, US-MMS 96; US-ARM 300, beyond even the Fortran limit). Bonan et al. (2021) found 5–10 within-canopy layers reproduce the 50 cm benchmark, so explicit `n_layers_within`/`n_layers_above`, or coarser above-canopy spacing, may be the better default for multi-tower and global runs.) |
 | 3 | Regression tolerance | **Revised in Phase 3:** bit-for-bit for refactors that should not change the arithmetic, and a **noise-twin** test for changes that alter round-off. The twins differ by ≤ 4e-11, so the noise-twin test is tight; an apparent evening-transition sensitivity (up to 4.5%) turned out to be a solver bug, now fixed. See [`numerics_and_regression.md`](numerics_and_regression.md) §5–6. |
-| 4 | Legacy lifetime | Undecided. Default: keep `clm-ml-offline` until Phase 7, and keep the namelist converter permanently. Revisit at Phase 7. |
-| 5 | Soil model scope | Undecided. Default: soil routines go behind the same process interface, migrated last in Phase 7 (decision 18). Making them swappable is not a goal yet. Revisit at Phase 7. (Soil column sharing is decided separately: option A now, option B later; see §6.7.) |
+| 4 | Legacy lifetime | **Settled in Phase 7 (C30):** `clm-ml-offline` retired; the namelist converter (`clm-ml convert`, now writing an experiment folder) kept permanently; the legacy `.out` files written by a run with `output.legacy_ascii`. |
+| 5 | Soil model scope | **Settled in Phase 7:** the soil routines are processes like the others (`clm_ml/processes/soil.py`), migrated in 7.2; making them swappable is not a goal. Soil column sharing is decided separately (option A now, option B later; §6.7). |
 | 6 | Legacy `.out` format | **Not needed after validation.** It is kept only as long as the Fortran comparison test needs it, and is replaced by netCDF output once that test reads netCDF. `output.format` options become `netcdf` only. |
 | 7 | GPU timing | **Deferred until after Phase 4.** GPU doesn't change the design. Note that the model runs in float64: data-center GPUs (A100/H100) handle this well, but consumer GPUs run float64 30–60× slower. A `precision` option could be considered in Phase 4, with its own validation. |
 | 8 | Minimum patch weight | Default `0.0` (keep all patches). For global runs, dropping patches below, for example, 1% of a gridcell is a science choice left to `run.yaml` (`domain.min_patch_weight`). Remaining weights are renormalized to sum to 1. |

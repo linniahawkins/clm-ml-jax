@@ -1,8 +1,11 @@
 # Timing tests
 
-Baseline for the modernization plan (Phase 0). Later phases are compared against these numbers.
-Raw results are appended to [`timing/results.jsonl`](../../timing/results.jsonl) by
-`python timing/time_offline.py`.
+Baseline for the modernization plan (Phase 0). Later results are not copied here: each timing
+script appends one JSON line per measurement to its file in [`timing/`](../../timing/)
+(`results.jsonl`: `time_offline.py`, whole runs; `results_model.jsonl`: `time_model.py`, the
+compiled chunk and its gradient; `results_vmap.jsonl`: `time_vmap.py`, batched patches;
+`results_program.jsonl`: `time_program.py`, GPU program size and compile time), with a label
+naming the phase or commit; the progress logs quote the comparisons that mattered.
 
 A timing test measures wall-clock run time only. It does not check results (that is the
 regression test's job), runs on demand rather than in CI, and is only comparable between runs

@@ -1,121 +1,29 @@
-# CLM-ML Offline Executable
+# CLM-ml namelists
 
-Python/JAX equivalent of the Fortran `prgm.exe` offline executable.
-
-## Installation
-
-From the project root directory:
-
-```bash
-# Install in editable mode (replaces 'make' step from Fortran Makefile)
-pip install -e .
-```
-
-This will install the `clm-ml-offline` console script.
-
-## Usage
-
-### Method 1: Console Script (Recommended)
-
-After installation, run directly:
+The Fortran CLM-ml v2 offline driver (`prgm.exe < nl.CHATS7.05.2007`) reads a `&clmML_inparm`
+namelist. These files are those namelists, kept as test and example data and as the record of
+the Fortran runs the model is compared with. The JAX model does not read them directly: convert
+one to an experiment folder (run.yaml, domain.yaml, model.yaml, params.yaml) and run that:
 
 ```bash
-# With namelist from stdin (mirrors Fortran: ./prgm.exe < nl.CHATS7.05.2007)
-clm-ml-offline < nl.CHATS7.05.2007
-
-# With namelist as argument
-clm-ml-offline nl.CHATS7.05.2007
+clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/
+clm-ml check chats7
+clm-ml run chats7
 ```
 
-### Method 2: Direct Python Execution
+The converter reads the paths as the Fortran driver did (`../input_files/...` relative to this
+directory, i.e. `data/input_files/`), takes the tower from its preset (CHATS7), the parameters
+from `pftcon_val` (1: the `chats` preset, 0: `clm5_defaults`) and refuses settings it cannot
+translate (e.g. `clm_phys = 'CLM4_5'`). The ready-made equivalents of the CHATS7 runs are in
+`configs/` (`configs/chats7_1day`, `configs/chats7_may2007_fortran`).
 
-Without installation, from the project root:
+| Namelist | Run |
+|---|---|
+| `nl.CHATS7.1day` | 1 May 2007, one day |
+| `nl.CHATS7.50steps` | 1 May 2007, 50 steps (the regression reference) |
+| `nl.CHATS7.05.2007` | May 2007 (the Fortran comparison) |
+| `nl.CHATS7.04.2007` | April 2007 (30 days) |
+| `nl.CHATS7.debug`, `nl.CHATS7.test3` | 1 May 2007, 2 and 3 steps (short Fortran test runs) |
+| `nl.US-UMB.test` | a US-UMB test (its files are not in the repository) |
 
-```bash
-# With stdin
-python -m offline_executable.main < nl.CHATS7.05.2007
-
-# With argument
-python -m offline_executable.main nl.CHATS7.05.2007
-```
-
-### Method 3: From This Directory
-
-```bash
-# With stdin
-cd src/offline_executable
-python main.py < ../../input_files/nl.CHATS7.05.2007
-
-# With argument
-python main.py ../../input_files/nl.CHATS7.05.2007
-```
-
-## Namelist Format
-
-The namelist file should contain a `&clm_inparm` section with parameters:
-
-```fortran
-&clm_inparm
-  tower_site = "CHATS"
-  iyear      = 2007
-  imonth     = 5
-  finidat    = "path/to/initial/conditions"
-  fsurdat    = "path/to/surface/data"
-  ntimes     = 2880    ! Number of timesteps
-/
-```
-
-## Migration from Fortran Makefile
-
-**Fortran Workflow (old):**
-```bash
-make           # Compile
-./prgm.exe < nl.CHATS7.05.2007   # Run
-make clean     # Clean up
-```
-
-**Python Workflow (new):**
-```bash
-pip install -e .                  # Install (once)
-clm-ml-offline < nl.CHATS7.05.2007   # Run
-```
-
-No compilation or cleanup needed!
-
-## What Replaced the Makefile
-
-| Makefile Component | Python Equivalent |
-|-------------------|-------------------|
-| `FC = gfortran` | Python interpreter |
-| `FFLAGS = ...` | N/A (interpreted) |
-| `make` | `pip install -e .` |
-| `./prgm.exe` | `clm-ml-offline` |
-| `make clean` | N/A (no build artifacts) |
-| Object files (`.o`) | Bytecode (`.pyc`, auto-managed) |
-
-## Dependencies
-
-Required packages (auto-installed via `pip install -e .`):
-- `jax` - JAX array library
-- `jaxlib` - JAX backend
-- `numpy` - Numerical arrays
-- `f90nml` - Fortran namelist parser
-
-## Troubleshooting
-
-**Import errors:**
-```bash
-# Make sure you're running from project root or have installed with pip
-pip install -e .
-```
-
-**Module not found:**
-```bash
-# Add project root to PYTHONPATH if not using pip install
-export PYTHONPATH=/path/to/clm-ml-jax:$PYTHONPATH
-```
-
-**f90nml not found:**
-```bash
-pip install f90nml
-```
+The former `clm-ml-offline` driver was retired in Phase 7.

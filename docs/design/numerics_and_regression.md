@@ -134,7 +134,7 @@ what CLM-ml v2 computes: `z0m` differed by up to 4e-4 relative.
 differentiable. (The derivative of a bisection result is zero almost everywhere. This is the
 Fortran algorithm's property, not something introduced here.)
 
-## 4. Known deviations of the running model from Fortran (not changed in Phase 3)
+## 4. Known deviations of the running model from Fortran (kept; see `open_items.md` O5)
 
 Each is pre-existing behavior of the validated translation (CHATS7 May 2007 within 2.5% of
 Fortran per output column). Each would change results, so each is a fidelity change for a later,

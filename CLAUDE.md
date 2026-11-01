@@ -371,8 +371,8 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
   carries the state, reads the next chunk in the background, and writes output per chunk. Never
   design something that needs the whole run's forcing or per-step output in memory (plan §6.9).
 - **Chunks vs output intervals** (as jax-gcm): output is accumulated *inside* the compiled scan
-  (nested scan: outer loop over output records, inner loop over steps, `jax.checkpoint` on the
-  step), so memory scales with output records, not steps. The chunk length is host
+  (one scan over steps, each step adding into its output record's slot, `jax.checkpoint` on
+  the step), so memory scales with output records, not steps. The chunk length is host
   bookkeeping (forcing in memory, restarts with `.prev`, health checks, file writes). A
   compiled chunk is reused for all chunks of the same shape; data never trigger compilation.
 - **Model time step is configurable** (`numerics.step_seconds`); forcing streams are

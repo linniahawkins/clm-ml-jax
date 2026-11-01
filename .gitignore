@@ -1,21 +1,7 @@
-# Claude-specific files
+# Claude Code local settings
 .claude/
-CLM-ml_v1/
-clubb_ML/
-tests/integration/
-
-# Internal development tools (not part of the land model)
-jax-agents/
-
-# Integration test log files (generated outputs)
-tests/integration/comparison_*.log
 
 # Python
-bashscripts/
-Paper/
-prompts/
-Domain-Litterature/
-logs/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -24,8 +10,6 @@ __pycache__/
 build/
 develop-eggs/
 dist/
-diags/
-downloads/
 eggs/
 .eggs/
 lib/
@@ -127,12 +111,6 @@ dmypy.json
 .DS_Store
 Thumbs.db
 *.err
-
-#plots
-comparison_plots/
-
-
-Paper/jaxes_paper/
 
 # outputs of the runs in configs/
 configs/*/output/
