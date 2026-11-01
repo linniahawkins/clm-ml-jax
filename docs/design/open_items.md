@@ -74,6 +74,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O67 | PFT optics keep the old 1-based layout `[unused, vis, nir]` | housekeeping | 8a | I |
 | O68 | Stale docstrings and comments (`model.py`, `legacy_ascii`, `clm_ml/__init__.py`, CLAUDE.md `rtol`) | housekeeping | 8a | I |
 | O69 | Plan says output is a nested scan (records × steps); the code is one scan with a record slot per step | housekeeping | 8a | I |
+| O70 | Implement experiment folders (decision 91, `experiment_folders.md`) | housekeeping | 8a | I (open questions: M) |
 | **5. Documentation (8b)** |||||
 | O45 | Getting-started guide | documentation | 8b | I |
 | O46 | Reference of every YAML key, generated from the code | documentation | 8b (code part in 8a) | I |
@@ -518,6 +519,14 @@ The model as it is now: [`model_overview.md`](model_overview.md).
   the host. Memory still scales with output records, as intended.
 - **Next:** update the plan text (no code change).
 - **Source:** model map (2026-11-01).
+
+### O70. Implement experiment folders
+- **What:** decision 91: four complete files per experiment folder (`run`, `domain`, `model`,
+  `params`), strict loading, `clm-ml new`/`upgrade`, presets in the package, `configs/`
+  regenerated as folders, configuration copied into each run's output.
+- **Next:** the six steps of `experiment_folders.md` §12; the maintainer's open questions
+  there (§13: file names, where the data interval comes from, test-only settings) first.
+- **Source:** maintainer, 2026-11-01.
 
 ## 5. Documentation (8b)
 

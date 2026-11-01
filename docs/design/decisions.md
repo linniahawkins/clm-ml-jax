@@ -242,7 +242,7 @@ Reason: runs are in-process (entry 15); a caller must be able to catch a failure
 Source: plan §6.8; C28.
 
 **89. Params files are complete; every run names one**
-2026-11-01 · Phase 8a · maintainer · in force · Departure from Fortran: no
+2026-11-01 · Phase 8a · maintainer · in force (revised by 91: the run's params.yaml is a file of its folder) · Departure from Fortran: no
 A params file gives every parameter of every PFT 1-16 itself: no `extends`, no values filled in
 from another file (`extends` and missing values are errors; only the canopy roughness ratios,
 used by grid runs alone, may be left out, and a grid run then refuses the file). `run.yaml`
@@ -254,7 +254,7 @@ in a chain of files.
 Source: maintainer, 2026-11-01 (open_items O17).
 
 **90. `configs/`: runnable configurations with complete model.yaml files**
-2026-11-01 · Phase 8a · maintainer · in force · Departure from Fortran: no
+2026-11-01 · Phase 8a · maintainer · revised by 91 (to be implemented) · Departure from Fortran: no
 Runnable experiments live in `configs/` (one folder each: `chats7_1day`, `chats7_may2007_fortran`,
 `grid_1deg_2000`), replacing `docs/design/examples/`. `configs/model.yaml` lists every model
 setting at its default with its explanation, generated from `clm_ml.config` (`clm-ml
@@ -265,6 +265,21 @@ built-in params, towers and psihat files stay package data (used by name).
 Reason: validated configurations as named, commented files (as jax-gcm); one source for the
 defaults (the code), so the file cannot drift.
 Source: maintainer, 2026-11-01 (open_items O17).
+
+**91. Experiment folders: four complete files with fixed names, strict, with `clm-ml upgrade`**
+2026-11-01 · Phase 8a · maintainer · decided, to be implemented (open_items O70) · Departure from Fortran: no
+An experiment is a folder with `run.yaml` (when, forcing, output), `domain.yaml` (towers or
+grid), `model.yaml` (schemes, numerics) and `params.yaml` (every parameter of every PFT); a run
+reads only these and the data files they name, never a preset by name. Every file is complete
+(each key with its explanation, choices, default or REQUIRED); missing, unknown or misplaced
+keys are errors, and `clm-ml upgrade DIR` rewrites a folder to the current layout keeping the
+user's values. Folders are generated from presets (`clm-ml new DIR --from PRESET`); each setting
+lives in one file; each run writes a copy of the four files into its output. Details:
+[`experiment_folders.md`](experiment_folders.md).
+Reason: one start point where every user setting is visible and the required ones are marked,
+for ecologists; one definition of every option in the code (as jax-gcm), so files, errors and
+reference documentation agree.
+Source: maintainer, 2026-11-01 (strict with upgrade, fixed names).
 
 ## C. Spatial structure: gridcells, patches, layers, soil
 
