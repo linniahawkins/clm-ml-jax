@@ -437,41 +437,56 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   fast golden 370 pass; all of `tests/regression` 214 pass + the grid thin-layer test after
   its field names were updated (18.6 min).
 
+- **End of Phase 7 tests (2026-11-01).** All of `tests/regression` 214 + 1 pass (18.6 min,
+  7.6a; the review fixes after it re-ran bit-for-bit, noise twin, land-data and coarse-forcing
+  tests); `tests/clm_ml` + fast golden 370 pass; CPU gradient tier 8 pass (6.4 min); **GPU
+  gradient job** (`jobs/grad_gpu.pbs`, `4e2051e`, one A100): 10 pass (21 min); **Fortran
+  comparison** (May 2007, `run_mean`, `clm-ml run` with `legacy_ascii`, 65 s for the month on
+  CPU): max relative error 0.0689 %, mean 0.0076 % (end of Phase 6b: 0.0677 %, 0.0078 %),
+  the same two columns below r = 0.9999 as since Phase 6 (flux col 15 r = 0.99680, identical;
+  aux col 3 r = 0.99987, was 0.99983); `fsun`, `profile`, `fluxprofile` skipped by the test
+  as before. **Program size and compile time** (`timing/time_program.py`,
+  `jobs/program_gpu.pbs`, `2f79bc8`; the 1° global domain, 72 575 patches, one A100, a
+  10-day chunk): generated code 0.004 GB (Phase 6b: 2.32 GB), compile 61 s (~840 s), no
+  separate first-step program (Phase 6b: 871 s), setup 41 s (100 s), peak device memory
+  5.1 GB (21.2 GB); the chunk runs in 908 s, 38 400 patch-steps/s (Phase 6b on one A100:
+  816 s per 10-day chunk, 1.11x faster). The code size fell because the template and the
+  patch constants are no longer constants of the program (C23 b, 7.4d). The GPU
+  optimization proper is after Phase 8.
+
 ## Next (resume here)
 
-**Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,
-review fixes C23, timing above); last commit = the one that wrote this.** Stopped to report
-to the maintainer. **7.3 discussed with the maintainer (2026-10-31): D3 revised (plan
-decision 36)**: offline runs know all forcing in advance, so the forcing stays prepared on
-the host, a chunk ahead and overlapped with the GPU; the meteorology is not moved into the
-chunk (measured: GPU time is the physics, the forcing ~2-4 GB of a 21 GB peak). Next session:
-**package 7.3 as revised** (`phase7_scope.md`, 7.3, ~1 session): the chunk inputs as stacked
-0-based arrays shaped like `clm_ml.step.StepInputs` (meteorology per gridcell, land data per
-patch, previous/next records without the patch axis, 0-based bands) from the tower readers,
-`GridChunkReader`/`land_fn` and `Model.forcing`; `clm_ml.legacy.step.step_inputs` leaves the
-time step; first step unchanged until 7.4; bit for bit expected. Package-end feature tests:
-`test_coarse_forcing`, `test_land_data_files`, `test_grid_setup`, `test_stream_runner`,
-`test_patches_batched`; timing baseline `p72-clm-ml-jax-*`. C23: the maintainer agreed to fix
-the template-as-constant in 7.4 and to leave the Euler tableau as it is. Other open items:
-the list below.
+**Phase 7 done (2026-11-01): packages 7.0-7.6, the end-of-phase tests above; last commit =
+the one that wrote this.** Stopped for the maintainer's review of Phase 7 (the user asked to
+be reported to once Phase 7 is complete). Then: Phase 8 (documentation and release), after
+discussing it.
 
-Same pattern as processes 2-9 (C10, C12-C18): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
-adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
-fake containers holding only the declared fields. Expect round-off changes when loops become
-array operations even if every routine is bit-identical in isolation (C10): probe the routine
-alone against the old code first (`probe72/compare.py` pattern, old files from git), then, if
-only the whole-chunk compile differs and the noise twin passes, re-record the reference in the
-same commit (D7) and log it. Constants through `clm_ml/physics/constants.py`.
-If the routine alone differs by an ulp because an intermediate no longer round-trips through
-the container, XLA may be folding divisions across it: pass the values Fortran stores through
-`jax.lax.optimization_barrier` (C15). The barrier only blocks HLO simplification: if the
-compiled fusion recomputes a value next to its use (C17: check the optimized HLO,
-`jit(f).lower(...).compile().as_text()`, for `opt-barrier`), it does not help; then it is the
-C10 pattern (round-off, re-record).
-Before re-recording, compare the run with the reference relative to the twin spread
-(`probe78/ratio.py`): a field the twins do not move that differs (C18: the moved routine's
-own output, e.g. `vcmax25_leaf`) points at the moved arithmetic itself, often fixable by
-keeping the legacy order of masks and operations.
+For the maintainer's review (decisions and open issues; details in `phase7_decisions.md`
+and `global_input.md`):
+- **Science / behaviour, not changed (decisions needed):** open issue 21 (soil texture
+  classes looked up one class too far: towers with `texture_class` only; "clay" fails),
+  issue 22 (a missing `organic_matter` gives a negative organic fraction), issue 19 (soil
+  ice read one level too deep in `SoilResistance`), issue 20 (Fortran's implicit-solution
+  checks not run in the step), C34 (the unsupported Norman and well-mixed translations are in
+  git history only; D8 said "kept").
+- **Changes of round-off with re-recorded references** (noise twin passed each time): C10,
+  C14, C16, C17, C19-C21 (7.2), C28 (7.4d: the first step an ordinary compiled step, within
+  1.43x the twin spread); 7.6a re-recorded the reference in the new names with identical
+  values.
+- **Behaviour changes beyond round-off:** C28 (chunks counted from step 0; restart format
+  version 5, then netCDF format 6 in 7.5; errors raise `ModelError` instead of `SystemExit`;
+  health check by layer masks), C31 (CLM history levels and time slices validated: was
+  silently wrong; soil colour 0 refused), C33 (raw validation fields renamed
+  `diagnostics.*`/`state.*`/`layers.*`; Diagnostics keep CLM-ml names), C30
+  (`clm-ml-offline` retired; `legacy_ascii` written by the run), the review fixes (C31,
+  7.5, 7.6).
+- **Not done / deviations:** example data in `data/`, not `examples/data/` (plan 7b);
+  CLM4.5 soil structure never validated (no legacy reference); `lat.npy` stray at the root;
+  the readers' netCDF on a background thread while writers write on the main thread (as
+  since Phase 4).
+- **Timing:** forward chunk 1.3x faster than at the end of 7.3 on CPU, gradient faster; GPU:
+  code size 2.32 GB -> 4 MB, compile 840 s -> 61 s, no first-step program, 11 % slower per
+  chunk than Phase 6b (below the 1.5x threshold; GPU optimization after Phase 8).
 
 ### Fixes to make at process 10 (maintainer's instructions)
 
