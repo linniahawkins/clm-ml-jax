@@ -281,13 +281,13 @@ class Run:
     @property
     def calkindflag(self) -> str:
         """The model calendar as the time manager names it (``GREGORIAN``, ``NOLEAP``)."""
-        from clm_src_utils.clm_time_manager import CALENDARS
+        from clm_ml.calendar import CALENDARS
 
         return CALENDARS[self.run_file.time.calendar]
 
     def time_after(self, seconds: float) -> dt.datetime:
         """The date-time ``seconds`` after the run start, in the model calendar."""
-        from clm_src_utils.clm_time_manager import add_seconds
+        from clm_ml.calendar import add_seconds
 
         return add_seconds(self.start, seconds, self.calkindflag)
 
@@ -324,17 +324,7 @@ class Run:
         out = self.run_file.output
         out_dir = self.output_directory
         with tempfile.TemporaryDirectory() as tmp:
-            if self.is_grid:  # grid runs: the legacy setup in a worker until Phase 7.4e
-                raw_file = Path(tmp) / "streams.npz"
-                spec = self.legacy_spec(None)
-                spec["output_dir"] = str(out_dir) if write else None
-                spec["return_records"] = return_outputs
-                spec["restart_out"] = str(self.restart_path) if write else None
-                self._run_worker(spec, raw_file, quiet)
-                with np.load(raw_file) as data:
-                    arrays = {key: data[key] for key in data.files}
-            else:
-                arrays = self._run_in_process(write, return_outputs)
+            arrays = self._run_in_process(write, return_outputs)
             if write and out.legacy_ascii:
                 out_dir.mkdir(parents=True, exist_ok=True)
                 legacy = dict(self.legacy_spec(out_dir), mode="legacy_ascii")
@@ -356,15 +346,21 @@ class Run:
         """Set the run up and run it in this process (``clm_ml.driver``), writing the output
         files as their periods complete. Returns the records as arrays
         (``"<stream>/<key>"``) and ``"static.soil_depth"``."""
+        import time
+
         from clm_ml import driver
         from clm_ml.output_streams import StreamSpec
         from clm_ml.outputs import StreamFileWriter, domain_meta, records_to_arrays
 
         out = self.run_file.output
         ex = self.run_file.execution
+        t0 = time.perf_counter()
         sim = driver.simulation(self).laid_out(
             int(ex.devices or 1), ex.patch_count, ex.gridcell_count
         )
+        if self.is_grid:  # progress of long runs
+            print(f"timing: setup {time.perf_counter() - t0:.1f} s ({sim.n_real} patches, "
+                  f"{sim.n_real_gridcells} gridcells, layout {sim.layout})", flush=True)  # fmt: skip
         streams = [
             StreamSpec(st.name, st.frequency, st.statistic, self.stream_variables(st))
             for st in out.streams
@@ -421,10 +417,17 @@ class Run:
             max_failed_patch_fraction=numerics.max_failed_patch_fraction,
             ignore_checks=tuple(numerics.ignore_checks),
             chunk_steps=self.chunk_steps,
+            timing=self.is_grid,
         )
         if writers is not None:
             for w in writers:
                 w.close()
+        if self.is_grid:
+            import jax
+
+            stats = [dev.memory_stats() or {} for dev in jax.local_devices()]
+            peak = [round(st.get("peak_bytes_in_use", 0) / 1e9, 2) for st in stats]
+            print(f"timing: peak device memory GB {peak}", flush=True)
         arrays = {"static.soil_depth": sim.soil_depth}
         if return_outputs:
             for stream, stream_keys, records in zip(streams, keys, collected):
@@ -908,7 +911,7 @@ def _parse_datetime(text: str, key: str) -> dt.datetime:
 
 def _resolve_time(t: TimeSection, source: str, step_seconds: int) -> tuple[dt.datetime, int]:
     """Start and number of model steps (``step_seconds`` long), in the model calendar."""
-    from clm_src_utils.clm_time_manager import CALENDARS, seconds_between
+    from clm_ml.calendar import CALENDARS, seconds_between
 
     calendar = CALENDARS[t.calendar]
     start = _parse_datetime(t.start, "time.start")

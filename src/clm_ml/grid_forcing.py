@@ -505,7 +505,7 @@ class GridInputs:
     def step_start(self, k: int) -> dt.datetime:
         """Start of run step ``k`` in the model calendar (a noleap run never reaches 29
         February; a Gregorian one reads the no-leap streams' 28 February then, G3)."""
-        from clm_src_utils.clm_time_manager import add_seconds
+        from clm_ml.calendar import add_seconds
 
         return add_seconds(self.start, k * self.step_seconds, self.calendar)
 

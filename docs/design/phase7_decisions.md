@@ -1078,3 +1078,22 @@ containers or a worker process for tower runs.
 Alternatives: keeping a separate first-step program (no reason now; it cost a compile per
 run); keeping the template's health-check reference (needs the state after the first step,
 which the run loop does not otherwise keep).
+
+### C29. 7.4e: grid runs on the new setup (7.4, 2026-10-31)
+- `clm_ml/setup/grid.py`: `first_values(inputs, n_steps)` (per patch, from its gridcell's
+  gridded data at the first step: meteorology, the soil temperature stream, acclimation
+  temperature = the first step's air temperature, as the legacy grid setup set it for both
+  acclimation options), `GridChunkReader` (moved from `legacy/grid_setup.py`; the calendar
+  days from `Simulation.time_of`), `grid_simulation_parts(run)`. `build_patches` takes the
+  grid domain's per-patch measurement height, soil and vegetation directly; the legacy
+  prototypes (tower-format files of gridcell 0, one legacy setup per PFT) are gone from the
+  run path.
+- `driver.step_options` takes the interpolation from `forcing.gridded` for grid runs (no
+  soil-water adjustment there).
+- **Test without legacy code:** `test_grid_setup_equals_tower_setup_of_its_data` (was
+  "...legacy setup of its data") compares the new grid setup with the new tower setup of
+  tower runs whose files hold the grid run's data (`write_tower_files`): constants,
+  initial state, C3/C4 flags and the chunk inputs of 48 steps, bit for bit (land data to
+  the last bit, as before). Together with `test_setup` (new tower setup = legacy tower
+  setup) this keeps the chain to the Phase 6b grid setup. The chunk-input comparison moved
+  from the run test into it.

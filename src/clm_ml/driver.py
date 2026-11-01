@@ -308,11 +308,13 @@ def step_options(run):
     from clm_share.shr_orb_mod import shr_orb_params
     from multilayer_canopy.MLclm_varctl import MLOptions
 
-    opts = MLOptions.from_codes(run.config.to_fortran_codes(run.run_file.forcing.meteorology
-                                                            .interpolation))  # fmt: skip
+    f = run.run_file.forcing
+    interpolation = (f.gridded if run.is_grid else f.meteorology).interpolation
+    opts = MLOptions.from_codes(run.config.to_fortran_codes(interpolation))
     structure = run.config.soil.layer_structure
     n_soil, n_levels = SOIL_LEVELS[structure]
-    adjust = run.run_file.forcing.soil_water.adjustment
+    soil_water = getattr(f, "soil_water", None)
+    adjust = None if run.is_grid or soil_water is None else soil_water.adjustment
     eccen, _obliq, _mvelp, obliqr, lambm0, mvelpp = shr_orb_params(run.start.year)
     return (
         StepOptions(

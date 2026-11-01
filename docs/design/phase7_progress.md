@@ -376,6 +376,15 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   twins: 15 s (legacy path: minutes). Tests: lint; `tests/clm_ml` + fast golden 420 pass;
   bit-for-bit + noise twin 177 pass (37 s); focused CPU gradient test pass (1.9 min).
 
+- **7.4e, grid runs on the new setup (C29).** `clm_ml/setup/grid.py` (first-step values
+  per patch from its gridcell's gridded data, `GridChunkReader` for `Simulation`, the
+  in-chunk land data with the run's soil levels): no prototypes, no tower-format files, no
+  worker. `Run.execute` runs every run in this process. `test_grid_setup` rewritten
+  without the legacy code: the grid setup equals the tower setup of its data (constants,
+  initial state, C3/C4, 48 steps of chunk inputs) bit for bit; the runs agree through the
+  night; thin layers test unchanged. Tests: lint; `tests/clm_ml` + fast golden 420 pass;
+  bit-for-bit + noise twin 177 pass; `test_grid_setup` 3 pass (2.2 min).
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,

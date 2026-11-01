@@ -120,7 +120,7 @@ def satellite_phenology_date(
     ``CanopyFluxes`` of step n, for the next step's leaf and stem area (``clm_driver.F90``):
     step n + 1 sees the weights at its own end. (Phase 6 review, R9: the end of the step plus
     one step had been used here, one step early.)"""
-    from clm_src_utils.clm_time_manager import add_seconds
+    from clm_ml.calendar import add_seconds
 
     return add_seconds(step_start, step_seconds, calendar)
 
