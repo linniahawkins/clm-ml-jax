@@ -300,7 +300,7 @@ class Run:
     @property
     def restart_path(self) -> Path:
         """Where this run writes its restart (the previous one is kept as ``.prev``)."""
-        return self.output_directory / "restart" / f"{self.name}_restart.pkl"
+        return self.output_directory / "restart" / f"{self.name}_restart.nc"
 
     # -- running -----------------------------------------------------------------------
 

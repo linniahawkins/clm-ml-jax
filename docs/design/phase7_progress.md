@@ -413,6 +413,18 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   `test_grid_setup`, `test_coarse_forcing`, `test_land_data_files`,
   `test_sites_one_program`, `test_one_program_any_layers`, `test_patch_exclusion` 188 pass.
 
+### 7.5 Restarts as netCDF (2026-11-01)
+
+- **Package 7.5 (C32): netCDF restarts.** `clm_ml/io/restart.py` (format 6: state with units,
+  alive patches, the records in progress of every stream with typed keys, layout, calendar,
+  the output files in progress; `.prev` rotation and fallback); the run loop and `Run` use it
+  (`<output>/restart/<run>_restart.nc`). Independent review applied (stream identity checked
+  on resume, named dimensions and units, clear refusal of pickle restarts, warning on
+  `.prev` fallback). Tests: lint; `tests/clm_ml` + fast golden 378 pass (new
+  `test_restart_file`, 4); `test_restart` (resume bit for bit through the file),
+  bit-for-bit + noise twin, `test_patch_exclusion` 180 pass; CPU gradient tier 8 pass
+  (6.0 min). **Package 7.5 done.**
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,

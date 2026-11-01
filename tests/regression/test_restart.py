@@ -57,7 +57,7 @@ def _run(tmp_path, resume: bool, chunk=23):
         src=str(root / "src"),
         root=str(root),
         namelist=str(root / "src" / "offline_executable" / "nl.CHATS7.50steps"),
-        restart=str(tmp_path / "restart.pkl"),
+        restart=str(tmp_path / "restart.nc"),
         resume=resume,
         chunk=chunk,
         out=str(out),
@@ -70,7 +70,7 @@ def _run(tmp_path, resume: bool, chunk=23):
 
 def test_resume_from_mid_run_restart_reproduces_the_full_run(tmp_path):
     full = _run(tmp_path, resume=False)
-    assert (tmp_path / "restart.pkl.prev").exists()  # the restart after the second chunk
+    assert (tmp_path / "restart.nc.prev").exists()  # the restart after the second chunk
     resumed = _run(tmp_path, resume=True)
 
     # The record of step 45 was still pending (not yet emitted) when the restart was

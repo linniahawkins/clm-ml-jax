@@ -1162,3 +1162,35 @@ deleted `main.py`). Fixed:
   `Model.chunks` start at step 1 (the first step run at setup) while runs chunk from step 0.
 - Correction to C27: `forcing_interpolation.mean_cosz_function`'s calendar defaults to
   `"GREGORIAN"` (no legacy global since 7.4f).
+
+### C32. Package 7.5: restarts as netCDF (7.5, 2026-11-01)
+- **`clm_ml/io/restart.py`** (format version 6; versions 1-5 were pickles): one netCDF4 file
+  per run (`<output>/restart/<run>_restart.nc`), written beside the previous one and renamed
+  over it, the previous kept as `.prev` and read when the file is missing or unreadable.
+  Schema: global attributes `format_version`, `time` (ISO 8601, the end of the last step
+  run), `calendar`, `layout` (JSON), `writers` (the output files in progress, JSON);
+  dimensions `patch`, `layer`, `leaf`, `soil_level`; group `state` (one variable per
+  `State` field, `canopy_<name>`/`soil_temperature`, with `units` and `long_name`);
+  variable `alive` (patch, 1/0); group `streams/stream_<i>` per output stream with the
+  record in progress: attributes `pending`, `key` (typed JSON: step index, datetime, date,
+  (year, month), year), `end`, and its partial buffers (subgroups and variables with their
+  own dimensions, names in a `name` attribute, so any output variable name works). Read
+  with netCDF masking off: NaN, inf and fill values come back as written.
+- **No gridcell dimension:** the gridcell sums of a record in progress are buffers with
+  their own dimensions (`gridcell:<variable>`); the state has none.
+- **Resume checks** (unchanged, plus the calendar): the restart's time must be a step of the
+  run, its layout and state shapes must match, and its calendar must be the run's.
+- `clm_ml.driver.write_restart`/`read_restart` are the netCDF functions (the run loop is
+  unchanged); `Run.restart_path` ends in `.nc`.
+- **Tests:** `tests/clm_ml/test_restart_file.py` (exact round trip of every field, record
+  key type, NaN/inf/1e36, `None` pending records; the schema; the `.prev` fallback);
+  `tests/regression/test_restart.py` (resume bit for bit through the netCDF file; padded
+  fixed-length chunks equal one chunk).
+Why: D2 (restarts as netCDF): readable with standard tools, no pickled Python objects.
+- **Review (independent, 7.5):** no blocking bugs (an end-to-end probe with padded and
+  excluded patches and five stream types resumed bit for bit). Applied: each stream's
+  `name` and `statistic` are written and checked on resume (a changed stream list was
+  silently mismatched); stream buffers have dimensions `record`, `patch` or `gridcell`, then
+  `axis_<k>`, and the output variable's `units`; a pickle restart of formats 1-5 is refused
+  with a clear message; reading `.prev` instead of the file prints a warning; the calendar
+  check comes before any date arithmetic; the layout is written as plain integers.

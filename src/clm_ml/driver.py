@@ -21,7 +21,6 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import os
-import pickle
 import time as _time
 from pathlib import Path
 from typing import Optional
@@ -32,6 +31,8 @@ import numpy as np
 
 from clm_ml import calendar
 from clm_ml.checks import BALANCE_CHECKS, ModelError
+from clm_ml.io.restart import FORMAT_VERSION as RESTART_VERSION
+from clm_ml.io.restart import read_restart, write_restart  # noqa: F401  (netCDF restarts, 7.5)
 
 jax.config.update("jax_enable_x64", True)
 
@@ -854,42 +855,6 @@ def restart_boundary(start: datetime.datetime, end: datetime.datetime, every) ->
         month += 1
 
 
-# 5: the first step is an ordinary step of the first chunk (Phase 7.4; chunks from step 0)
-RESTART_VERSION = 5
-
-
-def write_restart(path: Path, content: dict) -> None:
-    """Write ``content`` beside the old restart and rename it over it, keeping the previous
-    one as ``<path>.prev``."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    with open(tmp, "wb") as fh:
-        pickle.dump(content, fh, protocol=pickle.HIGHEST_PROTOCOL)
-    if path.exists():
-        os.replace(path, path.with_name(path.name + ".prev"))
-    os.replace(tmp, path)
-
-
-def read_restart(path: Path) -> dict:
-    """A restart written by :func:`write_restart`; falls back to ``<path>.prev``."""
-    path = Path(path)
-    errors = []
-    for candidate in (path, path.with_name(path.name + ".prev")):
-        try:
-            with open(candidate, "rb") as fh:
-                content = pickle.load(fh)
-            if content.get("version") != RESTART_VERSION:
-                raise ValueError(
-                    f"restart format version {content.get('version')}, this code reads "
-                    f"version {RESTART_VERSION} (write it again with the current code)"
-                )
-            return content
-        except Exception as exc:  # noqa: BLE001 - report every candidate
-            errors.append(f"{candidate}: {exc}")
-    raise RuntimeError("no readable restart: " + "; ".join(errors))
-
-
 def gridcell_variables(names, level) -> tuple:
     """The variables of a stream accumulated per gridcell inside the chunk (level
     ``gridcell``): named variables without a ``layer`` axis."""
@@ -1105,6 +1070,11 @@ def run_streams(
     state = sim.state0
     first = 0
     if restart is not None:
+        if restart.get("calendar", sim.calendar) != sim.calendar:
+            raise ValueError(
+                f"restart written with the {restart['calendar']} calendar, this run uses "
+                f"{sim.calendar}"
+            )
         elapsed = calendar.seconds_between(sim.start, restart["time"], sim.calendar)
         first = int(round(elapsed / step_seconds))
         if first * step_seconds != elapsed or not 0 <= first < sim.n_steps:
@@ -1129,6 +1099,14 @@ def run_streams(
                 )
         state = restored
         if first > 0:  # continuing the same run: restore the output bookkeeping
+            saved = restart.get("streams")
+            mine = [(sp.name, sp.statistic) for sp in streams]
+            if saved is not None and (len(saved) != len(mine) or any(
+                    a is not None and tuple(a) != b for a, b in zip(saved, mine))):  # fmt: skip
+                raise ValueError(
+                    f"restart written with output streams {saved}, this run has {mine} (the "
+                    "streams of a continued run must be the same)"
+                )
             alive = np.asarray(restart.get("alive", alive), dtype=bool)
             for collector, pending in zip(collectors, restart["collectors"]):
                 collector._pending = pending
@@ -1215,10 +1193,12 @@ def run_streams(
                         "time": end,
                         "state": jax.tree.map(np.asarray, state),
                         "collectors": [col._pending for col in collectors],
+                        "streams": [(sp.name, sp.statistic) for sp in streams],
                         "alive": alive.copy(),
                         "layout": sim.layout,
                         "extra": save_extra() if save_extra is not None else None,
                     },
+                    calendar=sim.calendar,
                 )
     finally:
         reader.shutdown(cancel_futures=True)

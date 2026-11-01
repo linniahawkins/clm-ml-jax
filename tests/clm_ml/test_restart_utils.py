@@ -1,4 +1,4 @@
-"""Health checks, restart boundaries and restart files (clm_ml.driver)."""
+"""Health checks and restart boundaries (clm_ml.driver; restart files: test_restart_file)."""
 
 import datetime as dt
 
@@ -6,11 +6,8 @@ import numpy as np
 import pytest
 
 from clm_ml.driver import (
-    RESTART_VERSION,
     check_health,
-    read_restart,
     restart_boundary,
-    write_restart,
 )
 from clm_ml.state import CanopyState, PatchLayers, SoilState, State
 
@@ -60,13 +57,3 @@ def test_restart_boundaries():
     assert not restart_boundary(t(2010, 5, 25), t(2010, 6, 4), (3, "month"))
     assert not restart_boundary(t(2010, 6, 1, 0, 30), t(2010, 6, 11), (1, "month"))
     assert not restart_boundary(t(2009, 12, 25), t(2010, 1, 4), None)
-
-
-def test_restart_file_keeps_previous_and_falls_back(tmp_path):
-    path = tmp_path / "restart.pkl"
-    write_restart(path, {"version": RESTART_VERSION, "n": 1})
-    write_restart(path, {"version": RESTART_VERSION, "n": 2})
-    assert read_restart(path)["n"] == 2
-    assert read_restart(tmp_path / "restart.pkl.prev")["n"] == 1
-    path.write_bytes(b"truncated")  # e.g. killed while writing
-    assert read_restart(path)["n"] == 1  # falls back to .prev
