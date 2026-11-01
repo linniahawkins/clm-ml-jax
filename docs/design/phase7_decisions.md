@@ -673,3 +673,68 @@ Why: the scope's aim (physics on plain arrays by process, variants by name); the
 arithmetic kept so nothing moves.
 Alternatives: tableaus as a pytree argument of the step (they are constants of the method,
 which is static); a differentiable `kn` (interface change, for the maintainer if wanted).
+
+### C19. Process 10 split into four commits; 10a: `clm_ml/physics/canopy.py` (7.2, 2026-10-31)
+Context: scope 7.2 process 10 (the step driver; the legacy container leaves the step; the
+psihat fix, C15). The progress log asked for a plan and a split first. `MLCanopyFluxes`
+today: the step's set-up on the containers (CLM variables, plant area, plant hydraulics,
+soil humidity), the sub-step loop of processes 3-9 through their container adapters, the
+averages over the sub-steps, `CanopyFluxesDiagnostics`, the sunlit/shaded merge; around it
+`clm_drv` (the soil routines) and the boundary conversions template + `State` -> containers
+-> `StepState` in `offline_executable/main.py`.
+Decision: **four sub-steps, each its own commit (and session if needed):**
+- **10a (this commit):** the step-level pieces of `MLCanopyFluxesMod` on 0-based arrays in
+  `clm_ml/physics/canopy.py`: `plant_area` (with the issue-14 floor), `soil_surface_humidity`,
+  the sub-step averages (`SubstepFluxes`, `zero_sums`, `accumulate`, `average`,
+  `canopy_top_latent_heat`), `canopy_totals` (Fortran `CanopyFluxesDiagnostics`; inputs the
+  averages and `CanopyLeaves`), `merge_sun_shade`. Adapters in `clm_ml/legacy/canopy.py`
+  with `DECLARED` reads/writes; `_MLAccumulateFluxes`, `_MLScaleAndWriteBack`,
+  `_CanopyFluxesDiagnostics` and the inline plant-area, humidity and merge code deleted.
+- **10b:** the sub-step on plain arrays: `canopy.substep` calling the physics of processes
+  3-9 directly on a 0-based within-step carry (the RK stages, the forcing interpolation, the
+  sums); `MLCanopyFluxes` converts its container to that carry once per step and back once.
+  The process replay (`process_io`, which replays the container adapters) is re-recorded in
+  the new structure or retired then (scope §3.2), and the adapters of processes 3-9 go or
+  shrink to what the first step still needs.
+- **10c:** the step on `StepState`: the soil routines of `clm_drv`, `_GetCLMVar` (forcing,
+  solar zenith) and the step's set-up as one step function on `State` + step inputs +
+  per-patch constants (a 0-based pytree extracted once from the template; setup stays legacy
+  until 7.4); `instances_with_state`/`step_state_from_instances` leave the time step (kept
+  for the first step and the view); the legacy view fills the entries the state does not
+  hold (index 0, padding) from the template.
+- **10d:** the psihat tables as a run-time input of the compiled step (C15, maintainer).
+Then the package-end tests (CPU gradient tier, independent review, timing against `p71-*`).
+
+10a details:
+- **D6:** `canopy_totals` returns only what outputs, checks and the CLM coupling read; the
+  sunlit/shaded longwave and water-vapor totals, `etveg` and the 23 layer source and mean
+  profiles are no longer computed (listed in `phase7_removed_diagnostics.md`).
+- **Unused legacy slots kept as recorded:** the reference stores the raw legacy arrays,
+  index 0 included, and later steps take index 0 from the first step's containers. The
+  legacy averages covered index 0 of the leaf fields (six copies of the 1e36 fill average to
+  9.999999999999999e35), and the merge copied leaf index 0 into the `*_hist_leaf` fields.
+  The adapter therefore accumulates the leaf fields' full legacy slabs (`zero_based` gives
+  the physics its 0-based part) and writes leaf index 0 of the history fields. Junk, but
+  recorded junk: changing it would change the reference for no physical reason. It goes
+  when the reference is re-recorded in the new names (7.6).
+- **Round-off change, reference re-recorded (D7):** eager (op by op) the new
+  `MLCanopyFluxes` equals the old one in every container field over CHATS7 steps 1-7, except
+  the dropped diagnostics (`probe710/eager.py`). The compiled chunk differs in 4 fields from
+  the start: `albcan_canopy` (12 values), `gppveg_canopy`, `anet_leaf` (3 values at step 0),
+  `rnet_canopy` (3 values), all at the last bit (worst 2e-16 relative; noise twin passes:
+  `albcan` is not moved by the twins but is within the test's relative floor). Probably
+  fused multiply-adds now formed between the averaging and the totals, where the legacy
+  container stores separated them (C18 pattern; not checked in the HLO). An
+  `optimization_barrier` on the averages before the totals (as Fortran stores them) is kept:
+  without it 54 fields differed at round-off (worst 1.7x the twin spread); reading the
+  averages back from the container instead (the legacy data path) also gave 53 fields.
+  Reproducing the old packed accumulators in the adapter was not tried: 10b changes the
+  sub-step structure anyway. Reference and twins re-recorded in this commit (only the 4
+  fields change).
+Why: the progress log's plan-first instruction; one reviewable commit per sub-step, each
+bit for bit or a recorded round-off change; 10a moves the pieces that are independent of the
+sub-step carry, so 10b and 10c only change the data flow.
+Alternatives: one large commit for the whole driver (unreviewable, hard to bisect); keeping
+the removed diagnostics (D6 says drop them when their process moves); faking index 0 in the
+view now (the view takes index 0 from the template, which is the first step's containers:
+the first step must produce the recorded values until 7.4).

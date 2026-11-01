@@ -231,25 +231,42 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   (fixed, above); bit-for-bit + noise twin 177 pass (1.8 min); process replay 7 pass;
   focused CPU gradient test 1 pass (2.8 min).
 
+- **Process 10a, `clm_ml/physics/canopy.py` (C19): round-off change, reference
+  re-recorded.** Process 10 planned and split into 10a-10d (C19). 10a: the step-level pieces
+  of `MLCanopyFluxesMod` on 0-based arrays: `plant_area`, `soil_surface_humidity`, the
+  sub-step averages (`SubstepFluxes`, `accumulate`, `average`), `canopy_totals` (Fortran
+  `CanopyFluxesDiagnostics`; only what outputs, checks and the CLM coupling read: 5 totals
+  and 23 layer profiles no longer computed, listed in `phase7_removed_diagnostics.md`),
+  `merge_sun_shade`; adapters in `clm_ml/legacy/canopy.py` (`DECLARED`); the old helpers
+  deleted (`MLCanopyFluxesMod` 2075 -> ~1000 lines). The adapter keeps the unused legacy
+  index 0 of the leaf fields as recorded (averaged fill values; leaf index 0 of the history
+  fields). Eager bit for bit with the old driver over steps 1-7 (`probe710/eager.py`); the
+  compiled chunk differs in 4 fields at the last bit (`albcan`, `gppveg`, `anet_leaf`,
+  `rnet`; with an `optimization_barrier` on the averages, without it 54 fields). New
+  `tests/clm_ml/test_physics_canopy.py` (12). Tests: lint; `tests/clm_ml` + fast golden 415
+  pass; before re-recording: noise twin 88 pass, bit for bit 4 fail; after: bit-for-bit +
+  noise twin 177 pass (1.0 min); only the 4 fields changed in the reference.
+
 ## Next (resume here)
 
-**Package 7.2 in progress. Session 1 (2026-10-30) did processes 1-2, session 2 (2026-10-31)
-processes 3-4 (bit for bit), session 3 (2026-10-31) process 5 (round-off, reference
-re-recorded, C14), session 4 (2026-10-31) process 6 (turbulence, bit for bit, C15), session 5
-(2026-10-31) process 7 (boundary layer and photosynthesis, round-off, reference re-recorded,
-C16), session 6 (2026-10-31) process 8 (flux-profile solution and water vapor, round-off,
-reference re-recorded, C17), session 7 (2026-10-31) process 9 (nitrogen profile and
-Runge-Kutta, bit for bit, C18); last commit = the one that wrote this.** Next session:
-**process 10** (scope table): `canopy.py`, the step driver (`MLCanopyFluxesMod`:
-`MLCanopyFluxes`, the sub-step loop and RK stages, `_MLAccumulateFluxes`,
-`_CanopyFluxesDiagnostics`, the sun/shade merge); the legacy container leaves the step here
-(the step reads and returns `StepState` directly; `clm_ml/legacy/state.py` conversions and
-the adapters of processes 2-9 go or shrink), plus the fixes listed below ("Fixes to make at
-process 10"). Probably more than one session: plan it first and split it (e.g. driver on
-plain arrays with the adapters still in place, then removing the container from the step,
-then the psihat fix), each ending at a commit. It is the last process of 7.2: package-end
-tests after it (CPU gradient tier, independent review, timing against `p71-*`), then stop
-and report to the maintainer.
+**Package 7.2 in progress. Sessions 1-7 (2026-10-30/31) did processes 1-9; session 8
+(2026-10-31) planned process 10, split it into 10a-10d (C19) and did 10a (step-level canopy
+pieces, `clm_ml/physics/canopy.py`, round-off, reference re-recorded); last commit = the one
+that wrote this.** Next session: **process 10b** (C19): the canopy sub-step on plain arrays:
+`clm_ml/physics/canopy.py::substep` (or a new `canopy_step.py`) calling the physics of
+processes 3-9 directly (`atm_forcing`, `solar_radiation`, `nitrogen_profile`, `canopy_water`,
+`longwave`, `turbulence`, `leaf_boundary_layer`, `photosynthesis`, `flux_profile`,
+`plant_hydraulics`, `integrators`) on a 0-based within-step carry (the `*_bef` values, RK
+increments, the sub-step results the next routine reads: see the "Read by" column of
+`phase7_removed_diagnostics.md` and each adapter's `DECLARED`), with the sums of
+`SubstepFluxes`; `MLCanopyFluxes` converts the container to the carry once per step and
+back once (the adapters' write rules: layers in use, padding kept, the recorded index-0
+junk of C19). Expect a round-off change (C10 pattern: probe eager first, as
+`probe710/eager.py`, then re-record). The process replay replays the container adapters:
+re-record it in the new structure or retire it (scope §3.2; decide and log). Then 10c (the
+step on `StepState`, C19) and 10d (psihat tables as a step input, below); then the
+package-end tests (CPU gradient tier, independent review, timing against `p71-*`), stop and
+report to the maintainer.
 
 Same pattern as processes 2-9 (C10, C12-C18): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
@@ -286,7 +303,7 @@ done and ticked in the process-10 commit:
 
 Open for the maintainer: C10 and C14 (reference re-recorded for the soil and process-5 moves,
 round-off only), C15 (the `optimization_barrier`; the psihat tables as a step input is
-scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), C16 (reference re-recorded for process 7, round-off only; process replay compares fields zero to round-off absolutely). C17 (reference re-recorded for process 8, round-off only; `well_mixed` refused by `clm_ml.run`), C18 (process 9, bit for bit; `kn_val` still a static option), open issue 20 (Fortran's implicit-solution checks never run in the step: record them in `BALANCE_CHECKS`?). Earlier: C4, the removed
+scheduled for process 10, above), open issue 19 (soil ice index in `SoilResistance`, latent), C16 (reference re-recorded for process 7, round-off only; process replay compares fields zero to round-off absolutely). C17 (reference re-recorded for process 8, round-off only; `well_mixed` refused by `clm_ml.run`), C18 (process 9, bit for bit; `kn_val` still a static option), C19 (process 10 split into 10a-10d; 10a re-recorded the reference, 4 fields at the last bit; 28 diagnostics no longer computed), open issue 20 (Fortran's implicit-solution checks never run in the step: record them in `BALANCE_CHECKS`?). Earlier: C4, the removed
 diagnostics, C5-C8. Timing baseline for the end of 7.2: `p71-*` in
 `timing/results_model.jsonl` (forward ~27-28 ms/step, gradient ~604 ms/step).
 

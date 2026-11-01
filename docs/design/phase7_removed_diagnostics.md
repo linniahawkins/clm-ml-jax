@@ -155,3 +155,23 @@ Meanings are from the container's comments (`MLCanopyFluxesType`, CLM-ml v2
 | `t_ref2m_patch` | 2-m air temperature (K; `temperature` container, not set by CLM-ml) | TemperatureType | MLCanopyFluxesMod |
 
 133 fields (11 read by no module).
+
+## Computation dropped in Phase 7.2
+
+- **Process 10a (2026-10-31, `clm_ml/physics/canopy.py::canopy_totals`, Fortran
+  `CanopyFluxesDiagnostics`; C19):** no longer computed (the container fields keep their
+  setup values): `lwvegsun_canopy`, `lwvegsha_canopy`, `etveg_canopy`, `etvegsun_canopy`,
+  `etvegsha_canopy`; the layer sources `swsrc_profile` (shortwave, by band; missing from the
+  table above), `lwsrc_profile`, `rnsrc_profile`, `stsrc_profile`, `shsrc_profile`,
+  `lhsrc_profile`, `etsrc_profile`, `trsrc_profile`, `evsrc_profile`, `fco2src_profile`
+  (layer mean per leaf area times the layer's plant area; CO2 also times the green fraction
+  `fdry / (1 - fwet)`); the layer means per leaf area `swleaf_mean_profile` (by band; missing
+  from the table above), `lwleaf_mean_profile`, `rnleaf_mean_profile`,
+  `stleaf_mean_profile`, `shleaf_mean_profile`, `lhleaf_mean_profile`,
+  `etleaf_mean_profile`, `trleaf_mean_profile`, `evleaf_mean_profile`, `fco2_mean_profile`,
+  `apar_mean_profile`, `gs_mean_profile`, `tleaf_mean_profile` (sunlit value times
+  `fracsun` plus shaded value times `1 - fracsun`, in layers with plant area). Still
+  computed: `lwveg_canopy` (energy checks), `etflx_canopy` (CLM coupling,
+  `mlcan_to_clm = 1`) and `lwp_mean_profile` (output). To add one back: a field of
+  `CanopyTotals` computed as written here (the formulas are in the git history of
+  `MLCanopyFluxesMod.py::_CanopyFluxesDiagnostics`, before commit "Phase 7.2 process 10a").
