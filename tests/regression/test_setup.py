@@ -11,7 +11,10 @@ counts. The reference (``reference/setup_7patches.npz``) holds the legacy setup'
 each patch's legacy setup with its first-step initialization (``worker.setup_batch_legacy``)
 read through ``patch_constants`` and ``state_from_instances``, and the legacy readers'
 forcing of 48 steps, recorded at commit 1f1b651 (Phase 7.4e) before the legacy setup was
-deleted (``probe74d/record_setup.py``). The forcing's ``soil_water`` is the reference's
+deleted (``probe74d/record_setup.py``). Since the fix of issue 21 (2026-11-01) the soil
+hydraulic and thermal values of the tower given only a texture class (G3) differ from the
+reference on purpose (their own class's values: ``tests/clm_ml/test_setup_soil.py``); every
+other value is compared bit for bit. The forcing's ``soil_water`` is the reference's
 ``soil_water_clm50`` (renamed by decision C35: CLM soil layer structure only).
 """
 
@@ -74,10 +77,20 @@ def compare(name, a, b):
     if a.shape != b.shape or not np.array_equal(a, b, equal_nan=True):
         bad += 1
         print("DIFF", name, a.shape, b.shape, a.dtype, b.dtype)
+# issue 21 (fixed 2026-11-01): G3 gives a texture class only; its columns' hydraulic and
+# thermal values now come from their own class (the legacy reference took the next class's)
+ISSUE21 = {{"constants.watsat", "constants.sucsat", "constants.bsw", "constants.hksat",
+           "constants.tkmg", "constants.tkdry"}}
+g3 = np.asarray(gi) == 2
 for name, tree in (("constants", new.constants), ("state", new.state)):
     for path, b in jax.tree_util.tree_leaves_with_path(tree):
         key = name + jax.tree_util.keystr(path)
-        compare(key, ref[key], b)
+        if key in ISSUE21:
+            compare(key, ref[key][~g3], np.asarray(b)[~g3])  # every other column unchanged
+            if np.array_equal(ref[key][g3], np.asarray(b)[g3]):
+                bad += 1; print("ISSUE 21 NOT FIXED", key)
+        else:
+            compare(key, ref[key], b)
 print("c3 equal:", ref["c3"].tolist() == new.c3.tolist())
 xbad = 0
 # the reference's names before C35 (CLM soil only): soil_water was soil_water_clm50, and its

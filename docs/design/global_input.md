@@ -341,7 +341,8 @@ Fortran); use the leaf water potential outputs instead.
     15 as array code and the unit test runs them. To check them in every run they would be
     added to `BALANCE_CHECKS` (the state's `balance_error` grows, the reference is
     re-recorded): a decision for the maintainer.
-21. **Soil texture classes are looked up one class too far** (found in Phase 7.4, 2026-10-31;
+21. **Fixed 2026-11-01 (decision 92 in `decisions.md`).** **Soil texture classes are looked
+    up one class too far** (found in Phase 7.4, 2026-10-31;
     a legacy translation bug, not Phase 6b). `SoilStateInitTimeConst` finds a towers.yaml
     `texture_class` as a 1-based class number and indexes the 0-based Python tables with it,
     so "loam" gets the sand/clay and Clapp-Hornberger values of "sandy clay loam", and

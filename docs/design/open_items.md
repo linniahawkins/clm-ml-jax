@@ -22,7 +22,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | ID | Title | Kind | Target | Decides |
 |---|---|---|---|---|
 | **1. Science issues needing the maintainer's decision** |||||
-| O1 | Soil texture class looked up one class too far | science issue (bug) | 8a | M |
+| O1 | ~~Soil texture class looked up one class too far~~ (closed: decision 92) | science issue (bug) | closed | M |
 | O2 | Missing `organic_matter` gives a negative organic fraction | science issue (bug) | 8a | M |
 | O3 | Soil ice read one level too deep in `SoilResistance` | science issue (bug, latent) | 8a | M |
 | O4 | Fortran's checks of the implicit flux-profile solution not run | science issue | 8a | M |
@@ -104,6 +104,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 ## 1. Science issues needing the maintainer's decision
 
 ### O1. Soil texture class looked up one class too far
+- **Closed 2026-11-01:** fixed (decision 92; `tests/clm_ml/test_setup_soil.py`).
 - **Kind:** science issue (translation bug) · **Target:** 8a · **Decides:** M
 - **What:** a tower given only `texture_class` (no sand/clay percentages) gets the next
   class's sand, clay and Clapp-Hornberger values ("loam" gets "sandy clay loam"), and
@@ -625,6 +626,8 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 ---
 
 ## Recently closed (for reference, not open)
+
+- Soil texture classes take their own values (O1, issue 21; decision 92; 2026-11-01).
 
 - Experiment folders implemented: four complete files, `clm-ml new`/`upgrade`, presets,
   configuration copy with each run's output (O70; decision 91; 2026-11-01).

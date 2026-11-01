@@ -83,11 +83,9 @@ def soil_properties(sand, clay, organic, texture, z, nlevsoi: int):
     """The hydraulic and thermal properties of each column, ``{name: (C, nlevgrnd)}``
     (``watsat``, ``sucsat`` mm, ``hksat`` mm/s, ``bsw``, ``tkmg``, ``tkdry``, ``csol``), from
     its sand and clay (percent; NaN: from the texture class ``texture``) and organic matter
-    (kg m-3); ``z`` (nlevgrnd,) node depths.
-
-    Open issue (``docs/design/global_input.md``, issue 21): the legacy translation looks up a
-    texture class's sand, clay and hydraulic values one class too far (the 1-based class
-    indexes 0-based tables); kept here bit for bit until the maintainer decides.
+    (kg m-3); ``z`` (nlevgrnd,) node depths. A texture class's values are the row of its
+    class in the tables (issue 21, fixed 2026-11-01: the legacy translation took the next
+    class's row, as Fortran's 1-based class number indexed the 0-based tables).
 
     Fortran reference: SoilStateInitTimeConstMod.F90::SoilStateInitTimeConst."""
     csol_bedrock = 2.0e6  # clm_varcon
@@ -100,8 +98,9 @@ def soil_properties(sand, clay, organic, texture, z, nlevsoi: int):
         if not (np.isnan(sand[c]) or np.isnan(clay[c])):
             tex, cl, s = 0, float(clay[c]), float(sand[c])
         else:
-            tex = texture_index(texture[c])
-            cl, s = float(tables.CLAY_TEX[tex]) * 100.0, float(tables.SAND_TEX[tex]) * 100.0
+            tex = texture_index(texture[c])  # 1-based, as Fortran; the tables' row is tex - 1
+            cl = float(tables.CLAY_TEX[tex - 1]) * 100.0
+            s = float(tables.SAND_TEX[tex - 1]) * 100.0
         for j in range(1, n + 1):
             zj = float(z[j - 1])
             if zj > 0.5:
@@ -112,10 +111,10 @@ def soil_properties(sand, clay, organic, texture, z, nlevsoi: int):
                 hksat = 0.0070556 * (10.0 ** (-0.884 + 0.0153 * s))
                 bsw = 2.91 + 0.159 * cl
             else:
-                watsat = float(tables.WATSAT_TEX[tex])
-                sucsat = -float(tables.SMPSAT_TEX[tex])
-                hksat = float(tables.HKSAT_TEX[tex]) / 60.0
-                bsw = float(tables.BSW_TEX[tex])
+                watsat = float(tables.WATSAT_TEX[tex - 1])
+                sucsat = -float(tables.SMPSAT_TEX[tex - 1])
+                hksat = float(tables.HKSAT_TEX[tex - 1]) / 60.0
+                bsw = float(tables.BSW_TEX[tex - 1])
             z_ratio = zj / zsapric
             om_watsat = max(0.93 - 0.1 * z_ratio, 0.83)
             om_sucsat = min(10.3 - 0.2 * z_ratio, 10.1)

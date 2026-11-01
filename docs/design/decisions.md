@@ -581,12 +581,22 @@ adding the implicit-solution checks changes the recorded state (a decision for t
 Source: plan §6.8; C17; C21; open issue 20.
 
 **55. Legacy translation quirks kept bit for bit, pending decisions**
-2026-10-31 · Phase 7.2, 7.4 · implementation, recorded · open (issues 19, 21, 22) · Departure from Fortran: yes
+2026-10-31 · Phase 7.2, 7.4 · implementation, recorded · open (issues 19, 22; 21 fixed by 92) · Departure from Fortran: yes
 Kept unchanged in refactors and listed as open issues: soil ice read one level too deep in
 `SoilResistance` (19; no effect while ice is 0); soil texture classes looked up one class too far
 (21); a missing `organic_matter` read as −999, giving a negative organic fraction (22).
 Reason: fixing them is a science change, not part of a refactor.
 Source: C14; C27; `global_input.md` issues 19, 21, 22.
+
+**92. Soil texture classes take their own values (issue 21 fixed)**
+2026-11-01 · Phase 8a · maintainer · in force · Departure from Fortran: no (restores Fortran)
+A tower given a USDA texture class (no sand and clay percentages) gets that class's sand,
+clay and Clapp-Hornberger values (`SoilTexMod.F90`); the legacy translation indexed the
+0-based tables with Fortran's 1-based class number, so each class got the next class's values
+and "clay" failed. Changes only the soils of towers given a class (CHATS7 and grid runs give
+percentages: unchanged, bit for bit).
+Reason: a translation error; the model must compute what CLM-ml v2 computes.
+Source: `global_input.md` issue 21; open_items O1; C27.
 
 **56. Soil colour class 0 refused**
 2026-11-01 · Phase 7.4 review · implementation · in force · Departure from Fortran: (unclear: the legacy JAX code wrapped class 0 to class 20; whether Fortran does was not checked)
