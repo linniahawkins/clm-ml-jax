@@ -7,7 +7,7 @@ reproduce the Fortran CLM-ml v2 results, so changes are tested against them.
 ## Development setup
 
 ```bash
-git clone https://github.com/AyaLahlou/clm-ml-jax.git
+git clone https://github.com/linniahawkins/clm-ml-jax.git
 cd clm-ml-jax
 pip install -e ".[dev]"      # dev extras: pytest, pytest-cov, black, ruff
 
@@ -107,7 +107,7 @@ questions in `docs/design/open_items.md` in the same commit as the change.
 
 ## Reporting bugs
 
-Open an issue at https://github.com/AyaLahlou/clm-ml-jax/issues with:
+Open an issue at https://github.com/linniahawkins/clm-ml-jax/issues with:
 - a minimal experiment folder or script that reproduces it;
 - the Python and JAX versions (`python --version`, `python -c "import jax; print(jax.__version__)"`);
 - the expected and actual output.

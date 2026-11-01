@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below, and the CLM-ml v2 model it translates (preferred-citation and references)."
+title: "CLM-ML-JAX: the CLM-ml v2 multilayer canopy model in JAX"
+authors:
+  - family-names: Hawkins
+    given-names: Linnia
+  - family-names: Lahlou
+    given-names: Aya
+repository-code: "https://github.com/linniahawkins/clm-ml-jax"
+license: BSD-3-Clause
+version: 0.1.0
+references:
+  - type: article
+    title: "Beyond surface fluxes: Observational and computational needs of multilayer canopy models - A walnut orchard test case"
+    authors:
+      - family-names: Bonan
+        given-names: Gordon B.
+      - family-names: Burns
+        given-names: Sean P.
+      - family-names: Patton
+        given-names: Edward G.
+    journal: "Agricultural and Forest Meteorology"
+    volume: 378
+    start: 110960
+    year: 2026
+    doi: "10.1016/j.agrformet.2025.110960"
+  - type: article
+    title: "Moving beyond the incorrect but useful paradigm: reevaluating big-leaf and multilayer plant canopies to model biosphere-atmosphere fluxes - a review"
+    authors:
+      - family-names: Bonan
+        given-names: Gordon B.
+      - family-names: Patton
+        given-names: Edward G.
+      - family-names: Finnigan
+        given-names: John J.
+      - family-names: Baldocchi
+        given-names: Dennis D.
+      - family-names: Harman
+        given-names: Ian N.
+    journal: "Agricultural and Forest Meteorology"
+    volume: 306
+    start: 108435
+    year: 2021
+    doi: "10.1016/j.agrformet.2021.108435"

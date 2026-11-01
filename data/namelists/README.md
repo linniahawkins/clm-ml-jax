@@ -22,8 +22,5 @@ translate (e.g. `clm_phys = 'CLM4_5'`). The ready-made equivalents of the CHATS7
 | `nl.CHATS7.1day` | 1 May 2007, one day |
 | `nl.CHATS7.50steps` | 1 May 2007, 50 steps (the regression reference) |
 | `nl.CHATS7.05.2007` | May 2007 (the Fortran comparison) |
-| `nl.CHATS7.04.2007` | April 2007 (30 days) |
-| `nl.CHATS7.debug`, `nl.CHATS7.test3` | 1 May 2007, 2 and 3 steps (short Fortran test runs) |
-| `nl.US-UMB.test` | a US-UMB test (its files are not in the repository) |
 
 The former `clm-ml-offline` driver was retired in Phase 7.

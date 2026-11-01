@@ -321,7 +321,8 @@ Fortran); use the leaf water potential outputs instead.
     `photosynthesis.WUE_SOLVER`); the option stays (D9); a traceable Brent validated against
     Fortran is listed under "After Phase 8: unsupported variants" in the plan (Phase 7
     decision C16).
-19. **Soil ice read one level too deep in `SoilResistance`** (found in Phase 7.2 process 5,
+19. **Fixed 2026-11-01 (decision 95 in `decisions.md`).** **Soil ice read one level too deep in
+    `SoilResistance`** (found in Phase 7.2 process 5,
     2026-10-31; not a Phase 6b issue). Fortran `MLPlantHydraulicsMod.F90::SoilResistance`
     sets a level's maximum uptake to 0 if `h2osoi_ice(c,j) > 0`. The JAX translation reads
     `h2osoi_ice_col[c, j]`, but that array holds level `j` at index `j - 1` (as

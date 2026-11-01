@@ -67,3 +67,12 @@ def test_solar_zenith_matches_formula():
     # at night the cosine is floored at 0.01
     night = float(S.solar_zenith(140.25, lat, lon, opts))
     assert night <= math.acos(0.01) + 1e-12
+
+
+def test_soil_level_ice_is_the_levels_own():
+    """Issue 19: root uptake stops in a frozen level, read from that level (Fortran
+    SoilResistance h2osoi_ice(c,j)), not from the level below it."""
+    ice = np.zeros(25)
+    ice[3] = 1.0  # level 4 (0-based index 3) frozen
+    out = np.asarray(S.soil_level_ice(ice, 20))
+    assert out.shape == (20,) and out[3] == 1.0 and out.sum() == 1.0

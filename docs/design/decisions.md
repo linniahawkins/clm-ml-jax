@@ -293,6 +293,40 @@ bit and noise twin unchanged.
 Source: maintainer, 2026-11-01 (strict with upgrade, fixed names; names kept, data interval in
 run.yaml, test-only settings hidden).
 
+**96. The public API: five names**
+2026-11-01 · Phase 8a · maintainer · in force · Departure from Fortran: no
+`import clm_ml` offers `load_experiment`, `new_experiment`, `upgrade_experiment`,
+`Experiment` and `Model`; they are documented and stable from 1.0. Everything else
+(`clm_ml.processes`, `driver`, `setup`, ...) is internal and may change.
+Reason: enough for runs, presets, upgrades and calibration; a small surface to keep stable.
+Source: open_items O21.
+
+**97. Authorship, citation and repository**
+2026-11-01 · Phase 8a · maintainer · in force · Departure from Fortran: n/a
+Authors: Linnia Hawkins (lead) and Aya Lahlou (the original translation); the canonical
+repository is github.com/linniahawkins/clm-ml-jax. `CITATION.cff`, the README citation and
+badges, `pyproject.toml` authors and the LICENSE copyright (2024-2026, both) say so; users
+also cite the CLM-ml v2 papers (Bonan et al. 2021, 2026).
+Reason: the maintainer's decision.
+Source: open_items O23, O37.
+
+**98. Release: `main` at the end of 8a, 1.0.0 at the end of 8b, GitHub only**
+2026-11-01 · Phase 8a · maintainer · decided (the `main` move at the end of 8a) · Departure from Fortran: n/a
+`main` is fast-forwarded to the phase branch when 8a closes (no pull request; it holds nothing
+of its own); version 1.0.0 is tagged at the end of 8b as a GitHub release; no PyPI for now
+(install with pip from git).
+Reason: the maintainer's decision.
+Source: open_items O24.
+
+**99. Stale files deleted**
+2026-11-01 · Phase 8a · maintainer · completed · Departure from Fortran: n/a
+`.github/copilot-instructions.md` (described deleted packages; CLAUDE.md is the guidance for
+AI assistants) and the unused namelists `nl.CHATS7.debug`, `nl.CHATS7.test3`,
+`nl.CHATS7.04.2007` and `nl.US-UMB.test` (scratch paths) are deleted; the tests use
+`nl.CHATS7.1day`, `nl.CHATS7.50steps` and `nl.CHATS7.05.2007`.
+Reason: the maintainer's decision.
+Source: open_items O36, O40.
+
 ## C. Spatial structure: gridcells, patches, layers, soil
 
 **21. One tower up to global**
@@ -581,7 +615,7 @@ adding the implicit-solution checks changes the recorded state (a decision for t
 Source: plan §6.8; C17; C21; open issue 20.
 
 **55. Legacy translation quirks kept bit for bit, pending decisions**
-2026-10-31 · Phase 7.2, 7.4 · implementation, recorded · open (issues 19, 22; 21 fixed by 92) · Departure from Fortran: yes
+2026-10-31 · Phase 7.2, 7.4 · implementation, recorded · closed (21 fixed by 92, 22 by 93, 19 by 95) · Departure from Fortran: yes
 Kept unchanged in refactors and listed as open issues: soil ice read one level too deep in
 `SoilResistance` (19; no effect while ice is 0); soil texture classes looked up one class too far
 (21); a missing `organic_matter` read as −999, giving a negative organic fraction (22).
@@ -638,6 +672,14 @@ Fortran). Bit for bit; gradient tier passes.
 Reason: a setting that does nothing, a leftover 1-based layout and a wrong constant are traps
 for users and future code.
 Source: open_items O33, O65, O67.
+
+**95. Soil ice of the level itself stops its root uptake (issue 19 fixed)**
+2026-11-01 · Phase 8a · maintainer · in force · Departure from Fortran: no (restores Fortran)
+Root uptake from a soil level stops when that level holds ice (Fortran `SoilResistance`,
+`h2osoi_ice(c,j)`); the translation read the level below it (`step.soil_level_ice`). Bit for
+bit today: the prescribed soil water is all liquid (open issue 3).
+Reason: a translation error; matters once frozen soil is represented.
+Source: `global_input.md` issue 19; open_items O3.
 
 **56. Soil colour class 0 refused**
 2026-11-01 · Phase 7.4 review · implementation · in force · Departure from Fortran: (unclear: the legacy JAX code wrapped class 0 to class 20; whether Fortran does was not checked)

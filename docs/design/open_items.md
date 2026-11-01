@@ -24,10 +24,10 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | **1. Science issues needing the maintainer's decision** |||||
 | O1 | ~~Soil texture class looked up one class too far~~ (closed: decision 92) | science issue (bug) | closed | M |
 | O2 | ~~Missing `organic_matter` gives a negative organic fraction~~ (closed: decision 93, organic matter required) | science issue (bug) | closed | M |
-| O3 | Soil ice read one level too deep in `SoilResistance` | science issue (bug, latent) | 8a | M |
-| O4 | Fortran's checks of the implicit flux-profile solution not run | science issue | 8a | M |
-| O5 | Solver stopping rules differ from Fortran (Obukhov, gs, ci) | science issue (fidelity) | 8a decide / after 8 fix | M |
-| O6 | Latent heat outputs of transpiration and canopy evaporation use the last sub-step's latent heat | science issue | 8a | M |
+| O3 | ~~Soil ice read one level too deep in `SoilResistance`~~ (closed: decision 95) | science issue (bug, latent) | closed | M |
+| O4 | Fortran's checks of the implicit flux-profile solution not run | science issue | after 8 (maintainer 2026-11-01) | M |
+| O5 | Solver stopping rules differ from Fortran (Obukhov, gs, ci) | science issue (fidelity) | after 8 (maintainer 2026-11-01) | M |
+| O6 | Latent heat outputs of transpiration and canopy evaporation use the last sub-step's latent heat (deferred, maintainer 2026-11-01) | science issue | after 8 | M |
 | O7 | LAI and SAI gradients have a kink at the minimum plant area | science issue | after 8 | M |
 | O8 | Minimum plant area protects radiation only for clumping above ~0.55 | science issue | after 8 | M |
 | O9 | Frozen soil: all prescribed soil water is liquid | science issue | after 8 | M |
@@ -40,37 +40,37 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O16 | CO₂ profile reset covers the wrong levels (no effect today) | science issue (latent) | after 8 | M |
 | **2. Other maintainer decisions pending** |||||
 | O17 | ~~Repository organization: where the real configuration files live~~ (closed: decisions 89, 90) | maintainer decision | closed | M |
-| O18 | Norman and well-mixed code in git history only (D8 said "kept") | maintainer decision | 8a | M |
-| O19 | Options that only ever refuse (`wue_solver: brent`, `mlcan_to_clm`) | maintainer decision | 8a | M |
-| O20 | `nitrogen_decay_kn` is a static option, not a differentiable parameter | maintainer decision | 8a | M |
-| O21 | Public API: which names `import clm_ml` offers | maintainer decision | 8a | M |
-| O22 | Review of Phase 7 behaviour changes and re-recorded references | maintainer decision | 8a | M |
-| O23 | Authorship, citation and canonical repository | maintainer decision | 8a | M |
-| O24 | Release logistics: `main` 156 commits behind; version 1.0.0; PyPI or not | maintainer decision | 8a (merge) / 8b (release) | M |
+| O18 | Norman and well-mixed code in git history only (D8 said "kept") | maintainer decision | after 8 (maintainer 2026-11-01) | M |
+| O19 | Options that only ever refuse (`wue_solver: brent`, `mlcan_to_clm`) | maintainer decision | after 8 (maintainer 2026-11-01) | M |
+| O20 | `nitrogen_decay_kn` is a static option, not a differentiable parameter | maintainer decision | after 8 (maintainer 2026-11-01) | M |
+| O21 | ~~Public API: which names `import clm_ml` offers~~ (closed: decision 96) | maintainer decision | closed | M |
+| O22 | Review of Phase 7 behaviour changes and re-recorded references | maintainer decision | after 8 (maintainer 2026-11-01) | M |
+| O23 | ~~Authorship, citation and canonical repository~~ (closed: decision 97) | maintainer decision | closed | M |
+| O24 | Release logistics (decided: decision 98; `main` moved forward at the end of 8a, 1.0.0 tag at the end of 8b) | maintainer decision | 8a (merge) / 8b (release) | M |
 | **3. Bugs and robustness** |||||
 | O25 | XLA CPU gradient crash (issue 16) | bug (upstream JAX) | known / recheck on JAX upgrade | I |
 | O26 | XLA CPU compile crash (LLVM linker recursion) | bug (upstream JAX) | known / recheck on JAX upgrade | I |
 | O27 | GPU: two fresh compiles can differ by ~1e-11 | bug (reproducibility) | after 8 (GPU work) | I |
-| O28 | A patch failing a check still enters its chunk's gridcell sums | robustness | 8a | M |
+| O28 | A patch failing a check still enters its chunk's gridcell sums | robustness | after 8 (maintainer 2026-11-01) | M |
 | O29 | Padding slots combine one gridcell's weather with another patch's data | robustness | 8a (verify) | I |
 | O30 | Smaller Phase 6 review items (R11) | robustness | 8a (verify) | I |
 | O31 | netCDF read on a background thread while writing on the main thread | robustness | 8a | I |
-| O32 | `Model.chunks()` start at step 1 while runs chunk from step 0 | robustness (API) | 8a / 8b document | M |
+| O32 | `Model.chunks()` start at step 1 while runs chunk from step 0 | robustness (API) | after 8 (maintainer 2026-11-01) | M |
 | O33 | ~~The `euler` tableau has `b = [0]` (trap for future code)~~ (closed: decision 94) | robustness | closed | I |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
-| O36 | `.github/copilot-instructions.md` describes deleted packages | housekeeping | 8a | M (delete or rewrite) |
-| O37 | README out of date (badges, features, citation, PR workflow) | housekeeping | 8a | M (with O23) |
+| O36 | ~~`.github/copilot-instructions.md` describes deleted packages~~ (closed: deleted, decision 99) | housekeeping | closed | M (delete or rewrite) |
+| O37 | ~~README out of date~~ (closed: badges, features, citation, contributing; decision 97) | housekeeping | closed | M (with O23) |
 | O38 | ~~CONTRIBUTING out of date~~ (closed: rewritten) | housekeeping | closed | I |
 | O39 | ~~`data/namelists/README.md` describes the retired `clm-ml-offline`~~ (closed: rewritten) | housekeeping | closed | I |
-| O40 | Namelists: `nl.US-UMB.test` points to scratch; `nl.CHATS7.debug`, `nl.CHATS7.test3` unclear | housekeeping | 8a | M |
+| O40 | ~~Namelists pointing to scratch or unused~~ (closed: deleted, decision 99) | housekeeping | closed | M |
 | O41 | ~~Example files not checked~~ (closed: `configs/` checked by `test_configs.py`) | housekeeping | closed | I |
 | O42 | ~~Stale design documents (plan header and §8, `api_sketch.py`, numerics §4 title, `timing.md`)~~ (closed: updated) | housekeeping | closed | I |
 | O43 | ~~CI lint skips `timing/`~~ (closed: CI lints timing/) | housekeeping | closed | I |
 | O44 | ~~One open-items list and one decision log~~ (done: this document, `decisions.md`, `model_overview.md`) | housekeeping | closed | I |
 | O65 | ~~`numerics.checkpoint_steps` in model.yaml does nothing~~ (closed: decision 94) | housekeeping | closed | I |
-| O66 | PFT parameters used only at setup have no effect through `Model.run_chunk` | maintainer decision | 8a | M |
+| O66 | PFT parameters used only at setup have no effect through `Model.run_chunk` | maintainer decision | after 8 (maintainer 2026-11-01) | M |
 | O67 | ~~PFT optics keep the old 1-based layout `[unused, vis, nir]`~~ (closed: decision 94) | housekeeping | closed | I |
 | O68 | ~~Stale docstrings and comments (`model.py`, `legacy_ascii`, `clm_ml/__init__.py`, CLAUDE.md `rtol`)~~ (closed: updated) | housekeeping | closed | I |
 | O69 | ~~Plan says output is a nested scan (records × steps); the code is one scan with a record slot per step~~ (closed: plan and CLAUDE.md corrected) | housekeeping | closed | I |
@@ -129,6 +129,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** `global_input.md` issue 22; C27; Phase 7 "Next".
 
 ### O3. Soil ice read one level too deep in `SoilResistance`
+- **Closed 2026-11-01:** fixed: the level's own ice (`step.soil_level_ice`; decision 95; bit for bit while soil water is all liquid).
 - **Kind:** science issue (latent bug) · **Target:** 8a · **Decides:** M
 - **What:** Fortran stops root uptake from a level holding ice; the JAX code tests the ice
   of the level below. No effect today (ice is always 0, see O9); would matter once frozen
@@ -161,6 +162,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** `numerics_and_regression.md` §4.1-4.3; CLAUDE.md "Iterative solvers".
 
 ### O6. Transpiration and canopy-evaporation latent heat outputs use the last sub-step's latent heat
+- **Deferred 2026-11-01:** deferred to after Phase 8 (maintainer): the two outputs keep Fortran's form (step-averaged water flux times the last sub-step's latent heat) and differ from `latent_heat_flux`'s sub-step accumulation (decision 32) only on steps where the air crosses 0 °C; to be documented in 8b as a known difference.
 - **Kind:** science issue (diagnostic consistency) · **Target:** 8a · **Decides:** M
 - **What:** decision 32 fixed the canopy-top latent heat (averaged sub-step by sub-step).
   The outputs `transpiration_latent_heat_flux` and `canopy_evaporation_latent_heat_flux`
@@ -307,6 +309,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** C18; `config.py:34`; CLAUDE.md design guidance.
 
 ### O21. Public API
+- **Closed 2026-11-01:** the five names `load_experiment`, `new_experiment`, `upgrade_experiment`, `Experiment`, `Model` (decision 96; `tests/clm_ml/test_public_api.py`).
 - **Kind:** maintainer decision · **Target:** 8a · **Decides:** M
 - **What:** `clm_ml/__init__.py` exports nothing; users must import internal modules
   (`clm_ml.run.load_run`, `clm_ml.model.Model`, `clm_ml.config.ModelConfig`,
@@ -327,6 +330,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** `phase7_progress.md` "Next" and "Open for the maintainer".
 
 ### O23. Authorship, citation and canonical repository
+- **Closed 2026-11-01:** Linnia Hawkins (lead) and Aya Lahlou; canonical repository linniahawkins/clm-ml-jax; CITATION.cff, README, pyproject, LICENSE (decision 97).
 - **Kind:** maintainer decision · **Target:** 8a · **Decides:** M
 - **What:** README badges, codecov, the citation ("Lahlou, Aya, 2024") and CONTRIBUTING's
   clone URL point to `AyaLahlou/clm-ml-jax`; the remote is `linniahawkins/clm-ml-jax`.
@@ -334,6 +338,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 8 survey.
 
 ### O24. Release logistics
+- **Decided 2026-11-01:** decision 98: `main` fast-forwarded to the phase branch when 8a closes; version 1.0.0 tagged at the end of 8b; GitHub release only, no PyPI for now.
 - **Kind:** maintainer decision · **Target:** 8a (merge), 8b (release) · **Decides:** M
 - **What:** `origin/main` (2026-05-26) is 156 commits behind `phase7/restructure`; no phase
   branch has been merged (plan risk "Every phase is merged on its own" not followed;
@@ -476,11 +481,13 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 8 survey.
 
 ### O36. `.github/copilot-instructions.md` is stale
+- **Closed 2026-11-01:** deleted (decision 99).
 - **What:** 491 lines on deleted packages (`clm_src_main`, `clm_varpar`, ...).
 - **Next:** delete (CLAUDE.md and CONTRIBUTING cover it) or rewrite.
 - **Source:** Phase 8 survey.
 
 ### O37. README out of date
+- **Closed 2026-11-01:** updated with O23 (decision 97).
 - **What:** badges and citation (O23); features list "Namelist-driven configuration"; a
   generic fork/PR contributing section; no mention of grid runs, gradients, restarts.
 - **Next:** short rewrite now; full guide in 8b.
@@ -500,6 +507,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** C30.
 
 ### O40. Namelists of unclear status
+- **Closed 2026-11-01:** the four unused namelists deleted (decision 99).
 - **What:** `nl.US-UMB.test` points to files in the maintainer's scratch (unusable by
   others; US-UMB is not a built-in tower, decision §8.9); `nl.CHATS7.debug` and
   `nl.CHATS7.test3` have no documented purpose.
@@ -686,6 +694,10 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 ---
 
 ## Recently closed (for reference, not open)
+
+- Soil ice of the level itself (O3, issue 19; decision 95); public API (O21; 96); authorship,
+  citation, repository (O23, O37; 97); release logistics decided (O24; 98); stale files
+  deleted (O36, O40; 99) (2026-11-01).
 
 - Phase 8a group C (2026-11-01): `.gitignore` pruned (O34), `.gitmodules` deleted (O35),
   CONTRIBUTING (O38) and the namelists README (O39) rewritten, stale design documents

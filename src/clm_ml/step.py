@@ -212,6 +212,15 @@ def _record(errors: Array, check: int, err) -> Array:
     return errors.at[check].max(jax.lax.stop_gradient(jnp.max(jnp.abs(jnp.asarray(err)))))
 
 
+def soil_level_ice(ice, n_soil: int):
+    """The ice of each hydrologically active soil level, ``(n_soil,)``: level j's own
+    (index j, 0-based), which stops root uptake from a frozen level. The legacy translation
+    took level j + 1's (open issue 19, fixed 2026-11-01, decision 95).
+
+    Fortran reference: MLPlantHydraulicsMod.F90::SoilResistance (``h2osoi_ice(c,j)``)."""
+    return ice[:n_soil]
+
+
 def step(
     state: State,
     inputs: StepInputs,
@@ -286,10 +295,9 @@ def step(
     dpai = keep(use, area.dpai, fill_layer)
     errors = _record(jnp.zeros(len(BALANCE_CHECKS), t_soil.dtype), PLANT_AREA, area.error)
 
-    # Plant hydraulics and leaf heat capacity (every layer slot). The ice of soil level j is
-    # read at level j + 1, as the legacy translation did (decision C14, open issue 19).
+    # Plant hydraulics and leaf heat capacity (every layer slot)
     roots = soil_resistance(
-        hk_l, smp_l, k.dz[:n_soil], k.rootfr, ice[1 : n_soil + 1], k.nbedrock, area.lai,
+        hk_l, smp_l, k.dz[:n_soil], k.rootfr, soil_level_ice(ice, n_soil), k.nbedrock, area.lai,
         k.root_biomass, params.root_radius, params.root_density, params.root_resistivity,
     )  # fmt: skip
     lsc = plant_resistance(dpai, roots.rsoil, params.plant_conductance)

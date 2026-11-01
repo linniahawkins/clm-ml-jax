@@ -8,6 +8,11 @@ An experiment is a folder with run.yaml, domain.yaml, model.yaml and params.yaml
     clm_ml.new_experiment("my_site", "chats7_1day")    # write a complete folder from a preset
     exp = clm_ml.load_experiment("my_site")              # the four files, validated
     results = exp.execute()                              # run; outputs per stream
+    model = clm_ml.Model.from_experiment(exp)            # chunks and gradients (calibration)
+
+The public API (stable from 1.0; decision 96) is these names: ``load_experiment``,
+``new_experiment``, ``upgrade_experiment``, ``Experiment`` and ``Model``. Everything else
+(``clm_ml.processes``, ``clm_ml.driver``, ``clm_ml.setup``, ...) is internal and may change.
 """
 
 import os as _os

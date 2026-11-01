@@ -1,24 +1,24 @@
 # CLM-ML-JAX: Community Land Model with Multi-Layer Canopy in JAX
 
-[![CI](https://github.com/AyaLahlou/clm-ml-jax/actions/workflows/ci.yml/badge.svg)](https://github.com/AyaLahlou/clm-ml-jax/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/AyaLahlou/clm-ml-jax/branch/main/graph/badge.svg)](https://codecov.io/gh/AyaLahlou/clm-ml-jax)
+[![CI](https://github.com/linniahawkins/clm-ml-jax/actions/workflows/ci.yml/badge.svg)](https://github.com/linniahawkins/clm-ml-jax/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![JAX](https://img.shields.io/badge/JAX-latest-orange.svg)](https://github.com/google/jax)
 [![License: BSD-3](https://img.shields.io/badge/License-BSD--3-green.svg)](LICENSE)
 
-> A complete JAX/Python translation of the Community Land Model (CLM) Multi-Layer Canopy physics, enabling  GPU acceleration 
+> CLM-ml v2, the multilayer canopy model developed for the Community Land Model (Bonan et al.
+> 2021, 2026), in JAX: the same results as the Fortran model, on CPUs or GPUs, with gradients.
 
- **Reference CLM-ML in Fortran**: [CLM-ML_v2.CHATS](https://github.com/gbonan/CLM-ml_v2.CHATS)
-
+**Reference model in Fortran**: [CLM-ml_v2.CHATS](https://github.com/gbonan/CLM-ml_v2.CHATS)
 
 ### Features
 
--  Full Fortran→Python/JAX translation maintaining scientific accuracy
--  Tower-site offline driver for point-scale simulations with prescribed meteorology
--  GPU-accelerated physics through JAX JIT compilation
--  Vectorization with vmap for ensemble and sensitivity analyses
--  Namelist-driven configuration (mirrors Fortran interface)
--  Modular architecture 
+- Reproduces the Fortran CLM-ml v2 results (CHATS walnut orchard test case; validated
+  routine by routine and end to end)
+- From one flux tower to global runs: patches on gridcells, prescribed meteorology, leaf area
+  and soil water, configurable model step and output streams
+- Experiment folders: every setting written out and explained in four YAML files
+- GPU execution, ensembles (`vmap`) and gradients with respect to parameters, forcing and
+  initial state (`jax.grad`) for calibration and sensitivity studies
 
 ---
 
@@ -26,7 +26,7 @@
 
 ```bash
 # 1. Clone and navigate to repository
-git clone https://github.com/AyaLahlou/clm-ml-jax.git
+git clone https://github.com/linniahawkins/clm-ml-jax.git
 cd clm-ml-jax
 
 # 2. Install package and dependencies
@@ -163,33 +163,30 @@ How each process is represented is in `model.yaml` under `processes` (e.g.
 
 ## Contributing
 
-Contributions are welcome! Here's how you can help: 
-
-1. **Report Bugs**: Open an issue with reproduction steps
-2. **Suggest Features**: Open an issue with use case description
-3. **Submit PRs**: Fork, create feature branch, submit PR
-4. **Improve Docs**: Documentation improvements are always welcome
-
-### Code of Conduct
-
-- Be respectful and inclusive
-- Provide constructive feedback
-- Focus on improving the project
+See `CONTRIBUTING.md`: how the code is organized, how to add a process or scheme, and the
+tests every change must pass. Bugs and questions: open an issue on GitHub.
 
 ---
 
 ## Citation
 
+Please cite the software (`CITATION.cff`) and the model it translates:
 
 ```bibtex
 @software{clm_ml_jax,
-  title={CLM-ML-JAX: Community Land Model with Multi-Layer Canopy in JAX},
-  author={Lahlou, Aya},
-  year={2024},
-  url={https://github.com/AyaLahlou/clm-ml-jax},
-  note={JAX translation of CTSM CLM-ML}
+  title  = {CLM-ML-JAX: the CLM-ml v2 multilayer canopy model in JAX},
+  author = {Hawkins, Linnia and Lahlou, Aya},
+  year   = {2026},
+  url    = {https://github.com/linniahawkins/clm-ml-jax},
+  note   = {JAX translation of CLM-ml v2 (Bonan et al.)}
 }
 ```
+
+The multilayer canopy model: Bonan, G. B., Burns, S. P., and Patton, E. G. (2026), Beyond
+surface fluxes: Observational and computational needs of multilayer canopy models - A walnut
+orchard test case, *Agricultural and Forest Meteorology*, 378, 110960,
+doi:10.1016/j.agrformet.2025.110960; and Bonan et al. (2021), *Agricultural and Forest
+Meteorology*, 306, 108435, doi:10.1016/j.agrformet.2021.108435.
 
 ---
 
@@ -201,5 +198,5 @@ This project is licensed under the **BSD-3-Clause License**. See [LICENSE](LICEN
 
 ⭐ **If this helps your research, please star the repository!**
 
-🐛 **Found a bug?** Please [open an issue](https://github.com/AyaLahlou/clm-ml-jax/issues)
+🐛 **Found a bug?** Please [open an issue](https://github.com/linniahawkins/clm-ml-jax/issues)
 

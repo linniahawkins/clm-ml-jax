@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "clm-ml-jax"
 version = "0.1.0"
-description = "JAX translation of CLM-ML (Community Land Model with Multi-Layer Canopy)"
+description = "JAX translation of CLM-ml v2, the multilayer canopy model for the Community Land Model"
+authors = [{ name = "Linnia Hawkins" }, { name = "Aya Lahlou" }]
 requires-python = ">=3.10"
 license = "BSD-3-Clause"
 dependencies = [
