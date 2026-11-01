@@ -461,6 +461,9 @@ the one that wrote this.** Stopped for the maintainer's review of Phase 7 (the u
 be reported to once Phase 7 is complete). Then: Phase 8 (documentation and release), after
 discussing it.
 
+**Phase 8a started (2026-11-01, branch `phase8a/housekeeping`):** everything still open
+from this log is in `open_items.md`; decisions in `decisions.md`. Resume there.
+
 **Review, done so far (2026-11-01):** CLM4.5 soil dropped, CLM soil only (decision 37,
 C35); stray `lat.npy` deleted.
 

@@ -1832,6 +1832,10 @@ Fortran-mirroring packages and `clm-ml-offline` are deleted.
 
 ### Phase 8: Documentation and release
 
+Split (maintainer, 2026-11-01): **8a**, housekeeping, science issues and repository
+organization before the documentation (the list is `open_items.md`); **8b**, the
+documentation and release below.
+
 - A getting-started guide (YAML-first), a full reference for every YAML key (generated from the
   dataclasses so it can't drift), a gradient-calibration example, an ensemble example, a
   multi-tower/multi-patch example, and a "for Fortran CLM-ml users" page mapping namelist keys

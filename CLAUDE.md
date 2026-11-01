@@ -10,11 +10,14 @@ Guidance for Claude (and other contributors) working in this repository.
 - **Think before coding.** State assumptions. If there are several reasonable interpretations,
   present them instead of picking one silently. Push back when something conflicts with the
   science or with an earlier decision (for example, a setting that would reject a supported tower).
-- Decisions made with the maintainer are recorded in `docs/design/modernization_plan.md` §0 and §8.
-  Don't re-open them without a new reason.
+- **Every meaningful decision** (maintainer's or implementation's) is recorded in
+  `docs/design/decisions.md` (one register, stable numbers; new ones get the next number, in
+  the same commit). Don't re-open them without a new reason. Every open task, issue and
+  pending decision is in `docs/design/open_items.md` (O1, O2, ...). The older documents
+  (plan §0/§8, Phase 7 D/C numbers, `global_input.md`) are the detailed history.
 - **Standing preferences** (from the working sessions):
   - Commit and push when the tests required by the testing tiers pass (authorized); never
-    open PRs; one branch per phase (`phase7/restructure` now). Commit footer:
+    open PRs; one branch per phase (`phase8a/housekeeping` now). Commit footer:
     `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (or the model in use).
   - Don't modify the maintainer's Python environment (no `pip install` without asking).
   - Stop before starting a new phase to discuss it; during a phase, a measured slowdown of
@@ -27,18 +30,12 @@ Guidance for Claude (and other contributors) working in this repository.
   hacks or dropping patches/things that fail; the model is a scientific tool (accurate and
   precise). Where a modelling choice comes up, copy CLM (CTSM 5.4 source in
   `/glade/work/linnia/ctsm5.4.004`; CLM-ml v1/v2 Fortran sources: see the progress log).
-  Science changes are the maintainer's decision; record each as a decision (plan §0) and
-  every open issue in `docs/design/global_input.md`.
-- **Resume here:** `docs/design/phase7_progress.md`, section "Next" (Phase 7 done; the
-  maintainer's review of Phase 7 and the start of Phase 8 come next).
-- **Phase 7 documents:** scope and the maintainer's decisions D1-D12
-  (`docs/design/phase7_scope.md`); **log every decision you make** that the scope does not
-  settle in `docs/design/phase7_decisions.md` (C1, C2, ...) in the same commit; removed state
-  fields in `docs/design/phase7_removed_diagnostics.md`.
-- **Phase 7 testing is the minimum in `phase7_progress.md`** ("Testing in Phase 7"; replaces
-  the tiers under "Rules for changes" for Phase 7): per commit lint + bit-for-bit/noise twin +
-  the moved routines' golden tests; CPU gradient test when a hand-written gradient moves;
-  gradient tier and touched feature tests at package ends; everything else at phase end.
+  Science changes are the maintainer's decision; record each in `docs/design/decisions.md`
+  and every open issue in `docs/design/open_items.md`.
+- **Resume here:** `docs/design/open_items.md` (Phase 8a: housekeeping before the
+  documentation, Phase 8b). How the model works now: `docs/design/model_overview.md`.
+- **Testing in Phase 8a:** the tiers under "Rules for changes" (the Phase 7 minimum in
+  `phase7_progress.md` was for Phase 7 only).
 - **Where the work is:** NCAR Derecho (CPU login node; GPUs through PBS, account UCLB0069,
   develop queue `gpudev`). Phase 6 history: `docs/design/phase6_progress.md`.
 - Terminology: say **"timing test"** for wall-clock performance measurements, not "benchmark".
@@ -370,7 +367,8 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
 - **Output is configurable and independent** of forcing and model step: output streams with
   their own variables, frequency, statistic, level and file split, accumulated during the run.
 - **Gradients** with respect to parameters, meteorological forcing and initial state.
-- Regression tolerance is `rtol = 1e-6`. The legacy `.out` output is only kept until validation
+- Regression: bit for bit for refactors, the noise twin for round-off changes (see "Rules for
+  changes"). The legacy `.out` output is only kept until validation
   moves to netCDF.
 
 **Phases:**
@@ -388,7 +386,7 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
 | 6 | Many patches and gridcells, **on Derecho (GPU)**: steps 0-6 (per-site data, batched patches, C3/C4 groups, devices, vectorized setup) done 2026-10-29; GPU optimization (step 1c) deferred; progress log `docs/design/phase6_progress.md` |
 | 6b | Real global input before Phase 7 (decisions 26-32): steps 1-6 done (grid loader, gridded forcing, setup, regional test), done 2026-10-30 (step 7 closed; review fixes, calendar decision 34); fixes: per-layer minimum plant area (30), no 0.05 LAI cutoff (31), canopy-top latent heat per sub-step (32); open issues in `global_input.md` |
 | 7 | Restructure (decision 35; `phase7_scope.md`): 7.0 preparation, 7.1 step state (0-based), 7.2 physics by process (`clm_ml/physics/`), 7.3 chunk forcing as 0-based arrays (forcing prepared on the host: decision 36), 7.4 setup without globals (in-process runs), 7.5 netCDF restarts, 7.6 cleanup. **Done 2026-11-01** (`phase7_progress.md`; decisions C0-C34) |
-| 8 | Docs and release |
+| 8 | 8a housekeeping before the docs (`open_items.md`); 8b docs and release |
 
 Decisions 18–21 (after Phase 4b): Phase 5 converts to masks in place; masks rather than grouping
 patches by layer structure; configuration passed explicitly (5a); process interface in Phase 7.
