@@ -805,3 +805,61 @@ boundary only.
 Alternatives: a carry of separate NamedTuples per process (more types, same values);
 keeping the legacy index-0 values (they cannot be computed without legacy-shaped arrays);
 retiring the process replay now (it still tests the physics on real inputs).
+
+### C21. Process 10c: the time step on the step state (7.2, 2026-10-31)
+Context: C19's plan; after 10b the compiled time step still rebuilt the legacy containers
+from the template and the state every step (`instances_with_state`), ran `clm_drv` and
+`MLCanopyFluxes` on them and read the results back (`step_state_from_instances`).
+Decision:
+- **`clm_ml/step.py::step(state, inputs, constants, params, *, options, c3) -> StepState`**:
+  one patch's step, pure, built from the physics of processes 2-10 in the order of
+  `clm_drv` (history LAI/SAI and soil water, soil albedo, evaporative resistance, thermal
+  and hydraulic properties; `GetCLMVar`'s forcing, O2 and solar zenith angle; plant area,
+  soil and plant resistance, leaf heat capacity, soil surface humidity; the sub-steps as a
+  `lax.scan` with `jax.checkpoint`; averages, totals, merge; soil temperature). Inputs:
+  `StepInputs` (the step's tower/gridcell meteorology, CLM history record, previous/next
+  forcing records, calendar days; 0-based), `PatchConstants` (layer grid, the sub-step
+  carry's start values besides the state, the padding slots the step keeps, PFT root
+  values, soil column properties, soil colour albedos, location), `StepOptions` (static:
+  the sub-step options, step length, layer PAI floor, totals option, history soil-water
+  settings, `nlevsoi`, orbital parameters). It lives at the package top (like `state.py`):
+  it composes processes, it is not one.
+- **`clm_ml/legacy/step.py`** (transition): `patch_constants(template)` (0-based values
+  from the containers after the first step; formed once per chunk, outside the scan, in
+  `make_chunk_runner`, `make_stream_runner` and `make_batch_runner` (vmapped per C3/C4
+  group)), `step_options(opts, step_seconds)`, `step_inputs(now, met, clm_record, bef,
+  next)`. `offline_executable.main.state_step` wraps them (with the acclimation update) for
+  the compiled chunks, the batched runner (`_patch_step` now takes the constants) and the
+  step-by-step loop of `clm-ml-offline` (now one compiled step called per step).
+  `instances_with_state` and `step_state_from_instances` left the time step; the first
+  (initializing) step, the batched first step and the legacy view still use the
+  containers (until 7.4); the view takes index 0 and other slots the state does not hold
+  from the template, as before.
+- **Each step's conservation errors start from zero.** The legacy step started from the
+  template's `balance_error`, i.e. the first step's errors, so every step reported at least
+  those (which had passed the checks). Not recorded in the reference; can only make a
+  check report a step's own error.
+- **`mlcan_to_clm = 1` refused** (`step_options`): it wrote CLM containers nothing reads
+  offline (and failed on JAX arrays). `nlevsoi < nlevgrnd` is required: `SoilResistance`
+  reads the ice of level j at j + 1 (C14, open issue 19), which must exist.
+- **The legacy adapters of processes 3-9 and the process replay stay** until the first
+  step leaves the containers (7.4): they test the same physics on the recorded
+  pre-Phase-7 calls. `clm_driver.clm_drv` and `MLCanopyFluxes` now run only the first step
+  (and `make_clm_ml_forward` of `test_differentiability`).
+- **Round-off change, reference re-recorded (D7):** op by op (`jax.disable_jit`) the new
+  step equals the old container step in every `State` and `Diagnostics` leaf over CHATS7
+  steps 2-3, except `balance_error` (above) (`probe710c/eager.py`). The compiled chunk
+  differs in 67 fields: 53 the twins move, within 1.13x the twin spread; 14 they do not, by
+  1-2 ulps (at most 2.3e-14 relative, `apar_leaf`): the solar zenith angle in 7 daytime
+  steps (sin/cos/acos) and the solar fields after it, and `psis_soil` (a sum over soil
+  levels), with identical inputs. `optimization_barrier` on the solar zenith angle and on
+  the soil hydraulic properties changed nothing (not kept): XLA fuses the transcendental
+  and the sums differently now that the containers are gone (C10/C17 pattern). Noise twin
+  passed before re-recording. Forward timing on CPU 15.6 ms/step (`p710c-check`; `p71`:
+  24-25 ms/step); gradient timing at the package end.
+Why: C19's 10c; the step is now a function of the step state, so 7.3 (forcing in the
+chunk) and 7.4 (setup) only change where its inputs and constants come from.
+Alternatives: splitting 10c into soil routines first and the canopy set-up second (each
+would still need the container boundary; one probe covered the whole step); keeping the
+template's error floor (no reason; not recorded); computing the constants inside each step
+(slicing the template under the step's `vmap` and checkpoint every step).

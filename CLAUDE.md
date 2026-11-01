@@ -204,6 +204,12 @@ docs/design/           modernization plan, API sketch, example YAML, timing resu
   axes `layer`, `level` = ground + layers, `leaf`, `band`, `soil_level`); batched states have
   one leading patch axis. `clm_ml/legacy/state.py` converts between them (blocks written with
   `dynamic_update_slice` into the template).
+- **The time step is `clm_ml/step.py::step` (Phase 7.2 process 10c):** pure, on `State` +
+  `StepInputs` + `PatchConstants` (0-based; the constants come from the template once per
+  chunk, `clm_ml/legacy/step.py::patch_constants`) + `CanopyParams`, returning a `StepState`;
+  `offline_executable.main.state_step` wraps it for the chunk runners. Only the first
+  (initializing) step, the batched first step and the legacy view still use the containers
+  (`clm_drv`/`MLCanopyFluxes`) until 7.4.
 - **The legacy view (Phase 7):** the regression reference stores raw legacy fields
   (`mlcanopy.<field>`, 1-based, patch axis). `clm_ml/legacy/view.py::legacy_view(template,
   step, layers)` maps a `StepState` to them; the output variables (`outputs._Raw`),

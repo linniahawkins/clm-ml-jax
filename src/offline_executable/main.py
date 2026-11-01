@@ -48,11 +48,10 @@ except ImportError:
 
 from clm_ml.legacy.state import (  # noqa: E402
     batched_state,
-    instances_with_state,
     patch_layers,
     state_from_instances,
-    step_state_from_instances,
 )
+from clm_ml.legacy.step import patch_constants  # noqa: E402
 from clm_ml.physics.math import is_concrete  # noqa: E402
 from clm_src_cpl.lnd_comp_nuopc import InitializeRealize, ModelAdvance  # noqa: E402
 from clm_src_main.decompMod import bounds_type  # noqa: E402
@@ -644,6 +643,33 @@ def advance_acclimation(run: LegacyRun, state, inputs: StepInputs):
     return state._replace(canopy=c._replace(acclimation_temperature=mean, acclimation_steps=n))
 
 
+def state_step(run: LegacyRun, grid):
+    """One patch's time step on the step state (``clm_ml.step.step``, Phase 7.2 process 10c):
+    ``step(constants, state, x, params) -> StepState`` with ``x`` one step's ``(now, met,
+    clm_record, forcing_bef, forcing_next)`` and ``constants`` the patch's ``PatchConstants``
+    (``clm_ml.legacy.step.patch_constants`` of its template, the containers after the first
+    step). The acclimation temperature's running mean is advanced first
+    (:func:`advance_acclimation`). The steps after the first get only the options that select
+    physics code (``MLOptions.step_options``), as before."""
+    from clm_ml import step as S
+    from clm_ml.legacy.step import step_inputs as legacy_step_inputs
+    from clm_ml.legacy.step import step_options
+
+    dtime = run.time_of(0).dtime  # static: the model step
+    options = step_options(run.opts.step_options(), dtime)
+    c3 = bool(grid.c3)
+
+    def step(constants, state, x, params):
+        now, met, clm_record, forcing_bef, forcing_next = x
+        inputs = StepInputs(now._replace(dtime=dtime), met, clm_record, forcing_bef, forcing_next)
+        state = advance_acclimation(run, state, inputs)
+        return S.step(
+            state, legacy_step_inputs(*x, p=grid.p), constants, params, options=options, c3=c3
+        )
+
+    return step
+
+
 def stack_step_inputs(inputs: list) -> tuple:
     """Per-step inputs stacked along a leading time axis (the ``xs`` of a chunk's scan)."""
     return jax.tree.map(
@@ -658,35 +684,17 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "steps"):
     :func:`stack_step_inputs`; the per-step outputs are each step's
     :class:`clm_ml.state.StepState` (for the legacy output writer, through
     ``clm_ml.legacy.view.view_series``), or only the state with ``outputs="state"`` (e.g. for
-    ensembles). Steps are rebuilt from ``template``
-    plus the carried state, as in the step-by-step loop.
+    ensembles). Each step is :func:`state_step` on the carried state, with the patch's
+    constants taken from ``template`` (the containers after the first step) once per chunk.
 
     The compiled function takes an optional third argument, the patch's ``CanopyParams``
     (default: from the PFT tables), so ``jax.vmap`` over it runs a parameter ensemble and
     ``jax.grad`` differentiates with respect to it."""
-    dtime = run.time_of(0).dtime  # static: the model step
     grid = _grid_of(template, filt)
+    patch_step = state_step(run, grid)
 
-    def body(state, x, params):
-        now, met, clm_record, forcing_bef, forcing_next = x
-        inputs = StepInputs(
-            now=now._replace(dtime=dtime),
-            met=met,
-            clm_record=clm_record,
-            forcing_bef=forcing_bef,
-            forcing_next=forcing_next,
-        )
-        state = advance_acclimation(run, state, inputs)
-        insts, _ = advance(
-            run,
-            instances_with_state(template, state),
-            filt,
-            inputs,
-            initialize=False,
-            params=params,
-            grid=grid,
-        )
-        step = step_state_from_instances(insts, state)
+    def body(constants, state, x, params):
+        step = patch_step(constants, state, x, params)
         if outputs == "state":
             return step.state, step.state
         return step.state, step
@@ -694,7 +702,8 @@ def make_chunk_runner(run: LegacyRun, template, filt, outputs: str = "steps"):
     default_params = run.canopy_params
 
     def run_chunk(state, xs, params=default_params):
-        return jax.lax.scan(lambda s, x: body(s, x, params), state, xs)
+        constants = patch_constants(template, grid.p)  # once per chunk
+        return jax.lax.scan(lambda s, x: body(constants, s, x, params), state, xs)
 
     return jax.jit(run_chunk)
 
@@ -729,38 +738,22 @@ def step_variables(names, max_layers: int):
 
 
 def _patch_step(run: LegacyRun, filt, grid, names, max_layers: int):
-    """One patch's time step for compiled chunks: ``step(template, state, x, params) ->
-    (state, {variable: value}, errors)``, with ``x`` one step's ``(now, met, clm_record,
-    forcing_bef, forcing_next)``, the output variables ``names`` (``clm_ml.outputs``,
-    computed with jax.numpy; leading axis the legacy patch axis of length 1) and ``errors``
-    the step's largest error of each Fortran conservation check. Used by the one-patch
-    (:func:`make_stream_runner`) and batched (:func:`make_batch_runner`) chunks."""
+    """One patch's time step for compiled chunks: ``step(template, constants, state, x,
+    params) -> (state, {variable: value}, errors)``, with ``x`` one step's ``(now, met,
+    clm_record, forcing_bef, forcing_next)``, ``constants`` the patch's ``PatchConstants``
+    (``patch_constants(template)``, formed once per chunk), the output variables ``names``
+    (``clm_ml.outputs``, computed with jax.numpy from the legacy view, which takes the entries
+    the step state does not hold from ``template``; leading axis the legacy patch axis of
+    length 1) and ``errors`` the step's largest error of each Fortran conservation check.
+    Used by the one-patch (:func:`make_stream_runner`) and batched
+    (:func:`make_batch_runner`) chunks."""
     from clm_ml.legacy.view import legacy_view
 
-    dtime = run.time_of(0).dtime
     variables = step_variables(names, max_layers)
+    patch_step = state_step(run, grid)
 
-    def step(template, state, x, params):
-        now, met, clm_record, forcing_bef, forcing_next = x
-        inputs = StepInputs(
-            now=now._replace(dtime=dtime),
-            met=met,
-            clm_record=clm_record,
-            forcing_bef=forcing_bef,
-            forcing_next=forcing_next,
-        )
-        state = advance_acclimation(run, state, inputs)
-        insts, _ = advance(
-            run,
-            instances_with_state(template, state),
-            filt,
-            inputs,
-            initialize=False,
-            params=params,
-            grid=grid,
-        )
-        # the step's results leave the step only as its StepState (D6)
-        step = step_state_from_instances(insts, state)
+    def step(template, constants, state, x, params):
+        step = patch_step(constants, state, x, params)
         view = legacy_view(template, step, patch_layers(template))
         return step.state, variables(view), step.diagnostics.balance_error
 
@@ -784,10 +777,10 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
     default_params = run.canopy_params
     patch_step = _patch_step(run, filt, _grid_of(template, filt), names, max_layers)
 
-    def step(template, carry, x):
+    def step(template, constants, carry, x):
         state, buffers, errors = carry
         xs, slots, params = x
-        state, values, step_errors = patch_step(template, state, xs, params)
+        state, values, step_errors = patch_step(template, constants, state, xs, params)
         buffers = tuple(
             S.accumulate(spec.statistic, b, slot, {n: values[n] for n in spec.variables})
             for spec, b, slot in zip(streams, buffers, slots)
@@ -807,8 +800,9 @@ def make_stream_runner(run: LegacyRun, template, filt, streams, max_layers: int)
         n = jax.tree.leaves(xs)[0].shape[0]
         per_step_params = jax.tree.map(lambda p: jnp.broadcast_to(p, (n,) + p.shape), params)
         errors = jnp.zeros(len(BALANCE_CHECKS))
+        constants = patch_constants(template)  # once per chunk
         (state, buffers, errors), _ = jax.lax.scan(
-            lambda c, x: checkpointed_step(template, c, x),
+            lambda c, x: checkpointed_step(template, constants, c, x),
             (state, buffers, errors),
             (xs, slots, per_step_params),
         )
@@ -1117,18 +1111,18 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
     else:
         n_p, n_g = batch.layout[2] + batch.layout[3], batch.layout[1]
 
-    def batched_step(templates, state, x_patch, params):
+    def batched_step(templates, constants, state, x_patch, params):
         """The step of every patch: per group (contiguous slot ranges), vmapped; the groups'
         results joined in patch order. Slices and concatenation only: scattering the groups'
         results into the scan's carry (``.at[idx].set``) gave wrong states and intermittent
         segmentation faults on CPU (JAX 0.9.2; Phase 6 step 5)."""
         if len(groups) == 1:
-            return jax.vmap(group_steps[0])(templates[0], state, x_patch, params)
+            return jax.vmap(group_steps[0])(templates[0], constants[0], state, x_patch, params)
         outs = []
-        for (_, idx), step_g, tmpl in zip(groups, group_steps, templates):
+        for (_, idx), step_g, tmpl, k in zip(groups, group_steps, templates, constants):
             lo, hi = int(idx[0]), int(idx[-1]) + 1
             cut = lambda t: jax.tree.map(lambda a: a[lo:hi], t)  # noqa: E731
-            outs.append(jax.vmap(step_g)(tmpl, cut(state), cut(x_patch), cut(params)))
+            outs.append(jax.vmap(step_g)(tmpl, k, cut(state), cut(x_patch), cut(params)))
         return jax.tree.map(lambda *parts: jnp.concatenate(parts), *outs)
 
     def gridcell_sum(v, weight, alive, gidx):  # (P, ...) -> (G, ...): area-weighted sum
@@ -1156,7 +1150,7 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
         gridcell axis (the step's time in grid runs) broadcast to them."""
         return jnp.take(a, gidx, 0) if a.ndim >= 1 else jnp.broadcast_to(a, (n_p,))
 
-    def step(template, land, consts, carry, x):
+    def step(template, constants, land, consts, carry, x):
         state, buffers, errors = carry
         params, weight, alive, gidx = consts
         xg, xp, slots, *active = x
@@ -1164,7 +1158,7 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
         if land_fn is not None:  # grid runs: the step's CLM history record from the records
             xp = land_fn(xp, land, gidx)
         x_patch = (now, met, xp, forcing_bef, forcing_next)
-        state, values, step_errors = batched_step(template, state, x_patch, params)
+        state, values, step_errors = batched_step(template, constants, state, x_patch, params)
         values = {n: unbatch_patch_axis(v, n_p) for n, v in values.items()}
         new_buffers = []
         for spec, b, slot, gvars in zip(streams, buffers, slots, gridcell_vars):
@@ -1199,11 +1193,13 @@ def make_batch_runner(batch: PatchBatch, template, filt, streams, max_layers: in
             jax.tree.map(lambda a, lo=int(idx[0]), hi=int(idx[-1]) + 1: a[lo:hi], template)
             for _, idx in groups
         )
+        # and their patches' constants (clm_ml.step.PatchConstants), formed once per chunk
+        constants = tuple(jax.vmap(patch_constants)(t) for t in templates)
         land = None
         if land_fn is not None:
             xp, land = xp  # per-step weights (scanned), monthly records (chunk constant)
         (state, buffers, errors), _ = jax.lax.scan(
-            lambda c, x: checkpointed_step(templates, land, consts, c, x),
+            lambda c, x: checkpointed_step(templates, constants, land, consts, c, x),
             (state, buffers, errors),
             (xg, xp, slots) + (() if active is None else (active,)),
         )
@@ -2117,13 +2113,16 @@ def main(opts: Optional[MLOptions] = None):
                 chunk_dt = time.perf_counter() - chunk_t0
                 report(first + n, chunk_dt / n, detail=f"(chunk of {n} steps: {chunk_dt:.1f}s) ")
         else:
+            # one compiled step (clm_ml.step.step), called step by step
+            one_step = jax.jit(state_step(run, _grid_of(template, filt)))
+            constants = patch_constants(template)
             for _itim in range(2, ntimes + 1):
                 step_t0 = time.perf_counter()
                 inputs = step_inputs(run, run.load_chunk(_itim - 1, 1), _itim - 1)
-                state = advance_acclimation(run, state, inputs)
-                st = instances_with_state(template, state)
-                st, filt = advance(run, st, filt, inputs, initialize=False)
-                step = step_state_from_instances(st, state)
+                x = (inputs.now, inputs.met, inputs.clm_record, inputs.forcing_bef,
+                     inputs.forcing_next)  # fmt: skip
+                step = one_step(constants, state, x, run.canopy_params)
+                check_balance(step.diagnostics.balance_error, f"time step {inputs.now.nstep}")
                 state = step.state
                 write_output(inputs.now.calday, legacy_view(template, step, layers))
                 report(_itim, time.perf_counter() - step_t0)

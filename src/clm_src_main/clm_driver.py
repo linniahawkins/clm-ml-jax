@@ -6,6 +6,9 @@ full physics sequence for a single driver time step, including soil
 albedo, evaporative resistance, thermal conductivity, soil water
 movement, multilayer canopy fluxes, and soil temperature updates.
 
+Since Phase 7.2 process 10c only the first (initializing) step runs here; later steps are
+``clm_ml.step.step`` on the step state (decision C21).
+
 Original Fortran module: clm_driver
 Fortran lines 1-110
 """
