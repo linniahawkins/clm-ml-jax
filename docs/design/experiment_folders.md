@@ -105,7 +105,7 @@ copied from (for example "copied from chats: clm5_defaults with the CHATS walnut
 | File, section | Contents | Comes from today |
 |---|---|---|
 | run `time` | start, end/days/steps, calendar | run.yaml `time` (without `step_seconds`) |
-| run `forcing` | meteorology files and interpolation (tower) or gridded streams and CO2 (grid); CLM history file; vegetation and soil-water sources; the data interval where the files don't give it | run.yaml `forcing`; towers.yaml `forcing_step_minutes` |
+| run `forcing` | meteorology files, their data interval (`interval_seconds`) and interpolation (tower) or gridded streams and CO2 (grid); CLM history file; vegetation and soil-water sources | run.yaml `forcing`; run.yaml `time.step_seconds` and towers.yaml `forcing_step_minutes` (the data interval) |
 | run `initial_conditions` | from the CLM history or a restart file | run.yaml |
 | run `output` | directory, streams, legacy `.out` | run.yaml |
 | run `execution` | chunk length, restarts, devices, padding counts | run.yaml |
@@ -116,10 +116,11 @@ copied from (for example "copied from chats: clm5_defaults with the CHATS walnut
 | model | physics, numerics (including the model step), canopy layers, soil columns | model.yaml (unchanged) |
 | params | `units` and `pft` table | params file (unchanged format) |
 
-The model time step goes in model.yaml only (`numerics.step_seconds`: it is a numerics
-choice and changes the compiled program). The forcing data interval is a property of the
-data: it is read from the forcing files' time axis where they have one and checked against
-any value given in run.yaml.
+The model time step goes in model.yaml only (`numerics.step_seconds`, default 1800 s: a
+numerics choice that changes the compiled program; no longer "null = the data interval").
+The tower meteorology's data interval is a run.yaml setting
+(`forcing.meteorology.interval_seconds`, maintainer 2026-11-01); the model step must divide
+it. Grid streams keep their own intervals (CDEPS rules).
 
 ## 6. Strictness and `clm-ml upgrade`
 
@@ -211,8 +212,7 @@ twin:
 
 1. Option definitions with explanations (field metadata) for every run and domain setting;
    one renderer for complete, commented files (generalizing `clm_ml.config.model_yaml_text`).
-2. `domain.yaml` (towers or grid) and the move of the settings in §5; the data interval from
-   the forcing files.
+2. `domain.yaml` (towers or grid) and the move of the settings in §5.
 3. The experiment loader (`load_experiment`, strict) and `clm-ml run|check DIR`; the
    regression tests run from a CHATS7 experiment folder and must stay bit for bit.
 4. Presets, `clm-ml new`, `clm-ml convert` writing four files, `configs/` regenerated, the
@@ -226,12 +226,10 @@ fix; `new` then `run` reproduces the CHATS7 reference bit for bit; `upgrade` kee
 user value and turns today's layout into one that runs identically; the output's config copy
 reruns identically.
 
-## 13. Open questions for the maintainer
+## 13. Answers (maintainer, 2026-11-01)
 
-1. **File names.** `run`, `domain`, `model`, `params` are used here. Alternatives an
-   ecologist might find clearer: `site.yaml` or `where.yaml` for domain, `vegetation.yaml` or
-   `plants.yaml` for params.
-2. **The data interval.** Read it from the forcing files (proposed), or keep it as a
-   run.yaml setting that the files are checked against?
-3. **Test-only settings** such as `domain.grid.max_gridcells` (drop gridcells beyond a
-   count): show them in the generated files, or keep them out of the user's view?
+1. **File names:** `run`, `domain`, `model`, `params` (kept).
+2. **The data interval:** a run.yaml setting (`forcing.meteorology.interval_seconds`), not
+   read from the files.
+3. **Test-only settings** (such as `domain.grid.max_gridcells`): kept out of the user's
+   view: not in generated files, not in the reference; set only from Python or tests.

@@ -524,8 +524,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **What:** decision 91: four complete files per experiment folder (`run`, `domain`, `model`,
   `params`), strict loading, `clm-ml new`/`upgrade`, presets in the package, `configs/`
   regenerated as folders, configuration copied into each run's output.
-- **Next:** the six steps of `experiment_folders.md` §12; the maintainer's open questions
-  there (§13: file names, where the data interval comes from, test-only settings) first.
+- **Next:** the six steps of `experiment_folders.md` §12 (questions answered, §13).
 - **Source:** maintainer, 2026-11-01.
 
 ## 5. Documentation (8b)
