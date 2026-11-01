@@ -2,8 +2,8 @@
 
 Phase 7 turns the translated Fortran structure into the target architecture of the plan (§6):
 physics organized by process under `clm_ml/physics/`, a per-step state in place of the legacy
-containers, setup without module globals, forcing interpolated inside the compiled chunk,
-restarts as netCDF, and only `clm_ml/` left in `src/`. Every step gives the same answer as
+containers, setup without module globals, the chunk's forcing as plain 0-based arrays (D3 as
+revised 2026-10-31), restarts as netCDF, and only `clm_ml/` left in `src/`. Every step gives the same answer as
 before (bit for bit on CPU, or round-off only where stated).
 
 Sources: the plan (Phase 7, §6), two code surveys of 2026-10-30 (time step; setup, I/O and
@@ -15,7 +15,7 @@ tests) and the Phase 6 review. Numbers marked ~ are estimates.
 |---|---|
 | D1 | **0-based indexing** for layers, leaves, bands, soil levels and RK stages. |
 | D2 | **Restarts as netCDF.** |
-| D3 | **Meteorology built inside the compiled chunk** (open issue 7). |
+| D3 | ~~Meteorology built inside the compiled chunk (open issue 7).~~ **Revised 2026-10-31 (maintainer): the forcing stays prepared on the host**, a chunk ahead and overlapped with the GPU (offline runs know all forcing in advance). 7.3 only replaces the legacy forcing records with 0-based arrays. Reasons below 7.3 and plan decision 36. |
 | D4 | Orbital parameters per year: **not** done (decision 34's known departure stays). |
 | D5 | **No new unrolled Python loops** in compiled code; remove the large existing ones where it preserves the arithmetic. |
 | D6 | **Diagnostics: keep only what outputs and checks use.** Every removed field is listed (name, meaning, the routine that computed it) in `docs/design/phase7_removed_diagnostics.md` so it can be added back. |
@@ -123,15 +123,29 @@ change.
 Each process gets: variants registered by name (§6.6), a docstring with `Fortran reference:` and
 its reads/writes, a test that the declared writes are what changes, its golden tests repointed.
 
-**7.3 Forcing inside the chunk (D3)** (~1-2 weeks)
-- Tower: derived records sent once per chunk (`n + 2` rows), previous/current/next by slicing in
-  the scan; the different arithmetic of the previous and next records kept (bit for bit).
-- Grid: the 6-hourly CRUJRA records the chunk needs plus per-step interpolation indices and
-  weights; linear, nearest and coszen interpolation and the CDEPS derivation (`datm_derive`)
-  in `jax.numpy` inside the chunk; per-step calday/declination from the host. Equal to today's
-  host path to round-off; the grid regression test compares the inputs.
-- CLM history record for towers as records + weights (as `land_record` for grids).
-- Memory per chunk falls from ~39 numbers per gridcell-step to ~8 per gridcell-record.
+**7.3 The chunk's forcing as 0-based arrays (D3 revised)** (~1 session)
+- The chunk inputs (tower readers, `GridChunkReader`, `Model.forcing`, the first-step-free
+  run loops) become stacked 0-based arrays shaped like `clm_ml.step.StepInputs`: meteorology
+  per gridcell, land data (LAI, SAI, soil water) per patch, the previous/next-step records
+  without the legacy patch axis and with the band axis 0-based. Today they are legacy records
+  (`StepTime`, `TowerMet`, `ClmHistoryRecord`, `AtmForcingRecord` with a patch axis and a
+  1-based band axis of `numrad + 1`) converted at every step inside the chunk by
+  `clm_ml.legacy.step.step_inputs`; that adapter leaves the time step.
+- Where the forcing is prepared does not change: on the host, a chunk ahead, overlapped with
+  the GPU. The grid `land_fn` (monthly vegetation and soil-water records combined inside the
+  chunk) stays and returns the new land fields. The first step keeps its legacy inputs until
+  7.4. Expected bit for bit.
+- **Not done (the original D3 plan, dropped 2026-10-31):** building the meteorology inside
+  the chunk. Measured on the 1-degree global run on one A100 (Phase 6b): the GPU spends its
+  time on the canopy physics (816 s per 10-day chunk), the host builds a chunk's forcing in
+  seconds on a background thread while the previous chunk runs, and the forcing takes ~2 GB
+  (~4 GB with the read-ahead) of a 21.2 GB peak; the April out-of-memory stop came from
+  program code and unsplit forcing, both fixed (decision 33). Interpolating on the GPU would
+  add work there, change grid round-off and re-record references to save memory that is not
+  the limit; if it becomes the limit, a shorter `execution.chunk` reduces forcing memory in
+  proportion. The GPU costs that matter are the compiled program (2.32 GB of code, ~840 s
+  compile and ~800 s first step per run, ~31 600 kernels per step): the GPU optimization after
+  Phase 8.
 
 **7.4 Setup without module globals** (~2-3 weeks)
 - Pure functions: soil layer structure, soil properties and roots, vertical structure and

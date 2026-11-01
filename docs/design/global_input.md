@@ -135,10 +135,12 @@ chunk inputs), `clm_ml/params_convert.py` (`clm-ml params`: a CLM parameter file
    choices to revisit.
 6. **Initial state** from monthly means (G11), not a spun-up restart: expect a spin-up drift
    of the soil temperature over the first weeks.
-7. **Meteorology memory**: the meteorology is built on the host per chunk at the model step
-   (~39 numbers per gridcell-step, ~7 GB per month for 14 346 gridcells). Interpolating the
-   6-hourly records inside the compiled chunk, as is done for vegetation and soil water, would
-   remove it (Phase 7).
+7. **Meteorology memory** (*closed 2026-10-31, plan decision 36: not changed*): the
+   meteorology is built on the host per chunk at the model step (~39 numbers per
+   gridcell-step: ~2 GB per 10-day chunk for 14 346 gridcells, ~4 GB with the read-ahead, of a
+   21.2 GB peak on one A100). Interpolating the 6-hourly records inside the compiled chunk
+   would save that memory but add GPU work and change round-off; memory is not the limit since
+   decision 33. If it becomes one, a shorter `execution.chunk` reduces it in proportion.
 8. **`forc_hgt_u_patch` after setup**: the step writes the gridcell's 30 m into this container
    (`TowerMetCurr`); unused (the canopy uses `zref_forcing`, set at setup to the patch's
    height), but misleading if output.

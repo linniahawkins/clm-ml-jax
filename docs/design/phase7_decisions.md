@@ -913,8 +913,9 @@ only). One bug, fixed; the rest recorded:
   `template` (and `make_chunk_runner` without `params`), so jit compiles the template, and
   the patch constants formed from it, into the program as constants, contrary to the
   comment in `make_stream_runner` (since Phase 5b, not 7.2; `Model.run_chunk` passes
-  them). Results are unaffected; it costs a recompilation per patch structure. For the
-  maintainer: fix in 7.4 (setup without globals), where the template goes away.
+  them). Results are unaffected; it costs a recompilation per patch structure. **Maintainer
+  (2026-10-31): agreed, fix (b) in 7.4** (setup without globals), where the template goes
+  away; (a) left as it is.
 - Checked by the reviewers and found equal to the old code (round-off): every physics
   module; the alternative photosynthesis options (C3/C4 x colimitation x Medlyn /
   Ball-Berry / WUE, 3.8e-12); Euler, RK2, RK3, Medlyn without acclimation/colimitation/

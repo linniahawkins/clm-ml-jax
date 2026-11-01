@@ -30,7 +30,7 @@ remaining state and output field after every step. So the testing is cut to:
 |---|---|---|
 | Each commit | `black`/`ruff`; bit-for-bit + noise twin (`tests/regression/test_end_to_end_regression.py -m regression`, one run); the Fortran golden tests of the routines moved in that commit; `tests/clm_ml` only if `src/clm_ml/` config/IO code changed | ~1-2 min |
 | A commit that moves a routine with a hand-written gradient (implicit-function solvers: Obukhov length, stomatal conductance bisection, any `stop_gradient` construction) | plus `test_model_api.py::test_model_chunk_gradient_matches_finite_difference` on CPU with optimization off (command below) | ~5 min |
-| End of a package | the CPU gradient tier (below), and the feature tests the package touched (7.3: `test_coarse_forcing`, `test_land_data_files`, `test_grid_setup`, `test_stream_runner`; 7.4: `test_vector_setup`, `test_grid_setup`, `test_patches_batched`, `test_c3_c4_groups`, `test_sites_one_program`; 7.5: `test_restart`) | ~10-20 min |
+| End of a package | the CPU gradient tier (below), and the feature tests the package touched (7.3: `test_coarse_forcing`, `test_land_data_files`, `test_grid_setup`, `test_stream_runner`, `test_patches_batched`; 7.4: `test_vector_setup`, `test_grid_setup`, `test_patches_batched`, `test_c3_c4_groups`, `test_sites_one_program`; 7.5: `test_restart`) | ~10-20 min |
 | End of Phase 7 | all of `tests/regression`, the slow tests, the Fortran comparison, and **one** GPU gradient job (`jobs/grad_gpu.pbs`, develop queue) | ~1.5 h |
 
 Not run per commit any more: the fast tier after every edit, `test_clm_ml_equivalence`, the
@@ -316,12 +316,19 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,
 review fixes C23, timing above); last commit = the one that wrote this.** Stopped to report
-to the maintainer. Next: **package 7.3, forcing in the chunk** (`phase7_scope.md`), after
-discussing it with the maintainer; its package-end feature tests: `test_coarse_forcing`,
-`test_land_data_files`, `test_grid_setup`, `test_stream_runner`. Timing baseline for the
-end of 7.3: `p72-clm-ml-jax-*`. Open for the maintainer from 7.2: the C23 observations
-(template compiled in as a constant by `run_streams`, proposed for 7.4; the Euler tableau
-trap) and the list below.
+to the maintainer. **7.3 discussed with the maintainer (2026-10-31): D3 revised (plan
+decision 36)**: offline runs know all forcing in advance, so the forcing stays prepared on
+the host, a chunk ahead and overlapped with the GPU; the meteorology is not moved into the
+chunk (measured: GPU time is the physics, the forcing ~2-4 GB of a 21 GB peak). Next session:
+**package 7.3 as revised** (`phase7_scope.md`, 7.3, ~1 session): the chunk inputs as stacked
+0-based arrays shaped like `clm_ml.step.StepInputs` (meteorology per gridcell, land data per
+patch, previous/next records without the patch axis, 0-based bands) from the tower readers,
+`GridChunkReader`/`land_fn` and `Model.forcing`; `clm_ml.legacy.step.step_inputs` leaves the
+time step; first step unchanged until 7.4; bit for bit expected. Package-end feature tests:
+`test_coarse_forcing`, `test_land_data_files`, `test_grid_setup`, `test_stream_runner`,
+`test_patches_batched`; timing baseline `p72-clm-ml-jax-*`. C23: the maintainer agreed to fix
+the template-as-constant in 7.4 and to leave the Euler tableau as it is. Other open items:
+the list below.
 
 Same pattern as processes 2-9 (C10, C12-C18): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
