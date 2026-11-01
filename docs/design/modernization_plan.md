@@ -1,7 +1,7 @@
 # CLM-ML-JAX Modernization Plan
 
-**Status (2026-11-01):** Phases 0-7 done; Phase 8a (housekeeping before the documentation)
-in progress on `phase8a/housekeeping`, then 8b (documentation and release). Every decision is
+**Status (2026-11-01):** Phases 0-8 done (8b reduced to a README, one docs page and two
+examples, decision 103); Phase 9 is the documentation and release (`phase9_scope.md`). Every decision is
 in [`decisions.md`](decisions.md), every open item in [`open_items.md`](open_items.md), the
 model as it is now in [`model_overview.md`](model_overview.md). This plan is the design record
 (v4: gridcell/patch structure §3.1, memory independent of run length §6.9, configurable model
@@ -1838,7 +1838,9 @@ Fortran-mirroring packages and `clm-ml-offline` are deleted.
 
 Split (maintainer, 2026-11-01): **8a**, housekeeping, science issues and repository
 organization before the documentation (the list is `open_items.md`; **done 2026-11-01**);
-**8b**, the documentation and release below (scope: `phase8b_scope.md`).
+**8b**, reduced (decision 103) to a README (install, run CHATS7), `docs/how_the_model_works.md`
+and two examples (`examples/run_tower.py`, `examples/run_global.py`); **done 2026-11-01**. The
+documentation and release below are **Phase 9** (scope: `phase9_scope.md`).
 
 - A getting-started guide (YAML-first), a full reference for every YAML key (generated from the
   dataclasses so it can't drift), a gradient-calibration example, an ensemble example, a

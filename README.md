@@ -1,170 +1,132 @@
-# CLM-ML-JAX: Community Land Model with Multi-Layer Canopy in JAX
+# CLM-ML-JAX: the CLM-ml v2 multilayer canopy model in JAX
 
 [![CI](https://github.com/linniahawkins/clm-ml-jax/actions/workflows/ci.yml/badge.svg)](https://github.com/linniahawkins/clm-ml-jax/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![JAX](https://img.shields.io/badge/JAX-latest-orange.svg)](https://github.com/google/jax)
 [![License: BSD-3](https://img.shields.io/badge/License-BSD--3-green.svg)](LICENSE)
 
-> CLM-ml v2, the multilayer canopy model developed for the Community Land Model (Bonan et al.
-> 2021, 2026), in JAX: the same results as the Fortran model, on CPUs or GPUs, with gradients.
+CLM-ml v2 is the multilayer canopy model developed for the Community Land Model by Gordon
+Bonan (Bonan et al. 2021, 2026). This repository is a JAX version of it. It gives the same
+results as the Fortran model ([gbonan/CLM-ml_v2.CHATS](https://github.com/gbonan/CLM-ml_v2.CHATS)),
+and adds GPU execution, gradients for calibration and sensitivity analysis, and runs from one
+flux tower up to the whole globe.
 
-**Reference model in Fortran**: [CLM-ml_v2.CHATS](https://github.com/gbonan/CLM-ml_v2.CHATS)
-
-### Features
-
-- Reproduces the Fortran CLM-ml v2 results (CHATS walnut orchard test case; validated
-  routine by routine and end to end)
-- From one flux tower to global runs: patches on gridcells, prescribed meteorology, leaf area
-  and soil water, configurable model step and output streams
-- Experiment folders: every setting written out and explained in four YAML files
-- GPU execution, ensembles (`vmap`) and gradients with respect to parameters, forcing and
-  initial state (`jax.grad`) for calibration and sensitivity studies
+How the model is organized, what runs when, and how it differs from the Fortran:
+[`docs/how_the_model_works.md`](docs/how_the_model_works.md).
 
 ---
 
-## Installation
+## Install
+
+You need Python 3.10 or newer and git.
 
 ```bash
-# 1. Clone and navigate to repository
 git clone https://github.com/linniahawkins/clm-ml-jax.git
 cd clm-ml-jax
-
-# 2. Install package and dependencies
-pip install -e .
-
-# 3. Verify installation
+pip install -e .            # the clm_ml package and the clm-ml command
 clm-ml --help
 ```
 
-This installs the `clm-ml` command and the `clm_ml` package (the only package in `src/`).
+A fresh conda environment avoids clashes with other packages:
+
+```bash
+conda create -n clm-ml-jax python=3.11
+conda activate clm-ml-jax
+pip install -e .
+```
+
+This installs JAX for the CPU. To run on an NVIDIA GPU, also install the CUDA build of JAX
+(`pip install -U "jax[cuda12]"`; see the [JAX install guide](https://docs.jax.dev/en/latest/installation.html)).
+For development (tests, linting) install the extras: `pip install -e ".[dev]"`.
 
 ---
 
-## Run a Simulation
+## Run the CHATS tower (the default test case)
 
-### Experiment folders (`clm-ml`)
+CHATS is the walnut orchard in Dixon, California, used to test CLM-ml v2 (Bonan, Burns &
+Patton 2026). The forcing and CLM input files for May 2007 are in this repository
+(`data/input_files/`), so this runs right after installing.
 
-An experiment is a folder with four files, and every setting the model has is written out in
-them with an explanation (keys marked REQUIRED have no default):
+```bash
+clm-ml new chats7 --from chats7_1day    # write an experiment folder from the preset
+clm-ml check chats7                      # check the settings and print a summary (no run)
+clm-ml run chats7                        # run 1 May 2007 (under a minute on a CPU)
+```
+
+The output is in `chats7/output/`:
+
+- `CHATS7_halfhourly_2007-05-01_patch.nc`: every output variable, every 30 minutes (fluxes,
+  profiles through the canopy, sunlit and shaded leaves, soil temperature), with units;
+- `config/`: a copy of the four settings files exactly as the run read them;
+- `restart/`: the state at the end of the run, to continue from.
+
+Or run it from Python, which also prints the mean fluxes and saves a figure:
+
+```bash
+python examples/run_tower.py            # writes chats7_example/ and runs it
+```
+
+Read the output with xarray:
+
+```python
+import xarray as xr
+
+ds = xr.open_dataset("chats7/output/CHATS7_halfhourly_2007-05-01_patch.nc")
+ds.latent_heat_flux.isel(patch=0).plot()          # through the day
+ds.air_temperature.isel(patch=0, time=24)         # profile: one value per canopy layer
+```
+
+The first run compiles the model (most of that minute); compiled programs are cached on disk,
+so later runs with the same settings start faster. Times are UTC, at the end of each output
+interval. Canopy layers are numbered from the ground;
+slots above the top layer are NaN.
+
+### Change the run
+
+An experiment is a folder of four files. Every setting is listed in them with an explanation:
 
 | File | What it sets |
 |---|---|
-| `run.yaml` | when and with what: dates, calendar, forcing and land-data files, initial conditions, output streams, chunks and restarts |
-| `domain.yaml` | where: towers (location, forcing height, soil, patches) or a grid (CLM surface dataset, region) |
-| `model.yaml` | how: physics schemes and numerics (a change recompiles the model) |
-| `params.yaml` | which plants: every parameter of every PFT (the numbers gradients come back for) |
+| `run.yaml` | when and with what: dates, forcing and land-data files, initial conditions, output, restarts |
+| `domain.yaml` | where: towers (location, forcing height, soil, patches) or a grid |
+| `model.yaml` | how: the scheme for each process, the model step, canopy layers |
+| `params.yaml` | which plants: every parameter of every plant functional type |
 
-Start from a preset; ready-made folders are in `configs/` (`configs/README.md`):
+Edit the files, or change a setting for one run with `--set`:
 
 ```bash
-clm-ml new my_site --from chats7_1day      # write the four complete files
-clm-ml check my_site                        # validate everything and print a summary
-clm-ml run my_site                          # run; one netCDF file per output stream
-clm-ml run my_site --set 'run.time.length=7 days' --set model.processes.stomatal_conductance.scheme=medlyn
-clm-ml upgrade my_site                      # after updating clm-ml: add new settings
+clm-ml run chats7 --set 'run.time.length=31 days'                                   # all of May 2007
+clm-ml run chats7 --set model.processes.stomatal_conductance.scheme=medlyn
+clm-ml run chats7 --set params.broadleaf_deciduous_temperate_tree.vcmax25=100
 ```
 
-Each run also writes the four files as it read them into `OUTPUT/config/`, a folder that
-repeats the run. From Python:
+### Other towers and global runs
 
-```python
-import clm_ml
-
-exp = clm_ml.load_experiment("my_site")
-out = exp.execute()["halfhourly"]   # one result per output stream (run.yaml output.streams)
-ds = out.to_xarray()                # dims (time, patch, layer, ...), with units
-ds["latent_heat_flux"].plot()
-```
-
-Output streams are accumulated during the run, so memory does not grow with the number of
-model steps. The parameter presets are `clm5_defaults`, `chats` (the CHATS walnut-orchard
-values of Bonan, Burns & Patton 2026, Table 2) and `clm6` (CTSM 6.0); a folder's
-params.yaml is a complete copy of one. The design: `docs/design/experiment_folders.md`.
-
-### From a CLM-ml namelist
-
-The Fortran-style namelists (`data/namelists/nl.*`) are converted to an experiment folder
-with `clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/`; the former `clm-ml-offline` driver was retired in Phase 7. The
-Fortran-format `.out` files are still written with `output.legacy_ascii: true` (one patch,
-for the comparison with the Fortran model).
+- **Your own tower:** copy a folder (`clm-ml new my_tower --from chats7_1day`), then edit
+  `domain.yaml` (location, forcing height, soil, patches) and `run.yaml` (dates, forcing and
+  CLM history files). `python examples/run_tower.py --folder my_tower` runs it.
+- **Global:** `python examples/run_global.py` runs the 1° CLM grid, using the preset
+  `grid_1deg_2000` (CRUJRA forcing, CLM6 parameters; its input files are on NCAR's Glade
+  storage). The whole globe needs a GPU. A small region runs on a CPU:
+  `python examples/run_global.py --region 35 40 -100 -95 --length "1 day"`.
+- **Ready-made folders:** `configs/` (`configs/README.md`), including May 2007 set up for the
+  comparison with the Fortran model.
+- **From a Fortran CLM-ml namelist:** `clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/`.
 
 ---
 
-## Validation Tests
+## Tests
 
-We compare every JAX routine against golden reference values of the Fortran build:
-
-```bash
-/path/to/conda/envs/clm-ml-jax/bin/python -m pytest tests/fortran_validation/ -q
-```
-
-Golden JSON files live in `tests/fortran_validation/golden_IO/`.
-
-### End-to-end regression test
-
-A 50-step CHATS7 run (one full diurnal cycle) is compared, field by field and at full
-precision, against a committed reference. Two checks: refactors must reproduce it bit for bit,
-and every change must stay within the model's own round-off sensitivity, measured by two
-"noise twin" runs (see `docs/design/numerics_and_regression.md`):
+The JAX model is checked against the Fortran model routine by routine (160+ tests) and end to
+end (CHATS7, May 2007). Every change must also pass a bit-for-bit regression test:
 
 ```bash
-python -m pytest tests/regression/ -m regression -q     # ~20 min on CPU
+pip install -e ".[dev]"
+python -m pytest tests/clm_ml tests/fortran_validation -m "not slow" -q   # fast
+python -m pytest tests/regression -m regression -q                         # end to end (~20 min)
 ```
 
-If results change **on purpose** (a science change or bug fix), or a change alters only
-round-off and passes the noise-twin test, regenerate the reference and its twins and note it
-in the PR:
-
-```bash
-python tests/regression/record_run.py --update-reference
-```
-
-### Timing test
-
-```bash
-python timing/time_offline.py     # wall-clock time of a 50-step `clm-ml run`; timing/results.jsonl
-python timing/time_model.py       # the compiled chunk and its gradient; timing/results_model.jsonl
-```
-
----
-
-## Development
-
-### Adding a New Process or Scheme
-
-1. Write the process as pure functions on 0-based arrays in `src/clm_ml/processes/` (one file
-   per process, e.g. `photosynthesis.py`): everything it reads is an argument, everything it
-   changes is returned; compute on every layer slot and keep results with the layer masks
-   (`clm_ml.processes.layers`).
-2. Name the Fortran source in the docstring (`Fortran reference: MLFooMod.F90::Bar`).
-3. Static choices (schemes) come from `model.yaml` through `clm_ml.config`; numeric
-   parameters are per PFT in `params.yaml` (`clm_ml.params`) and stay differentiable.
-4. Call it from the time step (`src/clm_ml/step.py`, `src/clm_ml/processes/canopy.py`) and
-   add unit tests in `tests/clm_ml/`.
-5. Register output variables in `src/clm_ml/outputs.py` (`VARIABLES`).
-
-### Adding a New Tower
-
-A tower is an entry of an experiment's `domain.yaml`: location, forcing height, soil (texture
-as percentages or a USDA class, organic matter, colour, bedrock) and its patches (PFT,
-weight, canopy height, root biomass, area profiles, layer counts). Start from a preset
-(`clm-ml new my_site --from chats7_1day`) and edit its `domain.yaml`; the forcing files and
-their interval go in `run.yaml`.
-
-### Model options
-
-How each process is represented is in `model.yaml` under `processes` (e.g.
-`processes.stomatal_conductance.scheme: wue | medlyn | ball_berry`), with `numerics`,
-`canopy_layers` and `soil`; any key can be changed on the command line with
-`--set model.<section>.<key>=<value>`. Every setting is explained in each folder's
-`model.yaml` (e.g. `configs/chats7_1day/model.yaml`).
-
----
-
-## Contributing
-
-See `CONTRIBUTING.md`: how the code is organized, how to add a process or scheme, and the
-tests every change must pass. Bugs and questions: open an issue on GitHub.
+How to add a process or scheme, and the testing rules: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The development record (decisions, open issues): [`docs/design/`](docs/design/).
 
 ---
 
@@ -182,21 +144,17 @@ Please cite the software (`CITATION.cff`) and the model it translates:
 }
 ```
 
-The multilayer canopy model: Bonan, G. B., Burns, S. P., and Patton, E. G. (2026), Beyond
-surface fluxes: Observational and computational needs of multilayer canopy models - A walnut
-orchard test case, *Agricultural and Forest Meteorology*, 378, 110960,
-doi:10.1016/j.agrformet.2025.110960; and Bonan et al. (2021), *Agricultural and Forest
-Meteorology*, 306, 108435, doi:10.1016/j.agrformet.2021.108435.
+- Bonan, G. B., Burns, S. P., and Patton, E. G. (2026), Beyond surface fluxes: Observational
+  and computational needs of multilayer canopy models – A walnut orchard test case,
+  *Agricultural and Forest Meteorology*, 378, 110960, doi:10.1016/j.agrformet.2025.110960.
+- Bonan, G. B., Patton, E. G., Finnigan, J. J., Baldocchi, D. D., and Harman, I. N. (2021),
+  Moving beyond the incorrect but useful paradigm: reevaluating big-leaf and multilayer plant
+  canopies to model biosphere-atmosphere fluxes – a review, *Agricultural and Forest
+  Meteorology*, 306, 108435, doi:10.1016/j.agrformet.2021.108435.
 
 ---
 
 ## License
 
-This project is licensed under the **BSD-3-Clause License**. See [LICENSE](LICENSE) for details.
-
----
-
-⭐ **If this helps your research, please star the repository!**
-
-🐛 **Found a bug?** Please [open an issue](https://github.com/linniahawkins/clm-ml-jax/issues)
-
+BSD-3-Clause. See [LICENSE](LICENSE). Bugs and questions:
+[open an issue](https://github.com/linniahawkins/clm-ml-jax/issues).

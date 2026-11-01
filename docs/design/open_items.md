@@ -6,10 +6,11 @@ One list of everything still open after Phase 7, gathered from the design docume
 CLAUDE.md, the code, and the Phase 8 survey. Each item keeps its original IDs under
 "Source" so its history can be traced. Items appearing in several places are merged.
 
-**Status (2026-11-01): Phase 8a closed**; the 8b items are scoped in `phase8b_scope.md`.
+**Status (2026-11-01): Phase 8 closed** (8b reduced to a README, one docs page and two
+examples: decision 103); the documentation items are Phase 9, scoped in `phase9_scope.md`.
 
-**Targets:** **8a** = housekeeping before the documentation; **8b** = documentation and
-release; **after 8** = after Phase 8 (already planned that way); **known** = a known model
+**Targets:** **8a** = housekeeping before the documentation; **9** = documentation and
+release (was 8b; decision 103); **after 8** = after Phase 8 (already planned that way); **known** = a known model
 limitation, not to be changed without discussion. **Decides:** **M** = maintainer (science
 or project choice); **I** = implementation (can be done without a science decision, reviewed
 as usual).
@@ -48,7 +49,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O21 | ~~Public API: which names `import clm_ml` offers~~ (closed: decision 96) | maintainer decision | closed | M |
 | O22 | Review of Phase 7 behaviour changes and re-recorded references | maintainer decision | after 8 (maintainer 2026-11-01) | M |
 | O23 | ~~Authorship, citation and canonical repository~~ (closed: decision 97) | maintainer decision | closed | M |
-| O24 | Release logistics (decided: decision 98; `main` moved forward at the end of 8a, 1.0.0 tag at the end of 8b) | maintainer decision | 8a (merge) / 8b (release) | M |
+| O24 | Release logistics (decided: decision 98; `main` moved forward at the end of 8a, 1.0.0 tag at the end of Phase 9: decision 103) | maintainer decision | 8a (merge) / 9 (release) | M |
 | **3. Bugs and robustness** |||||
 | O25 | XLA CPU gradient crash (issue 16) | bug (upstream JAX) | known / recheck on JAX upgrade | I |
 | O26 | XLA CPU compile crash (LLVM linker recursion) | bug (upstream JAX) | known / recheck on JAX upgrade | I |
@@ -77,15 +78,15 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O68 | ~~Stale docstrings and comments (`model.py`, `legacy_ascii`, `clm_ml/__init__.py`, CLAUDE.md `rtol`)~~ (closed: updated) | housekeeping | closed | I |
 | O69 | ~~Plan says output is a nested scan (records × steps); the code is one scan with a record slot per step~~ (closed: plan and CLAUDE.md corrected) | housekeeping | closed | I |
 | O70 | ~~Implement experiment folders~~ (closed: decision 91 implemented) | housekeeping | closed | I |
-| **5. Documentation (8b)** |||||
-| O45 | Getting-started guide | documentation | 8b | I |
-| O46 | Reference of every YAML key, generated from the code | documentation | 8b (code part in 8a) | I |
-| O47 | Examples: gradient calibration, ensemble, multi-tower, grid | documentation | 8b | M (calibration target) |
-| O48 | Page for Fortran CLM-ml users (namelist and option codes to YAML) | documentation | 8b | I |
-| O49 | API reference from docstrings | documentation | 8b | I |
-| O50 | CONTRIBUTING: "add a process variant", testing tiers, regression policy | documentation | 8b | I |
-| O51 | Output caveats for users (`soil_water_stress` = 1 with WUE; NaN above the top layer; `stem_area_added`) | documentation | 8b | I |
-| O52 | Release 1.0.0: version, CHANGELOG, CITATION.cff, tag | documentation | 8b | M |
+| **5. Documentation (Phase 9)** |||||
+| O45 | Getting-started guide (a README version in 8b) | documentation | 9 | I |
+| O46 | Reference of every YAML key, generated from the code | documentation | 9 | I |
+| O47 | Examples: gradient calibration, ensemble, multi-tower (tower and global scripts in 8b) | documentation | 9 | M (calibration target) |
+| O48 | Page for Fortran CLM-ml users (namelist and option codes to YAML) | documentation | 9 | I |
+| O49 | API reference from docstrings | documentation | 9 | I |
+| O50 | CONTRIBUTING: "add a process variant", testing tiers, regression policy | documentation | 9 | I |
+| O51 | Output caveats for users (`soil_water_stress` = 1 with WUE; NaN above the top layer; `stem_area_added`) | documentation | 9 | I |
+| O52 | Release 1.0.0: version, CHANGELOG, CITATION.cff, tag | documentation | 9 | M |
 | **6. Deferred to after Phase 8** |||||
 | O53 | Round-off amplification in real 1° patches (issue 10) | science issue | after 8 | M |
 | O54 | Bare-ground patches (issue 13) | deferred feature | after 8 | M |
@@ -341,7 +342,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 
 ### O24. Release logistics
 - **Decided 2026-11-01:** decision 98: `main` fast-forwarded to the phase branch when 8a closes; version 1.0.0 tagged at the end of 8b; GitHub release only, no PyPI for now.
-- **Kind:** maintainer decision · **Target:** 8a (merge), 8b (release) · **Decides:** M
+- **Kind:** maintainer decision · **Target:** 8a (merge), 9 (release; decision 103) · **Decides:** M
 - **What:** `origin/main` (2026-05-26) is 156 commits behind `phase7/restructure`; no phase
   branch has been merged (plan risk "Every phase is merged on its own" not followed;
   standing rule: no PRs). Version is 0.1.0.
@@ -602,7 +603,11 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Next:** the six steps of `experiment_folders.md` §12 (questions answered, §13).
 - **Source:** maintainer, 2026-11-01.
 
-## 5. Documentation (8b)
+## 5. Documentation (Phase 9)
+
+Moved from 8b to Phase 9 (decision 103). Done in 8b: `README.md` (install, run CHATS7),
+`docs/how_the_model_works.md` (organization, skeleton, differences from Fortran),
+`examples/run_tower.py` and `examples/run_global.py`.
 
 ### O45. Getting-started guide
 YAML first: install, convert a namelist, run one CHATS7 day, read the netCDF with xarray,

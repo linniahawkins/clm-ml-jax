@@ -17,13 +17,13 @@ Guidance for Claude (and other contributors) working in this repository.
   (plan §0/§8, Phase 7 D/C numbers, `global_input.md`) are the detailed history.
 - **Standing preferences** (from the working sessions):
   - Commit and push when the tests required by the testing tiers pass (authorized); never
-    open PRs; one branch per phase (`phase8b/docs` next). Commit footer:
+    open PRs; one branch per phase (`phase9/docs` next). Commit footer:
     `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (or the model in use).
   - Don't modify the maintainer's Python environment (no `pip install` without asking).
   - Stop before starting a new phase to discuss it; during a phase, a measured slowdown of
     more than ~1.5× (timing test or gradient) is discussed before going on.
   - Explain plainly, with the scientific reason; keep reports short.
-  - Lint with `black --check --line-length 100 src tests timing && ruff check src tests timing`
+  - Lint with `black --check --line-length 100 src tests timing examples && ruff check src tests timing examples`
     (dev extras). If `pytest-cov` is missing, run pytest with `-p no:cacheprovider -o addopts=""`.
 - **Bugs and science (maintainer, Phase 6b):** diagnose first with probes in scratch, *no code
   changes*, and bring the diagnosis to the maintainer before changing code; no shortcuts,
@@ -32,11 +32,13 @@ Guidance for Claude (and other contributors) working in this repository.
   `/glade/work/linnia/ctsm5.4.004`; CLM-ml v1/v2 Fortran sources: see the progress log).
   Science changes are the maintainer's decision; record each in `docs/design/decisions.md`
   and every open issue in `docs/design/open_items.md`.
-- **Resume here:** `docs/design/phase8b_scope.md` (Phase 8a closed 2026-11-01; Phase 8b,
-  documentation and release, starts by discussing its §2 decisions with the maintainer, on a
-  new branch `phase8b/docs` from `main`). Open items: `docs/design/open_items.md`; how the
-  model works now: `docs/design/model_overview.md`.
-- **Testing:** the tiers under "Rules for changes" (8b adds the docs build; phase8b_scope §5).
+- **Resume here:** `docs/design/phase9_scope.md` (Phase 8 closed 2026-11-01 with a short 8b:
+  README, `docs/how_the_model_works.md`, `examples/run_tower.py` and `examples/run_global.py`,
+  decision 103). Phase 9, the formal documentation and release, starts by discussing its §2
+  decisions with the maintainer, on a new branch `phase9/docs` from `main`. Open items:
+  `docs/design/open_items.md`; how the model works now: `docs/how_the_model_works.md` (users)
+  and `docs/design/model_overview.md` (detail).
+- **Testing:** the tiers under "Rules for changes" (Phase 9 adds the docs build; phase9_scope §5).
 - **Where the work is:** NCAR Derecho (CPU login node; GPUs through PBS, account UCLB0069,
   develop queue `gpudev`). Phase 6 history: `docs/design/phase6_progress.md`.
 - Terminology: say **"timing test"** for wall-clock performance measurements, not "benchmark".
@@ -191,6 +193,8 @@ tests/
   test_fortran_python_comparison.py  end-to-end vs Fortran .out files (slow; 2.5% / r >= 0.9999)
   test_differentiability.py          jax.grad through one step (gradient tier)
 timing/                time_offline.py, time_model.py, time_vmap.py, time_global.py, time_program.py
+examples/              run_tower.py (any tower, CHATS7 default), run_global.py (1° grid)
+docs/how_the_model_works.md   organization, skeleton of a run, differences from Fortran
 docs/design/           plan, decisions.md, open_items.md, model_overview.md, phase logs
 ```
 
@@ -270,7 +274,7 @@ python tests/regression/record_run.py --update-reference   # reference + 2 noise
 python timing/time_offline.py                              # wall-clock time of a whole run; timing/results.jsonl
 python timing/time_model.py [--steps 8] [--no-grad]        # compiled chunk + gradient timing/memory; results_model.jsonl
 
-black --check --line-length 100 src tests timing && ruff check src tests timing   # what CI runs
+black --check --line-length 100 src tests timing examples && ruff check src tests timing examples   # what CI runs
 ```
 
 Python >= 3.10. CI tests 3.10 and 3.12.
@@ -405,7 +409,8 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
 | 6 | Many patches and gridcells, **on Derecho (GPU)**: steps 0-6 (per-site data, batched patches, C3/C4 groups, devices, vectorized setup) done 2026-10-29; GPU optimization (step 1c) deferred; progress log `docs/design/phase6_progress.md` |
 | 6b | Real global input before Phase 7 (decisions 26-32): steps 1-6 done (grid loader, gridded forcing, setup, regional test), done 2026-10-30 (step 7 closed; review fixes, calendar decision 34); fixes: per-layer minimum plant area (30), no 0.05 LAI cutoff (31), canopy-top latent heat per sub-step (32); open issues in `global_input.md` |
 | 7 | Restructure (decision 35; `phase7_scope.md`): 7.0 preparation, 7.1 step state (0-based), 7.2 physics by process (`clm_ml/processes/`), 7.3 chunk forcing as 0-based arrays (forcing prepared on the host: decision 36), 7.4 setup without globals (in-process runs), 7.5 netCDF restarts, 7.6 cleanup. **Done 2026-11-01** (`phase7_progress.md`; decisions C0-C34) |
-| 8 | 8a housekeeping before the docs (done 2026-11-01); 8b docs and release (`phase8b_scope.md`) |
+| 8 | 8a housekeeping before the docs; 8b README, one docs page, two examples (decision 103). **Done 2026-11-01** |
+| 9 | Documentation and release: docs site, settings reference, guides, examples, Fortran-users page, API reference, formatting clean-up, 1.0.0 (`phase9_scope.md`) |
 
 Decisions 18–21 (after Phase 4b): Phase 5 converts to masks in place; masks rather than grouping
 patches by layer structure; configuration passed explicitly (5a); process interface in Phase 7.

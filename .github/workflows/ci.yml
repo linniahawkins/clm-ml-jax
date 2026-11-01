@@ -26,10 +26,10 @@ jobs:
         run: pip install black>=23.0.0 ruff>=0.1.0
 
       - name: black
-        run: black --check --line-length 100 src/ tests/ timing/
+        run: black --check --line-length 100 src/ tests/ timing/ examples/
 
       - name: ruff
-        run: ruff check src/ tests/ timing/
+        run: ruff check src/ tests/ timing/ examples/
 
   test:
     name: Tests (Python ${{ matrix.python-version }})

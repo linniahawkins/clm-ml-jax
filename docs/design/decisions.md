@@ -117,11 +117,25 @@ Reason: one place to see what was decided and why.
 Source: `phase7_decisions.md` header; CLAUDE.md.
 
 **6. Phase 8 in two parts**
-2026-11-01 · Phase 8 · maintainer · in force · Departure from Fortran: no
+2026-11-01 · Phase 8 · maintainer · revised by 103 · Departure from Fortran: no
 Phase 8a: housekeeping and clean-up (science issues, repository organization, one open-items
 document, this register, a schematic of the model); Phase 8b: the documentation and release.
 Reason: the model and repository should be in final shape before they are documented.
 Source: maintainer, 2026-11-01 (this session).
+
+**103. Phase 8 ends with a short 8b; formal documentation and the release move to Phase 9**
+2026-11-01 · Phase 8b · maintainer · in force · Departure from Fortran: no
+Phase 8b is only: a README that says how to install and run the CHATS tower; one page,
+`docs/how_the_model_works.md` (how the model is organized, how it works, how the JAX version
+differs from Fortran, and a skeleton of what runs when); and two scripts, `examples/run_tower.py`
+(any tower, CHATS7 by default) and `examples/run_global.py` (the 1° grid, whole globe by
+default). Phase 8 closes with them. The documentation site, the generated settings reference,
+the guides, the further examples (calibration, ensemble), the Fortran-users page, the API
+reference, the formatting clean-up and the 1.0.0 release are Phase 9 (`phase9_scope.md`;
+open items O45-O52, O24).
+Reason: the maintainer's decision: enough for a user to install and run now; the formal
+documentation later.
+Source: maintainer, 2026-11-01.
 
 ## B. Configuration and user interface
 
@@ -311,7 +325,7 @@ Reason: the maintainer's decision.
 Source: open_items O23, O37.
 
 **98. Release: `main` at the end of 8a, 1.0.0 at the end of 8b, GitHub only**
-2026-11-01 · Phase 8a · maintainer · in force (`main` moved at the end of 8a, 2026-11-01; 1.0.0 at the end of 8b) · Departure from Fortran: n/a
+2026-11-01 · Phase 8a · maintainer · in force, revised by 103 (`main` moved at the end of 8a, 2026-11-01; 1.0.0 at the end of Phase 9) · Departure from Fortran: n/a
 `main` is fast-forwarded to the phase branch when 8a closes (no pull request; it holds nothing
 of its own); version 1.0.0 is tagged at the end of 8b as a GitHub release; no PyPI for now
 (install with pip from git).
