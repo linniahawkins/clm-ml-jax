@@ -497,3 +497,439 @@ def merge_sun_shade(
         )
 
     return MergedLeaves(tleaf=merge(tleaf), lwp=merge(lwp), tleaf_hist=tleaf, lwp_hist=lwp)
+
+
+# ---------------------------------------------------------------------------
+# The sub-step — Fortran MLCanopyFluxes, lines 261-330
+# ---------------------------------------------------------------------------
+
+
+class SubstepOptions(NamedTuple):
+    """The static choices of the sub-step (model.yaml names; hashable, a static argument)."""
+
+    interpolation: str  # forcing time interpolation (physics.atm_forcing.TIME_INTERPOLATION)
+    acclimation: bool  # temperature acclimation of photosynthesis
+    kn_val: float  # nitrogen decay coefficient (-999: from Vcmax25)
+    sparse_canopy: bool  # turbulence: sparse canopy
+    ground_conductance: str  # turbulence: physics.turbulence.GROUND_CONDUCTANCE
+    regime: str  # leaf boundary layer: physics.leaf_boundary_layer.REGIMES
+    stomatal_conductance: str  # physics.photosynthesis.STOMATAL_CONDUCTANCE
+    water_stress: bool  # stomatal conductance limited by leaf water potential
+    colimitation: bool  # photosynthesis colimitation
+    wue_solver: str  # stomatal optimization solver
+    dtime: float  # sub-step length, s
+    integrator: str  # physics.integrators.TABLEAUS
+
+
+class SubstepInputs(NamedTuple):
+    """Values fixed over a step's sub-steps (legacy container field in parentheses)."""
+
+    layers: PatchLayers
+    forcing_bef: object  # physics.atm_forcing.ForcingRecord at the previous step
+    forcing_cur: object  # ... at this step
+    forcing_next: object  # ... at the next step
+    time_bef: Array  # () calendar days of the three records for the interpolation
+    time_cur: Array
+    time_next: Array
+    zref: Array  # () reference height, m (zref_forcing)
+    solar_zen: Array  # () solar zenith angle (solar_zen_forcing)
+    dlai: Array  # (layer,) (dlai_profile)
+    dsai: Array  # (layer,) (dsai_profile)
+    dpai: Array  # (layer,) (dpai_profile)
+    albsoib: Array  # (band,) direct beam albedo of the ground (albsoib_soil)
+    albsoid: Array  # (band,) diffuse albedo of the ground (albsoid_soil)
+    lai: Array  # () (lai_canopy)
+    sai: Array  # () (sai_canopy)
+    tacclim: Array  # () acclimation temperature, K (tacclim_forcing)
+    ztop: Array  # () canopy height, m (ztop_canopy)
+    o2ref: Array  # () O2, mmol/mol (o2ref_forcing)
+    qflx_rain: Array  # () rainfall, kg H2O/m2/s (qflx_rain_forcing)
+    qflx_snow: Array  # () snowfall, kg H2O/m2/s (qflx_snow_forcing)
+    rhg: Array  # () relative humidity at the soil surface (rhg_soil)
+    soilres: Array  # () soil evaporative resistance, s/m (soilres_soil)
+    soil_t: Array  # () first soil layer temperature, K (soil_t_soil)
+    soil_dz: Array  # () depth to the first soil layer, m (soil_dz_soil)
+    soil_tk: Array  # () first soil layer thermal conductivity (soil_tk_soil)
+    cpleaf: Array  # (layer,) leaf heat capacity (cpleaf_profile)
+    lsc: Array  # (layer,) leaf-specific conductance (lsc_profile)
+    psis: Array  # () soil water potential, MPa (psis_soil)
+
+
+#: Fields of :class:`Substep` by kind (their legacy container names; the kind gives the
+#: shape: scalar (), band (band,), layer (layer,), level (level,), level_band (level, band),
+#: leaf (layer, leaf), leaf_band (layer, leaf, band), stage (stage,), layer_stage
+#: (layer, stage), leaf_stage (layer, leaf, stage), checks (check,))
+SUBSTEP_KINDS = {
+    "scalar": ("tg_soil", "tg_bef_soil", "uref_forcing", "tref_forcing", "qref_forcing",
+               "pref_forcing", "co2ref_forcing", "lwsky_forcing", "eref_forcing",
+               "rhomol_forcing", "rhoair_forcing", "mmair_forcing", "cpair_forcing",
+               "thref_forcing", "thvref_forcing", "qflx_intr_canopy", "qflx_tflrain_canopy",
+               "qflx_tflsnow_canopy", "lwsoi_soil", "lwveg_canopy", "lwup_canopy",
+               "rnsoi_soil", "obu_canopy", "beta_canopy", "zdisp_canopy", "ustar_canopy",
+               "z0m_canopy", "gac0_soil", "btran_soil", "shsoi_soil", "lhsoi_soil",
+               "gsoi_soil", "etsoi_soil"),
+    "band": ("swskyb_forcing", "swskyd_forcing", "swsoi_soil", "swveg_canopy",
+             "swvegsun_canopy", "swvegsha_canopy", "albcan_canopy"),
+    "layer": ("tair_profile", "eair_profile", "cair_profile", "h2ocan_profile",
+              "tair_bef_profile", "eair_bef_profile", "cair_bef_profile", "h2ocan_bef_profile",
+              "fracsun_profile", "kb_profile", "tb_profile", "td_profile", "vcmax25_profile",
+              "jmax25_profile", "rd25_profile", "kp25_profile", "fwet_profile", "fdry_profile",
+              "wind_profile", "mflx_profile", "gac_profile", "kc_eddy_profile",
+              "shair_profile", "etair_profile", "stair_profile"),
+    "level": ("tbi_profile", "lwupw_profile", "lwdwn_profile"),
+    "level_band": ("swbeam_profile", "swdwn_profile", "swupw_profile"),
+    "leaf": ("tleaf_leaf", "lwp_leaf", "tleaf_bef_leaf", "lwp_bef_leaf", "apar_leaf",
+             "vcmax25_leaf", "jmax25_leaf", "rd25_leaf", "kp25_leaf", "lwleaf_leaf",
+             "rnleaf_leaf", "gbh_leaf", "gbv_leaf", "gbc_leaf", "gs_leaf", "anet_leaf",
+             "agross_leaf", "stleaf_leaf", "shleaf_leaf", "lhleaf_leaf", "evleaf_leaf",
+             "trleaf_leaf"),
+    "leaf_band": ("swleaf_leaf",),
+    "stage": ("dtg_soil",),
+    "layer_stage": ("dtair_profile", "deair_profile", "dh2ocan_profile"),
+    "leaf_stage": ("dtleaf_leaf", "dlwp_leaf"),
+    "checks": ("balance_error",),
+}  # fmt: skip
+
+#: The values a sub-step carries: everything the sub-step's processes read or write except
+#: :class:`SubstepInputs` (the prognostic variables, their values at the start of the
+#: sub-step, the Runge-Kutta increments, and the processes' results that later processes,
+#: the averages, the canopy totals or the outputs read). Every slot of each axis; padding
+#: slots keep their values where the legacy routines kept them.
+Substep = NamedTuple("Substep", [(f, Array) for fields in SUBSTEP_KINDS.values() for f in fields])
+
+
+def _record(errors: Array, check: int, err) -> Array:
+    """``errors`` with ``|err|`` (largest element) recorded for ``check`` (as
+    ``MLCanopyFluxesType.record_balance_error``)."""
+    return errors.at[check].max(jax.lax.stop_gradient(jnp.max(jnp.abs(jnp.asarray(err)))))
+
+
+def _keep(mask, new, old):
+    from clm_ml.physics.layers import keep
+
+    return keep(mask, new, old)
+
+
+def save_start(c: Substep, layers: PatchLayers) -> Substep:
+    """The values at the start of the sub-step (``*_bef``), layers in use (padding kept).
+
+    Fortran reference: MLCanopyFluxesMod.F90::MLCanopyFluxes (lines 272-285).
+    """
+    use = layers.in_use
+    return c._replace(
+        tg_bef_soil=c.tg_soil,
+        tair_bef_profile=_keep(use, c.tair_profile, c.tair_bef_profile),
+        eair_bef_profile=_keep(use, c.eair_profile, c.eair_bef_profile),
+        cair_bef_profile=_keep(use, c.cair_profile, c.cair_bef_profile),
+        h2ocan_bef_profile=_keep(use, c.h2ocan_profile, c.h2ocan_bef_profile),
+        tleaf_bef_leaf=_keep(use, c.tleaf_leaf, c.tleaf_bef_leaf),
+        lwp_bef_leaf=_keep(use, c.lwp_leaf, c.lwp_bef_leaf),
+    )
+
+
+def _radiation(c: Substep, x: SubstepInputs, params, calday, opt: SubstepOptions, c3: bool):
+    """Forcing, solar radiation and the nitrogen profile of the sub-step (once per
+    sub-step, before the Runge-Kutta stages)."""
+    from clm_ml.physics import atm_forcing, nitrogen_profile, solar_radiation
+    from multilayer_canopy.MLCanopyFluxesType import NITROGEN, SOLAR, SUNLIT_FRACTION
+
+    lay = x.layers
+    use = lay.in_use
+    errors = c.balance_error
+
+    # Forcing at the reference height — Fortran GetAtmForcing
+    f = atm_forcing.atm_forcing(
+        x.forcing_bef, x.forcing_cur, x.forcing_next, x.zref,
+        x.time_bef, x.time_cur, x.time_next, calday, interpolation=opt.interpolation,
+    )  # fmt: skip
+    c = c._replace(**{name + "_forcing": v for name, v in f._asdict().items()})
+
+    # Solar radiation — Fortran SolarRadiation (two-stream; values in the layers in use,
+    # padding kept)
+    bands = slice(1, 3)  # legacy band columns of the PFT parameters
+    optics = solar_radiation.canopy_optics(
+        x.solar_zen, x.dlai, x.dsai, x.dpai, lay,
+        params.leaf_reflectance[bands], params.leaf_transmittance[bands],
+        params.stem_reflectance[bands], params.stem_transmittance[bands],
+        params.leaf_angle_index, params.clumping_index,
+    )  # fmt: skip
+    errors = _record(errors, SUNLIT_FRACTION, optics.sunlit_fraction_error)
+    c = c._replace(
+        kb_profile=_keep(use, optics.kb, c.kb_profile),
+        fracsun_profile=_keep(use, optics.fracsun, c.fracsun_profile),
+        tb_profile=_keep(use, optics.tb, c.tb_profile),
+        td_profile=_keep(use, optics.td, c.td_profile),
+        tbi_profile=jnp.concatenate(
+            [optics.tbi_ground[None], _keep(use, optics.tbi, c.tbi_profile[1:])]
+        ),
+    )
+    s = solar_radiation.two_stream(
+        optics, x.dpai, c.swskyb_forcing, c.swskyd_forcing, x.albsoib, x.albsoid, lay
+    )
+    errors = _record(errors, SOLAR, s.error)
+    upto = jnp.arange(lay.dz.shape[0] + 1) <= lay.n_layers  # levels 0..ncan
+    swleaf = _keep(use, s.swleaf, c.swleaf_leaf)
+    c = c._replace(
+        swbeam_profile=_keep(upto, s.swbeam, c.swbeam_profile),
+        swdwn_profile=_keep(upto, s.swdwn, c.swdwn_profile),
+        swupw_profile=_keep(upto, s.swupw, c.swupw_profile),
+        swleaf_leaf=swleaf,
+        swsoi_soil=s.swsoi,
+        swveg_canopy=s.swveg,
+        swvegsun_canopy=s.swvegsun,
+        swvegsha_canopy=s.swvegsha,
+        albcan_canopy=s.albcan,
+        apar_leaf=_keep(use, solar_radiation.absorbed_par(swleaf), c.apar_leaf),
+    )
+
+    # Leaf nitrogen and photosynthetic capacity — Fortran CanopyNitrogenProfile (every slot)
+    n = nitrogen_profile.canopy_nitrogen_profile(
+        lay, x.dpai, c.kb_profile, c.tbi_profile[1:], c.fracsun_profile, x.lai, x.sai,
+        x.tacclim, params.vcmax25, params.clumping_index,
+        c3=c3, acclimation=opt.acclimation, kn_val=opt.kn_val, vary_with_height=False,
+    )  # fmt: skip
+    errors = _record(errors, NITROGEN, n.integration_error)
+    c = c._replace(**{k: v for k, v in n._asdict().items() if k != "integration_error"})
+    return c._replace(balance_error=errors)
+
+
+def _stage(c: Substep, x: SubstepInputs, params, opt: SubstepOptions, c3: bool, stage):
+    """One Runge-Kutta stage (1-based ``stage``; the last one, after the method's stages,
+    only computes the fluxes): the canopy processes, then the state update.
+
+    Fortran reference: MLCanopyFluxesMod.F90::MLCanopyFluxes (lines 295-328).
+    """
+    from clm_ml.io.rsl_tables import default_rsl_tables
+    from clm_ml.physics import (
+        canopy_water,
+        flux_profile,
+        integrators,
+        leaf_boundary_layer,
+        longwave,
+        photosynthesis,
+        plant_hydraulics,
+        turbulence,
+    )
+    from multilayer_canopy.MLCanopyFluxesType import LEAF_ENERGY, LONGWAVE, SOIL_ENERGY
+
+    lay = x.layers
+    use = lay.in_use
+    errors = c.balance_error
+
+    # Wetted fraction of the plant area — Fortran CanopyWettedFraction (every slot)
+    fwet, fdry = canopy_water.wetted_fraction(c.h2ocan_profile, x.dpai, x.dlai)
+    c = c._replace(fwet_profile=fwet, fdry_profile=fdry)
+
+    # Longwave radiation — Fortran LongwaveRadiation (layers and levels up to the canopy top)
+    lw = longwave.norman(
+        c.tleaf_leaf, c.fracsun_profile, c.td_profile, x.dpai, c.lwsky_forcing, c.tg_soil,
+        lay, params.leaf_emissivity,
+    )  # fmt: skip
+    errors = _record(errors, LONGWAVE, lw.error)
+    upto_top = jnp.arange(lay.dz.shape[0] + 1) <= lay.n_within  # levels 0..ntop
+    c = c._replace(
+        lwup_canopy=lw.lwup,
+        lwveg_canopy=lw.lwveg,
+        lwsoi_soil=lw.lwsoi,
+        lwleaf_leaf=_keep(upto_top[1:], lw.lwleaf, c.lwleaf_leaf),
+        lwupw_profile=jnp.where(upto_top, lw.lwupw, c.lwupw_profile),
+        lwdwn_profile=jnp.where(upto_top, lw.lwdwn, c.lwdwn_profile),
+    )
+
+    # Net radiation — Fortran lines 301-307 (every slot)
+    c = c._replace(
+        rnleaf_leaf=c.swleaf_leaf[..., 0] + c.swleaf_leaf[..., 1] + c.lwleaf_leaf,
+        rnsoi_soil=c.swsoi_soil[0] + c.swsoi_soil[1] + c.lwsoi_soil,
+    )
+
+    # Canopy turbulence — Fortran CanopyTurbulence (profiles in the layers in use)
+    t = turbulence.harman_finnigan(
+        lay, c.tair_profile, c.eair_profile, c.pref_forcing, x.ztop, x.lai, x.sai, x.zref,
+        c.uref_forcing, c.thref_forcing, c.thvref_forcing, c.qref_forcing, c.rhomol_forcing,
+        default_rsl_tables(),
+        sparse_canopy=opt.sparse_canopy, ground_conductance=opt.ground_conductance,
+    )  # fmt: skip
+    c = c._replace(
+        obu_canopy=t.obu,
+        beta_canopy=t.beta,
+        zdisp_canopy=t.zdisp,
+        ustar_canopy=t.ustar,
+        z0m_canopy=t.z0m,
+        gac0_soil=t.gac0,
+        wind_profile=_keep(use, t.wind, c.wind_profile),
+        mflx_profile=_keep(use, t.mflx, c.mflx_profile),
+        gac_profile=_keep(use, t.gac, c.gac_profile),
+        kc_eddy_profile=_keep(use, t.kc_eddy, c.kc_eddy_profile),
+    )
+
+    # Leaf boundary layer conductances — Fortran LeafBoundaryLayer (every slot)
+    gbh, gbv, gbc = leaf_boundary_layer.leaf_boundary_layer(
+        x.dpai, c.wind_profile, c.tair_profile, c.tleaf_leaf, c.pref_forcing, c.tref_forcing,
+        c.rhomol_forcing, params.leaf_dimension, regime=opt.regime,
+    )  # fmt: skip
+    c = c._replace(gbh_leaf=gbh, gbv_leaf=gbv, gbc_leaf=gbc)
+
+    # Photosynthesis and stomatal conductance — Fortran LeafPhotosynthesis (layers in use)
+    stomatal = {}
+    if opt.stomatal_conductance != "wue":
+        g0, g1 = photosynthesis.stomatal_parameters(params, opt.stomatal_conductance)
+        stomatal = {"g0": g0, "g1": g1}
+    ps = photosynthesis.leaf_photosynthesis(
+        lay, x.dpai, c.eair_profile, c.cair_profile, c.tleaf_leaf, c.vcmax25_leaf,
+        c.jmax25_leaf, c.rd25_leaf, c.kp25_leaf, c.apar_leaf, c.gbc_leaf, c.gbv_leaf,
+        c.lwp_leaf, x.o2ref, c.pref_forcing, x.tacclim,
+        iota=params.iota, gs_min=params.gs_min, psi50_gs=params.psi50_gs,
+        shape_gs=params.shape_gs, **stomatal, c3=c3,
+        stomatal_conductance=opt.stomatal_conductance, water_stress=opt.water_stress,
+        colimitation=opt.colimitation, acclimation=opt.acclimation, wue_solver=opt.wue_solver,
+    )  # fmt: skip
+    c = c._replace(
+        gs_leaf=_keep(use, ps.gs, c.gs_leaf),
+        anet_leaf=_keep(use, ps.anet, c.anet_leaf),
+        agross_leaf=_keep(use, ps.agross, c.agross_leaf),
+        btran_soil=jnp.ones_like(c.btran_soil),
+    )
+
+    # Flux-profile solution — Fortran FluxProfileSolution (implicit; layers in use)
+    fp = flux_profile.implicit(
+        flux_profile.Canopy(
+            x.dpai, c.fwet_profile, c.fdry_profile, c.fracsun_profile, x.cpleaf,
+            c.gac_profile, c.tair_bef_profile, c.eair_bef_profile, c.gbh_leaf, c.gbv_leaf,
+            c.gs_leaf, c.rnleaf_leaf, c.tleaf_bef_leaf,
+        ),
+        flux_profile.Ground(
+            c.tg_bef_soil, x.rhg, c.rnsoi_soil, x.soilres, x.soil_t, x.soil_dz, x.soil_tk,
+            c.gac0_soil,
+        ),
+        flux_profile.Reference(
+            c.pref_forcing, c.rhomol_forcing, c.cpair_forcing, c.tref_forcing,
+            c.thref_forcing, c.eref_forcing,
+        ),
+        lay,
+        opt.dtime,
+    )  # fmt: skip
+    errors = _record(errors, SOIL_ENERGY, fp.soil.error)
+    errors = _record(errors, LEAF_ENERGY, fp.leaf.error)
+    # cair: the reference CO2 in layers 0..ncan-2, as the legacy translation set it
+    # (Fortran: all layers; no effect while cair is constant, numerics doc §4.5)
+    below_top = lay.index < lay.n_layers - 1
+    c = c._replace(
+        tair_profile=_keep(use, fp.tair, c.tair_profile),
+        eair_profile=_keep(use, fp.eair, c.eair_profile),
+        shair_profile=_keep(use, fp.shair, c.shair_profile),
+        etair_profile=_keep(use, fp.etair, c.etair_profile),
+        stair_profile=_keep(use, fp.stair, c.stair_profile),
+        **{name + "_leaf": _keep(use, getattr(fp.leaf, name), getattr(c, name + "_leaf"))
+           for name in ("tleaf", "stleaf", "shleaf", "lhleaf", "evleaf", "trleaf")},
+        shsoi_soil=fp.soil.shsoi,
+        lhsoi_soil=fp.soil.lhsoi,
+        gsoi_soil=fp.soil.gsoi,
+        etsoi_soil=fp.soil.etsoi,
+        tg_soil=fp.soil.tg,
+        cair_profile=jnp.where(below_top, c.co2ref_forcing, c.cair_profile),
+    )  # fmt: skip
+
+    # Leaf water potential — Fortran LeafWaterPotential (every slot)
+    c = c._replace(
+        lwp_leaf=plant_hydraulics.leaf_water_potential(
+            x.dpai, lay.zs, x.lsc, c.trleaf_leaf, c.lwp_bef_leaf, x.psis,
+            params.plant_capacitance, opt.dtime,
+        )
+    )  # fmt: skip
+
+    # Intercepted water — Fortran CanopyInterception, CanopyEvaporation (every slot)
+    i = canopy_water.interception(
+        x.qflx_rain, x.qflx_snow, x.lai, x.sai, x.dpai, c.h2ocan_bef_profile, opt.dtime
+    )
+    c = c._replace(
+        h2ocan_profile=canopy_water.evaporation(
+            i.h2ocan, x.dpai, c.fracsun_profile, c.evleaf_leaf, c.trleaf_leaf, opt.dtime
+        ),
+        qflx_intr_canopy=i.qflx_intr,
+        qflx_tflrain_canopy=i.qflx_tflrain,
+        qflx_tflsnow_canopy=i.qflx_tflsnow,
+        balance_error=errors,
+    )
+
+    # Runge-Kutta update — Fortran RungeKuttaUpdate (no update for Euler, nor after the
+    # last stage)
+    if opt.integrator == "euler":
+        return c
+    fields = {"tair": "_profile", "eair": "_profile", "h2ocan": "_profile",
+              "tleaf": "_leaf", "lwp": "_leaf", "tg": "_soil"}  # fmt: skip
+
+    def gather(fmt):
+        return integrators.Integrated(
+            **{n: getattr(c, fmt.format(n=n, s=s)) for n, s in fields.items()}
+        )
+
+    new, increment, k = integrators.runge_kutta_update(
+        stage, integrators.TABLEAUS[opt.integrator], lay,
+        gather("{n}_bef{s}"), gather("{n}{s}"), gather("d{n}{s}"),
+    )  # fmt: skip
+    updates = {}
+    for n, s in fields.items():
+        updates[n + s] = getattr(new, n)
+        delta = getattr(c, "d" + n + s)
+        updates["d" + n + s] = delta.at[..., k].set(getattr(increment, n))
+    return c._replace(**updates)
+
+
+def substep_fluxes(c: Substep, layers: PatchLayers) -> SubstepFluxes:
+    """The values of a sub-step that the step averages."""
+    names = {
+        "ustar": "ustar_canopy", "beta": "beta_canopy", "obu": "obu_canopy",
+        "z0m": "z0m_canopy", "zdisp": "zdisp_canopy", "lwup": "lwup_canopy",
+        "swsoi": "swsoi_soil", "lwsoi": "lwsoi_soil", "rnsoi": "rnsoi_soil",
+        "shsoi": "shsoi_soil", "lhsoi": "lhsoi_soil", "etsoi": "etsoi_soil",
+        "gsoi": "gsoi_soil", "gac0": "gac0_soil", "qflx_intr": "qflx_intr_canopy",
+        "qflx_tflrain": "qflx_tflrain_canopy", "qflx_tflsnow": "qflx_tflsnow_canopy",
+        "swskyb": "swskyb_forcing", "swskyd": "swskyd_forcing", "lwsky": "lwsky_forcing",
+    }  # fmt: skip
+    values = {}
+    for name in SubstepFluxes._fields:
+        if name == "lhtop":
+            values[name] = canopy_top_latent_heat(layers, c.etair_profile, c.tref_forcing)
+        else:
+            field = names.get(name) or next(
+                f for f in (name + "_profile", name + "_leaf") if f in Substep._fields
+            )
+            values[name] = getattr(c, field)
+    return SubstepFluxes(**values)
+
+
+def n_stages(integrator: str) -> int:
+    """Passes of the canopy processes per sub-step: the method's stages and a last pass
+    for the fluxes (Euler: one pass). Fortran: ``nrk_steps + 1``."""
+    from clm_ml.physics.integrators import TABLEAUS
+
+    return 1 if integrator == "euler" else len(TABLEAUS[integrator].b) + 1
+
+
+def substep(
+    carry: tuple[Substep, SubstepFluxes],
+    calday,
+    inputs: SubstepInputs,
+    params,
+    *,
+    options: SubstepOptions,
+    c3: bool,
+) -> tuple[Substep, SubstepFluxes]:
+    """One sub-step of the multilayer canopy at calendar day ``calday``: the values at the
+    start saved, the forcing interpolated, solar radiation and the nitrogen profile, then
+    the canopy processes and the state update for each Runge-Kutta stage (one
+    ``lax.scan``), and the sub-step's fluxes added to the sums. ``carry``: the
+    :class:`Substep` values and the sums of :class:`SubstepFluxes`.
+
+    Fortran reference: MLCanopyFluxesMod.F90::MLCanopyFluxes (lines 261-330) and
+    MLTimeStepFluxIntegration (the sums).
+    """
+    c, sums = carry
+    c = save_start(c, inputs.layers)
+    c = _radiation(c, inputs, params, calday, options, c3)
+    c, _ = jax.lax.scan(
+        lambda c, stage: (_stage(c, inputs, params, options, c3, stage), None),
+        c,
+        jnp.arange(1, n_stages(options.integrator) + 1),
+    )
+    return c, accumulate(sums, substep_fluxes(c, inputs.layers))

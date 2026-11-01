@@ -77,9 +77,8 @@ def _fakes(declared, rng):
 
 
 def _means(seed=11):
-    """Averages in the adapter's layout (one sub-step's values of a fake container)."""
-    ml = _fakes(adapter.DECLARED["substep_fluxes"], np.random.default_rng(seed))["mlcanopy"]
-    return jax.tree.map(lambda x: x + 0.5, adapter.substep_fluxes(ml, 0))
+    """Averages over the sub-steps (random values, every slot)."""
+    return _random_fluxes(np.random.default_rng(seed))
 
 
 CASES = {
@@ -115,12 +114,64 @@ def test_adapter_reads_and_writes_what_it_declares(name):
     assert changed == set(declared[1])
 
 
-def test_substep_fluxes_reads_only_what_it_declares():
-    declared = adapter.DECLARED["substep_fluxes"]
-    ml = _fakes(declared, np.random.default_rng(3))["mlcanopy"]
-    f = adapter.substep_fluxes(ml, 0)
-    assert np.asarray(f.swleaf).shape == (N_SLOTS + 1, 3, 2)  # legacy leaf slots, 2 bands
-    assert np.asarray(adapter.zero_based(f).swleaf).shape == (N_SLOTS, 2, 2)
+def _substep_container(rng):
+    """A fake container holding the fields of ``canopy.Substep`` in the legacy layout."""
+    n, stages = N_SLOTS + 1, 5
+    shapes = {
+        "scalar": (1,), "band": (1, 3), "layer": (1, n), "level": (1, n),
+        "level_band": (1, n, 3), "leaf": (1, n, 3), "leaf_band": (1, n, 3, 3),
+        "stage": (1, stages), "layer_stage": (1, n, stages), "leaf_stage": (1, n, 3, stages),
+        "checks": (1, N_CHECKS),
+    }  # fmt: skip
+    fields = {
+        f: jnp.asarray(rng.uniform(1.0, 2.0, shapes[kind]))
+        for kind, names in canopy.SUBSTEP_KINDS.items()
+        for f in names
+    }
+    return namedtuple("mlcanopy", sorted(fields))(**{f: fields[f] for f in sorted(fields)})
+
+
+def test_substep_carry_round_trip_keeps_index_0():
+    ml = _substep_container(np.random.default_rng(3))
+    c = adapter.substep_from_container(ml, 0)
+    assert np.asarray(c.tleaf_leaf).shape == (N_SLOTS, 2)
+    assert np.asarray(c.swleaf_leaf).shape == (N_SLOTS, 2, 2)
+    assert np.asarray(c.swupw_profile).shape == (N_SLOTS + 1, 2)  # levels: ground included
+    assert np.asarray(c.dtleaf_leaf).shape == (N_SLOTS, 2, 5)
+    np.testing.assert_array_equal(np.asarray(c.tair_profile), np.asarray(ml.tair_profile[0, 1:]))
+    back = adapter.container_with_substep(ml, 0, c)
+    for f in ml._fields:
+        np.testing.assert_array_equal(np.asarray(getattr(back, f)), np.asarray(getattr(ml, f)))
+    # new values go to the 0-based slots; the unused index 0 keeps its value
+    c2 = jax.tree.map(lambda x: x + 1.0, c)
+    back = adapter.container_with_substep(ml, 0, c2)
+    np.testing.assert_array_equal(
+        np.asarray(back.tleaf_leaf[0, 0]), np.asarray(ml.tleaf_leaf[0, 0])
+    )
+    np.testing.assert_array_equal(np.asarray(back.tleaf_leaf[0, 1:, 0]),
+                                  np.asarray(ml.tleaf_leaf[0, 1:, 0]))  # fmt: skip
+    np.testing.assert_array_equal(np.asarray(back.tleaf_leaf[0, 1:, 1:]),
+                                  np.asarray(ml.tleaf_leaf[0, 1:, 1:]) + 1.0)  # fmt: skip
+    np.testing.assert_array_equal(np.asarray(back.lwupw_profile[0]),
+                                  np.asarray(ml.lwupw_profile[0]) + 1.0)  # fmt: skip
+
+
+def test_substep_options_refuse_unsupported_variants():
+    from multilayer_canopy.MLclm_varctl import DEFAULT_OPTIONS
+
+    o = adapter.substep_options(DEFAULT_OPTIONS._replace(met_type=3))
+    assert o.integrator == "rk4" and o.interpolation == "three_point"
+    with pytest.raises(NotImplementedError):
+        adapter.substep_options(DEFAULT_OPTIONS._replace(met_type=3, light_type=1))
+    with pytest.raises(NotImplementedError):
+        adapter.substep_options(DEFAULT_OPTIONS._replace(met_type=3, flux_profile_type=0))
+    with pytest.raises(ValueError):
+        adapter.substep_options(DEFAULT_OPTIONS._replace(met_type=2))
+
+
+def test_n_stages():
+    assert canopy.n_stages("euler") == 1
+    assert canopy.n_stages("rk4") == 5
 
 
 def _layers(n_layers=N_CAN, n_within=3, first_leafy=0):

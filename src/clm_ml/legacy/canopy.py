@@ -73,19 +73,24 @@ _SUBSTEP_FIELDS = {
     "agross": ("agross_leaf", _LEAF),
     "gs": ("gs_leaf", _LEAF),
 }
-#: legacy slots of each kind after the patch index. Leaf fields: every layer and leaf slot,
-#: the unused index 0 included (the legacy averages wrote it, and the reference records it:
-#: six copies of the 1e36 fill average to 9.999999999999999e35); :func:`zero_based` drops it.
+#: legacy slots of each kind after the patch index (the unused index 0 of layer, leaf and
+#: band axes is not written by the step since process 10b: C20)
+_S1, _ALL = slice(1, None), slice(None)
 _SLOTS = {
     _SCALAR: (),
-    _BAND: (slice(1, None),),
-    _LAYER: (slice(1, None),),
-    _LEVEL: (slice(None),),
-    _LEVEL_BAND: (slice(None), slice(1, None)),
-    _LEAF: (slice(None), slice(None)),
-    _LEAF_BAND: (slice(None), slice(None), slice(1, None)),
+    _BAND: (_S1,),
+    _LAYER: (_S1,),
+    _LEVEL: (_ALL,),
+    _LEVEL_BAND: (_ALL, _S1),
+    _LEAF: (_S1, _S1),
+    _LEAF_BAND: (_S1, _S1, _S1),
 }
-_SUBSTEP_READS = tuple(f for f, _ in _SUBSTEP_FIELDS.values() if f != "lhtop_canopy")
+#: the same for the kinds of ``physics.canopy.SUBSTEP_KINDS``
+_KIND_SLOTS = {
+    "scalar": (), "band": (_S1,), "layer": (_S1,), "level": (_ALL,), "level_band": (_ALL, _S1),
+    "leaf": (_S1, _S1), "leaf_band": (_S1, _S1, _S1), "stage": (_ALL,),
+    "layer_stage": (_S1, _ALL), "leaf_stage": (_S1, _S1, _ALL), "checks": (_ALL,),
+}  # fmt: skip
 
 #: Canopy totals -> container fields (all ``*_canopy`` but the mean leaf water potential)
 _TOTALS = {n: n + "_canopy" for n in physics.CanopyTotals._fields if n not in ("lwp_mean",
@@ -111,8 +116,6 @@ DECLARED = {
         (_ML + "rhg_soil", "soilstate.smp_l_col", "temperature.t_soisno_col"),
         (_ML + "rhg_soil",),
     ),
-    "substep_fluxes": (tuple(_ML + f for f in (*_SUBSTEP_READS, "tref_forcing", *_LAYERS)),
-                       ()),
     "WriteSubstepMeans": (
         tuple(_ML + f for f, _ in _SUBSTEP_FIELDS.values()) + tuple(_ML + f for f in _LAYERS),
         tuple(_ML + f for f, _ in _SUBSTEP_FIELDS.values()),
@@ -180,33 +183,6 @@ def SoilSurfaceHumidity(
     return mlcanopy_inst._replace(rhg_soil=mlcanopy_inst.rhg_soil.at[p].set(rhg))
 
 
-def substep_fluxes(mlcanopy_inst: mlcanopy_type, p: int) -> physics.SubstepFluxes:
-    """The values of patch ``p`` that a sub-step adds to the step's averages (every slot; leaf
-    fields with the legacy index 0, see :data:`_SLOTS`)."""
-    inst = mlcanopy_inst
-    values = {}
-    for name, (field, kind) in _SUBSTEP_FIELDS.items():
-        if name == "lhtop":
-            values[name] = physics.canopy_top_latent_heat(
-                mlcanopy_layers(inst, p), inst.etair_profile[p, 1:], inst.tref_forcing[p]
-            )
-        else:
-            values[name] = getattr(inst, field)[(p,) + _SLOTS[kind]]
-    return physics.SubstepFluxes(**values)
-
-
-def zero_based(fluxes: physics.SubstepFluxes) -> physics.SubstepFluxes:
-    """``fluxes`` from :func:`substep_fluxes` (leaf fields with the legacy index 0) as the
-    physics takes them (0-based layers and leaves)."""
-    return fluxes._replace(
-        **{
-            name: getattr(fluxes, name)[1:, 1:]
-            for name, (_, kind) in _SUBSTEP_FIELDS.items()
-            if kind in (_LEAF, _LEAF_BAND)
-        }
-    )
-
-
 def WriteSubstepMeans(
     mlcanopy_inst: mlcanopy_type, p: int, means: physics.SubstepFluxes
 ) -> mlcanopy_type:
@@ -252,12 +228,10 @@ def CanopyFluxesDiagnostics(
             for name, field in _TOTALS_IN.items()
         }
     )  # fmt: skip
-    # The averages through a barrier, as Fortran stores them before the totals (the
-    # compiled chunk is closer to the legacy one with it: 4 fields 1 ulp off instead of 54
-    # fields at round-off; C19)
+    # The averages through a barrier, as Fortran stores them before the totals (C19)
     t = physics.canopy_totals(
         lay,
-        jax.lax.optimization_barrier(zero_based(means)),
+        jax.lax.optimization_barrier(means),
         leaves,
         inst.lai_canopy[p],
         inst.sai_canopy[p],
@@ -298,9 +272,123 @@ def MergeSunShade(mlcanopy_inst: mlcanopy_type, p: int) -> mlcanopy_type:
     for name, field in zip(m._fields, _MERGE_WRITES):
         arr = getattr(inst, field)
         changes[field] = arr.at[leaves].set(keep(lay.in_use, getattr(m, name), arr[leaves]))
-    # The unused leaf index 0 of the history fields takes the leaves' (as the legacy copy did;
-    # the reference records it)
-    for field, source in (("tleaf_hist_leaf", inst.tleaf_leaf), ("lwp_hist_leaf", inst.lwp_leaf)):
-        arr, sl = changes[field], (p, slice(1, None), 0)
-        changes[field] = arr.at[sl].set(keep(lay.in_use, source[sl], arr[sl]))
     return inst._replace(**changes)
+
+
+# ---------------------------------------------------------------------------
+# The sub-step (physics.canopy.substep) on the legacy containers
+# ---------------------------------------------------------------------------
+
+#: Fortran codes -> model.yaml names
+_MET_TYPE = {0: "none", 3: "three_point"}
+_GROUND = {1: "extend_hf", 2: "log_profile"}
+_REGIME = {1: "laminar", 2: "turbulent", 3: "free_convection"}
+_STOMATAL = {0: "medlyn", 1: "ball_berry", 2: "wue"}
+_WUE_SOLVER = {1: "brent", 2: "bisection"}
+
+
+def substep_options(opts) -> physics.SubstepOptions:
+    """The sub-step's choices from the legacy options (``MLOptions``), with the legacy
+    routines' checks: Norman solar radiation and the well-mixed flux-profile solution are
+    registered but not supported (Phase 7 decision D8: ``clm_ml.run`` refuses them; the
+    legacy translations stay in ``clm_ml.legacy.solar_radiation`` and
+    ``clm_ml.legacy.flux_profile``), the other codes must be valid."""
+    from clm_ml.legacy.integrators import INTEGRATOR
+
+    if opts.light_type == 1:
+        raise NotImplementedError("Norman solar radiation (light_type 1) is not supported")
+    if opts.flux_profile_type in (0, -1):
+        raise NotImplementedError("the well-mixed flux-profile solution is not supported")
+    checks = (("met_type", opts.met_type, _MET_TYPE), ("light_type", opts.light_type, (2,)),
+              ("leaf_optics_type", opts.leaf_optics_type, (0,)),
+              ("acclim_type", opts.acclim_type, (0, 1)), ("longwave_type", opts.longwave_type, (1,)),
+              ("turb_type", opts.turb_type, (1,)),
+              ("HF_extension_type", opts.HF_extension_type, _GROUND),
+              ("gb_type", opts.gb_type, _REGIME), ("gs_type", opts.gs_type, _STOMATAL),
+              ("gs_solver", opts.gs_solver, _WUE_SOLVER), ("gspot_type", opts.gspot_type, (0, 1)),
+              ("colim_type", opts.colim_type, (0, 1)),
+              ("flux_profile_type", opts.flux_profile_type, (1,)),
+              ("runge_kutta_type", opts.runge_kutta_type, INTEGRATOR))  # fmt: skip
+    for name, code, valid in checks:
+        if code not in valid:
+            raise ValueError(f"{name} {code} not one of {tuple(valid)}")
+    return physics.SubstepOptions(
+        interpolation=_MET_TYPE[opts.met_type],
+        acclimation=bool(opts.acclim_type == 1),
+        kn_val=float(opts.kn_val),
+        sparse_canopy=bool(opts.sparse_canopy_type == 1),
+        ground_conductance=_GROUND[opts.HF_extension_type],
+        regime=_REGIME[opts.gb_type],
+        stomatal_conductance=_STOMATAL[opts.gs_type],
+        water_stress=bool(opts.gspot_type == 1),
+        colimitation=bool(opts.colim_type == 1),
+        wue_solver=_WUE_SOLVER[opts.gs_solver],
+        dtime=float(opts.dtime_ml),
+        integrator=INTEGRATOR[opts.runge_kutta_type],
+    )
+
+
+def _kind_of(field: str) -> str:
+    return next(k for k, fs in physics.SUBSTEP_KINDS.items() if field in fs)
+
+
+def substep_from_container(mlcanopy_inst: mlcanopy_type, p: int) -> physics.Substep:
+    """Patch ``p``'s values the sub-step carries, 0-based (every slot)."""
+    return physics.Substep(
+        **{f: getattr(mlcanopy_inst, f)[(p,) + _KIND_SLOTS[_kind_of(f)]]
+           for f in physics.Substep._fields}
+    )  # fmt: skip
+
+
+def container_with_substep(
+    mlcanopy_inst: mlcanopy_type, p: int, c: physics.Substep
+) -> mlcanopy_type:
+    """The container with patch ``p``'s sub-step values ``c`` written (the unused index 0
+    of layer, leaf and band axes kept)."""
+    return mlcanopy_inst._replace(
+        **{f: getattr(mlcanopy_inst, f).at[(p,) + _KIND_SLOTS[_kind_of(f)]].set(getattr(c, f))
+           for f in physics.Substep._fields}
+    )  # fmt: skip
+
+
+def substep_inputs(mlcanopy_inst: mlcanopy_type, p: int, window, times) -> physics.SubstepInputs:
+    """Patch ``p``'s values fixed over the step's sub-steps; ``window`` the legacy forcing
+    window (``AtmForcingWindow``), ``times`` the calendar days of its three records."""
+    from clm_ml.legacy.atm_forcing import _patch_record
+
+    inst = mlcanopy_inst
+
+    def layer(f):
+        return getattr(inst, f)[p, 1:]
+
+    return physics.SubstepInputs(
+        layers=mlcanopy_layers(inst, p),
+        forcing_bef=_patch_record(window.bef, p),
+        forcing_cur=_patch_record(window.cur, p),
+        forcing_next=_patch_record(window.next, p),
+        time_bef=times[0],
+        time_cur=times[1],
+        time_next=times[2],
+        zref=inst.zref_forcing[p],
+        solar_zen=inst.solar_zen_forcing[p],
+        dlai=layer("dlai_profile"),
+        dsai=layer("dsai_profile"),
+        dpai=layer("dpai_profile"),
+        albsoib=inst.albsoib_soil[p, 1:],
+        albsoid=inst.albsoid_soil[p, 1:],
+        lai=inst.lai_canopy[p],
+        sai=inst.sai_canopy[p],
+        tacclim=inst.tacclim_forcing[p],
+        ztop=inst.ztop_canopy[p],
+        o2ref=inst.o2ref_forcing[p],
+        qflx_rain=inst.qflx_rain_forcing[p],
+        qflx_snow=inst.qflx_snow_forcing[p],
+        rhg=inst.rhg_soil[p],
+        soilres=inst.soilres_soil[p],
+        soil_t=inst.soil_t_soil[p],
+        soil_dz=inst.soil_dz_soil[p],
+        soil_tk=inst.soil_tk_soil[p],
+        cpleaf=layer("cpleaf_profile"),
+        lsc=layer("lsc_profile"),
+        psis=inst.psis_soil[p],
+    )

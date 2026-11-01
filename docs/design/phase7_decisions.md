@@ -738,3 +738,70 @@ Alternatives: one large commit for the whole driver (unreviewable, hard to bisec
 the removed diagnostics (D6 says drop them when their process moves); faking index 0 in the
 view now (the view takes index 0 from the template, which is the first step's containers:
 the first step must produce the recorded values until 7.4).
+
+### C20. Process 10b: the canopy sub-step on plain arrays (7.2, 2026-10-31)
+Context: C19's plan; the sub-step still ran processes 3-9 through their container adapters
+(every routine reading and writing the 235-field container in the scan carry).
+Decision:
+- **`clm_ml/physics/canopy.py::substep(carry, calday, inputs, params, *, options, c3)`**:
+  one sub-step on 0-based arrays: `save_start` (the `*_bef` values), `_radiation` (forcing
+  interpolation, solar radiation, nitrogen profile), the Runge-Kutta stages as one
+  `lax.scan` over `_stage` (wetted fraction, longwave, net radiation, turbulence, leaf
+  boundary layer, photosynthesis, implicit flux-profile solution, leaf water potential,
+  interception and evaporation, the state update), then the sub-step's `SubstepFluxes`
+  added to the sums. The physics of processes 3-9 are called directly, with each legacy
+  adapter's write rules (layers in use, padding kept; `cair` in layers 0..ncan-2, numerics
+  doc §4.5) and checks recorded in the carried `balance_error`.
+- **The carry `canopy.Substep`**: the values a sub-step reads or writes besides the step's
+  constants, named as the legacy container fields (renamed with the outputs in 7.6), with
+  their kinds (`SUBSTEP_KINDS`: scalar, band, layer, level, leaf, stages, ...); every slot.
+  **`SubstepInputs`**: the values fixed over the step's sub-steps (layer grid, forcing
+  window and its calendar days, plant area, ground albedo, soil inputs, leaf heat capacity,
+  leaf-specific conductance, soil water potential). **`SubstepOptions`**: the static
+  choices by model.yaml name; `clm_ml.legacy.canopy.substep_options(opts)` maps the
+  Fortran codes and makes the legacy adapters' checks. Norman solar radiation and the
+  well-mixed flux profile now stop before the step (`NotImplementedError`) instead of
+  running their legacy translations and then stopping (D8; the translations stay in
+  `clm_ml.legacy.solar_radiation`/`flux_profile`, unused).
+- **`MLCanopyFluxes`** reads the container once before the sub-steps
+  (`substep_from_container`, `substep_inputs`) and writes it once after them
+  (`container_with_substep`). Compiled chunks trace `canopy.substep` in the sub-step
+  `lax.scan` (with `jax.checkpoint`, as before); step-by-step runs call it compiled once
+  (`MLCanopyFluxesMod._substep`, one program for the run). The turbulence's `eta >=
+  eta_max` warning, printed only in step-by-step runs, is gone (it never printed in
+  compiled chunks).
+- **D6:** values no process, average, total or output reads are no longer written
+  (turbulence `Lc`, `taf`, `qaf`, `PrSc`, `gac_to_hc`, `uaf`; `eg`; 18 photosynthesis
+  fields; `g0`, `g1`): listed in `phase7_removed_diagnostics.md`.
+- **The unused legacy index 0 is no longer written by the step** (layer slot 0 of non-level
+  fields, leaf 0, band 0): the 0-based carry has no such slots. The container keeps the
+  setup's values there, so the view's index-0 entries (from the template, C19) are setup
+  fill values, as 7.1 intended ("constant fill values, taken from the template"). C19's
+  replication of the averaged junk (leaf fields' full slabs, `*_hist_leaf` leaf 0) is
+  removed: `SubstepFluxes` and the averages are 0-based. The reference's index-0 entries
+  change with the re-recording (e.g. `shleaf_leaf`, `lhleaf_leaf`, `tleaf_hist_leaf`:
+  0 or averaged values -> the 1e36 fill).
+- **Process replay unchanged:** it replays the container adapters of processes 3-9, which
+  the step no longer calls; they still check the same physics against the recorded
+  pre-Phase-7 calls, so they stay (re-exported by `MLCanopyFluxesMod`, where the replay
+  looks routines up by name) until 10c decides their end with the containers.
+- **Round-off change, reference re-recorded (D7):** run op by op (`jax.disable_jit`, no
+  compilation in either), the new `MLCanopyFluxes` equals the old one in every container
+  slot over CHATS7 steps 2-3, except the unused index 0 and the dropped values above
+  (`probe710b/exact_masked.py`). The compiled chunk differs in 60 of 88 recorded fields
+  (index 0 masked): those the twins move within 1.65x the twin spread (from step 0); the
+  twin-invariant solar fields (`apar_leaf`, `swveg*`, `swdwn`, `swupw`, `albcan`) by a few
+  ulps (at most 2.2e-14 relative) from step 2, with identical inputs (forcing, zenith
+  angle, plant area): probably XLA hoisting the sub-step-invariant optics out of the
+  sub-step loop now that the step's constants are not part of the carried container (not
+  checked in the HLO); an `optimization_barrier` on the interpolated forcing changed
+  nothing (not kept). Before re-recording the noise-twin test failed only on index-0
+  entries (`shleaf_leaf`, `lhleaf_leaf`, `tleaf_hist_leaf`: finite in the reference, the
+  1e36 fill now). Reference and twins re-recorded in this commit; focused CPU gradient
+  test passes.
+Why: the scope's process 10 (the step on plain arrays), in the order of C19; one carry
+instead of the container makes 10c (the step on `StepState`) a change of the step's
+boundary only.
+Alternatives: a carry of separate NamedTuples per process (more types, same values);
+keeping the legacy index-0 values (they cannot be computed without legacy-shaped arrays);
+retiring the process replay now (it still tests the physics on real inputs).

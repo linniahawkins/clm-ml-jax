@@ -175,3 +175,13 @@ Meanings are from the container's comments (`MLCanopyFluxesType`, CLM-ml v2
   `mlcan_to_clm = 1`) and `lwp_mean_profile` (output). To add one back: a field of
   `CanopyTotals` computed as written here (the formulas are in the git history of
   `MLCanopyFluxesMod.py::_CanopyFluxesDiagnostics`, before commit "Phase 7.2 process 10a").
+- **Process 10b (2026-10-31, `clm_ml/physics/canopy.py::substep`; C20):** the sub-step
+  carries only what later processes, the averages, the canopy totals and the outputs read
+  (`canopy.Substep`); no longer written to the container (the processes may still compute
+  them internally): from the turbulence `Lc_canopy`, `taf_canopy`, `qaf_canopy`,
+  `PrSc_canopy`, `gac_to_hc_canopy`, `uaf_canopy`; from the soil fluxes `eg_soil`; from
+  photosynthesis `kc_leaf`, `ko_leaf`, `cp_leaf`, `vcmax_leaf`, `jmax_leaf`, `rd_leaf`,
+  `kp_leaf`, `leaf_esat_leaf`, `ceair_leaf`, `je_leaf`, `gspot_leaf`, `ci_leaf`,
+  `cs_leaf`, `hs_leaf`, `vpd_leaf`, `ac_leaf`, `aj_leaf`, `ap_leaf`, and `g0_canopy`,
+  `g1_canopy` (Medlyn, Ball-Berry). To add one back: a field of `canopy.Substep` (its kind
+  in `SUBSTEP_KINDS`) set from the process's result in `canopy._stage`.

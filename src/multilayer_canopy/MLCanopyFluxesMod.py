@@ -16,38 +16,49 @@ Private helpers
 - :func:`_MLTimeStepFluxIntegration`: stub — accumulate ML-step fluxes.
 - :func:`_CanopyFluxesDiagnostics`: stub — canopy-wide diagnostics.
 
+The legacy adapters of processes 3-9 imported below (``GetAtmForcing``, ``SolarRadiation``,
+...) are no longer called by the time step (Phase 7.2 process 10b, decision C20): they are
+re-exported for the process replay (``tests/regression/process_io.py``), which looks the
+recorded routines up by name in this module.
+
 Original Fortran module: MLCanopyFluxesMod
 Fortran lines 1-400
 """
 
 from __future__ import annotations
 
-from functools import partial
 from typing import Any, List, Sequence
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from clm_ml.legacy.atm_forcing import AtmForcingRecord, AtmForcingWindow, GetAtmForcing
+from clm_ml.legacy.atm_forcing import (
+    AtmForcingRecord,
+    AtmForcingWindow,
+    GetAtmForcing,  # noqa: F401
+)
 from clm_ml.legacy.canopy import (
     CanopyFluxesDiagnostics,
     MergeSunShade,
     PlantAreaProfiles,
     SoilSurfaceHumidity,
     WriteSubstepMeans,
-    substep_fluxes,
+    container_with_substep,
+    substep_from_container,
+    substep_inputs,
+    substep_options,
 )
 from clm_ml.legacy.canopy_water import (  # noqa: F401
     CanopyEvaporation,
     CanopyInterception,
     CanopyWettedFraction,
 )
-from clm_ml.legacy.flux_profile import FluxProfileSolution
-from clm_ml.legacy.integrators import RungeKuttaUpdate, integrator_tableau
+from clm_ml.legacy.flux_profile import FluxProfileSolution  # noqa: F401
+from clm_ml.legacy.integrators import RungeKuttaUpdate  # noqa: F401
 from clm_ml.legacy.leaf_boundary_layer import LeafBoundaryLayer  # noqa: F401
 from clm_ml.legacy.longwave import LongwaveRadiation  # noqa: F401
-from clm_ml.legacy.nitrogen_profile import CanopyNitrogenProfile
+from clm_ml.legacy.nitrogen_profile import CanopyNitrogenProfile  # noqa: F401
 from clm_ml.legacy.photosynthesis import LeafPhotosynthesis  # noqa: F401
 from clm_ml.legacy.plant_hydraulics import (  # noqa: F401
     LeafHeatCapacity,
@@ -87,7 +98,7 @@ from multilayer_canopy.MLinitVerticalMod import (  # noqa: F401
     initVerticalProfiles,
     initVerticalStructure,
 )
-from multilayer_canopy.MLLayersMod import keep, layers
+from multilayer_canopy.MLLayersMod import layers
 
 # ---------------------------------------------------------------------------
 # JIT-compiled bef-state copy helper
@@ -100,33 +111,9 @@ def _float_if_concrete(x):
     return float(x) if is_concrete(x) else x
 
 
-@partial(jax.jit, static_argnums=(0,))
-def _copy_bef_state(
-    filter_mlcan: tuple,
-    mlcanopy_inst: mlcanopy_type,
-) -> mlcanopy_type:
-    """Copy current-state arrays to their ``*_bef`` counterparts, layers 1..ncan (data;
-    padding kept).
-
-    Mirrors Fortran lines 272-285 of ``MLCanopyFluxes``.
-    """
-    inst = mlcanopy_inst
-    for p in filter_mlcan:
-        use = layers(inst, p).in_use
-
-        def _copy(bef, cur):
-            return bef.at[p, 1:].set(keep(use, cur[p, 1:], bef[p, 1:]))
-
-        inst = inst._replace(
-            tg_bef_soil=inst.tg_bef_soil.at[p].set(inst.tg_soil[p]),
-            tair_bef_profile=_copy(inst.tair_bef_profile, inst.tair_profile),
-            eair_bef_profile=_copy(inst.eair_bef_profile, inst.eair_profile),
-            cair_bef_profile=_copy(inst.cair_bef_profile, inst.cair_profile),
-            h2ocan_bef_profile=_copy(inst.h2ocan_bef_profile, inst.h2ocan_profile),
-            tleaf_bef_leaf=_copy(inst.tleaf_bef_leaf, inst.tleaf_leaf),
-            lwp_bef_leaf=_copy(inst.lwp_bef_leaf, inst.lwp_leaf),
-        )
-    return inst
+#: One sub-step compiled as one program (normal runs; a compiled chunk traces
+#: ``canopy.substep`` itself)
+_substep = jax.jit(canopy.substep, static_argnames=("options", "c3"))
 
 
 # ---------------------------------------------------------------------------
@@ -362,10 +349,6 @@ def MLCanopyFluxes(
         if initialize == "only":  # the batched first step runs the physics (Phase 6 step 6)
             return mlcanopy_inst
 
-    # Runge-Kutta coefficients — Fortran line 197 (computed on the first step and kept in
-    # module state; they depend only on runge_kutta_type): numpy constants
-    rk = integrator_tableau(opts)
-
     # ------------------------------------------------------------------
     # Copy CLM variables to mlcanopy container — Fortran line 201
     # ------------------------------------------------------------------
@@ -430,112 +413,32 @@ def MLCanopyFluxes(
         mlcanopy_inst, soilstate_inst, temperature_inst, p, int(np.asarray(patch.column)[p])
     )
 
-    # ------------------------------------------------------------------
-    # Runge-Kutta configuration — Fortran lines 265-271
-    # ------------------------------------------------------------------
-    _runge_kutta_type = opts.runge_kutta_type
-    if _runge_kutta_type == 10:
-        nrk_steps = 0
-    elif _runge_kutta_type >= 20:
-        nrk_steps = _runge_kutta_type // 10
-    else:
-        nrk_steps = 0
+    # ==================================================================
+    # Multilayer canopy time-stepping loop — Fortran lines 261-330
+    # ==================================================================
+    # One sub-step is one function, clm_ml.physics.canopy.substep, on 0-based arrays (the
+    # container is read once before the loop and written once after it). It is driven by
+    # lax.scan (with jax.checkpoint, so backward memory does not grow with the number of
+    # sub-steps) when the step is traced (a compiled chunk, jax.grad), and by a Python loop
+    # over the compiled sub-step in a normal run.
+    # ==================================================================
+    sub_options = substep_options(opts)
+    c3 = bool(grid.c3)
+    times = tuple(
+        jnp.asarray(t, dtype=jnp.float64)
+        for t in (calday_interp_bef, calday_interp_cur, calday_interp_next)
+    )
+    inputs = substep_inputs(mlcanopy_inst, p, forcing_window, times)
 
     if masterproc and is_concrete(nstep) and nstep == 1:
         print(
             f"MLCanopyFluxes: starting ML sub-steps (num_ml_steps={num_ml_steps}, "
-            f"nrk_steps={nrk_steps}, num_mlcan={num_mlcan})",
+            f"stages={canopy.n_stages(sub_options.integrator)}, num_mlcan={num_mlcan})",
             flush=True,
         )
 
     # Keep heartbeat output bounded while still proving forward progress.
     progress_stride = max(1, num_ml_steps // 10)
-
-    # ==================================================================
-    # Multilayer canopy time-stepping loop — Fortran lines 261-330
-    # ==================================================================
-    # One sub-step is one function, _substep (physics + flux accumulation). It is
-    # driven by a Python loop in a normal run, and by lax.scan (with
-    # jax.checkpoint, so backward memory does not grow with the number of
-    # sub-steps) when the state is being traced, e.g. under jax.grad. A lax.scan in
-    # a normal run would recompile at every CLM step (the forcing it closes over
-    # changes); compiling a whole run is plan Phase 4.
-    # ==================================================================
-
-    # Current sub-step, for warning messages only (0 inside lax.scan)
-    nstep_ml = 0
-
-    def _physics_step_fn(inst, calday_ml):
-        """Pure (inst, calday_ml) → inst for one ML sub-step."""
-        # Save previous-step state — Fortran lines 272-285
-        inst = _copy_bef_state(filter_mlcan, inst)
-        # Atmospheric forcing — Fortran line 287
-        # calday_ml is a JAX traced scalar inside lax.scan;
-        # TimeInterpolation3 uses jnp.where so this is safe.
-        inst = GetAtmForcing(
-            calday_interp_bef,
-            calday_interp_cur,
-            calday_interp_next,
-            calday_ml,
-            num_mlcan,
-            filter_mlcan,
-            inst,
-            forcing_window,
-            grid=grid,
-            opts=opts,
-        )
-        # Solar radiation — Fortran line 290
-        inst = SolarRadiation(bounds, num_mlcan, filter_mlcan, inst, params, grid=grid, opts=opts)
-        # Nitrogen profile — Fortran line 293
-        inst = CanopyNitrogenProfile(num_mlcan, filter_mlcan, inst, params, grid, opts=opts)
-
-        # Runge-Kutta stages — Fortran lines 310-328: nrk_steps stages, each followed by
-        # a state update, and a final physics pass. One function, _rk_stage, is a stage:
-        # a Python loop drives it in normal runs; lax.scan (one traced copy of the
-        # physics instead of nrk_steps + 1) when traced, which keeps the gradient small
-        # enough to compile.
-        def _rk_stage(inst, irk):
-            inst = CanopyWettedFraction(num_mlcan, filter_mlcan, inst)
-            inst = LongwaveRadiation(
-                bounds, num_mlcan, filter_mlcan, inst, params, grid=grid, opts=opts
-            )
-            inst = inst._replace(
-                rnleaf_leaf=(
-                    inst.swleaf_leaf[..., ivis] + inst.swleaf_leaf[..., inir] + inst.lwleaf_leaf
-                ),
-                rnsoi_soil=(inst.swsoi_soil[:, ivis] + inst.swsoi_soil[:, inir] + inst.lwsoi_soil),
-            )
-            inst = CanopyTurbulence(
-                nstep_ml, num_mlcan, filter_mlcan, inst, grid=grid, nstep=nstep, opts=opts
-            )
-            # Sunlit and shaded leaves in one call each
-            inst = LeafBoundaryLayer(num_mlcan, filter_mlcan, inst, params, opts=opts)
-            inst = LeafPhotosynthesis(
-                num_mlcan, filter_mlcan, None, inst, grid=grid, params=params, opts=opts
-            )
-            inst = FluxProfileSolution(num_mlcan, filter_mlcan, inst, grid=grid, opts=opts)
-            inst = LeafWaterPotential(num_mlcan, filter_mlcan, inst, params, opts=opts)
-            inst = CanopyInterception(num_mlcan, filter_mlcan, inst, opts=opts)
-            inst = CanopyEvaporation(num_mlcan, filter_mlcan, inst, opts=opts)
-            if nrk_steps > 0:  # no-op after the last stage (irk > nrk)
-                inst = RungeKuttaUpdate(irk, rk, inst, grid)
-            return inst
-
-        stages = range(1, nrk_steps + 2)
-        if _traced:
-            inst, _ = jax.lax.scan(
-                lambda st, irk: (_rk_stage(st, irk), None), inst, jnp.arange(1, nrk_steps + 2)
-            )
-        else:
-            for irk in stages:
-                inst = _rk_stage(inst, irk)
-        return inst
-
-    def _substep(carry, calday_ml):
-        """One ML sub-step: physics, then accumulate fluxes — Fortran line 372."""
-        inst, sums = carry
-        inst = _physics_step_fn(inst, calday_ml)
-        return (inst, canopy.accumulate(sums, substep_fluxes(inst, p))), None
 
     # Calendar day of each ML sub-step — Fortran lines 263-270
     _dtime_ml = opts.dtime_ml
@@ -545,16 +448,22 @@ def MLCanopyFluxes(
         for k in range(1, num_ml_steps + 1)
     ]
 
-    carry = (mlcanopy_inst, canopy.zero_sums(substep_fluxes(mlcanopy_inst, p)))
+    start = substep_from_container(mlcanopy_inst, p)
+    carry = (start, canopy.zero_sums(canopy.substep_fluxes(start, inputs.layers)))
     _traced = not is_concrete(
         *jax.tree_util.tree_leaves((mlcanopy_inst, forcing_bef, forcing_cur, forcing_next))
     )
     if _traced:
         import os as _os
 
-        _scan_body = _substep
+        def _scan_body(carry, calday_ml):
+            return (
+                canopy.substep(carry, calday_ml, inputs, params, options=sub_options, c3=c3),
+                None,
+            )
+
         if _os.environ.get("CLM_ML_NO_CHECKPOINT", "0") != "1":
-            _scan_body = jax.checkpoint(_substep)
+            _scan_body = jax.checkpoint(_scan_body)
         carry, _ = jax.lax.scan(_scan_body, carry, jnp.array(caldays_ml, dtype=jnp.float64))
     else:
         for nstep_ml, calday_ml in enumerate(caldays_ml, start=1):
@@ -565,8 +474,9 @@ def MLCanopyFluxes(
                 and (nstep_ml == 1 or nstep_ml == num_ml_steps or (nstep_ml % progress_stride == 0))
             ):
                 print(f"MLCanopyFluxes: sub-step {nstep_ml}/{num_ml_steps}", flush=True)
-            carry, _ = _substep(carry, calday_ml)
-    mlcanopy_inst, sums = carry
+            carry = _substep(carry, calday_ml, inputs, params, options=sub_options, c3=c3)
+    end, sums = carry
+    mlcanopy_inst = container_with_substep(mlcanopy_inst, p, end)
 
     # Averages over the sub-steps — Fortran MLTimeStepFluxIntegration
     means = canopy.average(sums, num_ml_steps)
