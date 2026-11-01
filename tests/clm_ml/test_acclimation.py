@@ -26,7 +26,7 @@ def _run(days, mode="running_mean"):
 
 
 def _inputs(t):
-    return types.SimpleNamespace(met=types.SimpleNamespace(tref=t))
+    return t  # the step's forcing air temperature (K)
 
 
 def test_mean_of_all_steps_during_the_first_period_then_running():

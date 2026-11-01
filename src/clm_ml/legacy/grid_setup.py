@@ -317,7 +317,8 @@ def setup_grid_batch(spec: dict, run=None, inputs=None, workdir=None):
 class GridChunkReader:
     """``PatchBatch.reader`` of a grid run: a chunk's ``(xg, xp)`` for the batch's slots
     (padding gridcells read the last real gridcell's data, padding patches the patch they
-    copy). ``xg``: the step times ``(n,)`` and the meteorology per gridcell slot; ``xp``:
+    copy). ``xg``: ``clm_ml.step.MetInputs`` per gridcell slot (calendar days ``(n,)``,
+    without a gridcell axis); ``xp``:
     ``(xw, land)``, per-step vegetation and soil-water weights and the chunk's monthly
     records (:func:`clm_ml.grid_forcing.land_record`)."""
 
@@ -329,6 +330,7 @@ class GridChunkReader:
     def __call__(self, first_step: int, n_steps: int):
         import jax
 
+        from clm_ml.chunk_inputs import met_inputs
         from clm_src_utils.clm_time_manager import step_time
 
         inp, run = self.inputs, self.batch.run
@@ -337,16 +339,16 @@ class GridChunkReader:
         met = {k: (tuple(x[:, self.src_g] for x in v) if isinstance(v, tuple) else v[:, self.src_g])
                for k, v in met.items()}  # fmt: skip
         n = n_steps
-        cur = met_records(met, slice(1, n + 1))
-        bef = atm_records(met_records(met, slice(0, n)), current=True)
-        nxt = atm_records(met_records(met, slice(2, n + 2)), current=False)
         start = inp.start
         ymd, tod = int(f"{start:%Y%m%d}"), start.hour * 3600 + start.minute * 60 + start.second
         times = [
             step_time(ymd, tod, inp.step_seconds, k + 1) for k in range(first_step, first_step + n)
         ]
-        now = type(times[0])(*(np.array(col) for col in zip(*times)))
-        xg = (now, tower_met(cur), bef, nxt)
+        xg = met_inputs(
+            met_records(met, slice(0, n)), met_records(met, slice(1, n + 1)),
+            met_records(met, slice(2, n + 2)), [t.calday for t in times],
+            [t.calday_beg for t in times],
+        )  # fmt: skip
         m1, m2, w1, w2 = inp.vegetation_weights(first_step, n)
         h, lb, f1, f2 = inp.soil_window(first_step, n)
         xw = (m1, m2, w1, w2, lb, f1, f2)

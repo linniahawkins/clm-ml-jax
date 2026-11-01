@@ -168,8 +168,9 @@ class Model:
 
     def forcing(self, first_step: int, n_steps: int):
         """The forcing of run steps ``first_step ... first_step + n_steps - 1``: ``(xg, xp)``,
-        the meteorology per gridcell and the CLM history record per patch, stacked per step
-        (differentiable input of :meth:`run_chunk`)."""
+        the meteorology per gridcell (``clm_ml.step.MetInputs``) and the land data per patch
+        (``clm_ml.step.LandInputs``; grid runs: the monthly records and weights), stacked per
+        step (differentiable input of :meth:`run_chunk`)."""
         import jax
         import jax.numpy as jnp
 
@@ -228,7 +229,7 @@ class Model:
         weights = self.weights() if weights is None else weights
         alive = jnp.ones(self.n_patches, dtype=bool) if alive is None else jnp.asarray(alive)
         xg, xp = forcing
-        n = int(xg[0].nstep.shape[0])
+        n = int(xg.calday.shape[0])
         n_g = self._batch.n_gridcells
         max_layers = self.run.config.canopy_layers.max_layers
         names = sorted({v for s in streams for v in s.variables})

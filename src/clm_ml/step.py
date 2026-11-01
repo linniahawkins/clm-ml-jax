@@ -92,6 +92,45 @@ class StepInputs(NamedTuple):
     forcing_next: ForcingRecord
 
 
+class MetInputs(NamedTuple):
+    """One step's time and meteorology, per gridcell (the :class:`StepInputs` fields that
+    every patch of a gridcell shares). A chunk holds them stacked along a leading step axis,
+    then a gridcell axis (``calday``/``calday_beg`` may have no gridcell axis)."""
+
+    calday: Array
+    calday_beg: Array
+    uref: Array
+    tref: Array
+    qref: Array
+    pref: Array
+    lwsky: Array
+    rain: Array
+    snow: Array
+    solad: Array  # (band,)
+    solai: Array  # (band,)
+    pco2: Array
+    po2: Array
+    forcing_bef: ForcingRecord
+    forcing_next: ForcingRecord
+
+
+class LandInputs(NamedTuple):
+    """One step's prescribed land data, per patch (the :class:`StepInputs` fields of the CLM
+    history record or the land-data files). A chunk holds them stacked along a leading step
+    axis, then a patch axis."""
+
+    elai: Array
+    esai: Array
+    h2osoi_clm45: Array  # (soil_level,)
+    h2osoi_clm50: Array  # (n_soil,)
+    h2osoi_factor: Array  # 1 when the history has no adjustment factor
+
+
+def step_inputs(met: MetInputs, land: LandInputs) -> StepInputs:
+    """A patch's :class:`StepInputs` from its gridcell's meteorology and its land data."""
+    return StepInputs(**met._asdict(), **land._asdict())
+
+
 class PatchConstants(NamedTuple):
     """The patch's values every step reads and no step changes (0-based, no patch axis)."""
 

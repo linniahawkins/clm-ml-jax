@@ -34,8 +34,7 @@ st, filt = M.advance(run, run.insts, run.filt, M.step_inputs(run, run.load_chunk
                      initialize=True)
 template, state0 = st, state_from_instances(st)
 first, n = 1, 49
-chunk = run.load_chunk(first, n)
-xs = M.stack_step_inputs([M.step_inputs(run, chunk, k) for k in range(first, first + n)])
+xs = M.patch_inputs(run, run.load_chunk(first, n))
 names = tuple(v.name for v in VARIABLES) + ("soil_temperature",)
 _, steps = M.make_chunk_runner(run, template, filt)(state0, xs, tables=run.rsl_tables)
 views = view_series(template, steps)  # (step, patch, ...) legacy fields of each step

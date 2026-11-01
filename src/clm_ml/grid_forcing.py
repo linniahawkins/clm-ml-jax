@@ -641,14 +641,15 @@ def exposed_area(tlai, tsai, xp=np):
 
 
 def land_record(xw, land, gidx, nlevgrnd: int):
-    """The CLM history record of every patch at one step, inside the compiled chunk:
+    """The land data of every patch at one step (``clm_ml.step.LandInputs``), inside the
+    compiled chunk:
     vegetation from the monthly records with CLM's satellite-phenology weights (``xw``: m1,
     m2, w1, w2), soil water linear between the monthly records (``xw``: lb, f_lb, f_ub;
     ``land``: ``(lai (12, P), sai (12, P), h2osoi (records, G, nlevsoi))``)."""
     import jax.numpy as jnp
 
-    from clm_src_main.clm_varcon import spval
-    from offline_driver.clmDataMod import ClmHistoryRecord
+    from clm_ml.physics.constants import spval
+    from clm_ml.step import LandInputs
 
     m1, m2, w1, w2, lb, f1, f2 = xw
     lai, sai, h2osoi = land
@@ -658,12 +659,12 @@ def land_record(xw, land, gidx, nlevgrnd: int):
     h = jnp.take(h2osoi, lb, axis=0) * f1 + jnp.take(h2osoi, lb + 1, axis=0) * f2  # (G, lev)
     h = jnp.take(h, gidx, axis=0)
     n_p = elai.shape[0]
-    return ClmHistoryRecord(
+    return LandInputs(
         elai=elai,
         esai=esai,
         h2osoi_clm45=jnp.full((n_p, nlevgrnd), spval, dtype=jnp.float64),
         h2osoi_clm50=h,
-        h2osoi_factor=None,
+        h2osoi_factor=jnp.ones((n_p,), dtype=jnp.float64),  # no adjustment factor
     )
 
 

@@ -922,3 +922,40 @@ only). One bug, fixed; the rest recorded:
   water stress, `HF_extension_type 1` with a dense canopy and `kn_val 0.3` (against
   `bdde552` over 26 steps, 1.8e-11); the process order, the 13 conservation checks, the
   options reaching the physics, the `_sharded` argument order and `vmap` axes.
+
+### C24. Package 7.3: the chunk's inputs as 0-based arrays (7.3, 2026-10-31)
+
+- **Types** (`clm_ml/step.py`): the compiled step still takes one flat `StepInputs` per
+  patch; a chunk holds its inputs split by what they belong to: **`MetInputs`** (calendar
+  days, the step's meteorology, the previous and next steps' `ForcingRecord`s; per
+  gridcell) and **`LandInputs`** (leaf and stem area, soil water, the adjustment factor;
+  per patch), each stacked along a leading step axis. `step_inputs(met, land)` joins them
+  per patch inside the chunk (after the gridcell-to-patch gather). Shortwave bands 0-based
+  `(..., 2)`, no legacy patch axis, no `numrad + 1` band slot.
+- **Producers** (`clm_ml/chunk_inputs.py`): `met_inputs(bef, cur, nxt, calday, calday_beg)`
+  from derived-meteorology dicts (`TowerMet` names) and `forcing_inputs(forcing, ...)` from a
+  tower `clm_ml.forcing.Forcing` chunk, both vectorized over the chunk with NumPy on the host
+  (the previous record through `physics.atm_forcing.clm_forcing_to_ml`, the same arithmetic
+  as the step's current record). Tower runs: `main.chunk_inputs` (one tower: gridcell and
+  patch axes of length 1), `main.patch_inputs` (one patch: `StepInputs` stacked per step,
+  for `make_chunk_runner`/`make_stream_runner`), `main.read_batch_inputs` (runs joined
+  along the gridcell and patch axes, then gathered to the batch's slots; NumPy on the host,
+  placed on the devices by `place_inputs` as before). Grid runs: `GridChunkReader` builds
+  `MetInputs` with `met_inputs` (calendar days `(step,)` without a gridcell axis, broadcast
+  in the chunk as before); `grid_forcing.land_record` (the chunk's `land_fn`) returns
+  `LandInputs`.
+- **No adjustment factor = 1.** The legacy record held `None` and the adapter wrote 1.0;
+  `LandInputs.h2osoi_factor` is always an array (ones), the value the step used before.
+- **Left on the legacy records until 7.4:** the first (initializing) step (`main.StepInputs`,
+  `main.step_inputs`, `PatchBatch.inits`/`init_stack`, `grid_setup.first_step_inputs`), which
+  runs on the containers. `clm_ml.legacy.step.step_inputs` and `main.stack_step_inputs`
+  are deleted; `advance_acclimation` takes the step's air temperature.
+- **Bit for bit:** the CHATS7 bit-for-bit + noise twin test passed unchanged (no
+  re-recording); the grid input test compares the new arrays of a grid run and of the
+  equivalent towers (calendar days excluded, as the step times were before).
+Why: scope 7.3 as revised (D3, plan decision 36): the forcing stays prepared on the host;
+only its layout changes, so the compiled step no longer converts legacy records.
+Alternatives: nesting `MetInputs`/`LandInputs` inside `StepInputs` (every physics access
+would change for no gain); keeping one `StepInputs` per patch in the chunk (sends the
+meteorology once per patch instead of once per gridcell: the Phase 6 layout keeps it per
+gridcell).

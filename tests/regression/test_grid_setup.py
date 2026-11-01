@@ -197,7 +197,7 @@ if batch.land_fn is not None:
     xp = jax.jit(jax.vmap(lambda w: batch.land_fn(w, land, gidx)))(xw)
 real = np.asarray(batch.real_index); gi = np.asarray(batch.runner_gidx)[real]
 out = {{}}
-for name, tree, idx in (("xg", xg[1:], gi), ("xp", xp, real)):  # xg[0]: the step times
+for name, tree, idx in (("xg", xg[2:], gi), ("xp", xp, real)):  # xg[:2]: the calendar days
     for path, leaf in jax.tree_util.tree_leaves_with_path(tree):
         a = np.asarray(leaf)
         out[name + jax.tree_util.keystr(path)] = a[:, idx] if a.ndim >= 2 else a

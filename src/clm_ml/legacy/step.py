@@ -1,13 +1,11 @@
 """The legacy run's inputs of :func:`clm_ml.step.step` (Phase 7.2, process 10c; transition
-only: the constants come from the setup itself in Phase 7.4, the step inputs from the chunk's
-forcing records in Phase 7.3).
+only: the constants come from the setup itself in Phase 7.4; the step inputs come from the
+chunk's 0-based arrays since Phase 7.3, ``clm_ml.chunk_inputs``).
 
 - :func:`patch_constants`: the patch's :class:`clm_ml.step.PatchConstants` from its
   containers after the first step (the *template*; legacy layout: a patch axis, layer slots
   1..max_layers, leaves and bands from index 1, soil level ``j`` at index ``j``).
 - :func:`step_options`: the step's static choices from the legacy options (``MLOptions``).
-- :func:`step_inputs`: one step's ``(now, met, clm_record, forcing_bef, forcing_next)`` (the
-  legacy step inputs, ``offline_executable.main.StepInputs``) as :class:`clm_ml.step.StepInputs`.
 """
 
 from __future__ import annotations
@@ -16,7 +14,7 @@ import jax.numpy as jnp
 
 from clm_ml.legacy.canopy import substep_from_container, substep_options
 from clm_ml.legacy.state import mlcanopy_layers
-from clm_ml.step import PatchConstants, StepInputs, StepOptions
+from clm_ml.step import PatchConstants, StepOptions
 
 
 def step_options(opts, step_seconds: int) -> StepOptions:
@@ -98,37 +96,4 @@ def patch_constants(template, p: int = 0) -> PatchConstants:
         albdry=jnp.asarray(SurfaceAlbedoMod.albdry)[colour, bands],
         latdeg=site.latdeg_grc[g],
         londeg=site.londeg_grc[g],
-    )
-
-
-def step_inputs(now, met, clm_record, forcing_bef, forcing_next, p: int = 0) -> StepInputs:
-    """One step's legacy inputs as :class:`StepInputs` for patch ``p`` (the forcing records
-    of the previous and next steps per patch, ``AtmForcingRecord``)."""
-    from clm_ml.legacy.atm_forcing import _patch_record
-
-    def f(x):
-        return jnp.asarray(x, dtype=jnp.float64)
-
-    factor = clm_record.h2osoi_factor
-    return StepInputs(
-        calday=now.calday,
-        calday_beg=now.calday_beg,
-        uref=f(met.uref),
-        tref=f(met.tref),
-        qref=f(met.qref),
-        pref=f(met.pref),
-        lwsky=f(met.lwsky),
-        rain=f(met.rain),
-        snow=f(met.snow),
-        solad=jnp.stack([f(met.solad[0]), f(met.solad[1])]),
-        solai=jnp.stack([f(met.solai[0]), f(met.solai[1])]),
-        pco2=f(met.pco2),
-        po2=f(met.po2),
-        elai=f(clm_record.elai),
-        esai=f(clm_record.esai),
-        h2osoi_clm45=f(clm_record.h2osoi_clm45),
-        h2osoi_clm50=f(clm_record.h2osoi_clm50),
-        h2osoi_factor=f(1.0 if factor is None else factor),
-        forcing_bef=_patch_record(forcing_bef, p),
-        forcing_next=_patch_record(forcing_next, p),
     )

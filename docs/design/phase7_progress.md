@@ -312,6 +312,22 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   gradient 640/567 -> 405/376 ms/step (1.5x faster); setup 32 -> 19 s; peak memory
   4.3-4.4 -> 3.6-3.9 GB. (With the default flags the forward step was 15.6 ms at 10c.)
 
+### 7.3 The chunk's forcing as 0-based arrays (2026-10-31)
+
+- **Package 7.3 (C24): bit for bit.** The chunk inputs are `clm_ml.step.MetInputs` (per
+  gridcell: calendar days, the step's meteorology, the previous and next steps'
+  `ForcingRecord`s) and `clm_ml.step.LandInputs` (per patch: leaf and stem area, soil water,
+  adjustment factor), NumPy on the host, stacked per step; `clm_ml.step.step_inputs` joins
+  them per patch inside the chunk. Producers in `clm_ml/chunk_inputs.py` (`met_inputs`,
+  `forcing_inputs`); tower runs through `main.chunk_inputs`/`patch_inputs`/
+  `read_batch_inputs`, grid runs through `GridChunkReader` and `grid_forcing.land_record`.
+  `clm_ml.legacy.step.step_inputs` and `main.stack_step_inputs` deleted; the first step keeps
+  its legacy records until 7.4. Tests: lint; `tests/clm_ml` + fast golden 420 pass (one
+  acclimation test updated: `advance_acclimation` takes the air temperature); bit-for-bit +
+  noise twin 177 pass (1.5 min, unchanged reference). Package end: `test_coarse_forcing`,
+  `test_land_data_files`, `test_grid_setup`, `test_stream_runner`, `test_patches_batched`,
+  `test_ensemble` pass (11.3 min); CPU gradient tier 8 pass (6.1 min; logs `logs7/p73_*`).
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,

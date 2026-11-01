@@ -64,10 +64,7 @@ def main() -> None:
     insts = jax.tree.map(lambda x: x[0], model._template)
     state, params = state_from_instances(insts), legacy.canopy_params
     first, n, npatch = 1, args.steps, args.patches
-    chunk = legacy.load_chunk(first, n)
-    forcing = M.stack_step_inputs(
-        [M.step_inputs(legacy, chunk, k) for k in range(first, first + n)]
-    )
+    forcing = M.patch_inputs(legacy, legacy.load_chunk(first, n))
 
     # The chunk's pieces, as Model.run_chunk builds them
     stream = StreamSpec("s", "step", "mean", ("latent_heat_flux",))
