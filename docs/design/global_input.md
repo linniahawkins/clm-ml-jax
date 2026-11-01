@@ -341,3 +341,20 @@ Fortran); use the leaf water potential outputs instead.
     15 as array code and the unit test runs them. To check them in every run they would be
     added to `BALANCE_CHECKS` (the state's `balance_error` grows, the reference is
     re-recorded): a decision for the maintainer.
+21. **Soil texture classes are looked up one class too far** (found in Phase 7.4, 2026-10-31;
+    a legacy translation bug, not Phase 6b). `SoilStateInitTimeConst` finds a towers.yaml
+    `texture_class` as a 1-based class number and indexes the 0-based Python tables with it,
+    so "loam" gets the sand/clay and Clapp-Hornberger values of "sandy clay loam", and
+    "clay" (class 11) fails with an index error. Fortran indexes 1-based arrays (no shift).
+    Only towers with `texture_class` and no sand/clay percentages are affected (CHATS7 and
+    grid runs give percentages). Kept bit for bit in the new setup
+    (`clm_ml.setup.soil.soil_properties`); the fix (index `tex - 1`) changes those towers'
+    soil: the maintainer's decision.
+22. **A missing `organic_matter` gives a negative organic fraction** (found in Phase 7.4,
+    2026-10-31; legacy, not Phase 6b). towers.yaml allows `organic_matter: null`; the legacy
+    tower table turned it into -999, and `SoilStateInitTimeConst` divides by 130 kg m-3:
+    `om_frac` = -7.7, so porosity, suction, b, conductivities and heat capacity are
+    extrapolated far outside their range. Fortran's tower table always gives a value. Kept
+    bit for bit (`clm_ml.setup.patches.build_patches`); a fix (0, i.e. mineral soil, or an
+    error asking for a value) is the maintainer's decision. CHATS7 (50 kg m-3) and grid runs
+    (surface data) are not affected.

@@ -351,6 +351,17 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   pass; bit-for-bit + noise twin 177 pass (no re-recording: the reference already holds
   `spval` in those slots); focused CPU gradient test pass (2.3 min).
 
+- **7.4c, the setup as pure functions (C27): bit for bit against the legacy setup.** New
+  `clm_ml/setup/` (`soil`, `canopy`, `tables`, `patches.build_patches`, `towers`), ported
+  readers `clm_ml/io/tower.py` and `clm_ml/io/clm_history.py` (explicit soil structure, no
+  module globals), `clm_ml/tower_forcing.py` (the tower forcing source on them),
+  `clm_ml/calendar.py` (the time manager with an explicit calendar). Not yet used by runs.
+  New `tests/regression/test_setup.py`: seven patches on three gridcells, every towers.yaml
+  input varied: 266 constant and state arrays and every forcing array of 48 steps equal to
+  the legacy setup's. Found two legacy setup bugs, kept bit for bit and recorded for the
+  maintainer (`global_input.md` issues 21, 22). Tests: lint; `tests/clm_ml` + fast golden 420
+  pass; bit-for-bit + noise twin 177 pass; `test_setup` pass.
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,

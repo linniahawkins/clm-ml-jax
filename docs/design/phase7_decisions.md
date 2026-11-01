@@ -1006,3 +1006,30 @@ Why: the setup can now produce the constants directly (7.4c), and per-patch memo
 (the carry's ~120 start arrays per patch are no longer inputs of the chunk).
 Alternatives: zeros instead of `spval` (would change recorded fill slots; `spval` keeps the
 legacy meaning "not set").
+
+### C27. 7.4c: the setup as pure functions (7.4, 2026-10-31)
+- **Modules:** `clm_ml/setup/soil.py` (soil layers of each structure, bedrock index, soil
+  properties, roots, soil colour albedos, initial soil temperature), `canopy.py` (leaf/stem
+  area profile parameters, canopy heights, layer grid and area fractions, initial canopy
+  state; the vectorized beta CDF moved here from `legacy/vector_setup.py`), `tables.py`
+  (soil texture, soil colour albedo, PFT canopy heights and profiles), `patches.py`
+  (`build_patches(domain, params, config, first)` -> `PatchSetup(constants, state, c3, pft,
+  soil_depth)`, NumPy with a leading patch axis), `towers.py` (one
+  `tower_forcing.TowerForcingSource` per gridcell, the first step's values, initial soil
+  and acclimation temperature). Inputs are the clm_ml objects (`Domain`, `Params`,
+  `ModelConfig`), never the legacy tower table or containers.
+- **Arithmetic copied operation by operation** from the legacy setup (Python floats where it
+  used them, `jax.numpy` for `exp`/`sqrt`/`sum` where it did), so the values are bit for
+  bit: the test compares them with the legacy setup of seven varied patches (live, until the
+  legacy setup is deleted in 7.4f; then against a recorded copy).
+- **Readers ported** (`clm_ml/io/tower.py`, `clm_ml/io/clm_history.py`): the same code with
+  the soil layer structure and the adjustment file as arguments; errors raise
+  `TowerMetError` instead of `endrun`. `clm_ml/calendar.py`: the time manager's date
+  functions with the calendar as an argument. `forcing_interpolation.mean_cosz_function`
+  takes an optional calendar (None: the legacy global, until the legacy runs go).
+- **Legacy quirks kept** (bit for bit; recorded as open issues 21 and 22): the texture
+  class's table index shifted by one; a missing organic matter content read as -999.
+- **Initial acclimation steps** is an argument (`build_patches(..., acclimation_steps)`):
+  1 reproduces the legacy initialized state; runs will use 0 (7.4d), so that the first
+  step's running-mean update sets the mean to that step's air temperature, which it already
+  is (exactly: `t + (t - t) / 1`), and the first step needs no special case.

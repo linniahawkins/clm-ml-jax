@@ -119,18 +119,28 @@ def interpolate_records(
     return out
 
 
-def mean_cosz_function(lat: float, lon: float, year: int, samples: int = 10):
+def mean_cosz_function(lat: float, lon: float, year: int, samples: int = 10, calendar=None):
     """``mean_cosz(start, seconds)`` for a site (``lat``, ``lon`` in radians): the mean of
     ``max(cos(solar zenith), 0)`` over the interval, from ``samples`` evenly spaced points,
     with the model's orbital functions (CLM's ``shr_orb_decl``/``shr_orb_cosz``; calendar
-    day in UTC, as the model's own solar zenith angle)."""
+    day in UTC, as the model's own solar zenith angle). ``calendar``: the model calendar
+    (``clm_ml.calendar``; None: the legacy time manager's, until Phase 7.6)."""
     from clm_share.shr_orb_mod import shr_orb_cosz, shr_orb_decl, shr_orb_params
-    from clm_src_utils.clm_time_manager import calday_of
+
+    if calendar is None:
+        from clm_src_utils.clm_time_manager import calday_of
+
+        def calday(t: dt.datetime) -> float:
+            return calday_of(t.year, t.month, t.day, t.hour * 3600 + t.minute * 60 + t.second)
+
+    else:
+        from clm_ml.calendar import calday_of as _calday_of
+
+        def calday(t: dt.datetime) -> float:
+            tod = t.hour * 3600 + t.minute * 60 + t.second
+            return _calday_of(t.year, t.month, t.day, tod, calendar)
 
     _eccen, _obliq, _mvelp, obliqr, lambm0, mvelpp = shr_orb_params(year)
-
-    def calday(t: dt.datetime) -> float:
-        return calday_of(t.year, t.month, t.day, t.hour * 3600 + t.minute * 60 + t.second)
 
     def mean_cosz(start: dt.datetime, seconds: int) -> float:
         total = 0.0
