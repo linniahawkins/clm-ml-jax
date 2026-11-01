@@ -22,6 +22,7 @@ from typing import Mapping
 
 import numpy as np
 
+from clm_ml.io import netcdf
 from clm_ml.io.yaml_schema import ConfigError
 from clm_ml.params import PARAM_SPECS, PFT_NAMES, Params
 
@@ -57,7 +58,7 @@ def read_clm_parameter_file(path: Path) -> dict[str, dict]:
     if not path.exists():
         raise ConfigError(f"CLM parameter file not found: {path}")
     n = len(PFT_NAMES)
-    with nc.Dataset(path) as ds:
+    with netcdf.dataset(path) as ds:
         names = [str(x).strip() for x in nc.chartostring(ds.variables["pftname"][:n])]
         if names != list(PFT_NAMES):
             raise ConfigError(f"{path}: pftname rows 0-{n - 1} are {names}, not {PFT_NAMES}")

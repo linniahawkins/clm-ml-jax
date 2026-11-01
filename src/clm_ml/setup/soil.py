@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from clm_ml.io import netcdf
 from clm_ml.setup import tables
 
 #: Hydrologically active and all ground levels of the CLM soil layer structure (the only
@@ -201,9 +202,8 @@ def initial_soil_temperature(path, time_index: int, nlevgrnd: int) -> np.ndarray
     ``time_index``.
 
     Fortran reference: CLMml_driver.F90::SoilInit."""
-    import netCDF4 as nc
 
-    with nc.Dataset(path) as ds:
+    with netcdf.dataset(path) as ds:
         if "TSOI" not in ds.variables:
             raise ValueError(f"{path}: no TSOI")
         var = ds.variables["TSOI"]

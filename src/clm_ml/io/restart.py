@@ -36,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from clm_ml.io import netcdf
+
 #: The restart format this code writes and reads (1-5: pickles of earlier phases)
 FORMAT_VERSION = 6
 
@@ -152,14 +154,13 @@ def write_restart(path: Path, content: dict, calendar: str = "GREGORIAN") -> Non
     """Write ``content`` (``clm_ml.driver.run_streams``'s restart) to the netCDF file
     ``path``: written beside it and renamed over it, the previous file kept as
     ``<path>.prev``."""
-    import netCDF4 as nc
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     state = content["state"]
     extra = content.get("extra") or {}
-    with nc.Dataset(tmp, "w", format="NETCDF4") as ds:
+    with netcdf.dataset(tmp, "w", format="NETCDF4") as ds:
         ds.title = "CLM-ML-JAX restart"
         ds.format_version = FORMAT_VERSION
         ds.time = content["time"].isoformat()
@@ -198,7 +199,6 @@ def write_restart(path: Path, content: dict, calendar: str = "GREGORIAN") -> Non
 
 
 def _read_one(path: Path) -> dict:
-    import netCDF4 as nc
 
     from clm_ml.state import CanopyState, SoilState, State
 
@@ -208,7 +208,7 @@ def _read_one(path: Path) -> dict:
                 "a pickle restart from before Phase 7.5 (format 1-5): this code reads netCDF "
                 f"restarts (format {FORMAT_VERSION}); run again from the start"
             )
-    with nc.Dataset(path) as ds:
+    with netcdf.dataset(path) as ds:
         ds.set_auto_mask(False)  # every value as written (NaN, inf and spval included)
         version = int(getattr(ds, "format_version", -1))
         if version != FORMAT_VERSION:

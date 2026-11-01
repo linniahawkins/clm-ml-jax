@@ -210,9 +210,10 @@ class Simulation:
         device gets the same block, ``Gd`` consecutive gridcells (padded) and their patches in
         ``N3`` C3 slots followed by ``N4`` C4 slots, so every device runs the same program and
         the forcing gather and gridcell sums stay on the device. Empty slots hold weight-0
-        copies of a patch of the same pathway on the block's last gridcell; padding gridcells
-        read the last real gridcell's forcing. Outputs are put back in domain order
-        (``real_index``)."""
+        copies of a patch of the same pathway, on that patch's own gridcell when it is in the
+        block (so the copy sees its own forcing), else on the block's last gridcell; padding
+        gridcells read the last real gridcell's forcing. Padding slots are not checked
+        (:func:`real_mask`). Outputs are put back in domain order (``real_index``)."""
         if self.n_real != self.n_patches or self.n_real_gridcells != self.n_gridcells:
             raise ValueError("blocked(): start from the domain's own patches (no padding)")
         gidx, c3 = self.gridcell_index, self.c3
@@ -239,7 +240,8 @@ class Simulation:
                     else:
                         src.append(plist[-1] if plist else fallback)
                         real.append(False)
-                        gi.append(d * gd + gd - 1)
+                        # the copied patch's gridcell when it is in this block (open item O29)
+                        gi.append(int(gidx[plist[-1]]) if plist else d * gd + gd - 1)
                     names.append(self.names[src[-1]] if real[-1] else f"padding {len(src) - 1}")
         src, real = np.array(src), np.array(real)
         return self._with_slots(
@@ -873,9 +875,7 @@ def report_ignored_checks(errors, ignored, alive, sim: Simulation, where: str):
     if not ignored:
         return errors
     errors = np.array(errors, dtype=float).reshape(sim.n_patches, len(BALANCE_CHECKS))
-    real = np.zeros(sim.n_patches, dtype=bool)
-    real[np.asarray(sim.real_index)] = True
-    use = real & np.asarray(alive, dtype=bool)
+    use = real_mask(sim) & np.asarray(alive, dtype=bool)
     for i in ignored:
         name, tol = BALANCE_CHECKS[i]
         e = errors[use, i]
@@ -891,14 +891,23 @@ def _patch(tree, p):
     return jax.tree.map(lambda x: np.asarray(x)[p], tree)
 
 
+def real_mask(sim: Simulation) -> np.ndarray:
+    """``(slots,)`` True for the slots that hold a domain patch (not padding)."""
+    real = np.zeros(sim.n_patches, dtype=bool)
+    real[np.asarray(sim.real_index)] = True
+    return real
+
+
 def batch_failures(errors, state, sim: Simulation, alive=None) -> dict:
     """``{patch: [problem, ...]}`` for the patches (of those ``alive``) that fail a
-    conservation check or whose state is unhealthy."""
+    conservation check or whose state is unhealthy; padding slots are not checked (they are
+    copies with weight 0, outside every output and gradient; open item O29)."""
     errors = np.asarray(errors, dtype=float).reshape(sim.n_patches, len(BALANCE_CHECKS))
     state = jax.tree.map(np.asarray, state)  # one transfer from the devices
     failed = {}
+    real = real_mask(sim)
     for p in range(sim.n_patches):
-        if alive is not None and not alive[p]:
+        if not real[p] or (alive is not None and not alive[p]):
             continue
         problems = [
             f"{name}: error {e:.3g} exceeds {tol:g}"
@@ -913,11 +922,12 @@ def batch_failures(errors, state, sim: Simulation, alive=None) -> dict:
 
 def check_batch_balance(errors, sim: Simulation, where: str, alive=None) -> None:
     """Fortran's conservation checks per patch: stop the run naming the patches that fail
-    (decision 25, default)."""
+    (decision 25, default); padding slots are not checked."""
     errors = np.asarray(errors, dtype=float).reshape(sim.n_patches, len(BALANCE_CHECKS))
     failed = []
+    real = real_mask(sim)
     for p in range(sim.n_patches):
-        if alive is not None and not alive[p]:
+        if not real[p] or (alive is not None and not alive[p]):
             continue
         for (name, tol), e in zip(BALANCE_CHECKS, errors[p]):
             if e > tol:
@@ -931,7 +941,7 @@ def check_batch(errors, state, sim: Simulation, where: str) -> None:
     patches that fail (decision 25, default)."""
     check_batch_balance(errors, sim, where)
     state = jax.tree.map(np.asarray, state)  # one transfer from the devices
-    for p in range(sim.n_patches):
+    for p in np.flatnonzero(real_mask(sim)):
         check_health(_patch(state, p), _patch(sim.constants.layers, p), f"{where}, {sim.names[p]}")
 
 

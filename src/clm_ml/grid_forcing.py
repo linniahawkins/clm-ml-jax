@@ -15,7 +15,10 @@ CLM's satellite phenology, and CLM's prescribed soil-moisture stream.
   each coupling interval, so the land step ``[t, t + Δt]`` uses the data atmosphere evaluated
   at ``t``, the step's start. Each stream is interpolated in its own calendar (``noleap`` for
   CRUJRA); a Gregorian model date of 29 February uses 28 February (CDEPS). Stamps are those
-  of the files:
+  of the files. Each stream's data years form a loop (:class:`StreamYears`, CDEPS
+  ``taxmode = cycle`` with ``stream_year_first/last`` and ``year_align``, as CLM runs these
+  streams): a model year reads its data year, and the first data year's first steps
+  interpolate from the last record of the last data year (decision 102).
   - ``TPQW`` (temperature, pressure, humidity, wind, longwave): **linear** between the
     stamps bracketing ``t`` (lower bound: last stamp <= t);
   - ``Precip``: **nearest** stamp (a tie goes to the earlier one);
@@ -65,10 +68,11 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import numpy as np
 
+from clm_ml.io import netcdf
 from clm_ml.io.yaml_schema import ConfigError, option
 
 TKFRZ = 273.15  # SHR_CONST_TKFRZ
@@ -89,6 +93,59 @@ STREAMS = {
 
 
 @dataclasses.dataclass(frozen=True)
+class StreamYears:
+    """A stream's time axis as CDEPS handles it (``taxmode``, ``stream_year_first``,
+    ``stream_year_last``, ``year_align``): with ``cycle`` the data years
+    ``year_first..year_last`` repeat, model year ``year_align`` reading ``year_first``, so a
+    run in the first data year interpolates from the last record of ``year_last`` (CDEPS
+    ``shr_stream_findBounds``: the greatest valid date, shifted back by the loop length), and
+    a run past ``year_last`` starts the loop again; with ``limit`` the run must lie inside
+    the data."""
+
+    taxmode: Literal["cycle", "limit"] = option(
+        "cycle",
+        "Time axis outside the data years: cycle (repeat them, CLM's default for "
+        "these streams) or limit (stop).",
+        "taxmode",
+    )
+    year_first: Optional[int] = option(None, "First data year of the loop.",
+                                       "stream_year_first", required=True)  # fmt: skip
+    year_last: Optional[int] = option(None, "Last data year of the loop.", "stream_year_last",
+                                      required=True)  # fmt: skip
+    year_align: Union[Literal["year_first"], int] = option(
+        "year_first",
+        "The model year that reads year_first (year_first: model years are data " "years).",
+        "year_align",
+        when={"taxmode": "cycle"},
+    )
+
+    def data_year(self, model_year: int) -> int:
+        """The data year read for ``model_year`` (CDEPS ``dYear``)."""
+        if self.taxmode != "cycle":
+            return model_year
+        n = self.year_last - self.year_first + 1
+        align = self.year_first if self.year_align == "year_first" else int(self.year_align)
+        return self.year_first + (model_year - align + 2 * n) % n
+
+
+def shift_years(stamps, calendar: str, years: int) -> np.ndarray:
+    """Stamps (seconds of ``calendar``, :data:`_EPOCH`) moved by ``years`` calendar years
+    (CDEPS shifts the date's year; a 29 February with no counterpart is dropped: NaN)."""
+    import cftime
+
+    stamps = np.asarray(stamps, dtype=float)
+    if years == 0:
+        return stamps
+    out = np.empty_like(stamps)
+    for i, d in enumerate(cftime.num2date(stamps, _EPOCH, calendar=calendar)):
+        try:
+            out[i] = cftime.date2num(d.replace(year=d.year + years), _EPOCH, calendar=calendar)
+        except ValueError:
+            out[i] = np.nan
+    return out
+
+
+@dataclasses.dataclass(frozen=True)
 class DatmStreamsSection:
     """The three CRUJRA datm streams ({year} is expanded), mapped and interpolated in time as
     CDEPS datm does."""
@@ -98,6 +155,12 @@ class DatmStreamsSection:
     solar: str = option(doc="Solar radiation stream.", path=True)
     precipitation: str = option(doc="Precipitation stream.", path=True)
     mask: str = option(doc="The streams' 0.5 degree domain file with mask.", path=True)
+    years: Optional[StreamYears] = option(
+        None,
+        "The streams' data years and time axis (CLM: DATM_YR_START, DATM_YR_END, "
+        "DATM_YR_ALIGN).",
+        required=True,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -124,6 +187,12 @@ class SoilHistorySection:
     soil water, and the initial soil temperature."""
 
     files: str = option(doc="The files, with {year} and {month} expanded.", path=True)
+    years: Optional[StreamYears] = option(
+        None,
+        "The files' data years and time axis (CLM: stream_year_first_soilm, "
+        "stream_year_last_soilm, model_year_align_soilm).",
+        required=True,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -334,13 +403,15 @@ class YearlyStream:
     """One ``datm`` stream split into yearly files (``{year}`` in the path), read for the
     source points of a :class:`PointMap`."""
 
-    def __init__(self, pattern: str, variables, point_map: PointMap, nlon: int):
+    def __init__(self, pattern: str, variables, point_map: PointMap, nlon: int,
+                 years: Optional[StreamYears] = None):  # fmt: skip
         self.pattern, self.variables, self.map, self.nlon = (
             pattern,
             tuple(variables),
             point_map,
             nlon,
         )
+        self.years = years or StreamYears(taxmode="limit")
         self._index: dict = {}  # year -> (stamps, calendar)
 
     def path(self, year: int) -> Path:
@@ -348,27 +419,31 @@ class YearlyStream:
 
     def stamps(self, year: int):
         if year not in self._index:
-            import netCDF4 as nc
 
             path = self.path(year)
             if not path.exists():
                 self._index[year] = None
             else:
-                with nc.Dataset(path) as ds:
+                with netcdf.dataset(path) as ds:
                     self._index[year] = stamps_of(ds.variables["time"])
         return self._index[year]
 
     def window(self, first: dt.datetime, last: dt.datetime):
-        """Stamps (seconds, the stream's calendar) of the records from the year before
-        ``first`` to the year after ``last`` that exist, with ``(year, k)`` per record."""
+        """Stamps (seconds, the stream's calendar, on the model's years) of the records from
+        the year before ``first`` to the year after ``last``, with ``(data year, k)`` per
+        record: each model year reads its data year (:class:`StreamYears`), its stamps moved
+        to the model year."""
         stamps, where, cal = [], [], None
         for year in range(first.year - 1, last.year + 2):
-            entry = self.stamps(year)
+            data_year = self.years.data_year(year)
+            entry = self.stamps(data_year)
             if entry is None:
                 continue
             s, cal = entry
-            stamps.append(s)
-            where += [(year, k) for k in range(len(s))]
+            s = shift_years(s, cal, year - data_year)
+            keep = np.isfinite(s)
+            stamps.append(s[keep])
+            where += [(data_year, k) for k in range(len(s)) if keep[k]]
         if not stamps:
             raise ConfigError(f"forcing: no file for {first.year} ({self.path(first.year)})")
         return np.concatenate(stamps), where, cal
@@ -376,7 +451,6 @@ class YearlyStream:
     def read(self, records):
         """``{variable: (len(records), dst)}`` mapped to the destination points, for
         ``records`` [(year, k), ...] (each year's span read once)."""
-        import netCDF4 as nc
 
         jj, ii = np.divmod(self.map.points, self.nlon)
         out = {v: np.empty((len(records), self.map.index.shape[0])) for v in self.variables}
@@ -386,7 +460,7 @@ class YearlyStream:
         for year, items in by_year.items():
             ks = [k for _, k in items]
             lo, hi = min(ks), max(ks) + 1
-            with nc.Dataset(self.path(year)) as ds:
+            with netcdf.dataset(self.path(year)) as ds:
                 for v in self.variables:
                     slab = np.ma.filled(ds.variables[v][lo:hi], np.nan)
                     pts = np.asarray(slab[:, jj, ii], dtype=float)
@@ -402,9 +476,8 @@ class Co2Stream:
     def __init__(self, section: Co2Section, resolve):
         self.ppm = section.ppm if section.source == "constant" else None
         if section.source == "file":
-            import netCDF4 as nc
 
-            with nc.Dataset(resolve(section.file)) as ds:
+            with netcdf.dataset(resolve(section.file)) as ds:
                 self.stamps, self.calendar = stamps_of(ds.variables["time"])
                 self.values = np.asarray(ds.variables["CO2"][:], dtype=float).reshape(-1)
 
@@ -419,29 +492,33 @@ class MonthlyHistory:
     """Monthly CLM history files (``{year}``, ``{month}``): ``H2OSOI``/``TSOI`` per domain
     gridcell (rows/cols on the history grid), with the files' time stamps."""
 
-    def __init__(self, pattern: str, rows, cols):
+    def __init__(self, pattern: str, rows, cols, years: Optional[StreamYears] = None):
         self.pattern, self.rows, self.cols = pattern, np.asarray(rows), np.asarray(cols)
+        self.years = years or StreamYears(taxmode="limit")
         self._stamp: dict = {}
 
     def path(self, year: int, month: int) -> Path:
         return Path(self.pattern.format(year=year, month=month))
 
     def months_around(self, first: dt.datetime, last: dt.datetime):
-        """``[(year, month, stamp)]`` from the month before ``first`` to the month after
-        ``last``, files that exist, in the files' calendar seconds."""
-        import netCDF4 as nc
+        """``[(data year, month, stamp)]`` from the month before ``first`` to the month after
+        ``last``, files that exist, in the files' calendar seconds on the model's years (each
+        model year reads its data year, :class:`StreamYears`)."""
 
         y, m = (first.year, first.month - 1) if first.month > 1 else (first.year - 1, 12)
         out, cal = [], None
         while (y, m) <= ((last.year, last.month + 1) if last.month < 12 else (last.year + 1, 1)):
-            path = self.path(y, m)
+            dy = self.years.data_year(y)
+            path = self.path(dy, m)
             if path.exists():
-                if (y, m) not in self._stamp:
-                    with nc.Dataset(path) as ds:
+                if (dy, m) not in self._stamp:
+                    with netcdf.dataset(path) as ds:
                         s, c = stamps_of(ds.variables["time"])
-                        self._stamp[(y, m)] = (float(s[0]), c)
-                s, cal = self._stamp[(y, m)]
-                out.append((y, m, s))
+                        self._stamp[(dy, m)] = (float(s[0]), c)
+                s, cal = self._stamp[(dy, m)]
+                s = float(shift_years([s], cal, y - dy)[0])
+                if np.isfinite(s):
+                    out.append((dy, m, s))
             y, m = (y + 1, 1) if m == 12 else (y, m + 1)
         if len(out) < 2:
             raise ConfigError(f"forcing.gridded.soil: no monthly files around {first:%Y-%m}")
@@ -449,9 +526,8 @@ class MonthlyHistory:
 
     def read(self, year: int, month: int, name: str) -> np.ndarray:
         """``name`` (levels, gridcell) of one month."""
-        import netCDF4 as nc
 
-        with nc.Dataset(self.path(year, month)) as ds:
+        with netcdf.dataset(self.path(year, month)) as ds:
             v = np.ma.filled(ds.variables[name][0], np.nan).astype(float)
         out = v[:, self.rows, self.cols]
         if not np.all(np.isfinite(out)) or np.any(np.abs(out) > 1e30):
@@ -478,7 +554,6 @@ class GridInputs:
 
     def __init__(self, domain, surface_data, section: GriddedForcingSection, start, step_seconds,
                  n_steps, resolve=lambda p: Path(p), calendar="GREGORIAN"):  # fmt: skip
-        import netCDF4 as nc
 
         from clm_ml.processes.orbit import shr_orb_params
 
@@ -486,26 +561,27 @@ class GridInputs:
         self.step_seconds, self.n_steps = int(step_seconds), int(n_steps)
         g = domain.gridcells
         met = section.meteorology
-        with nc.Dataset(resolve(met.mask)) as ds:
+        with netcdf.dataset(resolve(met.mask)) as ds:
             mask = np.asarray(ds.variables["mask"][:]) > 0
             src_lat = np.asarray(ds.variables["yc"][:, 0], dtype=float)
             src_lon = np.asarray(ds.variables["xc"][0, :], dtype=float)
         self.point_map = bilinear_map(src_lat, src_lon, mask, g.latitude, g.longitude)
         self.streams = {
             name: YearlyStream(str(resolve(getattr(met, name))), STREAMS[name][0], self.point_map,
-                               src_lon.size)  # fmt: skip
+                               src_lon.size, met.years)  # fmt: skip
             for name in STREAMS
         }
         self.co2 = Co2Stream(section.co2, resolve)
         rows, cols = g.grid_index[:, 0], g.grid_index[:, 1]
-        self.history = MonthlyHistory(str(resolve(section.soil.files)), rows, cols)
+        self.history = MonthlyHistory(str(resolve(section.soil.files)), rows, cols,
+                                      section.soil.years)  # fmt: skip
         self.lat_rad, self.lon_rad = np.radians(g.latitude), np.radians(g.longitude)
         _e, _o, _m, self.obliqr, self.lambm0, self.mvelpp = shr_orb_params(start.year)
         self.eccen = _e
         # monthly vegetation per patch, (12, P), from the surface data
         p = domain.patches
         prow, pcol = rows[p.gridcell_index], cols[p.gridcell_index]
-        with nc.Dataset(resolve(surface_data)) as ds:
+        with netcdf.dataset(resolve(surface_data)) as ds:
             self.lai = self._monthly(ds.variables["MONTHLY_LAI"], p.pft_index, prow, pcol)
             self.sai = self._monthly(ds.variables["MONTHLY_SAI"], p.pft_index, prow, pcol)
 

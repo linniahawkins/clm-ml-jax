@@ -27,6 +27,8 @@ from typing import Callable, Mapping, Optional, Sequence
 
 import numpy as np
 
+from clm_ml.io import netcdf
+
 #: How each raw tower variable is interpolated
 RULES = {
     "zbot": "linear",
@@ -186,12 +188,11 @@ def read_land_data(
     interval) and the named variables with time first (extra axes of size 1, e.g. a single
     gridcell, are dropped). ``last_end`` is the start of the record after the window (None
     at the end of the data)."""
-    import netCDF4 as nc
 
     paths = [paths] if isinstance(paths, str) else list(paths)
     index = []  # (record start, path, record in file), all files
     for path in paths:
-        with nc.Dataset(path) as ds:
+        with netcdf.dataset(path) as ds:
             time = ds.variables["time"]
             origin = dt.datetime.fromisoformat(time.units.split("since")[1].strip())
             for k, d in enumerate(np.asarray(time[:])):
@@ -211,7 +212,7 @@ def read_land_data(
         parts = []
         for path in dict.fromkeys(p for _, p, _ in window):
             ks = [k for _, p, k in window if p == path]
-            with nc.Dataset(path) as ds:
+            with netcdf.dataset(path) as ds:
                 if name not in ds.variables:
                     raise ValueError(f"{path}: variable {name} not found")
                 v = np.asarray(ds.variables[name][min(ks) : max(ks) + 1], dtype=float)

@@ -11,12 +11,15 @@ run:
   forcing:
     gridded:
       meteorology:
+        years: {taxmode: cycle, year_first: 1901, year_last: 2025}   # the CRUJRA files on disk
         tpqw: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.TPQWL.{year}.nc
         solar: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.Solr_Diffuse.{year}.nc
         precipitation: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.Prec.{year}.nc
         mask: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/domain.crujra.v2.5_0.5x0.5.c240722.nc
       co2: {source: file, file: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/CO2field/fco2_datm_global_simyr_1700-2025_TRENDY_c260722.nc}
-      soil: {files: "/glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.{year}-{month:02d}.nc"}
+      soil:
+        years: {taxmode: cycle, year_first: 1850, year_last: 2023}   # the CTSM 5.4 run's history
+        files: "/glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.{year}-{month:02d}.nc"
   output:
     directory: output
     streams:

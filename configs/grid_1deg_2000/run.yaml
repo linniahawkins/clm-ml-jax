@@ -44,6 +44,25 @@ forcing:
       # REQUIRED.
       mask: /glade/campaign/cgd/tss/projects/TRENDY2026/inputs/three_stream/domain.crujra.v2.5_0.5x0.5.c240722.nc
 
+      # The streams' data years and time axis (CLM: DATM_YR_START, DATM_YR_END, DATM_YR_ALIGN).
+      years:
+        # Time axis outside the data years: cycle (repeat them, CLM's default for these streams)
+        # or limit (stop).
+        # choices: cycle | limit; Fortran: taxmode; default: cycle.
+        taxmode: cycle
+
+        # First data year of the loop.
+        # Fortran: stream_year_first; REQUIRED.
+        year_first: 1901
+
+        # Last data year of the loop.
+        # Fortran: stream_year_last; REQUIRED.
+        year_last: 2025
+
+        # The model year that reads year_first (year_first: model years are data years).
+        # used with taxmode: cycle; Fortran: year_align; default: year_first.
+        year_align: year_first
+
     # Atmospheric CO2.
     co2:
       # A CO2 time series file, or a constant value.
@@ -59,6 +78,26 @@ forcing:
       # The files, with {year} and {month} expanded.
       # REQUIRED.
       files: /glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.{year}-{month:02d}.nc
+
+      # The files' data years and time axis (CLM: stream_year_first_soilm, stream_year_last_soilm,
+      # model_year_align_soilm).
+      years:
+        # Time axis outside the data years: cycle (repeat them, CLM's default for these streams)
+        # or limit (stop).
+        # choices: cycle | limit; Fortran: taxmode; default: cycle.
+        taxmode: cycle
+
+        # First data year of the loop.
+        # Fortran: stream_year_first; REQUIRED.
+        year_first: 1850
+
+        # Last data year of the loop.
+        # Fortran: stream_year_last; REQUIRED.
+        year_last: 2023
+
+        # The model year that reads year_first (year_first: model years are data years).
+        # used with taxmode: cycle; Fortran: year_align; default: year_first.
+        year_align: year_first
 
     # Forcing within a model step's sub-steps, as for towers: three-point interpolation (CLM-ml
     # v2) or the step's value.

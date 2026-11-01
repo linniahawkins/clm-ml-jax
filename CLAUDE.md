@@ -17,7 +17,7 @@ Guidance for Claude (and other contributors) working in this repository.
   (plan §0/§8, Phase 7 D/C numbers, `global_input.md`) are the detailed history.
 - **Standing preferences** (from the working sessions):
   - Commit and push when the tests required by the testing tiers pass (authorized); never
-    open PRs; one branch per phase (`phase8a/housekeeping` now). Commit footer:
+    open PRs; one branch per phase (`phase8b/docs` next). Commit footer:
     `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (or the model in use).
   - Don't modify the maintainer's Python environment (no `pip install` without asking).
   - Stop before starting a new phase to discuss it; during a phase, a measured slowdown of
@@ -32,10 +32,11 @@ Guidance for Claude (and other contributors) working in this repository.
   `/glade/work/linnia/ctsm5.4.004`; CLM-ml v1/v2 Fortran sources: see the progress log).
   Science changes are the maintainer's decision; record each in `docs/design/decisions.md`
   and every open issue in `docs/design/open_items.md`.
-- **Resume here:** `docs/design/open_items.md` (Phase 8a: housekeeping before the
-  documentation, Phase 8b). How the model works now: `docs/design/model_overview.md`.
-- **Testing in Phase 8a:** the tiers under "Rules for changes" (the Phase 7 minimum in
-  `phase7_progress.md` was for Phase 7 only).
+- **Resume here:** `docs/design/phase8b_scope.md` (Phase 8a closed 2026-11-01; Phase 8b,
+  documentation and release, starts by discussing its §2 decisions with the maintainer, on a
+  new branch `phase8b/docs` from `main`). Open items: `docs/design/open_items.md`; how the
+  model works now: `docs/design/model_overview.md`.
+- **Testing:** the tiers under "Rules for changes" (8b adds the docs build; phase8b_scope §5).
 - **Where the work is:** NCAR Derecho (CPU login node; GPUs through PBS, account UCLB0069,
   develop queue `gpudev`). Phase 6 history: `docs/design/phase6_progress.md`.
 - Terminology: say **"timing test"** for wall-clock performance measurements, not "benchmark".
@@ -404,7 +405,7 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
 | 6 | Many patches and gridcells, **on Derecho (GPU)**: steps 0-6 (per-site data, batched patches, C3/C4 groups, devices, vectorized setup) done 2026-10-29; GPU optimization (step 1c) deferred; progress log `docs/design/phase6_progress.md` |
 | 6b | Real global input before Phase 7 (decisions 26-32): steps 1-6 done (grid loader, gridded forcing, setup, regional test), done 2026-10-30 (step 7 closed; review fixes, calendar decision 34); fixes: per-layer minimum plant area (30), no 0.05 LAI cutoff (31), canopy-top latent heat per sub-step (32); open issues in `global_input.md` |
 | 7 | Restructure (decision 35; `phase7_scope.md`): 7.0 preparation, 7.1 step state (0-based), 7.2 physics by process (`clm_ml/processes/`), 7.3 chunk forcing as 0-based arrays (forcing prepared on the host: decision 36), 7.4 setup without globals (in-process runs), 7.5 netCDF restarts, 7.6 cleanup. **Done 2026-11-01** (`phase7_progress.md`; decisions C0-C34) |
-| 8 | 8a housekeeping before the docs (`open_items.md`); 8b docs and release |
+| 8 | 8a housekeeping before the docs (done 2026-11-01); 8b docs and release (`phase8b_scope.md`) |
 
 Decisions 18–21 (after Phase 4b): Phase 5 converts to masks in place; masks rather than grouping
 patches by layer structure; configuration passed explicitly (5a); process interface in Phase 7.

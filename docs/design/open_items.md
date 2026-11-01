@@ -6,6 +6,8 @@ One list of everything still open after Phase 7, gathered from the design docume
 CLAUDE.md, the code, and the Phase 8 survey. Each item keeps its original IDs under
 "Source" so its history can be traced. Items appearing in several places are merged.
 
+**Status (2026-11-01): Phase 8a closed**; the 8b items are scoped in `phase8b_scope.md`.
+
 **Targets:** **8a** = housekeeping before the documentation; **8b** = documentation and
 release; **after 8** = after Phase 8 (already planned that way); **known** = a known model
 limitation, not to be changed without discussion. **Decides:** **M** = maintainer (science
@@ -52,9 +54,9 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O26 | XLA CPU compile crash (LLVM linker recursion) | bug (upstream JAX) | known / recheck on JAX upgrade | I |
 | O27 | GPU: two fresh compiles can differ by ~1e-11 | bug (reproducibility) | after 8 (GPU work) | I |
 | O28 | A patch failing a check still enters its chunk's gridcell sums | robustness | after 8 (maintainer 2026-11-01) | M |
-| O29 | Padding slots combine one gridcell's weather with another patch's data | robustness | 8a (verify) | I |
-| O30 | Smaller Phase 6 review items (R11) | robustness | 8a (verify) | I |
-| O31 | netCDF read on a background thread while writing on the main thread | robustness | 8a | I |
+| O29 | ~~Padding slots combine one gridcell's weather with another patch's data~~ (closed: decision 101) | robustness | closed | I |
+| O30 | Smaller Phase 6 review items (R11): per-variable exclusion in gridcell sums, R7 check (first forcing year: closed, decision 102) | robustness | after 8 (maintainer 2026-11-01) | I |
+| O31 | ~~netCDF read on a background thread while writing on the main thread~~ (closed: decision 100) | robustness | closed | I |
 | O32 | `Model.chunks()` start at step 1 while runs chunk from step 0 | robustness (API) | after 8 (maintainer 2026-11-01) | M |
 | O33 | ~~The `euler` tableau has `b = [0]` (trap for future code)~~ (closed: decision 94) | robustness | closed | I |
 | **4. Housekeeping and repository organization (8a)** |||||
@@ -380,6 +382,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 6 review R4; decision 25.
 
 ### O29. Padding slots combine one gridcell's weather with another patch's data
+- **Closed 2026-11-01:** the proposed fix (decision 101).
 - **Kind:** robustness · **Target:** 8a (verify) · **Decides:** I
 - **What:** padding slots (for equal device shares) on real gridcells combine one
   gridcell's meteorology with another patch's site data, and stop mode checked them as if
@@ -399,6 +402,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 6 review R5.
 
 ### O30. Smaller Phase 6 review items
+- **2026-11-01 (maintainer):** the first-forcing-year item is fixed with CDEPS's rule (decision 102); the per-variable exclusion in `gridcell_sum` and the rest are documented here and fixed after Phase 8.
 - **Kind:** robustness · **Target:** 8a (verify each) · **Decides:** I
 - **What:** per-variable exclusion in `gridcell_sum`; unmasked first-step gridcell sums
   (the first step is an ordinary step since C28: likely closed); `Model.weights()` in slot
@@ -433,6 +437,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 6 review R7, R11.
 
 ### O31. netCDF read on a background thread while writing on the main thread
+- **Closed 2026-11-01:** the proposed fix (decision 100).
 - **Kind:** robustness · **Target:** 8a · **Decides:** I
 - **What:** the forcing reader thread reads netCDF while the output writers write netCDF on
   the main thread; HDF5 builds without thread safety could crash. As since Phase 4.
@@ -694,6 +699,9 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 ---
 
 ## Recently closed (for reference, not open)
+
+- netCDF lock (O31; decision 100); padding slots (O29; 101); gridded streams cycle over
+  their data years, a run can start in the first forcing year (O30 part; 102) (2026-11-01).
 
 - Soil ice of the level itself (O3, issue 19; decision 95); public API (O21; 96); authorship,
   citation, repository (O23, O37; 97); release logistics decided (O24; 98); stale files

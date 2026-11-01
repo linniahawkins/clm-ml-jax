@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from clm_ml.io import netcdf
 from clm_ml.processes.turbulence import PsihatTable, RSLTables
 
 
@@ -28,11 +29,10 @@ def read_rsl_tables(path=None) -> RSLTables:
     """The psihat tables in ``path`` (default: :func:`rsl_table_file`) as float64 numpy
     arrays. Fortran checks fixed sizes (nZ = 276, nL = 41); here each table's grids must
     match its psihat array."""
-    import netCDF4
 
     path = rsl_table_file() if path is None else Path(path)
     tables = {}
-    with netCDF4.Dataset(path, "r") as ds:
+    with netcdf.dataset(path, "r") as ds:
         for kind in ("M", "H"):
 
             def read(name, kind=kind):

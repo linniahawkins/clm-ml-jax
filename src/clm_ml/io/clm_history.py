@@ -17,6 +17,7 @@ from typing import Dict, Iterable, NamedTuple, Optional
 import netCDF4 as nc
 import numpy as np
 
+from clm_ml.io import netcdf
 from clm_ml.setup.soil import NLEVSOI
 
 
@@ -38,9 +39,10 @@ def read_clm_history_series(
     ``H2OSOI`` (the ``nlevsoi`` soil levels) and, with ``soil_adjust_path``, the
     adjustment factor ``FACTOR``."""
     records = {}
+    netcdf.LOCK.acquire()  # the adjustment file stays open while the history is read
     adjust = nc.Dataset(soil_adjust_path, "r") if soil_adjust_path else None
     try:
-        with nc.Dataset(path, "r") as ds:
+        with netcdf.dataset(path, "r") as ds:
             n_time = ds.dimensions["time"].size
             levels = ds.variables["H2OSOI"].shape[1]
             if levels != NLEVSOI:
@@ -63,11 +65,12 @@ def read_clm_history_series(
     finally:
         if adjust is not None:
             adjust.close()
+        netcdf.LOCK.release()
     return records
 
 
 def history_interval(path: str) -> int:
     """The interval of a CLM history file's time axis (s)."""
-    with nc.Dataset(path) as ds:
+    with netcdf.dataset(path) as ds:
         t = ds.variables["time"]
         return int(round(float(t[1] - t[0]) * 86400.0))

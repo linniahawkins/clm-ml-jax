@@ -16,8 +16,8 @@ import datetime
 from typing import List, NamedTuple, Sequence, Tuple
 
 import jax.numpy as jnp
-import netCDF4 as nc
 
+from clm_ml.io import netcdf
 from clm_ml.processes.constants import mmdry, mmh2o, sb
 from clm_ml.processes.water_vapor import sat_vap
 
@@ -197,7 +197,7 @@ def read_tower_met_series(ncfilename: str, records: Sequence[int]) -> List[Tower
     if not records:
         return []
     lo, hi = min(records), max(records) + 1
-    with nc.Dataset(ncfilename, "r") as ds:
+    with netcdf.dataset(ncfilename, "r") as ds:
         split = "FSDS_DIRECT" in ds.variables and "FSDS_DIFFUSE" in ds.variables
         for name in ("PRECTmms", "TBOT", "WIND") + (() if split else ("FSDS",)):
             if name not in ds.variables:
@@ -240,7 +240,7 @@ def tower_first_record(ncfilename: str, start: datetime.datetime, step_seconds: 
     The time variable must have units "days since <date>" and a constant
     interval of ``step_seconds``.
     """
-    with nc.Dataset(ncfilename, "r") as ds:
+    with netcdf.dataset(ncfilename, "r") as ds:
         time = ds.variables["time"]
         origin = datetime.datetime.fromisoformat(time.units.split("since")[1].strip())
         first_day = float(time[0])
@@ -271,7 +271,7 @@ class TowerFiles:
             endrun(msg=" TowerMet error: no tower forcing files")
         offsets, total, origin = [], 0, None
         for path in paths:
-            with nc.Dataset(path, "r") as ds:
+            with netcdf.dataset(path, "r") as ds:
                 time = ds.variables["time"]
                 base = datetime.datetime.fromisoformat(time.units.split("since")[1].strip())
                 first = base + datetime.timedelta(days=float(time[0]))

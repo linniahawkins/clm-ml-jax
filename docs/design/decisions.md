@@ -311,7 +311,7 @@ Reason: the maintainer's decision.
 Source: open_items O23, O37.
 
 **98. Release: `main` at the end of 8a, 1.0.0 at the end of 8b, GitHub only**
-2026-11-01 · Phase 8a · maintainer · decided (the `main` move at the end of 8a) · Departure from Fortran: n/a
+2026-11-01 · Phase 8a · maintainer · in force (`main` moved at the end of 8a, 2026-11-01; 1.0.0 at the end of 8b) · Departure from Fortran: n/a
 `main` is fast-forwarded to the phase branch when 8a closes (no pull request; it holds nothing
 of its own); version 1.0.0 is tagged at the end of 8b as a GitHub release; no PyPI for now
 (install with pip from git).
@@ -548,6 +548,21 @@ Reason: measured on the global run: GPU time is the canopy physics, host forcing
 per chunk, and forcing memory is not the limit; moving it to the GPU would add GPU work and
 change round-off.
 Source: plan §0 36; D3 (revised); C24.
+
+**102. Gridded streams: CDEPS's time axis (cycle over the data years)**
+2026-11-01 · Phase 8a · maintainer · in force · Departure from CTSM/CDEPS: no (copies CDEPS)
+The gridded meteorology and the monthly soil history each have `years: {taxmode, year_first,
+year_last, year_align}` in run.yaml (CLM: `DATM_YR_START/END/ALIGN`,
+`stream_year_first/last_soilm`, `model_year_align_soilm`; `taxmode = cycle`, as CLM runs
+these streams): model year Y reads data year `year_first + (Y - year_align + 2n) mod n`, its
+stamps moved to year Y, so a run in the first data year interpolates its first steps from the
+last record of `year_last` (CDEPS `shr_stream_findBounds`: the greatest valid date shifted
+back by the loop length), and runs past `year_last` start the loop again; `limit` stops
+outside the data. Fixes "a grid run cannot start in the first forcing year" (open item O30).
+Unchanged for runs inside the data years with `year_align: year_first` (bit for bit).
+Reason: copy CLM's rule (maintainer).
+Source: open_items O30; CDEPS `dshr_stream_mod.F90`; CTSM `stream_definition_datm.xml`,
+`SoilMoistureStreamMod.F90`.
 
 ## E. Science changes and departures from Fortran
 
@@ -935,6 +950,26 @@ Loops over layers or levels are array operations or `lax.scan`, not Python loops
 the program.
 Reason: program size and compile time (the GPU program went from 2.32 GB to 4 MB).
 Source: D5; plan §0 35.
+
+**100. One lock for netCDF reads and writes**
+2026-11-01 · Phase 8a · implementation (maintainer approved) · in force · Departure from Fortran: no
+Every netCDF file is opened through `clm_ml.io.netcdf.dataset` (and the output writers write
+under its lock), so the forcing reader thread and the output writers never use HDF5 at the
+same time (the HDF5 under netCDF4 here is built without thread safety). The device still runs
+the chunk while the next chunk is read. Results unchanged.
+Reason: a possible crash when output records complete while the next chunk is read.
+Source: open_items O31.
+
+**101. Padding slots on their copied patch's gridcell, and not checked**
+2026-11-01 · Phase 8a · implementation (maintainer approved) · in force · Departure from Fortran: no
+In multi-device layouts an empty slot copies a patch of the same pathway; it is now placed on
+that patch's own gridcell when the gridcell is in the block (it sees its own forcing), and
+padding slots are left out of the conservation and health checks (they have weight 0 and are
+outside every output and gradient). A padding slot can no longer stop a run. Results
+unchanged.
+Reason: padding combined one gridcell's weather with another patch's data and was checked as
+if real.
+Source: open_items O29; Phase 6 review R5.
 
 ## J. Performance
 

@@ -54,6 +54,7 @@ from typing import Literal, Optional, Union
 
 import numpy as np
 
+from clm_ml.io import netcdf
 from clm_ml.io.yaml_schema import ConfigError, option
 
 #: Days per month (CLM's interpMonthlyVeg, a no-leap table also in Gregorian runs)
@@ -168,7 +169,6 @@ def load_grid_domain(
     """The :class:`clm_ml.domain.Domain` of a grid run (module docstring). ``start`` and
     ``step_seconds`` give the first step (for the canopy heights, CLM's time weights);
     ``resolve`` turns the folder's relative paths into absolute paths."""
-    import netCDF4 as nc
 
     from clm_ml.domain import Domain, Gridcells, Patches, SoilColumns
 
@@ -177,9 +177,9 @@ def load_grid_domain(
         if not Path(path).exists():
             raise ConfigError(f"domain.yaml: grid.{key}: file not found: {path}")
 
-    with nc.Dataset(mask_file) as ds:
+    with netcdf.dataset(mask_file) as ds:
         landmask = np.asarray(ds.variables["landmask"][:]) == 1
-    with nc.Dataset(surf) as ds:
+    with netcdf.dataset(surf) as ds:
 
         def var(name):
             return np.ma.filled(ds.variables[name][:], np.nan).astype(float)

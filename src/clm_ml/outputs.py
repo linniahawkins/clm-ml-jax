@@ -20,6 +20,7 @@ from typing import Callable, Mapping, Sequence
 
 import numpy as np
 
+from clm_ml.io import netcdf
 from clm_ml.params import PFT_NAMES
 
 # Physical constants used only to derive output quantities (as in CLMml_driver.output).
@@ -479,17 +480,18 @@ class Outputs:
         for level in levels:
             out = Path(path).with_name(f"{Path(path).stem}_{level}.nc")
             ds = self.to_xarray(level)
-            if append and out.exists():
-                with xr.open_dataset(out) as old:
-                    ds = xr.concat(
-                        [old.load(), ds], dim="time", data_vars="minimal", coords="minimal",
-                        compat="override",
-                    )  # fmt: skip
-                tmp = out.with_name(out.name + ".tmp")
-                ds.to_netcdf(tmp)
-                os.replace(tmp, out)
-            else:
-                ds.to_netcdf(out)
+            with netcdf.LOCK:  # no forcing read while a file is written (O31)
+                if append and out.exists():
+                    with xr.open_dataset(out) as old:
+                        ds = xr.concat(
+                            [old.load(), ds], dim="time", data_vars="minimal", coords="minimal",
+                            compat="override",
+                        )  # fmt: skip
+                    tmp = out.with_name(out.name + ".tmp")
+                    ds.to_netcdf(tmp)
+                    os.replace(tmp, out)
+                else:
+                    ds.to_netcdf(out)
             written.append(out)
         return written
 
