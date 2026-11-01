@@ -1,4 +1,4 @@
-"""clm_ml.physics.flux_profile and clm_ml.physics.water_vapor (Phase 7.2, process 8).
+"""clm_ml.processes.flux_profile and clm_ml.processes.water_vapor (Phase 7.2, process 8).
 
 The physics is checked with Fortran's own checks of the implicit solution (``ErrorCheck01``:
 the leaf and soil fluxes equal those of the implicit solution; ``ErrorCheck02``: energy and
@@ -14,8 +14,8 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.physics import flux_profile as fp  # noqa: E402
-from clm_ml.physics import water_vapor as wv  # noqa: E402
+from clm_ml.processes import flux_profile as fp  # noqa: E402
+from clm_ml.processes import water_vapor as wv  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
 
 # 7 slots: layer 0 without plant area, 1-3 leafy, 4-5 above the canopy, 6 padding

@@ -140,7 +140,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **What:** Fortran `ErrorCheck01/02` stop the run if the implicit solution disagrees with
   the leaf and soil fluxes or does not conserve energy and water vapor (15 checks). No JAX
   run has ever checked them.
-- **Now:** `clm_ml.physics.flux_profile.implicit_errors` computes all 15 and a unit test
+- **Now:** `clm_ml.processes.flux_profile.implicit_errors` computes all 15 and a unit test
   runs them; they are not in `BALANCE_CHECKS`.
 - **Next:** decide whether every run records them (the state's `balance_error` grows; the
   reference is re-recorded).
@@ -248,7 +248,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **What:** Fortran resets `cair` to the reference CO₂ in canopy layers 1…ncan; the
   translation reset levels 0…ncan−1. No effect: `cair` is never computed (no CO₂ profile).
 - **Now:** kept through Phase 7 (0-based: layers 0…ncan−2, the top layer not reset;
-  `src/clm_ml/physics/canopy.py:843`); fix with any change that makes `cair` vary.
+  `src/clm_ml/processes/canopy.py:843`); fix with any change that makes `cair` vary.
 - **Source:** `numerics_and_regression.md` §4.5.
 
 ## 2. Other maintainer decisions pending

@@ -24,7 +24,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import (
+from clm_ml.processes.constants import (
     cpice,
     cpliq,
     csol_bedrock,
@@ -35,7 +35,7 @@ from clm_ml.physics.constants import (
     tkice,
     tkwat,
 )
-from clm_ml.physics.math import tridiag
+from clm_ml.processes.math import tridiag
 
 
 def _below_bedrock(n: int, nbedrock) -> Array:

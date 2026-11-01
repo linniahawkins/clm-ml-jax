@@ -21,9 +21,9 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import grav, mmh2o, rgas
-from clm_ml.physics.layers import pad_with_top
-from clm_ml.physics.water_vapor import lat_vap
+from clm_ml.processes.constants import grav, mmh2o, rgas
+from clm_ml.processes.layers import pad_with_top
+from clm_ml.processes.water_vapor import lat_vap
 from clm_ml.state import PatchLayers
 
 # ---------------------------------------------------------------------------
@@ -623,7 +623,7 @@ def initial_substep(n_layers: int, n_stage_slots: int, n_checks: int) -> Substep
 def stage_slots(integrator: str) -> int:
     """Slots of the Runge-Kutta increments in the carry: the method's stages + 1 (the
     legacy ``nrk + 1``)."""
-    from clm_ml.physics.integrators import TABLEAUS
+    from clm_ml.processes.integrators import TABLEAUS
 
     return len(TABLEAUS[integrator].b) + 1
 
@@ -635,7 +635,7 @@ def _record(errors: Array, check: int, err) -> Array:
 
 
 def _keep(mask, new, old):
-    from clm_ml.physics.layers import keep
+    from clm_ml.processes.layers import keep
 
     return keep(mask, new, old)
 
@@ -661,7 +661,7 @@ def _radiation(c: Substep, x: SubstepInputs, params, calday, opt: SubstepOptions
     """Forcing, solar radiation and the nitrogen profile of the sub-step (once per
     sub-step, before the Runge-Kutta stages)."""
     from clm_ml.checks import NITROGEN, SOLAR, SUNLIT_FRACTION
-    from clm_ml.physics import atm_forcing, nitrogen_profile, solar_radiation
+    from clm_ml.processes import atm_forcing, nitrogen_profile, solar_radiation
 
     lay = x.layers
     use = lay.in_use
@@ -731,7 +731,7 @@ def _stage(c: Substep, x: SubstepInputs, params, tables, opt: SubstepOptions, c3
     Fortran reference: MLCanopyFluxesMod.F90::MLCanopyFluxes (lines 295-328).
     """
     from clm_ml.checks import LEAF_ENERGY, LONGWAVE, SOIL_ENERGY
-    from clm_ml.physics import (
+    from clm_ml.processes import (
         canopy_water,
         flux_profile,
         integrators,
@@ -931,7 +931,7 @@ def substep_fluxes(c: Substep, layers: PatchLayers) -> SubstepFluxes:
 def n_stages(integrator: str) -> int:
     """Passes of the canopy processes per sub-step: the method's stages and a last pass
     for the fluxes (Euler: one pass). Fortran: ``nrk_steps + 1``."""
-    from clm_ml.physics.integrators import TABLEAUS
+    from clm_ml.processes.integrators import TABLEAUS
 
     return 1 if integrator == "euler" else len(TABLEAUS[integrator].b) + 1
 

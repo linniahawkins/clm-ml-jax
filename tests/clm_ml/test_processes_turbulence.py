@@ -1,4 +1,4 @@
-"""clm_ml.physics.turbulence (Phase 7.2, process 6).
+"""clm_ml.processes.turbulence (Phase 7.2, process 6).
 
 The physics is checked against what its definitions imply (the wind profile recovers the
 forcing wind and is continuous at the canopy top, the solvers find their roots) and the Obukhov
@@ -14,8 +14,8 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
 from clm_ml.io.rsl_tables import default_rsl_tables  # noqa: E402
-from clm_ml.physics import turbulence as turb  # noqa: E402
-from clm_ml.physics.constants import vkc  # noqa: E402
+from clm_ml.processes import turbulence as turb  # noqa: E402
+from clm_ml.processes.constants import vkc  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
 
 # A 10 m canopy under a 23 m reference height: 4 layers within, 3 above, 1 padding slot

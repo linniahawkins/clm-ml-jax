@@ -233,7 +233,7 @@ class Model:
             jax_tree_map(jnp.asarray, sim.constants if constants is None else constants),
             tables=sim.tables if tables is None else tables,
         )  # fmt: skip
-        from clm_ml.physics.math import is_concrete
+        from clm_ml.processes.math import is_concrete
 
         if is_concrete(errors):  # not under jax.grad: Fortran's conservation checks
             driver.check_batch_balance(
@@ -271,7 +271,7 @@ class Model:
         compiled program (same number of patches, layer slots and soil levels). ``alive``:
         the patches still in the run (default all; decision 25): the others are left out of
         gridcell values and of parameter gradients. ``tables``: the psihat lookup tables
-        (``clm_ml.physics.turbulence.RSLTables``; default: the package's). ``constants``: the
+        (``clm_ml.processes.turbulence.RSLTables``; default: the package's). ``constants``: the
         patches' :class:`clm_ml.step.PatchConstants` (default :meth:`constants`).
 
         Returns ``(state, {stream: {variable: (record, patch, ...), "gridcell:<variable>":

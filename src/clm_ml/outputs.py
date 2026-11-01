@@ -122,8 +122,8 @@ class _Raw:
 
     def latvap_tref(self) -> np.ndarray:
         """Molar latent heat of vaporization at the reference air temperature (J/mol), as
-        clm_ml.physics.water_vapor.lat_vap."""
-        from clm_ml.physics.constants import hsub, hvap, mmh2o, tfrz
+        clm_ml.processes.water_vapor.lat_vap."""
+        from clm_ml.processes.constants import hsub, hvap, mmh2o, tfrz
 
         t = self["tref_forcing"]
         return self.xp.where(t > tfrz, hvap, hsub) * mmh2o

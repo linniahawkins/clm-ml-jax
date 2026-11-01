@@ -16,12 +16,12 @@ from clm_ml.setup import tables
 SPVAL = 1.0e36  # clm_varcon.spval: the fill value of slots not in use
 
 # ---------------------------------------------------------------------------------------
-# Beta distribution (clm_ml.physics.math), vectorized
+# Beta distribution (clm_ml.processes.math), vectorized
 # ---------------------------------------------------------------------------------------
 
 
 def _log_gamma(x):
-    """``clm_ml.physics.math.log_gamma_function`` on arrays (same operations)."""
+    """``clm_ml.processes.math.log_gamma_function`` on arrays (same operations)."""
     import jax.numpy as jnp
 
     coef = (
@@ -44,7 +44,7 @@ def _log_gamma(x):
 
 
 def _beta_cf(a, b, x):
-    """``clm_ml.physics.math._beta_function_incomplete_cf`` on arrays: each element stops at its
+    """``clm_ml.processes.math._beta_function_incomplete_cf`` on arrays: each element stops at its
     own iteration (modified Lentz, maxit 100, eps 3e-7, fpmin 1e-30)."""
     a, b, x = (np.asarray(v, dtype=float) for v in np.broadcast_arrays(a, b, x))
     fpmin, eps = 1.0e-30, 3.0e-7
@@ -80,7 +80,7 @@ def _beta_cf(a, b, x):
 
 
 def beta_cdf(a, b, x):
-    """``clm_ml.physics.math.beta_distribution_cdf`` on arrays (same operations and branches)."""
+    """``clm_ml.processes.math.beta_distribution_cdf`` on arrays (same operations and branches)."""
     import jax.numpy as jnp
 
     a, b, x = (np.asarray(v, dtype=float) for v in np.broadcast_arrays(a, b, x))
@@ -249,7 +249,7 @@ def initial_canopy_state(n_layers, max_layers: int, u, v, t, q, pbot, pco2) -> d
     Fortran reference: MLinitVerticalMod.F90::initVerticalProfiles."""
     import jax.numpy as jnp
 
-    from clm_ml.physics.constants import mmdry, mmh2o
+    from clm_ml.processes.constants import mmdry, mmh2o
 
     n_p = len(n_layers)
     out = {

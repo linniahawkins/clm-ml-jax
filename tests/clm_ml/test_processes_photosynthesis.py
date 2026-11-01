@@ -1,4 +1,4 @@
-"""clm_ml.physics.leaf_boundary_layer and clm_ml.physics.photosynthesis (Phase 7.2, process 7).
+"""clm_ml.processes.leaf_boundary_layer and clm_ml.processes.photosynthesis (Phase 7.2, process 7).
 
 The physics is checked against what its definitions imply (Fortran's error checks of the
 stomatal models and the diffusion equation, the WUE optimum is the root of the marginal
@@ -17,9 +17,9 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.physics import leaf_boundary_layer as lbl  # noqa: E402
-from clm_ml.physics import photosynthesis as ps  # noqa: E402
-from clm_ml.physics.constants import dh2o_to_dco2, gbh_min  # noqa: E402
+from clm_ml.processes import leaf_boundary_layer as lbl  # noqa: E402
+from clm_ml.processes import photosynthesis as ps  # noqa: E402
+from clm_ml.processes.constants import dh2o_to_dco2, gbh_min  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
 
 # 6 slots: layer 0 without plant area, 1-3 leafy, 4 above the canopy, 5 padding

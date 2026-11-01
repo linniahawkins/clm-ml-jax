@@ -11,7 +11,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import cpbio, cpliq, fcarbon, fwater
+from clm_ml.processes.constants import cpbio, cpliq, fcarbon, fwater
 
 
 def leaf_heat_capacity(dpai: Array, sla_top) -> Array:

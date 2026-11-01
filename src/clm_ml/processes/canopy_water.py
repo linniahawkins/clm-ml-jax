@@ -18,7 +18,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import (
+from clm_ml.processes.constants import (
     dewmx,
     fwet_exponent,
     interception_fraction,

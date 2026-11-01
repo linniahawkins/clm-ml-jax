@@ -26,8 +26,8 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import J_to_umol, chil_max, chil_min, kb_max, rpi
-from clm_ml.physics.layers import keep, leafy_or_top_leafy, pad_with_top
+from clm_ml.processes.constants import J_to_umol, chil_max, chil_min, kb_max, rpi
+from clm_ml.processes.layers import keep, leafy_or_top_leafy, pad_with_top
 from clm_ml.state import PatchLayers
 
 # ---------------------------------------------------------------------------

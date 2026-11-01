@@ -25,7 +25,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
-from clm_ml.physics.layers import keep
+from clm_ml.processes.layers import keep
 from clm_ml.state import PatchLayers
 
 #: Fill value of the unused (upper-triangle) entries of ``a``, as Fortran's ``spval``

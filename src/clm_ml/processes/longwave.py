@@ -20,8 +20,8 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import emg, sb
-from clm_ml.physics.math import tridiag
+from clm_ml.processes.constants import emg, sb
+from clm_ml.processes.math import tridiag
 from clm_ml.state import PatchLayers
 
 

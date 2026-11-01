@@ -128,7 +128,7 @@ def mean_cosz_function(
     day in UTC, as the model's own solar zenith angle). ``calendar``: the model calendar
     (``clm_ml.calendar``)."""
     from clm_ml.calendar import calday_of
-    from clm_ml.physics.orbit import shr_orb_cosz, shr_orb_decl, shr_orb_params
+    from clm_ml.processes.orbit import shr_orb_cosz, shr_orb_decl, shr_orb_params
 
     def calday(t: dt.datetime) -> float:
         tod = t.hour * 3600 + t.minute * 60 + t.second

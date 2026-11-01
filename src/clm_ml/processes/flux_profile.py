@@ -3,7 +3,7 @@ vapor, leaf temperature and ground temperature, and the leaf and soil fluxes tha
 
 One patch. Layers are 0-based slots on axis 0 (``clm_ml.state.PatchLayers``); leaves 0
 sunlit, 1 shaded (axis 1). Every slot is computed: padding slots take the top layer's inputs
-(:func:`clm_ml.physics.layers.pad_with_top`) and become identity rows of the tridiagonal
+(:func:`clm_ml.processes.layers.pad_with_top`) and become identity rows of the tridiagonal
 system after the top layer, whose upward coupling is zero, so the solution is the one for
 the layers in use. The solution is chosen by name (``FLUX_PROFILE``, model.yaml
 ``physics.flux_profile_solution``): ``implicit`` (Fortran ``flux_profile_type = 1``);
@@ -24,9 +24,9 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.layers import pad_with_top
-from clm_ml.physics.math import tridiag_2eq
-from clm_ml.physics.water_vapor import lat_vap, sat_vap
+from clm_ml.processes.layers import pad_with_top
+from clm_ml.processes.math import tridiag_2eq
+from clm_ml.processes.water_vapor import lat_vap, sat_vap
 from clm_ml.state import PatchLayers
 
 

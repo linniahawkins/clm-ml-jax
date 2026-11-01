@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from clm_ml.config import INTEGRATOR_CODES
-from clm_ml.physics import canopy as physics
+from clm_ml.processes import canopy
 
 
 class MLOptions(NamedTuple):
@@ -95,7 +95,7 @@ _STOMATAL = {0: "medlyn", 1: "ball_berry", 2: "wue"}
 _WUE_SOLVER = {1: "brent", 2: "bisection"}
 
 
-def substep_options(opts) -> physics.SubstepOptions:
+def substep_options(opts) -> canopy.SubstepOptions:
     """The sub-step's choices from the legacy options (``MLOptions``), with the legacy
     routines' checks: Norman solar radiation and the well-mixed flux-profile solution are
     registered but not supported (Phase 7 decision D8: ``clm_ml.run`` refuses them), the other codes must be
@@ -117,7 +117,7 @@ def substep_options(opts) -> physics.SubstepOptions:
     for name, code, valid in checks:
         if code not in valid:
             raise ValueError(f"{name} {code} not one of {tuple(valid)}")
-    return physics.SubstepOptions(
+    return canopy.SubstepOptions(
         interpolation=_MET_TYPE[opts.met_type],
         acclimation=bool(opts.acclim_type == 1),
         kn_val=float(opts.kn_val),

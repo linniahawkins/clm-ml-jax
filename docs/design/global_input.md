@@ -337,7 +337,7 @@ Fortran); use the leaf water potential outputs instead.
     and water vapor in a layer, the canopy or at the ground (tolerance 1e-3 W m-2, 1e-6 K or
     Pa). The legacy JAX translation ran them only with a debug flag that was off, so no JAX
     run has checked them; the leaf and soil energy balances (`LeafFluxes`, `SoilFluxes`) are
-    recorded. Since Phase 7 (C17) `clm_ml.physics.flux_profile.implicit_errors` computes all
+    recorded. Since Phase 7 (C17) `clm_ml.processes.flux_profile.implicit_errors` computes all
     15 as array code and the unit test runs them. To check them in every run they would be
     added to `BALANCE_CHECKS` (the state's `balance_error` grows, the reference is
     re-recorded): a decision for the maintainer.

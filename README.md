@@ -132,14 +132,14 @@ python timing/time_model.py       # the compiled chunk and its gradient; timing/
 
 ### Adding a New Physics Module
 
-1. Write the process as pure functions on 0-based arrays in `src/clm_ml/physics/` (one file
+1. Write the process as pure functions on 0-based arrays in `src/clm_ml/processes/` (one file
    per process, e.g. `photosynthesis.py`): everything it reads is an argument, everything it
    changes is returned; compute on every layer slot and keep results with the layer masks
-   (`clm_ml.physics.layers`).
+   (`clm_ml.processes.layers`).
 2. Name the Fortran source in the docstring (`Fortran reference: MLFooMod.F90::Bar`).
 3. Static choices (schemes) come from `model.yaml` through `clm_ml.config`; numeric
    parameters are per PFT in `params.yaml` (`clm_ml.params`) and stay differentiable.
-4. Call it from the time step (`src/clm_ml/step.py`, `src/clm_ml/physics/canopy.py`) and
+4. Call it from the time step (`src/clm_ml/step.py`, `src/clm_ml/processes/canopy.py`) and
    add unit tests in `tests/clm_ml/`.
 5. Register output variables in `src/clm_ml/outputs.py` (`VARIABLES`).
 

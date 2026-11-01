@@ -37,7 +37,7 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 | 16 | Output | **Configurable and independent of the forcing and model step.** Several output streams, each with its own variables, frequency, statistic (mean, instantaneous, min, max), level (patch, gridcell) and file split. Statistics are accumulated during the run, so per-step values are never all held in memory. |
 | 17 | Chunk length | *(Superseded by decision 33; still available as `execution.chunk: 1 month`.)* **Calendar months**, aligned to month starts (a chunk is the steps whose start time falls in one month); a run shorter than a month is one chunk. Chunks therefore have up to four full-month lengths plus partial first/last months; each distinct length compiles once (§6.9). As in jax-gcm, output is accumulated inside the compiled chunk, and the chunk length only sets forcing memory, restart and file frequency, and health checks. |
 
-| 18 | Phase 5 approach | **Masks in place**: the existing modules keep their files, 1-based arrays and golden tests while becoming mask-aware. Moving processes to `clm_ml/physics/`, 0-based indexing and Fortran-filter removal move to Phase 7 (decided after Phase 4b). |
+| 18 | Phase 5 approach | **Masks in place**: the existing modules keep their files, 1-based arrays and golden tests while becoming mask-aware. Moving processes to `clm_ml/processes/`, 0-based indexing and Fortran-filter removal move to Phase 7 (decided after Phase 4b). |
 | 19 | Different layer counts | **Masks**, so one compiled program serves every patch (simpler batching and sharding, gradients across mixed patches). Not grouping patches by layer structure. Cost: compute on padded layers (e.g. a 20-layer grass in 50 slots). |
 | 20 | Configuration in the code | **Passed explicitly** (Phase 5a), not module globals: options static, tunable numbers in the differentiable parameters. Allows several models per process and in-process tests. |
 | 21 | Process interface (§6.6) | **Deferred to Phase 7** (not needed for batching). |
@@ -461,7 +461,7 @@ src/clm_ml/
 
 The existing packages (`clm_src_*`, `multilayer_canopy`, `offline_driver`, …) stay in place during
 the transition, and the new API calls into them through adapters. Each process moves into
-`clm_ml/physics/` as it is refactored (Phase 7, decision 18), and old modules are deleted only
+`clm_ml/processes/` as it is refactored (Phase 7, decision 18), and old modules are deleted only
 when nothing imports them.
 
 ### 6.2 One time step (for one patch)
@@ -1090,7 +1090,7 @@ layer loop into masked array operations. It also removes the module-global optio
 the reason each model run needs a fresh Python process.
 
 **Revised scope** (decisions 18–21, after Phase 4b): the original plan moved every process into
-`clm_ml/physics/`, rewrote it with 0-based indexing and a new process interface, one PR per
+`clm_ml/processes/`, rewrote it with 0-based indexing and a new process interface, one PR per
 process. Only the masks are needed for batching. Phase 5 therefore converts the code **in
 place**: same files, same 1-based arrays, same Fortran golden tests. Moving files, 0-based
 indexing and the §6.6 process interface move to Phase 7 (decision 18, 21). Reasons: jax-gcm's
@@ -1793,7 +1793,7 @@ for Phase 7.
 ### Phase 7: Restructure and cleanup
 
 **7a. Restructure by process** (moved here from Phase 5; decisions 18, 21):
-- Move each process from `multilayer_canopy/ML*Mod.py` into `clm_ml/physics/`, organized by
+- Move each process from `multilayer_canopy/ML*Mod.py` into `clm_ml/processes/`, organized by
   physical process and scheme name (jax-gcm), one PR per process, keeping the `Fortran reference:`
   docstrings.
 - The process interface of §6.6: a per-step state/diagnostics structure in place of the legacy
@@ -1824,7 +1824,7 @@ for Phase 7.
 
 **Phase 7 status: done (2026-11-01).** Work packages 7.0-7.6 as `phase7_scope.md` (decisions
 D1-D12, plan decision 36), log `phase7_progress.md`, Claude's decisions C0-C34 in
-`phase7_decisions.md`: the step is `clm_ml/physics/` processes on a 0-based `State`; the setup
+`phase7_decisions.md`: the step is `clm_ml/processes/` processes on a 0-based `State`; the setup
 is pure functions (`clm_ml/setup/`); runs are in-process (`clm_ml/driver.py`); the chunk's
 forcing is 0-based arrays prepared on the host (decision 36); restarts are netCDF; `src/`
 holds only `clm_ml/` (example and test data in `data/`, not `examples/data/`); the

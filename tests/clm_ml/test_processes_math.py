@@ -1,4 +1,4 @@
-"""clm_ml.physics.math: the tridiagonal solver as a scan (Phase 7.2, process 1).
+"""clm_ml.processes.math: the tridiagonal solver as a scan (Phase 7.2, process 1).
 
 The Fortran golden tests check every routine against Fortran (unguarded pivots); these check
 the guarded variant used by the solar radiation and soil temperature solves.
@@ -9,7 +9,7 @@ import numpy as np
 
 jax.config.update("jax_enable_x64", True)
 
-from clm_ml.physics.math import tridiag  # noqa: E402
+from clm_ml.processes.math import tridiag  # noqa: E402
 
 
 def _system(n, seed):

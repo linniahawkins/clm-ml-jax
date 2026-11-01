@@ -1,4 +1,4 @@
-"""clm_ml.physics.canopy (Phase 7.2, process 10) and the sub-step options
+"""clm_ml.processes.canopy (Phase 7.2, process 10) and the sub-step options
 (``clm_ml.options.substep_options``).
 
 The physics is checked against hand-computed canopy totals, the conservation of plant area and
@@ -14,7 +14,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp  # noqa: E402
 
 from clm_ml.options import DEFAULT_OPTIONS, substep_options  # noqa: E402
-from clm_ml.physics import canopy  # noqa: E402
+from clm_ml.processes import canopy  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
 
 N_SLOTS = 6  # layer slots; legacy arrays have N_SLOTS + 1 entries (index 0 unused/ground)

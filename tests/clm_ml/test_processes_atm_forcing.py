@@ -1,4 +1,4 @@
-"""clm_ml.physics.atm_forcing (Phase 7.2, process 3), checked against the interpolation it
+"""clm_ml.processes.atm_forcing (Phase 7.2, process 3), checked against the interpolation it
 describes."""
 
 import jax
@@ -9,8 +9,8 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.physics import atm_forcing  # noqa: E402
-from clm_ml.physics.constants import wind_forc_min  # noqa: E402
+from clm_ml.processes import atm_forcing  # noqa: E402
+from clm_ml.processes.constants import wind_forc_min  # noqa: E402
 
 
 def _record(x):

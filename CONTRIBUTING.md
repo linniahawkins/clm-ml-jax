@@ -37,18 +37,18 @@ tests/
 
 ## Adding a Physics Module
 
-1. **Write it by process** in `src/clm_ml/physics/`: pure functions on 0-based arrays
+1. **Write it by process** in `src/clm_ml/processes/`: pure functions on 0-based arrays
    (layers from the ground up, leaves sunlit/shaded, bands visible/near-infrared); everything
    read is an argument and everything changed is returned.
 2. **Name the Fortran source** in the docstring (`Fortran reference: MLFooMod.F90::Bar`).
 3. **Masks, not loops:** compute on every layer slot and keep results with the masks of
-   `clm_ml.physics.layers`; no Python loops over layers inside the step.
+   `clm_ml.processes.layers`; no Python loops over layers inside the step.
 4. **64-bit precision**: `clm_ml` enables float64; constants are Python floats.
 
 ## Writing Tests
 
 Test files mirror the source tree:
-`src/clm_ml/physics/foo.py` → `tests/clm_ml/test_physics_foo.py`
+`src/clm_ml/processes/foo.py` → `tests/clm_ml/test_processes_foo.py`
 
 For Fortran validation tests, capture golden I/O from the Fortran build and add a JSON file to `tests/fortran_validation/golden_IO/`, then add a parametrized case in `tests/fortran_validation/test_golden_jax.py`.
 

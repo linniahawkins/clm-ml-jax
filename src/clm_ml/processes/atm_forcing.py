@@ -23,7 +23,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import cpd, cpw, lapse_rate, mmdry, mmh2o, rgas, wind_forc_min
+from clm_ml.processes.constants import cpd, cpw, lapse_rate, mmdry, mmh2o, rgas, wind_forc_min
 
 
 class ForcingRecord(NamedTuple):

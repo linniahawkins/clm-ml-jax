@@ -304,7 +304,7 @@ class TowerReader:
 def step_options(run):
     """The time step's static choices (``clm_ml.step.StepOptions``) of a run."""
     from clm_ml.options import MLOptions, substep_options
-    from clm_ml.physics.orbit import shr_orb_params
+    from clm_ml.processes.orbit import shr_orb_params
     from clm_ml.setup.soil import NLEVGRND, NLEVSOI
     from clm_ml.step import StepOptions
 

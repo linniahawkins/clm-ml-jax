@@ -18,8 +18,8 @@ from typing import List, NamedTuple, Sequence, Tuple
 import jax.numpy as jnp
 import netCDF4 as nc
 
-from clm_ml.physics.constants import mmdry, mmh2o, sb
-from clm_ml.physics.water_vapor import sat_vap
+from clm_ml.processes.constants import mmdry, mmh2o, sb
+from clm_ml.processes.water_vapor import sat_vap
 
 
 class TowerMetError(ValueError):

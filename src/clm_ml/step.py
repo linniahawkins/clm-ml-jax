@@ -2,7 +2,7 @@
 
 ``step(state, inputs, constants, params, options) -> StepState``: the soil routines of
 CLM-ml v2's ``clm_driver`` around the multilayer canopy's ``MLCanopyFluxes``, built from the
-physics in ``clm_ml.physics`` (soil, plant area and hydraulics, the canopy sub-steps, the
+physics in ``clm_ml.processes`` (soil, plant area and hydraulics, the canopy sub-steps, the
 averages, totals and the sunlit/shaded merge). Pure: everything the step reads is an argument
 and everything it changes is returned.
 
@@ -33,11 +33,11 @@ from clm_ml.checks import (  # the conservation checks' indices
     PLANT_AREA,
     SOIL_TEMPERATURE,
 )
-from clm_ml.physics import canopy, soil
-from clm_ml.physics.atm_forcing import ForcingRecord, clm_forcing_to_ml
-from clm_ml.physics.layers import keep
-from clm_ml.physics.leaf_heat_capacity import leaf_heat_capacity
-from clm_ml.physics.plant_hydraulics import plant_resistance, soil_resistance
+from clm_ml.processes import canopy, soil
+from clm_ml.processes.atm_forcing import ForcingRecord, clm_forcing_to_ml
+from clm_ml.processes.layers import keep
+from clm_ml.processes.leaf_heat_capacity import leaf_heat_capacity
+from clm_ml.processes.plant_hydraulics import plant_resistance, soil_resistance
 from clm_ml.state import CanopyState, Diagnostics, PatchLayers, SoilState, State, StepState
 
 
@@ -189,8 +189,8 @@ def solar_zenith(calday_beg, latdeg, londeg, options: StepOptions) -> Array:
 
     Fortran reference: MLCanopyFluxesMod.F90::GetCLMVar (lines 92-110).
     """
-    from clm_ml.physics.constants import rpi as pi
-    from clm_ml.physics.orbit import shr_orb_cosz, shr_orb_decl
+    from clm_ml.processes.constants import rpi as pi
+    from clm_ml.processes.orbit import shr_orb_cosz, shr_orb_decl
 
     declin, _ = shr_orb_decl(
         calday_beg, options.eccen, options.mvelpp, options.lambm0, options.obliqr
@@ -232,7 +232,7 @@ def step(
     sunlit/shaded merge; the soil temperature. The conservation checks of the step are
     recorded in ``diagnostics.balance_error`` (checked on the host). ``params``: the patch's
     PFT parameters (``CanopyParams``); ``tables``: the psihat lookup tables
-    (``clm_ml.physics.turbulence.RSLTables``, one copy for all patches and steps of a chunk);
+    (``clm_ml.processes.turbulence.RSLTables``, one copy for all patches and steps of a chunk);
     ``c3`` (static): the photosynthetic pathway.
 
     Fortran reference: clm_driver.F90::clm_drv; MLCanopyFluxesMod.F90::MLCanopyFluxes,

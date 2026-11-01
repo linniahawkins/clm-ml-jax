@@ -1,4 +1,4 @@
-"""Physical constants and fixed model coefficients of the processes in ``clm_ml.physics``
+"""Physical constants and fixed model coefficients of the processes in ``clm_ml.processes``
 (Python floats, so importing them creates no arrays and needs no JAX setting).
 
 Values from CLM-ml v2 (Phase 7.4; until then re-exported from the legacy

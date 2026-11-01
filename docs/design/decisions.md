@@ -800,7 +800,7 @@ Source: D1; plan §0 35.
 **80. Physics organized by process, variants by name**
 2026-10-28 (decided), 2026-10-30/31 (done) · Phase 5 plan, 7.2 · maintainer · completed · Departure from Fortran: no
 Phase 5 made the existing modules mask-aware in place; Phase 7 moved the physics to
-`clm_ml/physics/` (one module per process, pure functions on 0-based arrays, `Fortran
+`clm_ml/processes/` (one module per process, pure functions on 0-based arrays, `Fortran
 reference:` in each docstring), with variants in name registries chosen by model.yaml and
 declared reads/writes (a lighter form of jax-gcm's composable terms); the soil routines moved
 too (§8 5).

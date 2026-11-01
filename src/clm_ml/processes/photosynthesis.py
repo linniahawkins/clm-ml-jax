@@ -32,7 +32,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import (
+from clm_ml.processes.constants import (
     colim_c3a,
     colim_c4a,
     colim_c4b,
@@ -64,9 +64,9 @@ from clm_ml.physics.constants import (
     vcmaxse_noacclim,
     vpd_min_MED,
 )
-from clm_ml.physics.layers import pad_with_top
-from clm_ml.physics.math import quadratic
-from clm_ml.physics.water_vapor import sat_vap
+from clm_ml.processes.layers import pad_with_top
+from clm_ml.processes.math import quadratic
+from clm_ml.processes.water_vapor import sat_vap
 from clm_ml.state import PatchLayers
 
 #: Stomatal conductance models by name (model.yaml ``physics.stomatal_conductance``; Fortran

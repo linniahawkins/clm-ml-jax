@@ -474,7 +474,7 @@ class GridInputs:
                  n_steps, resolve=lambda p: Path(p), calendar="GREGORIAN"):  # fmt: skip
         import netCDF4 as nc
 
-        from clm_ml.physics.orbit import shr_orb_params
+        from clm_ml.processes.orbit import shr_orb_params
 
         self.domain, self.start, self.calendar = domain, start, calendar
         self.step_seconds, self.n_steps = int(step_seconds), int(n_steps)
@@ -525,7 +525,7 @@ class GridInputs:
 
     def _cosz(self, t: dt.datetime, calendar: str) -> np.ndarray:
         """CDEPS ``shr_tInterp_getCosz`` at model time ``t`` for every gridcell."""
-        from clm_ml.physics.orbit import shr_orb_decl
+        from clm_ml.processes.orbit import shr_orb_decl
 
         day = calday_in(t, calendar)
         declin, _ = shr_orb_decl(day, self.eccen, self.mvelpp, self.lambm0, self.obliqr)

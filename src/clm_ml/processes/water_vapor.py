@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
-from clm_ml.physics.constants import hsub, hvap, mmh2o, tfrz
+from clm_ml.processes.constants import hsub, hvap, mmh2o, tfrz
 
 # Water (0 to 100 C): es and d(es)/dT, mb
 _A = (6.11213476, 0.444007856, 0.143064234e-1, 0.264461437e-3, 0.305903558e-5,

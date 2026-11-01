@@ -18,7 +18,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import denh2o, grav, mmh2o, rpi
+from clm_ml.processes.constants import denh2o, grav, mmh2o, rpi
 
 #: Pressure of a 1 m water column, MPa/m
 HEAD = denh2o * grav * 1.0e-6

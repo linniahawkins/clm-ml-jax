@@ -1,4 +1,4 @@
-"""clm_ml.physics.canopy_water and plant_hydraulics (Phase 7.2, process 5), checked against
+"""clm_ml.processes.canopy_water and plant_hydraulics (Phase 7.2, process 5), checked against
 what they must conserve."""
 
 from collections import namedtuple
@@ -10,8 +10,8 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.physics import canopy_water, plant_hydraulics  # noqa: E402
-from clm_ml.physics.constants import dewmx, maximum_leaf_wetted_fraction, mmh2o  # noqa: E402
+from clm_ml.processes import canopy_water, plant_hydraulics  # noqa: E402
+from clm_ml.processes.constants import dewmx, maximum_leaf_wetted_fraction, mmh2o  # noqa: E402
 
 N_SLOTS = 6  # layer slots; legacy arrays have N_SLOTS + 1 entries (index 0 unused)
 N_SOI = 4  # soil levels; legacy arrays have N_SOI + 1 entries

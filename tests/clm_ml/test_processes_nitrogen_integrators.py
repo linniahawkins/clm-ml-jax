@@ -1,4 +1,4 @@
-"""clm_ml.physics.nitrogen_profile and clm_ml.physics.integrators (Phase 7.2, process 9),
+"""clm_ml.processes.nitrogen_profile and clm_ml.processes.integrators (Phase 7.2, process 9),
 checked against the analytical canopy integral and the definition of each Runge-Kutta method.
 """
 
@@ -10,7 +10,7 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.physics import integrators, nitrogen_profile  # noqa: E402
+from clm_ml.processes import integrators, nitrogen_profile  # noqa: E402
 from clm_ml.state import PatchLayers  # noqa: E402
 
 N_SLOTS = 6  # layer slots; legacy arrays have N_SLOTS + 1 entries (index 0 unused)

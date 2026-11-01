@@ -1,4 +1,4 @@
-"""clm_ml.physics.soil (Phase 7.2, process 2)."""
+"""clm_ml.processes.soil (Phase 7.2, process 2)."""
 
 import jax
 import numpy as np
@@ -7,7 +7,7 @@ jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp  # noqa: E402
 
-from clm_ml.physics import soil  # noqa: E402
+from clm_ml.processes import soil  # noqa: E402
 
 
 def test_soil_temperature_keeps_a_uniform_profile_without_heat_flux():

@@ -13,7 +13,7 @@ import numpy as np
 jax.config.update("jax_enable_x64", True)
 
 from clm_ml import step as S  # noqa: E402
-from clm_ml.physics.canopy import SubstepOptions  # noqa: E402
+from clm_ml.processes.canopy import SubstepOptions  # noqa: E402
 
 
 def _options(interpolation="three_point", step_seconds=1800, dtime=300.0):

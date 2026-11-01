@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 
 from clm_ml.forcing import Forcing
-from clm_ml.physics.atm_forcing import ForcingRecord
+from clm_ml.processes.atm_forcing import ForcingRecord
 from clm_ml.step import LandInputs, MetInputs
 
 #: ``TowerMet`` field -> ``clm_ml.forcing.TowerForcing`` field

@@ -60,18 +60,18 @@ def _import_jax_modules():
 
     mods = {}
     for name in [
-        "clm_ml.physics.water_vapor",
-        "clm_ml.physics.math",
-        "clm_ml.physics.photosynthesis",
-        "clm_ml.physics.turbulence",
-        "clm_ml.physics.leaf_heat_capacity",
-        "clm_ml.physics.canopy_water",
-        "clm_ml.physics.leaf_boundary_layer",
-        "clm_ml.physics.integrators",
-        "clm_ml.physics.nitrogen_profile",
+        "clm_ml.processes.water_vapor",
+        "clm_ml.processes.math",
+        "clm_ml.processes.photosynthesis",
+        "clm_ml.processes.turbulence",
+        "clm_ml.processes.leaf_heat_capacity",
+        "clm_ml.processes.canopy_water",
+        "clm_ml.processes.leaf_boundary_layer",
+        "clm_ml.processes.integrators",
+        "clm_ml.processes.nitrogen_profile",
         "clm_ml.state",
-        "clm_ml.physics.constants",
-        "clm_ml.physics.orbit",
+        "clm_ml.processes.constants",
+        "clm_ml.processes.orbit",
     ]:
         mods[name] = importlib.import_module(name)
     return mods
@@ -93,47 +93,47 @@ def _get(mod_dotted: str):
 
 
 def _adapt_satvap(inp: dict) -> dict:
-    SatVap = _get("clm_ml.physics.water_vapor").sat_vap
+    SatVap = _get("clm_ml.processes.water_vapor").sat_vap
     es, desdt = SatVap(inp["t"])
     return {"es": float(es), "desdt": float(desdt)}
 
 
 def _adapt_latvap(inp: dict) -> dict:
-    LatVap = _get("clm_ml.physics.water_vapor").lat_vap
+    LatVap = _get("clm_ml.processes.water_vapor").lat_vap
     lam = LatVap(inp["t"])
     return {"lambda": float(lam)}
 
 
 def _adapt_quadratic(inp: dict) -> dict:
-    quadratic = _get("clm_ml.physics.math").quadratic
+    quadratic = _get("clm_ml.processes.math").quadratic
     r1, r2 = quadratic(inp["a"], inp["b"], inp["c"])
     return {"r1": float(r1), "r2": float(r2)}
 
 
 def _adapt_log_gamma(inp: dict) -> dict:
-    log_gamma_function = _get("clm_ml.physics.math").log_gamma_function
+    log_gamma_function = _get("clm_ml.processes.math").log_gamma_function
     return {"gammaln": float(log_gamma_function(inp["x"]))}
 
 
 def _adapt_beta_function(inp: dict) -> dict:
-    beta_function = _get("clm_ml.physics.math").beta_function
+    beta_function = _get("clm_ml.processes.math").beta_function
     return {"beta": float(beta_function(inp["a"], inp["b"]))}
 
 
 def _adapt_beta_pdf(inp: dict) -> dict:
-    beta_distribution_pdf = _get("clm_ml.physics.math").beta_distribution_pdf
+    beta_distribution_pdf = _get("clm_ml.processes.math").beta_distribution_pdf
     return {"beta_pdf": float(beta_distribution_pdf(inp["a"], inp["b"], inp["x"]))}
 
 
 def _adapt_beta_cdf(inp: dict) -> dict:
-    beta_distribution_cdf = _get("clm_ml.physics.math").beta_distribution_cdf
+    beta_distribution_cdf = _get("clm_ml.processes.math").beta_distribution_cdf
     return {"beta_cdf": float(beta_distribution_cdf(inp["a"], inp["b"], inp["x"]))}
 
 
 def _adapt_tridiag(inp: dict) -> dict:
     """tridiag takes 0-based rows; the golden outputs are named u_1..u_n (Fortran's rows).
-    Fortran's unguarded pivots (the guarded variant: tests/clm_ml/test_physics_math.py)."""
-    tridiag = _get("clm_ml.physics.math").tridiag
+    Fortran's unguarded pivots (the guarded variant: tests/clm_ml/test_processes_math.py)."""
+    tridiag = _get("clm_ml.processes.math").tridiag
     n = int(inp["n"])
 
     def _arr(key):
@@ -145,7 +145,7 @@ def _adapt_tridiag(inp: dict) -> dict:
 
 def _adapt_tridiag_2eq(inp: dict) -> dict:
     """tridiag_2eq uses 0-based indexing; missing off-diagonal keys default to 0."""
-    tridiag_2eq = _get("clm_ml.physics.math").tridiag_2eq
+    tridiag_2eq = _get("clm_ml.processes.math").tridiag_2eq
     n = int(inp["n"])
 
     def _arr(key):
@@ -172,23 +172,23 @@ def _adapt_tridiag_2eq(inp: dict) -> dict:
 
 
 def _adapt_ft(inp: dict) -> dict:
-    _ft = _get("clm_ml.physics.photosynthesis").ft
+    _ft = _get("clm_ml.processes.photosynthesis").ft
     return {"ans": float(_ft(inp["tl"], inp["ha"]))}
 
 
 def _adapt_fth(inp: dict) -> dict:
-    _fth = _get("clm_ml.physics.photosynthesis").fth
+    _fth = _get("clm_ml.processes.photosynthesis").fth
     return {"ans": float(_fth(inp["tl"], inp["hd"], inp["se"], inp["c"]))}
 
 
 def _adapt_fth25(inp: dict) -> dict:
-    _fth25 = _get("clm_ml.physics.photosynthesis").fth25
+    _fth25 = _get("clm_ml.processes.photosynthesis").fth25
     return {"ans": float(_fth25(inp["hd"], inp["se"]))}
 
 
 def _adapt_realized_rate(inp: dict) -> dict:
     """``realized_rate`` takes the pathway and co-limitation as switches."""
-    photo = _get("clm_ml.physics.photosynthesis")
+    photo = _get("clm_ml.processes.photosynthesis")
     agross = photo.realized_rate(
         inp["ac"],
         inp["aj"],
@@ -200,7 +200,7 @@ def _adapt_realized_rate(inp: dict) -> dict:
 
 
 def _adapt_phim_monin_obukhov(inp: dict) -> dict:
-    turb = _get("clm_ml.physics.turbulence")
+    turb = _get("clm_ml.processes.turbulence")
     zeta = inp["zeta"]
     return {
         "phim": float(turb.phim_monin_obukhov(zeta)),
@@ -209,7 +209,7 @@ def _adapt_phim_monin_obukhov(inp: dict) -> dict:
 
 
 def _adapt_psim_monin_obukhov(inp: dict) -> dict:
-    turb = _get("clm_ml.physics.turbulence")
+    turb = _get("clm_ml.processes.turbulence")
     zeta = inp["zeta"]
     return {
         "psim": float(turb.psim_monin_obukhov(zeta)),
@@ -218,14 +218,14 @@ def _adapt_psim_monin_obukhov(inp: dict) -> dict:
 
 
 def _adapt_get_beta(inp: dict) -> dict:
-    turb = _get("clm_ml.physics.turbulence")
+    turb = _get("clm_ml.processes.turbulence")
     beta = turb.beta_stability(inp["beta_neutral"], inp["LcL"])
     return {"beta": float(beta)}
 
 
 def _adapt_get_prsc(inp: dict) -> dict:
     """``prandtl_schmidt`` takes the sparse-canopy switch as an argument."""
-    turb = _get("clm_ml.physics.turbulence")
+    turb = _get("clm_ml.processes.turbulence")
     sparse_in = int(inp["sparse_canopy_type_in"]) == 1
     PrSc = turb.prandtl_schmidt(inp["beta_neutral"], inp["LcL"], sparse_in)
     return {"PrSc": float(PrSc)}
@@ -237,7 +237,7 @@ def _adapt_get_psi_rsl(inp: dict) -> dict:
 
     if not RSL_AVAILABLE:
         pytest.skip("RSL psihat lookup tables unavailable (netCDF4 load failed)")
-    turb = _get("clm_ml.physics.turbulence")
+    turb = _get("clm_ml.processes.turbulence")
     from clm_ml.io.rsl_tables import default_rsl_tables
 
     psim, psic, psim2, psim_hat2 = turb.psi_rsl(
@@ -258,8 +258,8 @@ def _adapt_get_psi_rsl(inp: dict) -> dict:
 
 
 def _adapt_wetted_fraction(inp: dict) -> dict:
-    """CanopyWettedFraction for a single layer (``clm_ml.physics.canopy_water``)."""
-    wetted_fraction = _get("clm_ml.physics.canopy_water").wetted_fraction
+    """CanopyWettedFraction for a single layer (``clm_ml.processes.canopy_water``)."""
+    wetted_fraction = _get("clm_ml.processes.canopy_water").wetted_fraction
     fwet, fdry = wetted_fraction(
         jnp.array([inp["h2ocan"]]), jnp.array([inp["dpai"]]), jnp.array([inp["dlai"]])
     )
@@ -269,7 +269,7 @@ def _adapt_wetted_fraction(inp: dict) -> dict:
 def _adapt_leaf_boundary_layer(inp: dict) -> dict:
     """``leaf_boundary_layer`` for one layer with plant area and one leaf; the regime from
     the golden input's ``gb_type``."""
-    lbl = _get("clm_ml.physics.leaf_boundary_layer")
+    lbl = _get("clm_ml.processes.leaf_boundary_layer")
     regime = {1: "laminar", 2: "turbulent", 3: "free_convection"}[int(inp["gb_type_in"])]
     g = lbl.leaf_boundary_layer(
         jnp.array([1.0]),  # dpai > 0 so the layer is active
@@ -287,7 +287,7 @@ def _adapt_leaf_boundary_layer(inp: dict) -> dict:
 
 def _adapt_leaf_heat_capacity(inp: dict) -> dict:
     """LeafHeatCapacity for a single layer with plant area (``dpai = 1``)."""
-    leaf_heat_capacity = _get("clm_ml.physics.leaf_heat_capacity").leaf_heat_capacity
+    leaf_heat_capacity = _get("clm_ml.processes.leaf_heat_capacity").leaf_heat_capacity
     cpleaf = leaf_heat_capacity(jnp.array([1.0]), jnp.asarray(float(inp["sla"])))
     return {"cpleaf": float(cpleaf[0])}
 
@@ -299,7 +299,7 @@ def _adapt_runge_kutta_ini(inp: dict) -> dict:
     The arrays are 0-based; golden keys use 1-based indices. Unused upper-triangular entries
     in ``a`` hold spval (1e36) matching Fortran.
     """
-    a, b, c = _get("clm_ml.physics.integrators").TABLEAUS["rk4"]
+    a, b, c = _get("clm_ml.processes.integrators").TABLEAUS["rk4"]
     nrk = len(b)
     out = {}
     for i in range(1, nrk + 1):
@@ -314,7 +314,7 @@ def _adapt_runge_kutta_ini(inp: dict) -> dict:
 def _adapt_nitrogen_scale(inp: dict) -> dict:
     """NitrogenScale: the sunlit and shaded nitrogen scaling factors of one layer
     (``physics.nitrogen_profile.nitrogen_scale``); 0 without plant area, as Fortran."""
-    physics = _get("clm_ml.physics.nitrogen_profile")
+    physics = _get("clm_ml.processes.nitrogen_profile")
     if float(inp["dpai"]) <= 0.0:
         return {"nscale_sun": 0.0, "nscale_sha": 0.0}
     vary = int(inp["leaf_optics_type_in"]) == 1
@@ -331,7 +331,7 @@ def _adapt_nitrogen_scale(inp: dict) -> dict:
 def _adapt_canopy_nitrogen_profile(inp: dict) -> dict:
     """CanopyNitrogenProfile of a C3 canopy without acclimation, the decay coefficient
     given (``kn_val``); the scaling factors are the leaf Vcmax25 over ``vcmax25top``."""
-    physics = _get("clm_ml.physics.nitrogen_profile")
+    physics = _get("clm_ml.processes.nitrogen_profile")
     n = len(inp["dpai"])
     ncan = int(inp["ncan"])
     layers = _get("clm_ml.state").PatchLayers(
@@ -356,7 +356,7 @@ def _adapt_canopy_nitrogen_profile(inp: dict) -> dict:
 
 
 def _adapt_shr_orb_params(inp: dict) -> dict:
-    shr_orb_mod = _get("clm_ml.physics.orbit")
+    shr_orb_mod = _get("clm_ml.processes.orbit")
     # shr_orb_params returns (eccen, obliq, mvelp, obliqr, lambm0, mvelpp)
     eccen, obliq, mvelp, obliqr, lambm0, mvelpp = shr_orb_mod.shr_orb_params(int(inp["iyear_AD"]))
     return {
@@ -378,7 +378,7 @@ def _adapt_shr_orb_decl(inp: dict) -> dict:
     delta and eccf (from decl).
     shr_orb_params returns (eccen, obliq, mvelp, obliqr, lambm0, mvelpp).
     """
-    shr_orb_mod = _get("clm_ml.physics.orbit")
+    shr_orb_mod = _get("clm_ml.processes.orbit")
     eccen, obliq, mvelp, obliqr, lambm0, mvelpp = shr_orb_mod.shr_orb_params(int(inp["iyear_AD"]))
     delta, eccf = shr_orb_mod.shr_orb_decl(float(inp["calday"]), eccen, mvelpp, lambm0, obliqr)
     return {

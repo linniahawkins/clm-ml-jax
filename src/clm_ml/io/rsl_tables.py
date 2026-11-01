@@ -1,4 +1,4 @@
-"""The roughness sublayer psihat lookup tables (``clm_ml.physics.turbulence.RSLTables``).
+"""The roughness sublayer psihat lookup tables (``clm_ml.processes.turbulence.RSLTables``).
 
 The tables ship with the package (``clm_ml/data/psihat.nc``, from CLM-ml v2's
 ``rsl_lookup_tables/psihat.nc``): variables ``zdtgridM``/``zdtgridH`` (nZ),
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from clm_ml.physics.turbulence import PsihatTable, RSLTables
+from clm_ml.processes.turbulence import PsihatTable, RSLTables
 
 
 def rsl_table_file() -> Path:

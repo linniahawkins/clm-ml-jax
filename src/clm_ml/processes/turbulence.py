@@ -28,7 +28,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.physics.constants import (
+from clm_ml.processes.constants import (
     LcL_max,
     LcL_min,
     Pr0,
@@ -46,8 +46,8 @@ from clm_ml.physics.constants import (
     vkc,
     z0mg,
 )
-from clm_ml.physics.layers import pad_with_top
-from clm_ml.physics.math import bisection_traceable
+from clm_ml.processes.layers import pad_with_top
+from clm_ml.processes.math import bisection_traceable
 from clm_ml.state import PatchLayers
 
 # Harman (2012) beta in unstable conditions, CHATS fit (Bonan et al. 2026, eq. 2; Fortran

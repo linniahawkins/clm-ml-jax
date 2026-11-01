@@ -154,8 +154,8 @@ def output(
         soil_z: Soil node depths (0-based levels), m.
         dtstep: The model step (s).
     """
-    from clm_ml.physics.constants import mmdry, mmh2o
-    from clm_ml.physics.water_vapor import lat_vap
+    from clm_ml.processes.constants import mmdry, mmh2o
+    from clm_ml.processes.water_vapor import lat_vap
 
     ivis, inir = 1, 2  # legacy band indices
     isun, isha = 1, 2  # legacy leaf indices
