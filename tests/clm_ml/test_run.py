@@ -37,12 +37,21 @@ def test_run_reads_the_files_and_times_of_the_original_namelist(chats_run_dir):
     original = f90nml.read(str(CHATS_NAMELISTS / "nl.CHATS7.50steps"))["clmml_inparm"]
     assert int(f"{run.start:%Y%m%d}") == original["start_ymd"]
     assert run.n_steps == original["stop_n"]
-    assert run.config.soil.layer_structure == original["clm_phys"].lower()
+    assert original["clm_phys"] == "CLM5_0"  # the only soil layer structure (C35)
     (source,) = gridcell_sources(run)
     assert source.tower_file.paths[0].endswith(original["fin_tower"].replace("../", ""))
     assert source.clm_history_file.endswith(original["fin_clm"].replace("../", ""))
     assert source.soil_adjust_file.endswith(original["fin_soil_adjust"].replace("../", ""))
     assert source.history_index(0) == 1441  # 1 May 00:30 in the April-May history file
+
+
+def test_convert_refuses_clm4_5_soil(tmp_path):
+    text = (CHATS_NAMELISTS / "nl.CHATS7.1day").read_text()
+    assert "'CLM5_0'" in text
+    namelist = tmp_path / "nl.clm45"
+    namelist.write_text(text.replace("'CLM5_0'", "'CLM4_5'"))
+    with pytest.raises(ConfigError, match="clm_phys 'CLM4_5' is not supported"):
+        convert_namelist(namelist, tmp_path / "out")
 
 
 @pytest.mark.parametrize("name", ["nl.CHATS7.1day", "nl.CHATS7.05.2007", "nl.CHATS7.50steps"])

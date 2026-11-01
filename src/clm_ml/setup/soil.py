@@ -13,56 +13,39 @@ import numpy as np
 
 from clm_ml.setup import tables
 
-#: (nlevsoi, nlevgrnd): hydrologically active and all ground levels of each layer structure
-#: (model.yaml soil.layer_structure). Fortran reference: clm_varpar.F90::clm_varpar_init
-SOIL_LEVELS = {"clm5_0": (20, 25), "clm4_5": (10, 15)}
-#: The CLM history's soil water option of each structure (clmSoilOptionMod clm_phys)
-CLM_PHYS = {"clm5_0": "CLM5_0", "clm4_5": "CLM4_5"}
+#: Hydrologically active and all ground levels of the CLM soil layer structure (the only
+#: one: decision C35). Fortran reference: clm_varpar.F90::clm_varpar_init (clm_phys CLM5_0)
+NLEVSOI = 20
+NLEVGRND = 25
 
 ZMIN_BEDROCK = 0.4  # minimum depth to bedrock, m (clm_varcon)
-SCALEZ = 0.025  # CLM4.5 soil layer thickness discretization, m
 
 
-def soil_layers(structure: str) -> tuple:
-    """``(z, dz, zi)`` of the soil layer structure, 0-based: node depth and thickness of each
-    level (``nlevgrnd``,), and the interface depths from the surface (``nlevgrnd + 1``,;
+def soil_layers() -> tuple:
+    """``(z, dz, zi)`` of the CLM soil layer structure, 0-based: node depth and thickness of
+    each level (``nlevgrnd``,), and the interface depths from the surface (``nlevgrnd + 1``,;
     ``zi[0] = 0``).
 
-    Fortran reference: initVerticalMod.F90::initVertical."""
+    Fortran reference: initVerticalMod.F90::initVertical (clm_phys CLM5_0)."""
     import jax.numpy as jnp
 
-    nlevsoi, nlevgrnd = SOIL_LEVELS[structure]
-    n = nlevgrnd
+    nlevsoi, n = NLEVSOI, NLEVGRND
     z = jnp.zeros(n + 1, dtype=jnp.float64)  # 1-based work arrays, as the legacy code
     dz = jnp.zeros(n + 1, dtype=jnp.float64)
     zi = jnp.zeros(n + 1, dtype=jnp.float64)
-    if structure == "clm4_5":
-        for j in range(1, n + 1):
-            z = z.at[j].set(SCALEZ * (jnp.exp(0.5 * (j - 0.5)) - 1.0))
-        dz = dz.at[1].set(0.5 * (z[1] + z[2]))
-        for j in range(2, n):
-            dz = dz.at[j].set(0.5 * (z[j + 1] - z[j - 1]))
-        dz = dz.at[n].set(z[n] - z[n - 1])
-        zi = zi.at[0].set(0.0)
-        for j in range(1, n):
-            zi = zi.at[j].set(0.5 * (z[j] + z[j + 1]))
-        zi = zi.at[n].set(z[n] + 0.5 * dz[n])
-    elif structure == "clm5_0":
-        for j in range(1, 5):
-            dz = dz.at[j].set(j * 0.02)
-        for j in range(5, 14):
-            dz = dz.at[j].set(dz[4] + (j - 4) * 0.04)
-        for j in range(14, nlevsoi + 1):
-            dz = dz.at[j].set(dz[13] + (j - 13) * 0.10)
-        for j in range(nlevsoi + 1, n + 1):
-            dz = dz.at[j].set(dz[nlevsoi] + (((j - nlevsoi) * 25.0) ** 1.5) / 100.0)
-        zi = zi.at[0].set(0.0)
-        for j in range(1, n + 1):
-            zi = zi.at[j].set(float(jnp.sum(dz[1 : j + 1])))
-        for j in range(1, n + 1):
-            z = z.at[j].set(0.5 * (zi[j - 1] + zi[j]))
-    else:
-        raise ValueError(f"soil layer structure {structure!r} is not clm5_0 or clm4_5")
+    for j in range(1, 5):
+        dz = dz.at[j].set(j * 0.02)
+    for j in range(5, 14):
+        dz = dz.at[j].set(dz[4] + (j - 4) * 0.04)
+    for j in range(14, nlevsoi + 1):
+        dz = dz.at[j].set(dz[13] + (j - 13) * 0.10)
+    for j in range(nlevsoi + 1, n + 1):
+        dz = dz.at[j].set(dz[nlevsoi] + (((j - nlevsoi) * 25.0) ** 1.5) / 100.0)
+    zi = zi.at[0].set(0.0)
+    for j in range(1, n + 1):
+        zi = zi.at[j].set(float(jnp.sum(dz[1 : j + 1])))
+    for j in range(1, n + 1):
+        z = z.at[j].set(0.5 * (zi[j - 1] + zi[j]))
     return np.asarray(z[1:]), np.asarray(dz[1:]), np.asarray(zi)
 
 

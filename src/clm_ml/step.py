@@ -48,7 +48,6 @@ class StepOptions(NamedTuple):
     step_seconds: int  # model time step (s)
     layer_pai_floor: float  # minimum plant area of a leafy layer (m2/m2; issue 14)
     flux_profile_type: int  # canopy totals: fluxes at the top layer (1)
-    clm_phys: str  # CLM history soil water: "CLM4_5" or "CLM5_0" (clmSoilOptionMod)
     n_soil_adjust: int  # soil levels multiplied by the history's adjustment factor
     n_soil: int  # hydrologically active soil levels (nlevsoi)
     # Orbital parameters for the solar zenith angle (clm_varorb, fixed for the run)
@@ -82,8 +81,7 @@ class StepInputs(NamedTuple):
     # CLM history record of this step (clmDataMod.ClmHistoryRecord)
     elai: Array  # () leaf area index, m2/m2
     esai: Array  # () stem area index, m2/m2
-    h2osoi_clm45: Array  # (soil_level,) volumetric soil water (CLM4.5 histories)
-    h2osoi_clm50: Array  # (n_soil,) volumetric soil water (CLM5.0 histories)
+    h2osoi: Array  # (n_soil,) volumetric soil water
     h2osoi_factor: Array  # () soil water adjustment factor
     # Forcing records of the previous and next steps (3-point time interpolation)
     forcing_bef: ForcingRecord
@@ -119,8 +117,7 @@ class LandInputs(NamedTuple):
 
     elai: Array
     esai: Array
-    h2osoi_clm45: Array  # (soil_level,)
-    h2osoi_clm50: Array  # (n_soil,)
+    h2osoi: Array  # (n_soil,)
     h2osoi_factor: Array  # 1 when the history has no adjustment factor
 
 
@@ -250,8 +247,8 @@ def step(
 
     # CLM history record: LAI, SAI (patch) and soil water (column) — clmDataMod::clmData
     water = soil.soil_water_from_history(
-        inputs.h2osoi_clm45, inputs.h2osoi_clm50, inputs.h2osoi_factor, k.dz, k.watsat,
-        k.nbedrock, clm_phys=options.clm_phys, n_soil=n_soil, n_adjust=options.n_soil_adjust,
+        inputs.h2osoi, inputs.h2osoi_factor, k.dz, k.watsat, k.nbedrock,
+        n_soil=n_soil, n_adjust=options.n_soil_adjust,
     )  # fmt: skip
     liq, ice = water.h2osoi_liq, water.h2osoi_ice
 

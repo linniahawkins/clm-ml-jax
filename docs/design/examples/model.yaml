@@ -39,7 +39,6 @@ canopy_layers:
   min_plant_area_per_layer: 0.01          # m2/m2                              (dpai_min)
 
 soil:
-  layer_structure: clm5_0                 # clm5_0 | clm4_5; must match the CLM history file (clm_phys)
   columns: per_patch                      # per_patch: each patch has its own soil column (option A,
                                           #   identical to today) | shared: patches on a gridcell share
                                           #   one column (option B; later science change)

@@ -50,7 +50,7 @@ clm_varpar.clm_varpar_init()  # Sets nlevgrnd, nlevsno, nlevsoi based on CLM ver
 from clm_src_main.clm_varpar import nlevgrnd, nlevsno  # Import AFTER init
 ```
 
-Values depend on `clm_phys` config ('CLM4_5' or 'CLM5_0'). See [clm_varpar.py](../src/clm_src_main/clm_varpar.py).
+The model has the CLM soil layer structure only (`nlevsoi = 20`, `nlevgrnd = 25`: `clm_ml.setup.soil`; decision 37).
 
 ### 4. Vectorization with `jax.vmap`
 

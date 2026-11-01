@@ -10,8 +10,6 @@ The gridded data are read and interpolated by :class:`clm_ml.grid_forcing.GridIn
 
 from __future__ import annotations
 
-import functools
-
 import numpy as np
 
 from clm_ml.forcing import chunk_run_steps
@@ -88,18 +86,10 @@ def grid_simulation_parts(run) -> dict:
     """The grid-specific parts of a run's :class:`clm_ml.driver.Simulation`: the first-step
     values per patch, the chunk reader and the land-data function of the compiled chunk."""
     from clm_ml.grid_forcing import land_record
-    from clm_ml.setup.soil import SOIL_LEVELS
 
     inputs = grid_inputs(run)
-    _, nlevgrnd = SOIL_LEVELS[run.config.soil.layer_structure]
     return {
         "first": first_values(inputs, run.n_steps),
         "reader": GridChunkReader(inputs),
-        "land_fn": functools.partial(_land, nlevgrnd=nlevgrnd, record=land_record),
+        "land_fn": land_record,
     }
-
-
-def _land(xw, land, gidx, *, nlevgrnd: int, record):
-    """``Simulation.land_fn`` of grid runs: ``grid_forcing.land_record`` with the run's soil
-    levels."""
-    return record(xw, land, gidx, nlevgrnd)

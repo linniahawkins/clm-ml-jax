@@ -85,6 +85,12 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
     else:
         raise ConfigError(f"{namelist_path.name}: stop_option {stop_option!r} not supported")
     time["step_seconds"] = 1800
+    clm_phys = str(g.get("clm_phys", "CLM5_0")).strip()
+    if clm_phys != "CLM5_0":
+        raise ConfigError(
+            f"{namelist_path.name}: clm_phys {clm_phys!r} is not supported (CLM5_0 only: "
+            "the model has the CLM soil layer structure only)"
+        )
 
     met_type = int(g.get("met_type", 0))
     if met_type not in (0, 3):
@@ -129,11 +135,6 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
     }
     model = {
         "canopy_layers": {"min_plant_area_per_layer": float(g.get("dpai_min", 0.01))},
-        "soil": {
-            "layer_structure": {"CLM5_0": "clm5_0", "CLM4_5": "clm4_5"}[
-                str(g.get("clm_phys", "CLM5_0")).strip()
-            ]
-        },
     }
 
     header = f"# Converted from {namelist_path.name} by `clm-ml convert`.\n"

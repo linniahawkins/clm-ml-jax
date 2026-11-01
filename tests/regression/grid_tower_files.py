@@ -8,8 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
-#: Soil layer counts (nlevsoi, nlevgrnd) of each layer structure
-SOIL_LEVELS = {"clm5_0": (20, 25), "clm4_5": (10, 15)}
+#: Soil layer counts (nlevsoi, nlevgrnd) of the CLM soil layer structure
+SOIL_LEVELS = (20, 25)
 
 
 def write_tower_files(

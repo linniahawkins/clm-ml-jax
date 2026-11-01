@@ -305,14 +305,12 @@ def step_options(run):
     """The time step's static choices (``clm_ml.step.StepOptions``) of a run."""
     from clm_ml.options import MLOptions, substep_options
     from clm_ml.physics.orbit import shr_orb_params
-    from clm_ml.setup.soil import CLM_PHYS, SOIL_LEVELS
+    from clm_ml.setup.soil import NLEVGRND, NLEVSOI
     from clm_ml.step import StepOptions
 
     f = run.run_file.forcing
     interpolation = (f.gridded if run.is_grid else f.meteorology).interpolation
     opts = MLOptions.from_codes(run.config.to_fortran_codes(interpolation))
-    structure = run.config.soil.layer_structure
-    n_soil, n_levels = SOIL_LEVELS[structure]
     soil_water = getattr(f, "soil_water", None)
     adjust = None if run.is_grid or soil_water is None else soil_water.adjustment
     eccen, _obliq, _mvelp, obliqr, lambm0, mvelpp = shr_orb_params(run.start.year)
@@ -322,16 +320,15 @@ def step_options(run):
             step_seconds=int(run.step_seconds),
             layer_pai_floor=float(opts.layer_pai_floor),
             flux_profile_type=int(opts.flux_profile_type),
-            clm_phys=CLM_PHYS[structure],
             n_soil_adjust=int(adjust.levels) if adjust else 0,
-            n_soil=int(n_soil),
+            n_soil=NLEVSOI,
             eccen=float(eccen),
             mvelpp=float(mvelpp),
             lambm0=float(lambm0),
             obliqr=float(obliqr),
         ),
         opts,
-        n_levels,
+        NLEVGRND,
     )
 
 

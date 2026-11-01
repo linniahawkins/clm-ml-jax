@@ -32,7 +32,6 @@ def load_forcing(
     n_steps: int,
     history_index: Callable[[int], int],
     tower_height: float,
-    layer_structure: str,
 ) -> Forcing:
     """Read and derive one chunk of forcing for one tower (one gridcell).
 
@@ -45,16 +44,15 @@ def load_forcing(
         first_step, n_steps: The chunk, in 0-based run steps.
         history_index: 1-based CLM history time slice for a 0-based run step.
         tower_height: Forcing height from the tower table (m).
-        layer_structure: The soil layer structure (model.yaml ``soil.layer_structure``).
     """
     run_steps = chunk_run_steps(run_n_steps, first_step, n_steps)
     raws = as_tower_files(tower_file).read([first_record + k for k in run_steps])
     mets = [derive_tower_met(raw, tower_height) for raw in raws]
     slices = [history_index(k) for k in run_steps]
-    return _forcing(mets, slices, clm_history_file, soil_adjust_file, first_step, layer_structure)
+    return _forcing(mets, slices, clm_history_file, soil_adjust_file, first_step)
 
 
-def _forcing(mets, slices, clm_history_file, soil_adjust_file, first_step, layer_structure):
+def _forcing(mets, slices, clm_history_file, soil_adjust_file, first_step):
     """A chunk from per-step derived meteorology and CLM history time slices."""
 
     def col(name):
@@ -75,15 +73,14 @@ def _forcing(mets, slices, clm_history_file, soil_adjust_file, first_step, layer
         shortwave_diffuse=np.array([[m.solai] for m in mets], dtype=float),
     )
 
-    records = read_clm_history_series(clm_history_file, layer_structure, slices, soil_adjust_file)
+    records = read_clm_history_series(clm_history_file, slices, soil_adjust_file)
     steps = [records[i] for i in slices]
     factors = [r.h2osoi_factor for r in steps]
     clm = ClmHistoryForcing(
         history_index=np.asarray(slices, dtype=int),
         leaf_area_index=np.array([[r.elai] for r in steps], dtype=float),
         stem_area_index=np.array([[r.esai] for r in steps], dtype=float),
-        soil_water_clm45=np.array([[np.asarray(r.h2osoi_clm45)] for r in steps], dtype=float),
-        soil_water_clm50=np.array([[np.asarray(r.h2osoi_clm50)] for r in steps], dtype=float),
+        soil_water=np.array([[np.asarray(r.h2osoi)] for r in steps], dtype=float),
         soil_water_factor=(
             None if factors[0] is None else np.array([[f] for f in factors], dtype=float)
         ),
@@ -104,7 +101,6 @@ class TowerForcingSource:
     n_steps: int  # steps in the whole run
     history_index: Callable[[int], int]
     tower_height: float
-    layer_structure: str = "clm5_0"  # model.yaml soil.layer_structure
     # The model step and the data interval (decision 13): equal -> records are steps;
     # otherwise the records are interpolated to the model step.
     record_seconds: int = 1800
@@ -140,7 +136,6 @@ class TowerForcingSource:
             n_steps=n_steps,
             history_index=self.history_index,
             tower_height=self.tower_height,
-            layer_structure=self.layer_structure,
         )
 
 
@@ -195,10 +190,7 @@ def _interpolated_chunk(self: TowerForcingSource, first_step: int, n_steps: int)
         for i in range(len(starts))
     ]
     slices = [self.history_index(k) for k in run_steps]
-    return _forcing(
-        mets, slices, self.clm_history_file, self.soil_adjust_file, first_step,
-        self.layer_structure,
-    )  # fmt: skip
+    return _forcing(mets, slices, self.clm_history_file, self.soil_adjust_file, first_step)
 
 
 def _with_land_data(
@@ -226,14 +218,11 @@ def _with_land_data(
         changes["stem_area_index"] = v["SAI"].reshape(clm.stem_area_index.shape)
     if self.soil_water_file:
         h2osoi = at_steps(self.soil_water_file, ("H2OSOI",))["H2OSOI"]
-        # the active soil-water field is the one the CLM history reader filled (the other
-        # is spval): CLM5.0 -> nlevsoi layers, CLM4.5 -> nlevgrnd
-        key = "soil_water_clm50" if np.all(clm.soil_water_clm45 > 1e30) else "soil_water_clm45"
-        nlev = getattr(clm, key).shape[-1]
+        nlev = clm.soil_water.shape[-1]  # nlevsoi
         if h2osoi.ndim != 2 or h2osoi.shape[1] < nlev:
             raise ValueError(
                 f"{self.soil_water_file}: H2OSOI needs (time, level) with at least {nlev} "
                 f"levels; got {h2osoi.shape}"
             )
-        changes[key] = h2osoi[:, None, :nlev]
+        changes["soil_water"] = h2osoi[:, None, :nlev]
     return dataclasses.replace(forcing, clm_history=dataclasses.replace(clm, **changes))

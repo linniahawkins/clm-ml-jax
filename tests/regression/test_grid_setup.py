@@ -90,7 +90,7 @@ towers = {{}}
 for p in range(d.n_patches):
     g = int(d.patches.gridcell_index[p])
     tw, hi = grid_setup.write_tower_files(inputs, g, run.n_steps, tmp / "towers" / str(p),
-                                          grid_setup.SOIL_LEVELS["clm5_0"], lai_patch=p)
+                                          grid_setup.SOIL_LEVELS, lai_patch=p)
     (tmp / "towers" / f"P{{p}}_met.nc").symlink_to(tw); (tmp / "towers" / f"P{{p}}_hist.nc").symlink_to(hi)
     c = d.columns
     towers[f"P{{p}}"] = {{"latitude": float(d.gridcells.latitude[g]), "longitude": float(d.gridcells.longitude[g]),

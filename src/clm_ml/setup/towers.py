@@ -72,7 +72,6 @@ def gridcell_sources(run) -> list:
                     run.start, step, clm_start, history_interval(history)
                 ),
                 tower_height=-999.0 if math.isnan(height) else height,
-                layer_structure=run.config.soil.layer_structure,
                 record_seconds=record_seconds,
                 step_seconds=step,
                 run_start=run.start,
@@ -106,9 +105,8 @@ def first_values(run, sources) -> dict:
     """Per gridcell (G,) the first step's forcing (``uref``, ``tref``, ``qref``, ``pref``,
     ``pco2``), its initial soil temperature ``tsoi`` (G, nlevgrnd; the CLM history's
     ``TSOI`` at the first step's time slice) and acclimation temperature ``tacclim``."""
-    from clm_ml.setup.soil import SOIL_LEVELS, initial_soil_temperature
+    from clm_ml.setup.soil import NLEVGRND, initial_soil_temperature
 
-    _, nlevgrnd = SOIL_LEVELS[run.config.soil.layer_structure]
     out: dict = {k: [] for k in ("uref", "tref", "qref", "pref", "pco2", "tsoi", "tacclim")}
     for source in sources:
         tower = source.chunk(0, 1).tower
@@ -122,7 +120,7 @@ def first_values(run, sources) -> dict:
         for k, v in row.items():
             out[k].append(float(v))
         out["tsoi"].append(
-            initial_soil_temperature(source.clm_history_file, source.history_index(0), nlevgrnd)
+            initial_soil_temperature(source.clm_history_file, source.history_index(0), NLEVGRND)
         )
         out["tacclim"].append(acclimation_temperature(run, source, row["tref"]))
     return {k: np.asarray(v, dtype=float) for k, v in out.items()}

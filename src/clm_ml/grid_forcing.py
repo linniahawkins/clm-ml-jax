@@ -640,7 +640,7 @@ def exposed_area(tlai, tsai, xp=np):
     return xp.maximum(tlai, 0.0), xp.maximum(tsai, 0.0)
 
 
-def land_record(xw, land, gidx, nlevgrnd: int):
+def land_record(xw, land, gidx):
     """The land data of every patch at one step (``clm_ml.step.LandInputs``), inside the
     compiled chunk:
     vegetation from the monthly records with CLM's satellite-phenology weights (``xw``: m1,
@@ -648,7 +648,6 @@ def land_record(xw, land, gidx, nlevgrnd: int):
     ``land``: ``(lai (12, P), sai (12, P), h2osoi (records, G, nlevsoi))``)."""
     import jax.numpy as jnp
 
-    from clm_ml.physics.constants import spval
     from clm_ml.step import LandInputs
 
     m1, m2, w1, w2, lb, f1, f2 = xw
@@ -662,7 +661,6 @@ def land_record(xw, land, gidx, nlevgrnd: int):
     return LandInputs(
         elai=elai,
         esai=esai,
-        h2osoi_clm45=jnp.full((n_p, nlevgrnd), spval, dtype=jnp.float64),
-        h2osoi_clm50=h,
+        h2osoi=h,
         h2osoi_factor=jnp.ones((n_p,), dtype=jnp.float64),  # no adjustment factor
     )

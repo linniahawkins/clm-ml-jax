@@ -77,9 +77,8 @@ def build_patches(domain, params, config, first: dict, acclimation_steps: float 
     )  # fmt: skip
 
     # soil (initVertical, SoilStateInitTimeConst, SurfaceAlbedoInitTimeConst)
-    structure = config.soil.layer_structure
-    nlevsoi, nlevgrnd = soil.SOIL_LEVELS[structure]
-    z, dz, zi = soil.soil_layers(structure)
+    nlevsoi, nlevgrnd = soil.NLEVSOI, soil.NLEVGRND
+    z, dz, zi = soil.soil_layers()
     nbed_col = soil.bedrock_index(np.asarray(cols.bedrock_depth, dtype=float), zi, nlevsoi)
     # legacy: a missing organic matter content was -999 (open issue 22)
     organic = np.where(np.isnan(cols.organic_matter), -999.0, cols.organic_matter)

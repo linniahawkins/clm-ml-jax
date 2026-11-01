@@ -1242,3 +1242,26 @@ they can be restored as reference files (they would not run without porting).
   kept); the 1-day example's output path; the params/towers headers named the deleted
   generator (these files are now the source of their values). Not changed: `lat.npy` at the
   repository root (tracked since `b45bd9a`, Phase 6 review; looks stray: for the maintainer).
+
+### C35. CLM soil only: the CLM4.5 soil layer structure dropped (Phase 7 review, 2026-11-01)
+The maintainer's decision (plan §0, decision 37): the model only ever uses CLM5's soil, so
+the CLM4.5 structure (never validated: the legacy path never ran, C31) is removed and the
+one remaining structure is called "CLM". Removed: model.yaml `soil.layer_structure` (now an
+unknown key), `clm_ml.setup.soil.SOIL_LEVELS`/`CLM_PHYS`/`SCALEZ` and the CLM4.5 branch of
+`soil_layers()` (now `NLEVSOI = 20`, `NLEVGRND = 25`, `soil_layers()` without argument),
+`StepOptions.clm_phys`, the CLM4.5 soil-water input of the step (`StepInputs`/`LandInputs`
+`h2osoi_clm45`/`h2osoi_clm50` -> one `h2osoi`, `(n_soil,)`), the spval-filled CLM4.5 field of
+the forcing (`ClmHistoryForcing.soil_water_clm45`/`_clm50` -> `soil_water`; the history
+record's `h2osoi`), the `layer_structure` arguments of the CLM history reader and the tower
+forcing, and the `nlevgrnd` argument of the grid land data (`land_record`). `clm-ml convert`
+refuses `clm_phys = 'CLM4_5'` (accepts the default `CLM5_0` and writes no soil key). Kept:
+the Fortran names in the namelists and the data directory `data/input_files/clm5_0/`
+(Fortran input layout; the namelists point there); the params set names `clm5_defaults` and
+`clm6` (parameter values, not the soil structure).
+- **Tests:** bit for bit and noise twin pass (the CLM5 arithmetic is unchanged; the step
+  only lost an unused input). `test_setup.py` compares the forcing's `soil_water` with the
+  reference's `soil_water_clm50` (the reference file not edited) and checks that its
+  `soil_water_clm45` is all fill values. New: model.yaml `soil.layer_structure` refused;
+  `clm-ml convert` refuses a `CLM4_5` namelist.
+- The stray `lat.npy` at the repository root deleted (maintainer, same review).
+

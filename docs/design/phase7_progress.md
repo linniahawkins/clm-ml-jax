@@ -461,6 +461,9 @@ the one that wrote this.** Stopped for the maintainer's review of Phase 7 (the u
 be reported to once Phase 7 is complete). Then: Phase 8 (documentation and release), after
 discussing it.
 
+**Review, done so far (2026-11-01):** CLM4.5 soil dropped, CLM soil only (decision 37,
+C35); stray `lat.npy` deleted.
+
 For the maintainer's review (decisions and open issues; details in `phase7_decisions.md`
 and `global_input.md`):
 - **Science / behaviour, not changed (decisions needed):** open issue 21 (soil texture
@@ -481,7 +484,6 @@ and `global_input.md`):
   (`clm-ml-offline` retired; `legacy_ascii` written by the run), the review fixes (C31,
   7.5, 7.6).
 - **Not done / deviations:** example data in `data/`, not `examples/data/` (plan 7b);
-  CLM4.5 soil structure never validated (no legacy reference); `lat.npy` stray at the root;
   the readers' netCDF on a background thread while writers write on the main thread (as
   since Phase 4).
 - **Timing:** forward chunk 1.3x faster than at the end of 7.3 on CPU, gradient faster; GPU:

@@ -45,8 +45,7 @@ n_run = 200
 def load(first_step, n_steps):
     return load_forcing(tower, clm, adjust, first_record=first, run_n_steps=n_run,
                         first_step=first_step, n_steps=n_steps,
-                        history_index=lambda k: 1441 + k, tower_height=23.0,
-                        layer_structure="clm5_0")
+                        history_index=lambda k: 1441 + k, tower_height=23.0)
 
 def arrays(f):
     out = {}

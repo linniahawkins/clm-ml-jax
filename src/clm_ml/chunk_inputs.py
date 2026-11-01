@@ -122,8 +122,7 @@ def forcing_inputs(forcing: Forcing, calday, calday_beg) -> tuple:
     land = LandInputs(
         elai=elai,
         esai=_f(h.stem_area_index[cur]),
-        h2osoi_clm45=_f(h.soil_water_clm45[cur]),
-        h2osoi_clm50=_f(h.soil_water_clm50[cur]),
+        h2osoi=_f(h.soil_water[cur]),
         h2osoi_factor=np.ones_like(elai) if factor is None else _f(factor[cur]),
     )
     return met_in, land

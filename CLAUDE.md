@@ -239,8 +239,10 @@ docs/design/           modernization plan, Phase 7 scope/progress/decisions, exa
   over layers in the time step.
 - **Real 1° patches amplify round-off** (1e-15 in LAI -> ~8 W m-2 after sunrise): grid
   regression tests compare inputs exactly and outputs only through the night.
-- `soil.layer_structure: clm4_5` has never been validated (the legacy path did not run); the
-  history file's soil levels must match the structure (checked).
+- **CLM soil only** (decision 37, C35): one soil layer structure, CLM5's (`nlevsoi` 20,
+  `nlevgrnd` 25; `clm_ml.setup.soil.NLEVSOI`/`NLEVGRND`), called "CLM"; CLM4.5 was dropped.
+  CLM histories must have 20 `H2OSOI` levels (checked). The CHATS7 data directory
+  `data/input_files/clm5_0/` keeps its Fortran name (the namelists point there).
 
 ## Commands
 

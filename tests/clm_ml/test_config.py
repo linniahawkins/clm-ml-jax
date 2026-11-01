@@ -52,6 +52,8 @@ def test_readable_options_map_to_codes():
         ({"numerics": {"substep_seconds": "fast"}}, "expected a number"),
         ({"physics": {"sparse_canopy": 1}}, "expected true or false"),
         ({"soil": {"columns": "shared"}}, "option B"),
+        # CLM soil layer structure only (C35)
+        ({"soil": {"layer_structure": "clm4_5"}}, "unknown key(s) ['layer_structure']"),
         ({"canopy_layers": {"n_layers_within": 10}}, "must be set together"),
     ],
 )

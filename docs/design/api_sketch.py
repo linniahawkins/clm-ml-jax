@@ -169,7 +169,6 @@ class CanopyLayerOptions:
 
 @dataclasses.dataclass(frozen=True)
 class SoilOptions:
-    layer_structure: Literal["clm5_0", "clm4_5"] = "clm5_0"
     # per_patch = option A (each patch has its own soil column; identical to today).
     # shared    = option B (patches on a gridcell share one column; later science change).
     columns: Literal["per_patch", "shared"] = "per_patch"

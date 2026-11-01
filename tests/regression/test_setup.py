@@ -11,7 +11,8 @@ counts. The reference (``reference/setup_7patches.npz``) holds the legacy setup'
 each patch's legacy setup with its first-step initialization (``worker.setup_batch_legacy``)
 read through ``patch_constants`` and ``state_from_instances``, and the legacy readers'
 forcing of 48 steps, recorded at commit 1f1b651 (Phase 7.4e) before the legacy setup was
-deleted (``probe74d/record_setup.py``).
+deleted (``probe74d/record_setup.py``). The forcing's ``soil_water`` is the reference's
+``soil_water_clm50`` (renamed by decision C35: CLM soil layer structure only).
 """
 
 from __future__ import annotations
@@ -81,10 +82,15 @@ for name, tree in (("constants", new.constants), ("state", new.state)):
         compare(key, ref[key], b)
 print("c3 equal:", ref["c3"].tolist() == new.c3.tolist())
 xbad = 0
+# the reference's names before C35 (CLM soil only): soil_water was soil_water_clm50, and its
+# soil_water_clm45 (the CLM4.5 layout) is all fill values
+OLD_NAMES = {{"soil_water": "soil_water_clm50"}}
 for g, chunk in enumerate(chunks):
+    if not np.all(ref[f"forcing{{g}}.clm_history.soil_water_clm45"] == 1e36):
+        xbad += 1; print("FORCING DIFF", g, "soil_water_clm45 not fill")
     for part in ("tower", "clm_history"):
         for k, v in vars(getattr(chunk, part)).items():
-            key = f"forcing{{g}}.{{part}}.{{k}}"
+            key = f"forcing{{g}}.{{part}}.{{OLD_NAMES.get(k, k)}}"
             if (v is None) != (key not in ref.files) or (v is not None and not np.array_equal(ref[key], v)):
                 xbad += 1; print("FORCING DIFF", key)
 print("compared", n_cmp)

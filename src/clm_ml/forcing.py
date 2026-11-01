@@ -52,8 +52,7 @@ class ClmHistoryForcing:
     history_index: np.ndarray  # (n_steps + 2,) int, 1-based time slice in the CLM history file
     leaf_area_index: np.ndarray  # (time, patch) m2 m-2
     stem_area_index: np.ndarray  # (time, patch) m2 m-2
-    soil_water_clm45: np.ndarray  # (time, column, nlevgrnd) m3 m-3 (spval unless CLM4.5)
-    soil_water_clm50: np.ndarray  # (time, column, nlevsoi) m3 m-3 (spval unless CLM5.0)
+    soil_water: np.ndarray  # (time, column, nlevsoi) m3 m-3
     soil_water_factor: Optional[np.ndarray]  # (time, column) adjustment factor, or None
 
 

@@ -55,14 +55,12 @@ class SoilWater(NamedTuple):
 
 
 def soil_water_from_history(
-    h2osoi_clm45: Array,
-    h2osoi_clm50: Array,
+    h2osoi: Array,
     h2osoi_factor,
     dz: Array,
     watsat: Array,
     nbedrock,
     *,
-    clm_phys: str,
     n_soil: int,
     n_adjust: int,
 ) -> SoilWater:
@@ -70,41 +68,32 @@ def soil_water_from_history(
 
     Fortran reference: clmDataMod.F90::clmData (soil water part).
 
-    CLM4.5 histories give every level; CLM5.0 histories give the ``n_soil`` (``nlevsoi``)
-    soil levels, the bedrock levels below are 0, and the values are capped at porosity down to
+    CLM histories give the ``n_soil`` (``nlevsoi``) soil levels, the bedrock levels below
+    are 0, and the values are capped at porosity down to
     the bedrock. The first ``n_adjust`` levels are multiplied by ``h2osoi_factor``. All water
     is liquid.
 
-    Reads: the history record (``h2osoi_clm45``/``h2osoi_clm50``, ``h2osoi_factor``),
+    Reads: the history record (``h2osoi``, ``h2osoi_factor``),
     ``site.dz_col``, ``site.nbedrock_col``, ``soilstate.watsat_col``.
     Writes: ``waterstatebulk.h2osoi_vol_col``, ``h2osoi_liq_col``, ``h2osoi_ice_col``.
 
     Args:
-        h2osoi_clm45: ``(n_levels,)`` history values (used if ``clm_phys == "CLM4_5"``).
-        h2osoi_clm50: ``(n_soil,)`` history values (used if ``clm_phys == "CLM5_0"``).
+        h2osoi: ``(n_soil,)`` history values.
         h2osoi_factor: Adjustment factor (used if ``n_adjust > 0``).
         dz: ``(n_levels,)`` level thickness (m).
         watsat: ``(n_levels,)`` porosity.
         nbedrock: Index (1-based) of the deepest level above bedrock (data).
-        clm_phys, n_soil, n_adjust: Static settings (``clmSoilOptionMod``, ``nlevsoi``).
+        n_soil, n_adjust: Static settings (``nlevsoi``, the adjusted levels).
     """
     n = dz.shape[0]
-    if clm_phys == "CLM4_5":
-        vol = jnp.asarray(h2osoi_clm45, dtype=dz.dtype)
-    elif clm_phys == "CLM5_0":
-        vol = jnp.concatenate(
-            [jnp.asarray(h2osoi_clm50, dtype=dz.dtype), jnp.zeros(n - n_soil, dz.dtype)]
-        )
-    else:
-        raise ValueError(f"clm_phys = {clm_phys!r}: CLM4_5 or CLM5_0")
+    vol = jnp.concatenate([jnp.asarray(h2osoi, dtype=dz.dtype), jnp.zeros(n - n_soil, dz.dtype)])
     if n_adjust > 0:
         vol = vol.at[:n_adjust].set(vol[:n_adjust] * h2osoi_factor)
-    if clm_phys == "CLM5_0":
-        top = vol[:n_soil]
-        capped = jnp.where(
-            jnp.arange(1, n_soil + 1) <= nbedrock, jnp.minimum(top, watsat[:n_soil]), top
-        )
-        vol = jnp.concatenate([capped, vol[n_soil:]])
+    top = vol[:n_soil]
+    capped = jnp.where(
+        jnp.arange(1, n_soil + 1) <= nbedrock, jnp.minimum(top, watsat[:n_soil]), top
+    )
+    vol = jnp.concatenate([capped, vol[n_soil:]])
     return SoilWater(vol, vol * dz * denh2o, jnp.zeros_like(vol))
 
 

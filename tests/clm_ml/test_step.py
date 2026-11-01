@@ -25,7 +25,7 @@ def _options(interpolation="three_point", step_seconds=1800, dtime=300.0):
     )  # fmt: skip
     return S.StepOptions(
         substep=sub, step_seconds=step_seconds, layer_pai_floor=0.005, flux_profile_type=1,
-        clm_phys="CLM5_0", n_soil_adjust=0, n_soil=20, eccen=0.0167, mvelpp=4.94,
+        n_soil_adjust=0, n_soil=20, eccen=0.0167, mvelpp=4.94,
         lambm0=-0.0327, obliqr=0.409,
     )  # fmt: skip
 
