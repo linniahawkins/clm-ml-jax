@@ -116,6 +116,9 @@ def leaf_boundary_layer(
         gbh = jnp.maximum(gbh_lam, gbh_turb) + gbh_free
         gbv = jnp.maximum(gbv_lam, gbv_turb) + gbv_free
         gbc = jnp.maximum(gbc_lam, gbc_turb) + gbc_free
+    # One value per leaf, as Fortran (called once per leaf): without free convection the
+    # conductances do not depend on the leaf, so they are the same for sunlit and shaded
+    gbh, gbv, gbc = (jnp.broadcast_to(g, jnp.shape(tleaf)) for g in (gbh, gbv, gbc))
 
     has_pai = (dpai > 0.0)[:, None]
     return BoundaryLayerConductance(

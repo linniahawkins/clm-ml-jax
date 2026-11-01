@@ -295,6 +295,16 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   noise twin 177 pass (1.4 min); `test_stream_runner` + `test_ensemble` 2 pass; focused CPU
   gradient test 1 pass (2.3 min).
 
+- **Package-end tests and review fixes (C23).** On `20ce6f3`: CPU gradient tier 8 pass
+  (6.8 min); all of `tests/regression` 207 pass (31.7 min); `tests/clm_ml` 255 pass; fast
+  golden 165 pass (logs `logs7/p72_*.log`). Independent review by two reviewers (physics
+  modules; step, driver, runners): one bug, `leaf_boundary_layer: laminar | turbulent`
+  stopped every run (the conductances lost their leaf axis in 10b); fixed in
+  `physics/leaf_boundary_layer.py`, unit test checks the shapes; CHATS7 with `gb_type` 1
+  and 2 agrees with `bdde552` to 1.4e-11 over 30 steps. Two observations recorded for the
+  maintainer (C23). Tests: lint; photosynthesis unit tests + fast golden 188 pass;
+  bit-for-bit + noise twin 177 pass (default regime unchanged).
+
 ## Next (resume here)
 
 **Package 7.2 in progress. Sessions 1-7 (2026-10-30/31) did processes 1-9; session 8

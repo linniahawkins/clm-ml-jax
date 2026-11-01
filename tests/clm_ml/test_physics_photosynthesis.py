@@ -193,6 +193,7 @@ def test_boundary_layer_regimes():
     lam, turb, free = (_gb(r) for r in lbl.REGIMES)
     for g in (lam, turb, free):
         for x in g:
+            assert x.shape == (N_SLOTS, 2)  # one value per leaf in every regime
             np.testing.assert_array_equal(np.asarray(x)[DPAI == 0], 0.0)
         assert np.all(np.asarray(g.gbh)[LEAFY] >= gbh_min)
         # diffusivity ratios: CO2 < heat < water vapor

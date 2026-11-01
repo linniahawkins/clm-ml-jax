@@ -891,3 +891,33 @@ table file needs no recompilation and the tables can be differentiated or swappe
 Alternatives: a Python wrapper filling in the default (hides the input; loses the jitted
 function's methods used by tests, `_cache_size`); tables inside `CanopyParams` (they are
 not per-PFT parameters; they would be gathered and batched per patch).
+
+### C23. Package 7.2 review fixes (7.2, 2026-10-31)
+
+Independent review of `bdde552..HEAD` (two reviewers, the physics modules against the
+deleted originals and the step/driver/runners against the old driver; each saw the code
+only). One bug, fixed; the rest recorded:
+- **`leaf_boundary_layer: laminar | turbulent` stopped every run (fixed).** In these
+  regimes the conductances do not depend on the leaf temperature, so
+  `physics/leaf_boundary_layer.py` returned (layer, 1) instead of (layer, leaf); the old
+  adapter broadcast them over sunlit and shaded leaves (`.at[p, 1:, leaves].set`), the
+  sub-step carry of 10b (C20) does not, and the Runge-Kutta scan refused the shape (in the
+  first step already). Now broadcast to the leaf temperature's shape inside the routine
+  (Fortran calls it once per leaf). The unit test missed it because JAX clamps the
+  out-of-range index `[:, 1]`; it now checks the shapes. CHATS7 with `gb_type` 1 and 2
+  agrees with `bdde552` to 1.4e-11 relative over 30 steps (night to 15:00;
+  `probe710d/dump.py`, `cmp.py`); the default regime is unchanged (bit for bit).
+- **Recorded, not changed:** (a) the `euler` tableau has `b = [0]`: `runge_kutta_update`
+  with it would reset the state; `canopy._stage` returns before calling it for Euler, so
+  the model is right; (b) `run_streams` and `main()`'s chunk path call the runners without
+  `template` (and `make_chunk_runner` without `params`), so jit compiles the template, and
+  the patch constants formed from it, into the program as constants, contrary to the
+  comment in `make_stream_runner` (since Phase 5b, not 7.2; `Model.run_chunk` passes
+  them). Results are unaffected; it costs a recompilation per patch structure. For the
+  maintainer: fix in 7.4 (setup without globals), where the template goes away.
+- Checked by the reviewers and found equal to the old code (round-off): every physics
+  module; the alternative photosynthesis options (C3/C4 x colimitation x Medlyn /
+  Ball-Berry / WUE, 3.8e-12); Euler, RK2, RK3, Medlyn without acclimation/colimitation/
+  water stress, `HF_extension_type 1` with a dense canopy and `kn_val 0.3` (against
+  `bdde552` over 26 steps, 1.8e-11); the process order, the 13 conservation checks, the
+  options reaching the physics, the `_sharded` argument order and `vmap` axes.
