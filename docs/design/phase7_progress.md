@@ -397,6 +397,22 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   start); timing scripts on the new API. Tests: lint; `tests/clm_ml` + fast golden 375
   pass; all of `tests/regression` 199 pass (19.7 min); CPU gradient tier 8 pass (6.7 min).
 
+- **7.4 review fixes and timing (C31). Package 7.4 done.** Two independent reviewers (setup
+  and readers; driver, Model and run). Fixed: the output shapes were recomputed on every
+  `Model.run_chunk` (1.4 s per call: the first timing showed forward 234 ms/step); now found
+  once per stream set; `program=` refuses a program with other options; output files are
+  closed (their records written) when a run stops on an error; the legacy `.out` files are
+  appended when a run continues from a restart; the checks transfer the state once per chunk;
+  a CLM history whose soil levels do not match `soil.layer_structure`, or a time slice outside
+  the file, is an error (it was silently truncated or wrapped). Timing (`time_model.py
+  --steps 8`, CPU, gradient flags; `logs7/timing74.sh`, `p74-*` in
+  `timing/results_model.jsonl`): end of 7.3 (`8d93889`) forward 33.4/31.0 ms/step, gradient
+  542/395 ms/step, setup 21 s, peak 3.8-3.9 GB; after the fix forward 25.1/25.2 ms/step
+  (1.3x faster), gradient 373/365 ms/step, setup 11-12 s, peak 3.1-3.2 GB. Tests: lint;
+  `tests/clm_ml` + fast golden 378 pass; bit-for-bit + noise twin, `test_setup`,
+  `test_grid_setup`, `test_coarse_forcing`, `test_land_data_files`,
+  `test_sites_one_program`, `test_one_program_any_layers`, `test_patch_exclusion` 188 pass.
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,

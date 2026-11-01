@@ -29,8 +29,6 @@ from clm_ml.legacy.state import (
     SCALAR,
     SOIL_FIELDS,
     _diagnostic_layout,
-    patch_layers,
-    step_state_from_instances,
 )
 from clm_ml.state import Diagnostics, PatchLayers, StepState
 
@@ -103,12 +101,6 @@ def legacy_view(step: StepState, layers: PatchLayers) -> Mapping[str, object]:
     out["mlcanopy.zs_profile"] = _legacy(layers.zs, LAYER)
     out["mlcanopy.zw_profile"] = jnp.asarray(layers.zw)[None]
     return {f"{c}.{f}": out[f"{c}.{f}"] for c, f in FIELDS}
-
-
-def view_of_instances(insts) -> Mapping[str, object]:
-    """The legacy view of a step's containers ``insts`` (one patch), through the step state:
-    the first (initializing) step, and output shapes."""
-    return legacy_view(step_state_from_instances(insts), patch_layers(insts))
 
 
 def view_series(steps: StepState, layers: PatchLayers) -> Mapping[str, object]:

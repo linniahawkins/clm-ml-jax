@@ -224,5 +224,10 @@ def initial_soil_temperature(path, time_index: int, nlevgrnd: int) -> np.ndarray
     with nc.Dataset(path) as ds:
         if "TSOI" not in ds.variables:
             raise ValueError(f"{path}: no TSOI")
-        t = ds.variables["TSOI"][time_index - 1, :nlevgrnd, 0]
+        var = ds.variables["TSOI"]
+        if var.shape[1] != nlevgrnd:
+            raise ValueError(f"{path}: TSOI has {var.shape[1]} levels; the run needs {nlevgrnd}")
+        if not 1 <= time_index <= var.shape[0]:
+            raise ValueError(f"{path}: time slice {time_index} outside 1..{var.shape[0]}")
+        t = var[time_index - 1, :nlevgrnd, 0]
     return np.array([float(v) for v in t])

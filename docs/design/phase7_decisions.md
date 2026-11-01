@@ -1131,3 +1131,34 @@ which the run loop does not otherwise keep).
   health checks, restarts, acclimation, readers. The grid tests' tower-file writer is a test
   helper (`tests/regression/grid_tower_files.py`).
 - `Run.execute(quiet=...)` is kept (no effect: there is no subprocess any more).
+
+### C31. Package 7.4 review fixes (7.4, 2026-11-01)
+Independent review of `8d93889..397d724` by two reviewers (setup and readers against the
+deleted legacy code, with an end-to-end probe of cases the setup test does not cover: 600 s
+step, `run_mean`, default measurement height, two patches on a gridcell, organic matter,
+adjustment factor: all outputs within 1.1e-10 of the old code; driver/Model/run against the
+deleted `main.py`). Fixed:
+- **Output shapes cached** (`driver.output_shapes`, per stream set, on the `Simulation`): it
+  traces one step (~1.4 s) and was called on every `Model.run_chunk`, also inside
+  `jax.grad`; the package-end timing first showed the forward chunk 7x slower.
+- **`Model.run_chunk(program=...)`** refuses another model's program when its options
+  (time step, orbit of its start year, soil structure, acclimation, layer slots, patches,
+  layout, grid land data) differ: the compiled program holds them.
+- **Files closed when a run stops** (`Run._run_in_process`, `try/finally`): the netCDF and
+  `.out` files keep the records before the stop; the reader thread is shut down
+  (`run_streams`).
+- **Legacy `.out` files appended** when a run continues from a restart (were overwritten).
+- **Checks transfer the state once per chunk** (`check_batch`, `batch_failures`; were once
+  per patch: O(P^2) for global runs).
+- **CLM history validated:** `H2OSOI` must have the soil levels of `soil.layer_structure`
+  (`nlevsoi` for `clm5_0`, `nlevgrnd` for `clm4_5`), `TSOI` `nlevgrnd`, and every time
+  slice must be in the file. Before, a CLM5 history in a `clm4_5` run was silently cut to
+  its top levels, and a run starting before `clm_history.start` read the file's last
+  record (index -1). The legacy CLM4.5 path never ran at all (an index error in `SoilInit`:
+  the soil level counts were copied at import): CLM4.5 has no legacy reference.
+- Not changed, recorded: the reader thread reads netCDF while the output writers write
+  netCDF on the main thread (as since Phase 4; HDF5 builds without thread safety could
+  crash); soil colour class 0 is now an error (the legacy code wrapped it to class 20);
+  `Model.chunks` start at step 1 (the first step run at setup) while runs chunk from step 0.
+- Correction to C27: `forcing_interpolation.mean_cosz_function`'s calendar defaults to
+  `"GREGORIAN"` (no legacy global since 7.4f).

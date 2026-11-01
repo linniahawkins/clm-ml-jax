@@ -712,7 +712,16 @@ def read_chunk_inputs(sim: Simulation, first_step: int, n_steps: int, length=Non
 
 def output_shapes(sim: Simulation, names) -> dict:
     """Per-patch shape of each output variable (for ``init_buffers``), from patch 0's first
-    step (abstract evaluation: nothing is computed)."""
+    step (abstract evaluation: nothing is computed), found once per set of names and kept
+    on the simulation (it traces a step: ~1 s)."""
+    cache = sim.__dict__.setdefault("_output_shapes", {})
+    key = tuple(sorted(names))
+    if key not in cache:
+        cache[key] = _output_shapes(sim, key)
+    return dict(cache[key])
+
+
+def _output_shapes(sim: Simulation, names) -> dict:
     from clm_ml.step import step_inputs as combine
 
     step = patch_step(sim, bool(sim.c3[0]), tuple(names))
@@ -935,6 +944,7 @@ def batch_failures(errors, state, sim: Simulation, alive=None) -> dict:
     """``{patch: [problem, ...]}`` for the patches (of those ``alive``) that fail a
     conservation check or whose state is unhealthy."""
     errors = np.asarray(errors, dtype=float).reshape(sim.n_patches, len(BALANCE_CHECKS))
+    state = jax.tree.map(np.asarray, state)  # one transfer from the devices
     failed = {}
     for p in range(sim.n_patches):
         if alive is not None and not alive[p]:
@@ -969,6 +979,7 @@ def check_batch(errors, state, sim: Simulation, where: str) -> None:
     """Conservation checks and the state's health, per patch: stop the run naming the
     patches that fail (decision 25, default)."""
     check_batch_balance(errors, sim, where)
+    state = jax.tree.map(np.asarray, state)  # one transfer from the devices
     for p in range(sim.n_patches):
         check_health(_patch(state, p), _patch(sim.constants.layers, p), f"{where}, {sim.names[p]}")
 
@@ -1130,78 +1141,86 @@ def run_streams(
     schedule, length = chunk_schedule(sim, first, chunk_steps)
     reader = ThreadPoolExecutor(max_workers=1)
     pending = reader.submit(read_chunk_inputs, sim, *schedule[0], length) if schedule else None
-    weight = jnp.asarray(sim.weight, dtype=jnp.float64)
-    gidx = jnp.asarray(sim.runner_gidx)
-    for c, (first_step, n) in enumerate(schedule):
-        xg, xp = pending.result()
-        if c + 1 < len(schedule):
-            pending = reader.submit(read_chunk_inputs, sim, *schedule[c + 1], length)
-        starts = sim.step_starts(first_step, n)
-        records = [
-            S.chunk_records(starts, first_step, step_seconds, s.frequency, sim.calendar)
-            for s in streams
-        ]
-        n_run = n if length is None else length
-        n_slots = [
-            len(rc.keys) if length is None else max_chunk_records(s.frequency, length, step_seconds)
-            for s, rc in zip(streams, records)
-        ]
-        buffers = tuple(
-            S.init_buffers(s.statistic, k, buffer_shapes(s, gv), jnp)
-            for s, k, gv in zip(streams, n_slots, gvars)
-        )
-        slots = tuple(jnp.asarray(pad_steps(rc.index, n_run)) for rc in records)
-        active = jnp.asarray(np.arange(n_run) < n)
-        chunk_start_state = state
-        t_chunk = _time.perf_counter()
-        state, buffers, errors = runner(
-            state, xg, xp, slots, buffers, params, weight, jnp.asarray(alive), gidx, constants,
-            active, tables=sim.tables,
-        )  # fmt: skip
-        del xg, xp  # the chunk's forcing is not kept on the devices while the next one runs
-        buffers = tuple(
-            jax.tree.map(lambda a, k=len(rc.keys): a[:k], b) for b, rc in zip(buffers, records)
-        )
-        if timing:
-            jax.block_until_ready(state)
-            secs = _time.perf_counter() - t_chunk
-            print(f"timing: chunk {starts[0]:%Y-%m-%d} {n} steps {secs:.1f} s "
-                  f"({sim.n_real * n / secs:.0f} patch-steps/s)", flush=True)  # fmt: skip
-        end = sim.step_end(first_step + n - 1)
-        where = f"the chunk {starts[0]} to {end}"
-        errors = report_ignored_checks(errors, ignored, alive, sim, where)
-        if on_patch_error == "stop":
-            check_batch(errors, state, sim, where)
-        else:
-            failed = batch_failures(errors, state, sim, alive)
-            for p, problems in failed.items():
-                print(f"excluding {sim.names[p]} after {where}: " + "; ".join(problems))
-                alive[p] = False
-            n_out = int((~alive[sim.real_index]).sum())
-            if n_out > max_failed_patch_fraction * sim.n_real:
-                raise ModelError(
-                    f"ERROR: {n_out} of {sim.n_real} patches failed (more than "
-                    f"max_failed_patch_fraction {max_failed_patch_fraction:g}), after {where}"
+    try:
+        weight = jnp.asarray(sim.weight, dtype=jnp.float64)
+        gidx = jnp.asarray(sim.runner_gidx)
+        for c, (first_step, n) in enumerate(schedule):
+            xg, xp = pending.result()
+            if c + 1 < len(schedule):
+                pending = reader.submit(read_chunk_inputs, sim, *schedule[c + 1], length)
+            starts = sim.step_starts(first_step, n)
+            records = [
+                S.chunk_records(starts, first_step, step_seconds, s.frequency, sim.calendar)
+                for s in streams
+            ]
+            n_run = n if length is None else length
+            n_slots = [
+                (
+                    len(rc.keys)
+                    if length is None
+                    else max_chunk_records(s.frequency, length, step_seconds)
                 )
-            if not alive.all():
-                state = freeze_patches(state, chunk_start_state, alive)
-                buffers = tuple(fill_patches(b, alive) for b in buffers)
-        for i, rc in enumerate(records):
-            on_records(i, collectors[i].add_chunk(rc, real_part(buffers[i], sim)))
-        last = first_step + n == sim.n_steps
-        if restart_path is not None and (last or restart_boundary(starts[0], end, restart_every)):
-            write_restart(
-                restart_path,
-                {
-                    "version": RESTART_VERSION,
-                    "time": end,
-                    "state": jax.tree.map(np.asarray, state),
-                    "collectors": [col._pending for col in collectors],
-                    "alive": alive.copy(),
-                    "layout": sim.layout,
-                    "extra": save_extra() if save_extra is not None else None,
-                },
+                for s, rc in zip(streams, records)
+            ]
+            buffers = tuple(
+                S.init_buffers(s.statistic, k, buffer_shapes(s, gv), jnp)
+                for s, k, gv in zip(streams, n_slots, gvars)
             )
-    reader.shutdown()
+            slots = tuple(jnp.asarray(pad_steps(rc.index, n_run)) for rc in records)
+            active = jnp.asarray(np.arange(n_run) < n)
+            chunk_start_state = state
+            t_chunk = _time.perf_counter()
+            state, buffers, errors = runner(
+                state, xg, xp, slots, buffers, params, weight, jnp.asarray(alive), gidx, constants,
+                active, tables=sim.tables,
+            )  # fmt: skip
+            del xg, xp  # the chunk's forcing is not kept on the devices while the next one runs
+            buffers = tuple(
+                jax.tree.map(lambda a, k=len(rc.keys): a[:k], b) for b, rc in zip(buffers, records)
+            )
+            if timing:
+                jax.block_until_ready(state)
+                secs = _time.perf_counter() - t_chunk
+                print(f"timing: chunk {starts[0]:%Y-%m-%d} {n} steps {secs:.1f} s "
+                      f"({sim.n_real * n / secs:.0f} patch-steps/s)", flush=True)  # fmt: skip
+            end = sim.step_end(first_step + n - 1)
+            where = f"the chunk {starts[0]} to {end}"
+            errors = report_ignored_checks(errors, ignored, alive, sim, where)
+            if on_patch_error == "stop":
+                check_batch(errors, state, sim, where)
+            else:
+                failed = batch_failures(errors, state, sim, alive)
+                for p, problems in failed.items():
+                    print(f"excluding {sim.names[p]} after {where}: " + "; ".join(problems))
+                    alive[p] = False
+                n_out = int((~alive[sim.real_index]).sum())
+                if n_out > max_failed_patch_fraction * sim.n_real:
+                    raise ModelError(
+                        f"ERROR: {n_out} of {sim.n_real} patches failed (more than "
+                        f"max_failed_patch_fraction {max_failed_patch_fraction:g}), after {where}"
+                    )
+                if not alive.all():
+                    state = freeze_patches(state, chunk_start_state, alive)
+                    buffers = tuple(fill_patches(b, alive) for b in buffers)
+            for i, rc in enumerate(records):
+                on_records(i, collectors[i].add_chunk(rc, real_part(buffers[i], sim)))
+            last = first_step + n == sim.n_steps
+            if restart_path is not None and (
+                last or restart_boundary(starts[0], end, restart_every)
+            ):
+                write_restart(
+                    restart_path,
+                    {
+                        "version": RESTART_VERSION,
+                        "time": end,
+                        "state": jax.tree.map(np.asarray, state),
+                        "collectors": [col._pending for col in collectors],
+                        "alive": alive.copy(),
+                        "layout": sim.layout,
+                        "extra": save_extra() if save_extra is not None else None,
+                    },
+                )
+    finally:
+        reader.shutdown(cancel_futures=True)
     for i, collector in enumerate(collectors):
         on_records(i, collector.close())

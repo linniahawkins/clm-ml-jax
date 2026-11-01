@@ -47,11 +47,12 @@ class LegacyAsciiWriter:
     (the run's start year and month). :meth:`write` appends one step."""
 
     def __init__(self, directory: Path, tower: str, year: int, month: int, *, met_type: int,
-                 step_seconds: int, soil_z):  # fmt: skip
+                 step_seconds: int, soil_z, append: bool = False):  # fmt: skip
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
+        mode = "a" if append else "w"  # a run continuing from a restart appends
         self.files = [
-            open(directory / f"{tower}_{year:04d}-{month:02d}_{tag}.out", "w") for tag in TAGS
+            open(directory / f"{tower}_{year:04d}-{month:02d}_{tag}.out", mode) for tag in TAGS
         ]
         self.met_type, self.step_seconds, self.soil_z = met_type, step_seconds, soil_z
 

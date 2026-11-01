@@ -185,6 +185,29 @@ class Model:
         n_g = sim.n_gridcells
         names = sorted({v for s in streams for v in s.variables})
         gvars = [driver.gridcell_variables(s.variables, ("gridcell",)) for s in streams]
+        if program is not None:  # its compiled program holds its options: they must be ours
+            mine, theirs = self._sim, program._sim
+            same = (
+                mine.options,
+                mine.acclimation,
+                mine.acclimation_days,
+                mine.max_layers,
+                mine.n_patches,
+                mine.layout,
+            ) == (
+                theirs.options,
+                theirs.acclimation,
+                theirs.acclimation_days,
+                theirs.max_layers,
+                theirs.n_patches,
+                theirs.layout,
+            )
+            if not same or (mine.land_fn is None) != (theirs.land_fn is None):
+                raise ValueError(
+                    "program: the other model's compiled program has other options (time step, "
+                    "orbit of its start year, soil structure, acclimation, layer slots, patches "
+                    "or layout); its program would run this model with them"
+                )  # fmt: skip
         runner = (program or self)._runner(streams, gvars)
         shapes = {v: (self.n_patches,) + sh for v, sh in driver.output_shapes(sim, names).items()}
         starts = sim.step_starts(first_step, n)

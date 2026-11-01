@@ -46,7 +46,20 @@ def read_clm_history_series(
     adjust = nc.Dataset(soil_adjust_path, "r") if soil_adjust_path else None
     try:
         with nc.Dataset(path, "r") as ds:
+            n_time = ds.dimensions["time"].size
+            levels = ds.variables["H2OSOI"].shape[1]
+            want = nlevgrnd if layer_structure == "clm4_5" else nlevsoi
+            if levels != want:
+                raise ValueError(
+                    f"{path}: H2OSOI has {levels} soil levels; soil.layer_structure "
+                    f"{layer_structure} needs a history with {want}"
+                )
             for strt in sorted(set(time_slices)):
+                if not 1 <= strt <= n_time:
+                    raise ValueError(
+                        f"{path}: time slice {strt} outside 1..{n_time} (does the run start "
+                        "before forcing.clm_history.start or end after the file?)"
+                    )
                 t = strt - 1
                 elai = float(ds.variables["ELAI"][t, 0])
                 esai = float(ds.variables["ESAI"][t, 0])

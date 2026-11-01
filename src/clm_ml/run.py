@@ -381,6 +381,7 @@ class Run:
                 self.output_directory, self.legacy_tower_name(0), self.start.year,
                 self.start.month, met_type=3 if interpolation == "three_point" else 0,
                 step_seconds=self.step_seconds, soil_z=sim.soil_depth[0],
+                append=self.run_file.initial_conditions.source == "restart",
             )  # fmt: skip
 
         def on_records(i, records):
@@ -411,27 +412,28 @@ class Run:
             restart = driver.read_restart(self.path(ic.restart_file, name))
         every = parse_every(ex.restart_every, "restart_every")
         numerics = self.config.numerics
-        driver.run_streams(
-            sim,
-            streams,
-            on_records,
-            restart=restart,
-            restart_path=self.restart_path if write else None,
-            restart_every=tuple(every) if every else None,
-            save_extra=save_extra,
-            restore_extra=restore_extra,
-            levels=levels,
-            on_patch_error=numerics.on_patch_error,
-            max_failed_patch_fraction=numerics.max_failed_patch_fraction,
-            ignore_checks=tuple(numerics.ignore_checks),
-            chunk_steps=self.chunk_steps,
-            timing=self.is_grid,
-        )
-        if writers is not None:
-            for w in writers:
+        try:
+            driver.run_streams(
+                sim,
+                streams,
+                on_records,
+                restart=restart,
+                restart_path=self.restart_path if write else None,
+                restart_every=tuple(every) if every else None,
+                save_extra=save_extra,
+                restore_extra=restore_extra,
+                levels=levels,
+                on_patch_error=numerics.on_patch_error,
+                max_failed_patch_fraction=numerics.max_failed_patch_fraction,
+                ignore_checks=tuple(numerics.ignore_checks),
+                chunk_steps=self.chunk_steps,
+                timing=self.is_grid,
+            )
+        finally:  # also when the run stops: the files hold the records before the stop
+            for w in writers or ():
                 w.close()
-        if ascii_writer is not None:
-            ascii_writer.close()
+            if ascii_writer is not None:
+                ascii_writer.close()
         if self.is_grid:
             import jax
 
