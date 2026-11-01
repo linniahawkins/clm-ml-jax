@@ -19,13 +19,13 @@ Only the canopy roughness ratios (``z0m_to_height_ratio``, ``displacement_to_hei
 which only grid runs use, may be left out; a grid run then refuses the file. To make a new
 parameter set, copy a complete file (``clm-ml params chats -o mine.yaml``) and edit it.
 
-Built-in files (``clm_ml/data/params/``): ``clm5_defaults`` (CLM5 / CLM-ml v1 values),
+Presets (``clm_ml/presets/params/``, copied into a folder by ``clm-ml new``): ``clm5_defaults`` (CLM5 / CLM-ml v1 values),
 ``chats`` (``clm5_defaults`` with the CHATS walnut orchard values; Bonan, Burns & Patton
 2026, Table 2) and ``clm6``.
 
 Every params file is YAML in this one format. To use a CLM parameter file (netCDF, e.g. the
 CTSM 6.0 file), convert it once (``clm-ml params ctsm60_params.nc -o params_clm6.yaml``,
-:mod:`clm_ml.params_convert`); the built-in ``clm6`` is that conversion of the CTSM 6.0 file.
+:mod:`clm_ml.params_convert`); the preset ``clm6`` is that conversion of the CTSM 6.0 file.
 """
 
 from __future__ import annotations
@@ -180,8 +180,14 @@ class Params:
 
     @classmethod
     def from_yaml(cls, path_or_name: Path | str) -> "Params":
-        """Load a complete params file (a path, or a built-in name such as ``"chats"``)."""
-        merged, source = _load(path_or_name)
+        """Load a complete params file (a path, or a preset name such as ``"chats"``)."""
+        path = _resolve(path_or_name)
+        return cls.from_data(read_yaml(path), path.name)
+
+    @classmethod
+    def from_data(cls, data: dict, source: str) -> "Params":
+        """A complete params table from a params file's contents (``units``, ``pft``)."""
+        merged = _check_data(data, source)
         params = cls._from_merged(merged, source)
         missing = params.missing_for(list(range(1, len(PFT_NAMES))))
         if missing:
@@ -273,7 +279,7 @@ def pft_index(name: str, source: str) -> int:
 
 
 def builtin_params_path(name: str) -> Path:
-    return Path(str(resources.files("clm_ml") / "data" / "params" / f"{name}.yaml"))
+    return Path(str(resources.files("clm_ml") / "presets" / "params" / f"{name}.yaml"))
 
 
 def _check_value(spec: ParamSpec, value, where: str):
@@ -300,15 +306,13 @@ def _resolve(path_or_name: Path | str) -> Path:
     return Path(text)
 
 
-def _load(path_or_name):
-    """``({pft: {name: value}}, file name)`` of one params file, checked for unknown keys."""
-    path = _resolve(path_or_name)
-    data = read_yaml(path)
+def _check_data(data: dict, name: str) -> dict:
+    """``{pft: {name: value}}`` of a params file's contents, checked for unknown keys."""
     if "extends" in data:
         raise ConfigError(
-            f"{path.name}: 'extends' is not supported: a params file gives every parameter of "
+            f"{name}: 'extends' is not supported: a params file gives every parameter of "
             f"every PFT itself. Write a complete copy to edit with "
-            f"`clm-ml params {data['extends']} -o {path.name}`"
+            f"`clm-ml params {data['extends']} -o {Path(name).name}`"
         )
     unknown = sorted(set(data) - {"pft", "units", "description"})
     if unknown:
@@ -317,12 +321,12 @@ def _load(path_or_name):
             if "clm_parameters" in unknown
             else ""
         )
-        raise ConfigError(f"{path.name}: unknown key(s) {unknown}; allowed: pft, units{hint}")
+        raise ConfigError(f"{name}: unknown key(s) {unknown}; allowed: pft, units{hint}")
     pfts = data.get("pft") or {}
     if not isinstance(pfts, dict):
-        raise ConfigError(f"{path.name}: pft: expected a mapping of PFT names to parameters")
+        raise ConfigError(f"{name}: pft: expected a mapping of PFT names to parameters")
     for pft, entries in pfts.items():
-        pft_index(pft, path.name)
+        pft_index(pft, name)
         if not isinstance(entries, dict):
-            raise ConfigError(f"{path.name}: pft.{pft}: expected a mapping of parameters")
-    return {pft: dict(entries) for pft, entries in pfts.items()}, path.name
+            raise ConfigError(f"{name}: pft.{pft}: expected a mapping of parameters")
+    return {pft: dict(entries) for pft, entries in pfts.items()}

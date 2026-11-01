@@ -3,7 +3,7 @@ compiled chunks that accumulate the output streams.
 
 - :class:`Simulation`: a run's patches (constants, initial state, parameters, C3/C4 flag,
   gridcell map and weights; padded or laid out for devices), its clock, options and forcing
-  reader. :func:`simulation` builds it from a :class:`clm_ml.run.Run`.
+  reader. :func:`simulation` builds it from a :class:`clm_ml.experiment.Experiment`.
 - :func:`make_runner`: the compiled chunk: a ``jax.lax.scan`` over steps whose step is
   ``clm_ml.step.step`` vmapped over the patches (C3 and C4 patches in contiguous groups,
   decision 22), with the output streams accumulated inside (plan §6.9), split over devices
@@ -333,7 +333,7 @@ def step_options(run):
 
 
 def simulation(run) -> Simulation:
-    """The :class:`Simulation` of ``run`` (``clm_ml.run.Run``): every patch set up
+    """The :class:`Simulation` of ``run`` (``clm_ml.experiment.Experiment``): every patch set up
     (``clm_ml.setup``), domain order, not yet laid out for devices (:meth:`Simulation.
     laid_out`)."""
     from clm_ml.io.rsl_tables import default_rsl_tables

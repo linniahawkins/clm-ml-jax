@@ -33,41 +33,35 @@ needs_data = pytest.mark.skipif(
 )
 
 
-def grid_run_files(tmp: Path, region: dict, start: str, days: float = 1, co2: str = "{ppm: 383}",
-                   extra_model: str = "") -> Path:  # fmt: skip
-    """A small grid run (run.yaml, model.yaml, params.yaml) in ``tmp``."""
-    (tmp / "model.yaml").write_text(
-        "canopy_layers: {n_layers_within: 10, n_layers_above: 10, max_layers: 20}\n" + extra_model
-    )
-    (tmp / "run.yaml").write_text(f"""
-model: model.yaml
-params: clm6
-time: {{start: {start}, days: {days}, step_seconds: 1800}}
-domain:
-  type: grid
-  grid:
-    surface_data: {SURFACE}
-    land_mask: {HIST}.2000-01.nc
-    region: {region}
-forcing:
-  gridded:
-    meteorology:
-      tpqw: {TRENDY}/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.TPQWL.{{year}}.nc
-      solar: {TRENDY}/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.Solr_Diffuse.{{year}}.nc
-      precipitation: {TRENDY}/three_stream/clmforc.CRUJRAv4.10_0.5x0.5.Prec.{{year}}.nc
-      mask: {TRENDY}/three_stream/domain.crujra.v2.5_0.5x0.5.c240722.nc
-    co2: {co2}
-    soil: {{files: "{HIST}.{{year}}-{{month:02d}}.nc"}}
-output:
-  directory: {tmp / "out"}
-  streams: [{{name: h, frequency: hourly, variables: [latent_heat_flux, gpp]}}]
-""")
-    return tmp / "run.yaml"
+def grid_run_files(tmp: Path, region: dict, start: str, days: float = 1, co2: dict | None = None,
+                   output: dict | None = None) -> Path:  # fmt: skip
+    """A small grid experiment folder (``tmp/grid``) from the grid_1deg_2000 preset: 10 + 10
+    canopy layers, CO2 constant (``co2``, default 383 ppm), hourly latent heat and GPP."""
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from tests.experiment_tools import make_experiment
+
+    def run(d):
+        d["time"].update(start=start, days=days, end=None, steps=None)
+        d["forcing"]["gridded"]["co2"] = dict({"file": None, "ppm": None}, **(co2 or {"ppm": 383}))
+        d["output"] = output or {
+            "directory": str(tmp / "out"),
+            "streams": [{"name": "h", "frequency": "hourly",
+                         "variables": ["latent_heat_flux", "gpp"]}],
+        }  # fmt: skip
+
+    return make_experiment(
+        tmp / "grid", preset="grid_1deg_2000", run=run,
+        domain={"grid": {"surface_data": SURFACE, "land_mask": f"{HIST}.2000-01.nc",
+                         "region": region}},
+        model=lambda d: d["numerics"].update(on_patch_error="stop", max_failed_patch_fraction=0.01),
+    )  # fmt: skip
 
 
 #: A grid run and tower runs of its patches whose files hold the gridded data (meteorology
 #: at the model step, vegetation and soil water as the grid run forms them, initial soil
-#: temperature), in ``tmp``: ``run.yaml`` and ``tower_run.yaml``
+#: temperature), in ``tmp``: the folders ``grid`` and ``tower``
 WRITE_RUNS = """
 import sys, yaml
 from pathlib import Path
@@ -75,13 +69,13 @@ ROOT = Path({root!r}); sys.path.insert(0, str(ROOT / "src")); sys.path.insert(0,
 import numpy as np, jax
 jax.config.update("jax_enable_x64", True)
 from tests.regression.test_grid_setup import grid_run_files
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 from tests.regression import grid_tower_files as grid_setup
 from clm_ml.setup.grid import grid_inputs
 from clm_ml.params import PFT_NAMES
 tmp = Path({tmp!r})
 path = grid_run_files(tmp, {region}, "2000-07-01T00:00")
-run = load_run(path)
+run = load_experiment(path)
 d = run.domain
 inputs = grid_inputs(run)
 print("patches", d.n_patches, "gridcells", d.n_gridcells, "C4", int((d.patches.pft_index == 14).sum()))
@@ -94,20 +88,25 @@ for p in range(d.n_patches):
     (tmp / "towers" / f"P{{p}}_met.nc").symlink_to(tw); (tmp / "towers" / f"P{{p}}_hist.nc").symlink_to(hi)
     c = d.columns
     towers[f"P{{p}}"] = {{"latitude": float(d.gridcells.latitude[g]), "longitude": float(d.gridcells.longitude[g]),
-        "measurement_height": float(d.patches.measurement_height[p]), "forcing_step_minutes": 30,
+        "measurement_height": float(d.patches.measurement_height[p]),
         "soil": {{"sand_percent": float(c.sand_percent[p]), "clay_percent": float(c.clay_percent[p]),
                  "organic_matter": float(c.organic_matter[p]), "color_class": int(c.color_class[p]),
                  "bedrock_depth": float(c.bedrock_depth[p])}},
         "patches": [{{"pft": PFT_NAMES[int(d.patches.pft_index[p])], "weight": 1.0,
                      "canopy_height": float(d.patches.canopy_height[p]),
                      "root_biomass": float(d.patches.root_biomass[p])}}]}}
-(tmp / "towers.yaml").write_text(yaml.safe_dump(towers))
-r = yaml.safe_load(path.read_text())
-r["domain"] = {{"type": "towers", "towers": list(towers), "towers_file": "towers.yaml"}}
-r["forcing"] = {{"meteorology": {{"files": str(tmp / "towers" / "{{tower}}_met.nc")}},
-                "clm_history": {{"file": str(tmp / "towers" / "{{tower}}_hist.nc"),
-                                "start": "2000-07-01T00:00"}}}}
-(tmp / "tower_run.yaml").write_text(yaml.safe_dump(r))
+import dataclasses
+from clm_ml.domain import DomainFile
+from clm_ml.experiment import write_experiment
+from clm_ml.io.yaml_schema import from_dict
+from clm_ml.run import ForcingSection
+domain = from_dict(DomainFile, {{"type": "towers", "towers": towers}}, source="towers", context="towers")
+forcing = from_dict(ForcingSection, {{
+    "meteorology": {{"files": str(tmp / "towers" / "{{tower}}_met.nc"), "interval_seconds": 1800}},
+    "clm_history": {{"file": str(tmp / "towers" / "{{tower}}_hist.nc"), "start": "2000-07-01T00:00"}}}},
+    source="forcing", context="towers")
+write_experiment(tmp / "tower", dataclasses.replace(run.run_file, forcing=forcing), domain, run.config,
+                 run.params, generated="test", params_about="the grid run's")
 print("written")
 """
 
@@ -119,10 +118,10 @@ from pathlib import Path
 ROOT = Path({root!r}); sys.path.insert(0, str(ROOT / "src"))
 import numpy as np, jax
 jax.config.update("jax_enable_x64", True)
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 from clm_ml import driver
 tmp = Path({tmp!r})
-sim = driver.simulation(load_run(tmp / {run_file!r}))  # domain order
+sim = driver.simulation(load_experiment(tmp / {run_file!r}))  # domain order
 xg, xp = sim.read(0, 48)
 if sim.land_fn is not None:
     xw, land = xp
@@ -149,10 +148,10 @@ from pathlib import Path
 ROOT = Path({root!r}); sys.path.insert(0, str(ROOT / "src"))
 import numpy as np, jax
 jax.config.update("jax_enable_x64", True)
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 tmp = Path({tmp!r})
-for name, f in (("grid", "run.yaml"), ("tower", "tower_run.yaml")):
-    out = load_run(tmp / f).execute(write=False)["h"]
+for name in ("grid", "tower"):
+    out = load_experiment(tmp / name).execute(write=False)["h"]
     np.savez(tmp / f"{{name}}_out.npz", **{{v: np.asarray(out.data[v]) for v in ("latent_heat_flux", "gpp")}})
 print("ran")
 """
@@ -168,7 +167,7 @@ def _setups(tmp_path, region):
     import numpy as np
 
     out = _python(WRITE_RUNS.format(root=str(ROOT), tmp=str(tmp_path), region=region))
-    for run_file, name in (("run.yaml", "grid_in.npz"), ("tower_run.yaml", "tower_in.npz")):
+    for run_file, name in (("grid", "grid_in.npz"), ("tower", "tower_in.npz")):
         _python(SETUP_SCRIPT.format(root=str(ROOT), tmp=str(tmp_path), run_file=run_file, out=name))
     return out, np.load(tmp_path / "grid_in.npz"), np.load(tmp_path / "tower_in.npz")
 
@@ -222,16 +221,15 @@ from pathlib import Path
 ROOT = Path({root!r}); sys.path.insert(0, str(ROOT / "src")); sys.path.insert(0, str(ROOT))
 import yaml, numpy as np
 from tests.regression.test_grid_setup import grid_run_files
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 tmp = Path({tmp!r})
+output = {{"directory": str(tmp / "out"), "streams": [{{"name": "s", "frequency": "step",
+    "statistic": "instantaneous", "level": ["patch"], "variables": ["diagnostics.td_profile",
+    "diagnostics.dpai_profile", "state.leaf_temperature", "stem_area_added", "stem_area_index",
+    "leaf_area_index"]}}]}}
 path = grid_run_files(tmp, {{"lat": [41.5, 42.5], "lon": [-109.0, -108.5]}}, "2000-01-01T00:00",
-                      days=16, co2="{{ppm: 369}}")
-r = yaml.safe_load(path.read_text())
-r["output"]["streams"] = [{{"name": "s", "frequency": "step", "statistic": "instantaneous",
-    "level": ["patch"], "variables": ["diagnostics.td_profile", "diagnostics.dpai_profile",
-    "state.leaf_temperature", "stem_area_added", "stem_area_index", "leaf_area_index"]}}]
-path.write_text(yaml.safe_dump(r))
-run = load_run(path)
+                      days=16, co2={{"ppm": 369}}, output=output)
+run = load_experiment(path)
 pft = [str(x) for x in run.domain.patches.pft_index]
 out = run.execute(write=False)["s"]
 d = {{k: np.asarray(v) for k, v in {{**out.data, **out.raw}}.items()}}

@@ -55,13 +55,13 @@ def _build_initialized_model():
 
     from clm_ml import driver as D
     from clm_ml import step as S
+    from clm_ml.experiment import load_experiment
     from clm_ml.io.namelist import convert_namelist
     from clm_ml.model import Model
-    from clm_ml.run import load_run
 
     tmp = Path(tempfile.mkdtemp())
     convert_namelist(NAMELIST, tmp)
-    model = Model.from_run(load_run(tmp / "run.yaml"))
+    model = Model.from_experiment(load_experiment(tmp))
     sim = model._sim
     one = lambda t: jax.tree.map(lambda a: jnp.asarray(a)[0], t)  # noqa: E731
     xg, xp = model.forcing(1, 1)

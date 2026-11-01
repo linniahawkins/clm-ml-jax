@@ -1,16 +1,18 @@
 """
-The ``clm-ml`` command.
+The ``clm-ml`` command. An experiment is a folder with run.yaml, domain.yaml, model.yaml and
+params.yaml (decision 91; docs/design/experiment_folders.md).
 
-    clm-ml run run.yaml [--set key=value ...]   run the model and write outputs
-    clm-ml check run.yaml [--set ...]           validate all files and print a summary
-    clm-ml convert NAMELIST -o DIR              write run.yaml + model.yaml from a namelist
-    clm-ml params SOURCE -o PARAMS.yaml          write a complete params.yaml from a CLM
-                                                parameter file (.nc) or a params file
-    clm-ml model-yaml [-o FILE] [--from M.yaml]  write a complete, commented model.yaml (the
-                                                defaults, or every key of M.yaml)
+    clm-ml new DIR --from PRESET            write a complete experiment folder from a preset
+    clm-ml check DIR [--set ...]            validate the four files and print a summary
+    clm-ml run DIR [--set file.key=value]   run the model and write the outputs
+    clm-ml upgrade DIR                      rewrite a folder with every current setting
+    clm-ml convert NAMELIST -o DIR          write an experiment folder from a Fortran namelist
+    clm-ml params SOURCE -o PARAMS.yaml     write a complete params.yaml from a CLM parameter
+                                            file (.nc), or copy a params file or preset
 
-``--set`` changes one setting without editing files: ``--set time.days=7`` changes
-run.yaml; ``--set model.physics.stomatal_conductance=medlyn`` changes model.yaml.
+``--set`` changes one setting without editing the files, the file named first:
+``--set run.time.days=7``, ``--set model.physics.stomatal_conductance=medlyn``,
+``--set params.broadleaf_deciduous_temperate_tree.vcmax25=100``.
 """
 
 from __future__ import annotations
@@ -23,42 +25,48 @@ from clm_ml.io.yaml_schema import ConfigError
 
 
 def main(argv: list[str] | None = None) -> int:
+    from clm_ml.experiment import preset_names
+
     parser = argparse.ArgumentParser(prog="clm-ml", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
     for name, help_text in (("run", "run the model"), ("check", "validate and summarize")):
         p = sub.add_parser(name, help=help_text)
-        p.add_argument("run_file", type=Path, help="path to run.yaml")
+        p.add_argument("folder", type=Path, help="experiment folder")
         p.add_argument("--set", dest="overrides", action="append", default=[],
-                       metavar="KEY=VALUE", help="override one setting (repeatable)")  # fmt: skip
+                       metavar="FILE.KEY=VALUE", help="change one setting (repeatable)")  # fmt: skip
 
-    p = sub.add_parser("convert", help="convert a Fortran-style namelist to YAML")
+    p = sub.add_parser("new", help="write a complete experiment folder from a preset")
+    p.add_argument("folder", type=Path)
+    p.add_argument("--from", dest="preset", required=True,
+                   help=f"preset: {', '.join(preset_names())}")  # fmt: skip
+    p.add_argument("--force", action="store_true", help="overwrite the folder's files")
+
+    p = sub.add_parser("upgrade", help="rewrite a folder with every current setting")
+    p.add_argument("folder", type=Path)
+
+    p = sub.add_parser("convert", help="convert a Fortran-style namelist to an experiment folder")
     p.add_argument("namelist", type=Path)
     p.add_argument("-o", "--out-dir", type=Path, required=True)
 
     p = sub.add_parser("params", help="write a complete params.yaml (from a CLM .nc file)")
-    p.add_argument("source", help="CLM parameter file (.nc), params file or built-in name")
+    p.add_argument("source", help="CLM parameter file (.nc), params file or preset name")
     p.add_argument("-o", "--out", type=Path, required=True)
     p.add_argument("--base", default="clm5_defaults",
                    help="params file for what a CLM file lacks (default clm5_defaults)")  # fmt: skip
 
-    p = sub.add_parser("model-yaml", help="write a complete, commented model.yaml")
-    p.add_argument("-o", "--out", type=Path, help="output file (default: print)")
-    p.add_argument("--from", dest="source", type=Path,
-                   help="a model.yaml to complete (default: the defaults)")  # fmt: skip
-
     args = parser.parse_args(argv)
     try:
-        if args.command == "model-yaml":
-            from clm_ml.config import ModelConfig, model_yaml_text
+        if args.command == "new":
+            from clm_ml.experiment import new_experiment
 
-            config = ModelConfig.from_yaml(args.source) if args.source else ModelConfig()
-            text = model_yaml_text(config)
-            if args.out:
-                args.out.write_text(text)
-                print(f"wrote {args.out}")
-            else:
-                print(text, end="")
+            print(f"wrote {new_experiment(args.folder, args.preset, force=args.force)}")
+            return 0
+        if args.command == "upgrade":
+            from clm_ml.experiment import upgrade_experiment
+
+            for line in upgrade_experiment(args.folder):
+                print(line)
             return 0
         if args.command == "params":
             from clm_ml.params_convert import write_params_yaml
@@ -68,17 +76,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "convert":
             from clm_ml.io.namelist import convert_namelist
 
-            for path in convert_namelist(args.namelist, args.out_dir).values():
-                print(f"wrote {path}")
+            print(f"wrote {convert_namelist(args.namelist, args.out_dir)}")
             return 0
 
-        from clm_ml.run import load_run
+        from clm_ml.experiment import load_experiment
 
-        run = load_run(args.run_file, args.overrides)
-        print(run.summary())
+        exp = load_experiment(args.folder, args.overrides)
+        print(exp.summary())
         if args.command == "run":
-            run.execute()
-            print(f"Outputs written to {run.output_directory}")
+            exp.execute()
+            print(f"Outputs written to {exp.output_directory}")
         return 0
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)

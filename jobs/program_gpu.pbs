@@ -26,8 +26,8 @@ git -C $REPO worktree add --detach $TREE ${REV:-HEAD} >/dev/null 2>&1 \
   || { echo "worktree add failed: ${REV:-HEAD}"; exit 1; }
 cd $TREE && export PYTHONPATH=$TREE/src:$TREE
 git log --oneline -1; nvidia-smi --query-gpu=name,memory.total --format=csv,noheader; date
-python -u timing/time_program.py docs/design/examples/run_grid_1deg.yaml 'domain.grid.region=null' \
-  execution.devices=1 --label "${TAG:-run}" 2>&1 | grep -v "pjrt_executable\|^W1"
+python -u timing/time_program.py configs/grid_1deg_2000 'domain.grid.region=null' \
+  run.execution.devices=1 --label "${TAG:-run}" 2>&1 | grep -v "pjrt_executable\|^W1"
 cp timing/results_program.jsonl $SCRATCH/clm-ml-jax/jobs/results_program_${TAG:-run}.jsonl 2>/dev/null
 cd /; git -C $REPO worktree remove --force $TREE
 echo "ALL DONE $(date)"

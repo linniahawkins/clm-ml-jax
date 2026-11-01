@@ -32,12 +32,12 @@ sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 from clm_ml import driver as D
 from clm_ml.io.namelist import convert_namelist
 from clm_ml.output_streams import StreamSpec
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 
 D.restart_boundary = lambda start, end, every: True
 tmp = Path(tempfile.mkdtemp())
 convert_namelist(Path({namelist!r}), tmp)
-sim = D.simulation(load_run(tmp / "run.yaml")).laid_out()
+sim = D.simulation(load_experiment(tmp)).laid_out()
 streams = [StreamSpec("step", "step", "instantaneous", ("latent_heat_flux", "air_temperature")),
            StreamSpec("daily", "daily", "mean", ("latent_heat_flux",))]
 records = [[], []]

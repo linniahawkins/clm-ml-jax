@@ -128,26 +128,37 @@ def write_params_yaml(source, out: Path, base="clm5_defaults") -> Path:
     return write_table(table, out, lines + about.splitlines())
 
 
-def write_table(table: dict, out: Path, header: list[str]) -> Path:
-    """Write ``{pft: {name: value}}`` (:func:`params_table`) as a params file with the
-    comment lines ``header``; the written file must load as a complete params file."""
+def params_text(table: dict, header: list[str]) -> str:
+    """A params file of ``{pft: {name: value}}`` (:func:`params_table`): the comment lines
+    ``header``, the ``units`` of every parameter with its description, then the table."""
     import textwrap
 
     import yaml
 
+    from clm_ml.io.yaml_schema import flow
+
     order = [s.name for s in PARAM_SPECS]
     table = {pft: {k: e[k] for k in order if k in e} for pft, e in table.items()}
-    units = {s.name: s.units for s in PARAM_SPECS}
-    out = Path(out)
-    out.parent.mkdir(parents=True, exist_ok=True)
     lines = []
     for paragraph in header:
-        lines += textwrap.wrap(paragraph, 96, break_on_hyphens=False, break_long_words=False) or [
+        lines += textwrap.wrap(paragraph, 94, break_on_hyphens=False, break_long_words=False) or [
             ""
         ]
-    text = "".join(f"# {line}".rstrip() + "\n" for line in lines)
-    with open(out, "w") as fh:
-        fh.write(text + "\n")
-        yaml.safe_dump({"units": units, "pft": table}, fh, sort_keys=False, width=100)
+    text = "".join(f"# {line}".rstrip() + "\n" for line in lines) + "\n"
+    text += "# Units and meaning of each parameter (spectral ones are [visible, near-infrared]).\n"
+    text += "units:\n"
+    for s in PARAM_SPECS:
+        about = s.description + (" Optional: only grid runs use it." if s.optional else "")
+        text += f"  # {about}\n  {s.name}: {flow(s.units)}\n"
+    text += yaml.safe_dump({"pft": table}, sort_keys=False, width=100)
+    return text
+
+
+def write_table(table: dict, out: Path, header: list[str]) -> Path:
+    """Write ``{pft: {name: value}}`` (:func:`params_table`) as a params file with the
+    comment lines ``header`` (:func:`params_text`); it must load as a complete params file."""
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(params_text(table, header))
     Params.from_yaml(out)  # it must load
     return out

@@ -28,16 +28,16 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = """
 import json, sys, tempfile, copy
 from pathlib import Path
-sys.path.insert(0, {src!r})
+sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import yaml
+from tests.experiment_tools import edit
 import numpy as np
 from clm_ml.model import Model
 from clm_ml.output_streams import StreamSpec
 from clm_ml.io.namelist import convert_namelist
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 
 tmp = Path(tempfile.mkdtemp())
-convert_namelist(Path({namelist!r}), tmp)
 chats = yaml.safe_load(open({towers!r}))["CHATS7"]
 walnut = chats["patches"][0]
 needle = {{"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.4, "canopy_height": 15.0,
@@ -46,17 +46,15 @@ a = copy.deepcopy(chats); a["patches"] = [dict(walnut, weight=0.6), needle]
 b = copy.deepcopy(chats); b.update(latitude=45.0, longitude=-100.0)
 b["soil"].update(bedrock_depth=1.0, color_class=5)
 b["patches"] = [dict(walnut, weight=1.0, n_layers_within=10, n_layers_above=8)]
-(tmp / "towers.yaml").write_text(yaml.safe_dump({{"SITEA": a, "SITEB": b}}))
-base = yaml.safe_load((tmp / "run.yaml").read_text())
+sites = {{"SITEA": a, "SITEB": b}}
 
 def model(towers, pad):
-    d = copy.deepcopy(base)
-    d["domain"].update(towers=towers, towers_file="towers.yaml")
-    if pad:
-        d["execution"] = {{"patch_count": 4, "gridcell_count": 3}}
-    name = "_".join(towers) + ("_pad" if pad else "")
-    (tmp / f"{{name}}.yaml").write_text(yaml.safe_dump(d))
-    return Model.from_run(load_run(tmp / f"{{name}}.yaml"))
+    folder = tmp / ("_".join(towers) + ("_pad" if pad else ""))
+    convert_namelist(Path({namelist!r}), folder)
+    edit(folder, domain=lambda d: d.update(towers={{t: sites[t] for t in towers}}))
+    # padding: hidden (test) settings, given when the folder is loaded
+    pads = ["run.execution.patch_count=4", "run.execution.gridcell_count=3"] if pad else []
+    return Model.from_experiment(load_experiment(folder, pads))
 
 ma, mb, mb0 = model(["SITEA", "SITEB"], True), model(["SITEB"], True), model(["SITEB"], False)
 stream = StreamSpec("s", "step", "mean", ("latent_heat_flux", "gpp", "net_radiation"))
@@ -82,7 +80,8 @@ def test_padded_domains_share_one_program():
     script = SCRIPT.format(
         src=str(ROOT / "src"),
         namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.1day"),
-        towers=str(ROOT / "src" / "clm_ml" / "data" / "towers.yaml"),
+        towers=str(ROOT / "src" / "clm_ml" / "presets" / "towers" / "chats7.yaml"),
+        root=str(ROOT),
     )
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr[-3000:]

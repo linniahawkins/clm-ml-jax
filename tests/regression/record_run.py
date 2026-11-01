@@ -63,42 +63,30 @@ def run_case(
     """
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
-    import yaml
-
-    from clm_ml.io.namelist import convert_namelist
-    from clm_ml.run import load_run
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    from clm_ml.experiment import load_experiment
+    from clm_ml.outputs import field_names
+    from tests.experiment_tools import make_experiment
 
     workdir = Path(workdir)
-    convert_namelist(REFERENCE_NAMELIST, workdir)
-    run_yaml = workdir / "run.yaml"
-    data = yaml.safe_load(run_yaml.read_text())
-    from clm_ml.outputs import field_names
-
-    data["output"] = {
+    output = {
         "directory": str(workdir / "out"),
         "legacy_ascii": legacy_ascii,
         "streams": [
             # every named variable at every step
-            {"name": "step", "frequency": "step", "statistic": "mean", "variables": ["all"]},
+            {"name": "step", "frequency": "step", "statistic": "mean", "variables": ["all"],
+             "level": ["patch", "gridcell"], "file_per": "run"},
             # validation: every step field (clm_ml.outputs.step_fields), at every step
-            {
-                "name": "fields",
-                "frequency": "step",
-                "statistic": "instantaneous",
-                "variables": list(field_names()),
-                "level": ["patch"],
-            },
+            {"name": "fields", "frequency": "step", "statistic": "instantaneous",
+             "variables": list(field_names()), "level": ["patch"], "file_per": "run"},
         ],
-    }
-    if params is not None:
-        data["params"] = params
-    if physics:  # model.yaml physics options (e.g. acclimation_temperature)
-        model_yaml = workdir / data["model"]
-        model = yaml.safe_load(model_yaml.read_text()) or {}
-        model.setdefault("physics", {}).update(physics)
-        model_yaml.write_text(yaml.safe_dump(model))
-    run_yaml.write_text(yaml.safe_dump(data))
-    run = load_run(run_yaml)
+    }  # fmt: skip
+    make_experiment(
+        workdir, namelist=REFERENCE_NAMELIST, run={"output": output},
+        model={"physics": physics} if physics else None, params=params,
+    )  # fmt: skip
+    run = load_experiment(workdir)
     return run, run.execute(quiet=True)
 
 

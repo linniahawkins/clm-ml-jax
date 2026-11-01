@@ -1,16 +1,16 @@
 """
 The model in this Python process: initial state, compiled chunks, gradients (plan Phase 4).
 
-``Run.execute()`` runs the model and writes files. :class:`Model` is for working in a
-notebook or script instead: it exposes the pieces a calibration or sensitivity study needs::
+``Experiment.execute()`` runs the model and writes files. :class:`Model` is for working in
+a notebook or script instead: it exposes the pieces a calibration or sensitivity study needs::
 
-    from clm_ml.run import load_run
+    import clm_ml
     from clm_ml.model import Model
 
-    model = Model.from_run(load_run("chats7/run.yaml"))
+    model = Model.from_experiment(clm_ml.load_experiment("configs/chats7_1day"))
     state = model.initial_state()          # after the first (initializing) step
     params = model.default_params()        # CanopyParams table, one row per PFT of the domain
-    first, n = model.chunks()[0]           # calendar-month chunks (decision 17)
+    first, n = model.chunks()[0]           # fixed-length chunks (decision 33)
     forcing = model.forcing(first, n)
     daily = StreamSpec("daily", "daily", "mean", ("latent_heat_flux",))
 
@@ -43,7 +43,7 @@ import numpy as np
 # (the "thunk" runtime, default in JAX 0.6.2): reproduced with a 2-step chunk; the older
 # runtime computes them, with or without jax.checkpoint on the step. XLA reads this flag
 # when it starts, so it is set here, on import, unless already chosen. (Normal runs,
-# Run.execute and the command line, keep the default runtime.) JAX 0.9.2 no longer supports
+# Experiment.execute and the command line, keep the default runtime.) JAX 0.9.2 no longer supports
 # the flag (the new runtime is the only one) and computes these gradients without crashing
 # (Phase 6, step 0c), so it is set only for JAX < 0.7.
 _LEGACY_CPU_RUNTIME = "--xla_cpu_use_thunk_runtime=false"
@@ -87,9 +87,10 @@ class Model:
         self.pft_names: tuple = sim.pft_names
 
     @classmethod
-    def from_run(cls, run) -> "Model":
-        """Set the model up in this process for ``run`` (a :class:`clm_ml.run.Run`): every
-        patch, and its first step (run as a one-step chunk)."""
+    def from_experiment(cls, run) -> "Model":
+        """Set the model up in this process for an experiment
+        (:class:`clm_ml.experiment.Experiment`): every patch, and its first step (run as a
+        one-step chunk)."""
         import jax.numpy as jnp
 
         from clm_ml import driver

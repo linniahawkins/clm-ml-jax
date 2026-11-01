@@ -65,11 +65,11 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import numpy as np
 
-from clm_ml.io.yaml_schema import ConfigError
+from clm_ml.io.yaml_schema import ConfigError, option
 
 TKFRZ = 273.15  # SHR_CONST_TKFRZ
 PSTD = 101325.0  # SHR_CONST_PSTD
@@ -90,35 +90,47 @@ STREAMS = {
 
 @dataclasses.dataclass(frozen=True)
 class DatmStreamsSection:
-    """The three CRUJRA ``datm`` streams; ``{year}`` is expanded."""
+    """The three CRUJRA datm streams ({year} is expanded), mapped and interpolated in time as
+    CDEPS datm does."""
 
-    tpqw: str
-    solar: str
-    precipitation: str
-    mask: str  # 0.5° domain file with ``mask`` (the streams' mesh mask)
+    tpqw: str = option(doc="Temperature, pressure, humidity, wind and longwave stream.",
+                       path=True)  # fmt: skip
+    solar: str = option(doc="Solar radiation stream.", path=True)
+    precipitation: str = option(doc="Precipitation stream.", path=True)
+    mask: str = option(doc="The streams' 0.5 degree domain file with mask.", path=True)
 
 
 @dataclasses.dataclass(frozen=True)
 class Co2Section:
-    file: Optional[str] = None  # co2tseries file (``CO2``, ``time`` with units and calendar)
-    ppm: Optional[float] = None  # or a constant
+    """Atmospheric CO2: a time series file or a constant (give one)."""
+
+    file: Optional[str] = option(
+        None, "CO2 time series file (CO2, time with units and calendar).", path=True
+    )
+    ppm: Optional[float] = option(None, "Or a constant CO2 (ppm).")
 
 
 @dataclasses.dataclass(frozen=True)
 class SoilHistorySection:
-    """Monthly CLM history files (``{year}``, ``{month}`` expanded) with ``H2OSOI`` and
-    ``TSOI`` on the surface-data grid."""
+    """Monthly CLM history files with H2OSOI and TSOI on the surface-data grid: prescribed
+    soil water, and the initial soil temperature."""
 
-    files: str
+    files: str = option(doc="The files, with {year} and {month} expanded.", path=True)
 
 
 @dataclasses.dataclass(frozen=True)
 class GriddedForcingSection:
-    meteorology: DatmStreamsSection
-    co2: Co2Section
-    soil: SoilHistorySection
-    # Within a model step (CLM-ml v2 sub-steps, as for towers): three_point = met_type 3
-    interpolation: str = "three_point"
+    """Gridded forcing (grid runs)."""
+
+    meteorology: DatmStreamsSection = option(doc="The meteorology streams.")
+    co2: Co2Section = option(doc="Atmospheric CO2.")
+    soil: SoilHistorySection = option(doc="Monthly soil water and temperature.")
+    interpolation: Literal["none", "three_point"] = option(
+        "three_point",
+        "Forcing within a model step's sub-steps, as for towers: three-point interpolation "
+        "(CLM-ml v2) or the step's value.",
+        fortran="met_type 3/0",
+    )
 
 
 # ---------------------------------------------------------------------------------------

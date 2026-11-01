@@ -22,7 +22,7 @@ sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import jax, jax.numpy as jnp, numpy as np
 jax.config.update("jax_enable_x64", True)
 from clm_ml.io.namelist import convert_namelist
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 from clm_ml.model import Model
 from clm_ml import driver as D, step as S
 from clm_ml import output_streams as OS
@@ -31,7 +31,7 @@ from clm_ml.outputs import VARIABLES, _Raw
 
 tmp = Path(tempfile.mkdtemp())
 convert_namelist(Path({namelist!r}), tmp)
-model = Model.from_run(load_run(tmp / "run.yaml"))
+model = Model.from_experiment(load_experiment(tmp))
 sim = model._sim
 first, n = 1, 49
 state, forcing = model.initial_state(), model.forcing(first, n)

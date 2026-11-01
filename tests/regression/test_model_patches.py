@@ -26,14 +26,15 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = """
 import json, sys, tempfile
 from pathlib import Path
-sys.path.insert(0, {src!r})
+sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import yaml
+from tests.experiment_tools import edit
 import jax
 import numpy as np
 from clm_ml.model import Model
 from clm_ml.output_streams import StreamSpec
 from clm_ml.io.namelist import convert_namelist
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 
 tmp = Path(tempfile.mkdtemp())
 convert_namelist(Path({namelist!r}), tmp)
@@ -42,12 +43,9 @@ walnut = dict(tower["patches"][0], weight=0.6)
 needle = {{"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.4, "canopy_height": 15.0,
           "root_biomass": 800.0, "n_layers_within": 8, "n_layers_above": 6}}
 tower["patches"] = [walnut, needle]
-(tmp / "towers.yaml").write_text(yaml.safe_dump({{"MIXED": tower}}))
-d = yaml.safe_load((tmp / "run.yaml").read_text())
-d["domain"].update(towers=["MIXED"], towers_file="towers.yaml")
-(tmp / "run.yaml").write_text(yaml.safe_dump(d))
+edit(tmp, domain=lambda d: d.update(towers={{"MIXED": tower}}))
 
-model = Model.from_run(load_run(tmp / "run.yaml"))
+model = Model.from_experiment(load_experiment(tmp))
 state, params, weights = model.initial_state(), model.default_params(), model.weights()
 first, n = 36, 2  # midday
 forcing = model.forcing(first, n)
@@ -83,7 +81,8 @@ def _run(gradient: bool) -> dict:
     script = SCRIPT.format(
         src=str(ROOT / "src"),
         namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.1day"),
-        towers=str(ROOT / "src" / "clm_ml" / "data" / "towers.yaml"),
+        towers=str(ROOT / "src" / "clm_ml" / "presets" / "towers" / "chats7.yaml"),
+        root=str(ROOT),
         gradient=gradient,
     )
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)

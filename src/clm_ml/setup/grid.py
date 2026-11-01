@@ -20,7 +20,7 @@ def grid_inputs(run):
     from clm_ml.grid_forcing import GridInputs
 
     return GridInputs(
-        run.domain, run.path(run.run_file.domain.grid.surface_data), run.run_file.forcing.gridded,
+        run.domain, run.path(run.domain_file.grid.surface_data), run.run_file.forcing.gridded,
         run.start, run.step_seconds, run.n_steps, resolve=run.path, calendar=run.calkindflag,
     )  # fmt: skip
 

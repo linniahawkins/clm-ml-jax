@@ -13,7 +13,7 @@ the Fortran acclimation temperature (``physics.acclimation_temperature: run_mean
 default 10-day running mean, decision 15, departs from Fortran by design, by up to ~1%) and
 the legacy ASCII output (``output.legacy_ascii: true``): ``configs/chats7_may2007_fortran``::
 
-    clm-ml run configs/chats7_may2007_fortran/run.yaml --set output.directory=<dir>
+    clm-ml run configs/chats7_may2007_fortran --set run.output.directory=<dir>
     CLM_ML_COMPARE_DIR=<dir> pytest tests/test_fortran_python_comparison.py -m slow -v
 
 (Phase 7.6: ``clm-ml-offline`` is retired; without ``CLM_ML_COMPARE_DIR`` the tests skip.)

@@ -1,0 +1,29 @@
+# Preset for `clm-ml new DIR --from chats7_may2007_fortran`: the settings that differ from the defaults.
+# `new` writes the four complete files. Relative paths starting with data/ are in the
+# repository (the CHATS7 input files are not installed with the package).
+description: >-
+  CHATS7, May 2007: the run compared with Fortran CLM-ml v2 (tests/test_fortran_python_comparison.py):
+  31 days with the Fortran acclimation temperature and the legacy .out files.
+run:
+  time: {start: 2007-05-01T00:00, days: 31}
+  forcing:
+    meteorology:
+      files: [data/input_files/tower-forcing/CHATS7/2007-05.nc]
+    clm_history:
+      file: data/input_files/clm5_0/CHATS7/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+      start: 2007-04-01T00:00
+    soil_water:
+      adjustment:
+        file: data/input_files/clm5_0/CHATS7/CHATS_soil_moisture_correction_29Jul25.nc
+        levels: 3
+  output:
+    directory: output
+    legacy_ascii: true
+    streams:
+    - {name: halfhourly, frequency: step, statistic: mean, variables: [all], level: [patch]}
+domain:
+  type: towers
+  towers: [chats7]                 # presets/towers/chats7.yaml
+model:
+  physics: {acclimation_temperature: run_mean}
+params: chats                      # presets/params/chats.yaml

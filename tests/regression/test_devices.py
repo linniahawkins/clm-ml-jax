@@ -28,7 +28,10 @@ VARS = ["latent_heat_flux", "sensible_heat_flux", "gpp", "net_radiation"]
 
 
 def _towers() -> dict:
-    chats = yaml.safe_load((ROOT / "src" / "clm_ml" / "data" / "towers.yaml").read_text())["CHATS7"]
+    sys.path.insert(0, str(ROOT))
+    from tests.experiment_tools import chats7_tower
+
+    chats = chats7_tower()
     walnut = chats["patches"][0]
     grass = {"pft": "c4_grass", "weight": 0.3, "canopy_height": 0.5, "root_biomass": 400.0,
              "n_layers_within": 5, "n_layers_above": 10}  # fmt: skip
@@ -47,23 +50,19 @@ def _towers() -> dict:
 
 def _execute(tmp: Path, devices: int):
     sys.path.insert(0, str(ROOT / "src"))
-    from clm_ml.io.namelist import convert_namelist
-    from clm_ml.run import load_run
+    sys.path.insert(0, str(ROOT))
+    from clm_ml.experiment import load_experiment
+    from tests.experiment_tools import make_experiment
 
     work = tmp / f"devices{devices}"
-    work.mkdir()
-    convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", work)
-    (work / "towers.yaml").write_text(yaml.safe_dump(_towers()))
-    d = yaml.safe_load((work / "run.yaml").read_text())
-    d["domain"].update(towers=["SITEA", "SITEB", "SITEC"], towers_file="towers.yaml")
-    d["execution"] = {"devices": devices}
-    d["output"] = {
+    output = {
         "directory": str(work / "out"),
         "streams": [{"name": "step", "frequency": "step", "statistic": "mean",
                      "variables": VARS, "level": ["patch", "gridcell"]}],
     }  # fmt: skip
-    (work / "run.yaml").write_text(yaml.safe_dump(d))
-    return load_run(work / "run.yaml").execute(write=False, quiet=True)["step"]
+    make_experiment(work, namelist=ROOT / "data" / "namelists" / "nl.CHATS7.1day", domain=lambda d: d.update(towers=_towers()),
+                    run={"execution": {"devices": devices}, "output": output})  # fmt: skip
+    return load_experiment(work).execute(write=False, quiet=True)["step"]
 
 
 _SCRIPT = """

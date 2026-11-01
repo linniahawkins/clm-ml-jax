@@ -9,8 +9,8 @@ size (``compiled.memory_analysis().generated_code_size_in_bytes``), the chunk's 
 patch-steps per second, and peak device memory. Appends one JSON line to
 ``timing/results_program.jsonl``.
 
-    python timing/time_program.py configs/grid_1deg_2000/run.yaml \
-        'domain.grid.region=null' execution.devices=1 [--label ...]
+    python timing/time_program.py configs/grid_1deg_2000 \
+        'domain.grid.region=null' run.execution.devices=1 [--label ...]
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("run_yaml")
+    parser.add_argument("folder", help="experiment folder")
     parser.add_argument("overrides", nargs="*")
     parser.add_argument("--label", default="")
     args = parser.parse_args()
@@ -38,11 +38,11 @@ def main() -> None:
 
     from clm_ml import driver as D
     from clm_ml import output_streams as S
-    from clm_ml.run import load_run
+    from clm_ml.experiment import load_experiment
 
-    run = load_run(args.run_yaml, args.overrides)
+    run = load_experiment(args.folder, args.overrides)
     ex = run.run_file.execution
-    result = {"label": args.label, "run": str(args.run_yaml), "overrides": args.overrides}
+    result = {"label": args.label, "run": str(args.folder), "overrides": args.overrides}
     t0 = time.perf_counter()
     sim = D.simulation(run).laid_out(int(ex.devices or 1), ex.patch_count, ex.gridcell_count)
     result["setup_s"] = round(time.perf_counter() - t0, 1)

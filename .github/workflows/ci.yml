@@ -58,7 +58,7 @@ jobs:
             --no-cov \
             --tb=short
 
-      - name: Run clm_ml tests (config, params, domain, run.yaml)
+      - name: Run clm_ml tests (experiment folders, config, params, domain)
         run: |
           pytest tests/clm_ml/ -q \
             --no-cov \

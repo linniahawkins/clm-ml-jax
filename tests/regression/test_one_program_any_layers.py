@@ -31,7 +31,7 @@ from clm_ml.model import Model
 import numpy as np
 from clm_ml import output_streams as S
 from clm_ml.io.namelist import convert_namelist
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 from clm_ml.outputs import VARIABLES
 
 tmp = Path(tempfile.mkdtemp())
@@ -40,8 +40,8 @@ names = tuple(v.name for v in VARIABLES)
 stream = S.StreamSpec("s", "step", "instantaneous", names)
 first, n = 12, 6
 
-a = Model.from_run(load_run(tmp / "run.yaml"))
-b = Model.from_run(load_run(tmp / "run.yaml", ["model.canopy_layers.n_layers_within=10",
+a = Model.from_experiment(load_experiment(tmp))
+b = Model.from_experiment(load_experiment(tmp, ["model.canopy_layers.n_layers_within=10",
                                               "model.canopy_layers.n_layers_above=10"]))
 layers = [int(np.asarray(m.constants().layers.n_layers).max()) for m in (a, b)]
 

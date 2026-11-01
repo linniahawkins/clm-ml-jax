@@ -32,14 +32,15 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = """
 import json, sys, tempfile
 from pathlib import Path
-sys.path.insert(0, {src!r})
+sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import yaml
+from tests.experiment_tools import edit
 import jax, jax.numpy as jnp
 import numpy as np
 from clm_ml import driver as D
 from clm_ml.io.namelist import convert_namelist
 from clm_ml.output_streams import StreamSpec
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 
 tmp = Path(tempfile.mkdtemp())
 convert_namelist(Path({namelist!r}), tmp)
@@ -47,11 +48,8 @@ tower = yaml.safe_load(open({towers!r}))["CHATS7"]
 needle = {{"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.4, "canopy_height": 15.0,
           "root_biomass": 800.0, "n_layers_within": 8, "n_layers_above": 6}}
 tower["patches"] = [dict(tower["patches"][0], weight=0.6), needle]
-(tmp / "towers.yaml").write_text(yaml.safe_dump({{"MIXED": tower}}))
-d = yaml.safe_load((tmp / "run.yaml").read_text())
-d["domain"].update(towers=["MIXED"], towers_file="towers.yaml")
-(tmp / "run.yaml").write_text(yaml.safe_dump(d))
-run = load_run(tmp / "run.yaml")
+edit(tmp, domain=lambda d: d.update(towers={{"MIXED": tower}}))
+run = load_experiment(tmp)
 sim = D.simulation(run).laid_out()
 stream = StreamSpec("s", "step", "mean", ("latent_heat_flux", "gpp"))
 good = jax.tree.map(jnp.asarray, sim.state0)  # before the first step
@@ -87,7 +85,8 @@ def test_failing_patch_stop_or_exclude():
     script = SCRIPT.format(
         src=str(ROOT / "src"),
         namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.1day"),
-        towers=str(ROOT / "src" / "clm_ml" / "data" / "towers.yaml"),
+        towers=str(ROOT / "src" / "clm_ml" / "presets" / "towers" / "chats7.yaml"),
+        root=str(ROOT),
     )
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr[-3000:]

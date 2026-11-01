@@ -41,26 +41,26 @@ SITE_B = {
 SCRIPT = """
 import json, sys, tempfile
 from pathlib import Path
-sys.path.insert(0, {src!r})
+sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import yaml
+from tests.experiment_tools import edit
 import numpy as np
 from clm_ml.model import Model
 from clm_ml import output_streams as S
 from clm_ml.io.namelist import convert_namelist
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 
 site_b = {site_b!r}
-tmp = Path(tempfile.mkdtemp())
+root = Path(tempfile.mkdtemp())
+tmp, tmp_b = root / "a", root / "b"
 convert_namelist(Path({namelist!r}), tmp)
+convert_namelist(Path({namelist!r}), tmp_b)
 tower = yaml.safe_load(open({towers!r}))["CHATS7"]
 tower.update(latitude=site_b["latitude"], longitude=site_b["longitude"])
 tower["soil"].update(bedrock_depth=site_b["bedrock_depth"], color_class=site_b["color_class"])
 tower["patches"][0].update(n_layers_within=site_b["n_layers_within"],
                            n_layers_above=site_b["n_layers_above"])
-(tmp / "towers.yaml").write_text(yaml.safe_dump({{"SITEB": tower}}))
-d = yaml.safe_load((tmp / "run.yaml").read_text())
-d["domain"].update(towers=["SITEB"], towers_file="towers.yaml")
-(tmp / "b.yaml").write_text(yaml.safe_dump(d))
+edit(tmp_b, domain=lambda d: d.update(towers={{"SITEB": tower}}))
 
 names = ("latent_heat_flux", "sensible_heat_flux", "gpp", "soil_temperature",
          "net_radiation")
@@ -81,11 +81,11 @@ def site(model):
 
 result = {{}}
 if {alone!r}:
-    b = Model.from_run(load_run(tmp / "b.yaml"))
+    b = Model.from_experiment(load_experiment(tmp_b))
     result["b_alone"] = own(b)
 else:
-    a = Model.from_run(load_run(tmp / "run.yaml"))
-    b = Model.from_run(load_run(tmp / "b.yaml"))
+    a = Model.from_experiment(load_experiment(tmp))
+    b = Model.from_experiment(load_experiment(tmp_b))
     result["site_a"], result["site_b"] = site(a), site(b)
     result["a"] = own(a)
     runner = next(iter(a._runners.values()))
@@ -103,7 +103,8 @@ def _run(alone: bool) -> dict:
     script = SCRIPT.format(
         src=str(ROOT / "src"),
         namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.1day"),
-        towers=str(ROOT / "src" / "clm_ml" / "data" / "towers.yaml"),
+        towers=str(ROOT / "src" / "clm_ml" / "presets" / "towers" / "chats7.yaml"),
+        root=str(ROOT),
         site_b=SITE_B,
         alone=alone,
     )

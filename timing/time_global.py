@@ -53,8 +53,8 @@ def main() -> None:
 
     from clm_ml import driver as D
     from clm_ml import output_streams as S
+    from clm_ml.experiment import load_experiment
     from clm_ml.io.namelist import convert_namelist
-    from clm_ml.run import load_run
 
     n_p, k = args.patches, args.per_gridcell
     n_g = n_p // k
@@ -64,7 +64,9 @@ def main() -> None:
     # the synthetic domain: CHATS7 forcing for every gridcell, every other input at random
     tmp = Path(tempfile.mkdtemp())
     convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", tmp)
-    chats = yaml.safe_load((ROOT / "src" / "clm_ml" / "data" / "towers.yaml").read_text())["CHATS7"]
+    chats = yaml.safe_load(
+        (ROOT / "src" / "clm_ml" / "presets" / "towers" / "chats7.yaml").read_text()
+    )["CHATS7"]
     towers = {}
     for g in range(n_g):
         t = copy.deepcopy(chats)
@@ -83,14 +85,15 @@ def main() -> None:
             for j, wi in zip(kinds, w)
         ]  # fmt: skip
         towers[f"G{g}"] = t
-    (tmp / "towers.yaml").write_text(yaml.safe_dump(towers))
+    d = yaml.safe_load((tmp / "domain.yaml").read_text())
+    d["towers"] = towers
+    (tmp / "domain.yaml").write_text(yaml.safe_dump(d))
     d = yaml.safe_load((tmp / "run.yaml").read_text())
-    d["domain"].update(towers=list(towers), towers_file="towers.yaml")
-    d["execution"] = {"devices": args.devices}
+    d["execution"]["devices"] = args.devices
     (tmp / "run.yaml").write_text(yaml.safe_dump(d))
 
     t0 = time.perf_counter()
-    sim = D.simulation(load_run(tmp / "run.yaml")).laid_out(args.devices)
+    sim = D.simulation(load_experiment(tmp)).laid_out(args.devices)
     result["setup_s"] = round(time.perf_counter() - t0, 1)
     print("setup", result["setup_s"], "s", flush=True)
 

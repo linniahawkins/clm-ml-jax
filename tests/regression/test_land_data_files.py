@@ -81,22 +81,19 @@ def _run(workdir: Path, forcing: dict):
     import sys
 
     sys.path.insert(0, str(ROOT / "src"))
-    from clm_ml.io.namelist import convert_namelist
-    from clm_ml.run import load_run
+    sys.path.insert(0, str(ROOT))
+    from clm_ml.experiment import load_experiment
+    from tests.experiment_tools import make_experiment
 
-    workdir.mkdir()
-    convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", workdir)
-    run_yaml = workdir / "run.yaml"
-    data = yaml.safe_load(run_yaml.read_text())
-    for key, section in forcing.items():  # merge: keep e.g. soil_water.adjustment
-        data["forcing"].setdefault(key, {}).update(section)
-    data["output"] = {
+    output = {
         "directory": str(workdir / "out"),
         "streams": [{"name": "step", "frequency": "step", "statistic": "mean",
                      "variables": VARIABLES}],
     }  # fmt: skip
-    run_yaml.write_text(yaml.safe_dump(data))
-    return load_run(run_yaml).execute(quiet=True)["step"]
+    # forcing sections merged (keeping e.g. soil_water.adjustment)
+    make_experiment(workdir, namelist=ROOT / "data" / "namelists" / "nl.CHATS7.1day",
+                    run={"forcing": forcing, "output": output})  # fmt: skip
+    return load_experiment(workdir).execute(quiet=True)["step"]
 
 
 def test_land_data_files(tmp_path):

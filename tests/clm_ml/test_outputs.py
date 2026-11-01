@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
+from clm_ml.experiment import load_experiment
 from clm_ml.outputs import VARIABLES, Outputs
-from clm_ml.run import load_run
 
 from .conftest import PROJECT_ROOT
 
@@ -20,7 +20,7 @@ def outputs(chats_run_dir):
 
     with np.load(REFERENCE) as data:
         raw = {k: data[k] for k in data.files if not k.startswith("meta.")}
-    run = load_run(chats_run_dir / "run.yaml")
+    run = load_experiment(chats_run_dir)
     r = _Raw(raw, run.config.canopy_layers.max_layers)
     n_steps = raw["layers.n_layers"].shape[0]
     step = dt.timedelta(seconds=run.step_seconds)

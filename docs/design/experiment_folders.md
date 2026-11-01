@@ -1,6 +1,7 @@
 # Experiment folders: one place for every user setting
 
 Design note, Phase 8a (maintainer, 2026-11-01; decision 91 in [`decisions.md`](decisions.md)).
+**Implemented 2026-11-01** (`clm_ml.experiment`; what changed with it: decision 91).
 Replaces how runs are configured today (decisions 89 and 90 revised). No science change: a
 CHATS7 experiment folder must give results bit for bit identical to today's CHATS7 run.
 

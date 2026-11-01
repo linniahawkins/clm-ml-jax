@@ -45,21 +45,21 @@ def main() -> None:
     import jax
     import numpy as np
 
+    from clm_ml.experiment import load_experiment
     from clm_ml.io.namelist import convert_namelist
     from clm_ml.model import Model
     from clm_ml.output_streams import StreamSpec
-    from clm_ml.run import load_run
 
     tmp = Path(tempfile.mkdtemp())
     convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", tmp)
     first, n, npatch = 1, args.steps, args.patches
     # the CHATS7 patch and N - 1 padded copies of it (execution.patch_count; weight 0 for the
     # copies, which compute everything all the same): one batched program, as a domain runs
-    extra = [f"execution.patch_count={npatch}"] if npatch > 1 else []
+    extra = [f"run.execution.patch_count={npatch}"] if npatch > 1 else []
     if args.devices > 1:
-        extra.append(f"execution.devices={args.devices}")
-    model = Model.from_run(load_run(tmp / "run.yaml", extra))
-    single = Model.from_run(load_run(tmp / "run.yaml"))
+        extra.append(f"run.execution.devices={args.devices}")
+    model = Model.from_experiment(load_experiment(tmp, extra))
+    single = Model.from_experiment(load_experiment(tmp))
     state, params, forcing = model.initial_state(), model.default_params(), model.forcing(first, n)
     stream = StreamSpec("s", "step", "mean", ("latent_heat_flux",))
     jax.block_until_ready((state, forcing))

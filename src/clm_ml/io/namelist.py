@@ -1,5 +1,5 @@
 """
-Convert a Fortran-style ``clmML_inparm`` namelist into ``run.yaml`` + ``model.yaml``.
+Convert a Fortran-style ``clmML_inparm`` namelist into an experiment folder (decision 91).
 
 Used by ``clm-ml convert``. Paths in the namelist are interpreted the way
 the legacy driver did (``../input_files/...`` relative to ``data/namelists``) and
@@ -11,8 +11,6 @@ from __future__ import annotations
 import datetime as dt
 import os
 from pathlib import Path
-
-import yaml
 
 from clm_ml.io.yaml_schema import ConfigError
 
@@ -42,11 +40,10 @@ def _datetime(ymd: int, tod: int) -> dt.datetime:
     return day + dt.timedelta(seconds=int(tod))
 
 
-def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
-    """Write ``run.yaml`` and ``model.yaml`` for ``namelist_path`` into ``out_dir``.
-
-    Returns the paths written. ``pftcon_val = 1`` becomes ``params: chats``.
-    """
+def convert_namelist(namelist_path: Path, out_dir: Path) -> Path:
+    """Write the experiment folder of ``namelist_path`` into ``out_dir``: the four complete
+    files (decision 91), the tower from its preset, ``pftcon_val = 1`` the ``chats``
+    parameters (``clm5_defaults`` otherwise). Returns the folder."""
     import f90nml
 
     namelist_path = Path(namelist_path).resolve()
@@ -84,7 +81,6 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
         time = {"start": start.isoformat(timespec="minutes"), "steps": stop_n}
     else:
         raise ConfigError(f"{namelist_path.name}: stop_option {stop_option!r} not supported")
-    time["step_seconds"] = 1800
     clm_phys = str(g.get("clm_phys", "CLM5_0")).strip()
     if clm_phys != "CLM5_0":
         raise ConfigError(
@@ -98,6 +94,7 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
     forcing = {
         "meteorology": {
             "files": rel(g["fin_tower"]),
+            "interval_seconds": 1800,  # CLM-ml v2 tower forcing: 30 minutes
             "interpolation": "three_point" if met_type == 3 else "none",
         },
         "clm_history": {
@@ -116,10 +113,7 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
         }
 
     run = {
-        "model": "model.yaml",
-        "params": "chats" if int(g.get("pftcon_val", 0)) == 1 else "clm5_defaults",
         "time": time,
-        "domain": {"type": "towers", "towers": [tower]},
         "forcing": forcing,
         "initial_conditions": {"source": "clm_history"},
         "output": {
@@ -133,17 +127,19 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
             "streams": [{"name": "step", "frequency": "step", "variables": ["all"]}],
         },
     }
-    model = {
-        "canopy_layers": {"min_plant_area_per_layer": float(g.get("dpai_min", 0.01))},
+    recipe = {
+        "run": run,
+        "domain": {"type": "towers", "towers": [tower]},  # the tower's preset
+        "model": {"canopy_layers": {"min_plant_area_per_layer": float(g.get("dpai_min", 0.01))}},
+        "params": "chats" if int(g.get("pftcon_val", 0)) == 1 else "clm5_defaults",
     }
+    from clm_ml.experiment import compose, version, write_experiment
 
-    from clm_ml.config import ModelConfig, model_yaml_text
-
-    header = f"# Converted from {namelist_path.name} by `clm-ml convert`.\n"
-    with open(out_dir / "run.yaml", "w") as fh:
-        fh.write(header)
-        yaml.safe_dump(run, fh, sort_keys=False)
-    # the complete model.yaml: the namelist's settings, every other key at its default
-    config = ModelConfig.from_dict(model, source=namelist_path.name)
-    (out_dir / "model.yaml").write_text(header + model_yaml_text(config))
-    return {"run.yaml": out_dir / "run.yaml", "model.yaml": out_dir / "model.yaml"}
+    run_file, domain_file, config, params = compose(recipe, namelist_path.name)
+    return write_experiment(
+        out_dir, run_file, domain_file, config, params,
+        generated=f"Converted from {namelist_path.name} by clm-ml {version()} (`clm-ml convert`).",
+        params_about=f"Copied from the preset {recipe['params']} (pftcon_val "
+        f"{int(g.get('pftcon_val', 0))}).",
+        force=True,
+    )  # fmt: skip

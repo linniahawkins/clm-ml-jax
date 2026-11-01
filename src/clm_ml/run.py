@@ -1,133 +1,152 @@
 """
-A run: the contents of ``run.yaml`` and everything it references, loaded and validated.
+``run.yaml``: when an experiment runs, with which forcing and land data, and what it writes
+(one of the four files of an experiment folder, decision 91; ``docs/design/experiment_folders.md``).
 
-``run.yaml`` replaces the Fortran namelist. It names the model and params files, the
-towers, the dates, the forcing files, the initial conditions and the output.
-
-``Run.execute()`` sets the run up (``clm_ml.setup``) and runs it in this process
-(``clm_ml.driver``; Phase 7.4). A run holds any number of towers (gridcells) and patches
-(Phase 6); the time steps run batched over the patches in one compiled program, with one
-clock for all gridcells (decision 24).
+Every setting is declared here with :func:`clm_ml.io.yaml_schema.option` and its
+explanation, which ``clm-ml new`` and ``clm-ml upgrade`` write into the file. The folder is
+loaded by :func:`clm_ml.experiment.load_experiment`.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import datetime as dt
-from pathlib import Path
 from typing import Literal, Optional
 
-import numpy as np
-
-from clm_ml.config import ModelConfig
-from clm_ml.domain import Domain
-from clm_ml.grid import GridSection
 from clm_ml.grid_forcing import GriddedForcingSection
-from clm_ml.io.yaml_schema import ConfigError, apply_overrides, from_dict, read_yaml
-from clm_ml.params import PFT_NAMES, Params
+from clm_ml.io.yaml_schema import ConfigError, option
 
-# --------------------------------------------------------------------------------------
-# run.yaml schema
-# --------------------------------------------------------------------------------------
+HEADER = """\
+run.yaml: when the experiment runs, with which forcing and land data, and what it writes.
+Part of an experiment folder (run.yaml, domain.yaml, model.yaml, params.yaml). Every setting
+is listed; REQUIRED keys have no default. Paths are relative to this folder. {generated}"""
 
 
 @dataclasses.dataclass(frozen=True)
 class TimeSection:
-    start: str  # ISO date-time, e.g. 2007-05-01T00:00
-    end: Optional[str] = None  # give exactly one of end, days, steps
-    days: Optional[float] = None
-    steps: Optional[int] = None
-    step_seconds: int = 1800  # forcing data interval (the model step: model.yaml numerics)
-    # Model calendar (as CTSM's GREGORIAN / NO_LEAP): dates, solar geometry, run length and
-    # output records follow it. noleap only for grid runs (tower forcing is a real time series)
-    calendar: Literal["gregorian", "noleap"] = "gregorian"
+    """The simulated period and calendar (the model time step is model.yaml
+    numerics.step_seconds)."""
 
-
-@dataclasses.dataclass(frozen=True)
-class DomainSection:
-    type: Literal["towers", "grid"] = "towers"
-    towers: tuple[str, ...] = ()
-    towers_file: Optional[str] = None
-    min_patch_weight: float = 0.0
-    grid: Optional[GridSection] = None  # type grid (Phase 6b): clm_ml.grid
-
-
-@dataclasses.dataclass(frozen=True)
-class ClmHistorySection:
-    file: str
-    start: str  # first record of the history file (was clm_start_ymd / clm_start_tod)
+    start: str = option(doc="First model time, ISO date-time (e.g. 2007-05-01T00:00).",
+                        fortran="start_ymd, start_tod")  # fmt: skip
+    end: Optional[str] = option(
+        None,
+        "End of the run, ISO date-time. Give exactly one of end, days and steps.",
+        fortran="stop_option, stop_n",
+    )
+    days: Optional[float] = option(None, "Length of the run in days (or end, or steps).")
+    steps: Optional[int] = option(None, "Length of the run in model steps (or end, or days).")
+    calendar: Literal["gregorian", "noleap"] = option(
+        "gregorian",
+        "Model calendar, as CTSM's GREGORIAN / NO_LEAP: dates, solar geometry, run length and "
+        "output records follow it. noleap only for grid runs (tower forcing is a real time "
+        "series).",
+    )
 
 
 #: A ``files`` entry: one path or a list; ``{tower}``, ``{year}`` and ``{month}`` (e.g.
-#: ``{year}-{month:02d}.nc``) are expanded over the run's months (see :meth:`Run.files`).
+#: ``{year}-{month:02d}.nc``) are expanded over the run's months.
 Files = tuple[str, ...]
 
 
 @dataclasses.dataclass(frozen=True)
 class MeteorologySection:
-    files: Files  # tower forcing netCDF, may be split in time
-    # Within a model step (CLM-ml v2 sub-steps): three_point = met_type 3, none = met_type 0
-    interpolation: Literal["none", "three_point"] = "three_point"
-    # From a coarser data interval to the model step (decision 13; other variables linear)
-    shortwave: Literal["coszen", "linear", "constant"] = "coszen"
-    precipitation: Literal["constant", "linear"] = "constant"
+    """Tower meteorology."""
+
+    files: Files = option(
+        doc="Tower forcing netCDF file(s); may be split in time with {year} and {month} "
+        "(e.g. {year}-{month:02d}.nc) and shared by towers with {tower}.",
+        fortran="fin_tower",
+        path=True,
+    )
+    interval_seconds: int = option(
+        1800,
+        "Time between the records of the forcing files (s). The model step (model.yaml "
+        "numerics.step_seconds) must divide it; shorter steps interpolate the forcing.",
+    )
+    interpolation: Literal["none", "three_point"] = option(
+        "three_point",
+        "Forcing within a model step's sub-steps: three-point interpolation of the previous, "
+        "current and next records (CLM-ml v2), or the step's record unchanged.",
+        fortran="met_type 3/0",
+    )
+    shortwave: Literal["coszen", "linear", "constant"] = option(
+        "coszen",
+        "Shortwave radiation from the data interval to a shorter model step: following the "
+        "cosine of the solar zenith angle (conserves interval means), linear, or held.",
+    )
+    precipitation: Literal["constant", "linear"] = option(
+        "constant",
+        "Precipitation from the data interval to a shorter model step: held (conserves "
+        "totals) or linear.",
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class ClmHistorySection:
+    """The CLM history file of the tower."""
+
+    file: str = option(
+        doc="CLM history file (netCDF, one patch, at the forcing interval) with ELAI, ESAI, "
+        "H2OSOI and TSOI: the initial soil temperature, and LAI, SAI and soil water when their "
+        "source is clm_history.",
+        fortran="fin_clm",
+        path=True,
+    )
+    start: str = option(doc="Date-time of the history file's first record.",
+                        fortran="clm_start_ymd, clm_start_tod")  # fmt: skip
 
 
 @dataclasses.dataclass(frozen=True)
 class SoilMoistureAdjustmentSection:
-    file: str  # factors per CLM history time slice (CHATS)
-    levels: int = 3  # was nlev_soil_adjust
+    """Soil water adjusted to observations (CHATS)."""
+
+    file: str = option(doc="Adjustment factors per CLM history record (netCDF, FACTOR).",
+                       fortran="fin_soil_adjust", path=True)  # fmt: skip
+    levels: int = option(3, "Number of soil levels, from the top, multiplied by the factor.",
+                         fortran="nlev_soil_adjust")  # fmt: skip
 
 
 @dataclasses.dataclass(frozen=True)
 class LandDataSection:
-    """Prescribed land data (decision 14): from the CLM history file, or from user files
-    with daily or monthly records interpolated linearly between interval midpoints."""
+    """Prescribed leaf and stem area: from the CLM history file, or from files with daily or
+    monthly records (netCDF with time in "days since ..."), interpolated linearly between the
+    middles of their intervals."""
 
-    source: Literal["clm_history", "file"] = "clm_history"
-    files: Files = ()  # netCDF: time ("days since ..."); LAI, SAI or H2OSOI
-    interpolation: Literal["linear"] = "linear"
+    source: Literal["clm_history", "file"] = option(
+        "clm_history", "Where the values come from: the CLM history file, or files."
+    )
+    files: Files = option((), "With source file: the netCDF file(s).", path=True)
+    interpolation: Literal["linear"] = option(
+        "linear", "Between the middles of the files' intervals."
+    )
 
 
 @dataclasses.dataclass(frozen=True)
 class SoilWaterSection(LandDataSection):
-    adjustment: Optional[SoilMoistureAdjustmentSection] = None
+    """Prescribed volumetric soil water (H2OSOI), as the leaf and stem area."""
+
+    adjustment: Optional[SoilMoistureAdjustmentSection] = option(
+        None, "Soil water adjusted to observations by factors (CHATS); null: none."
+    )
 
 
 @dataclasses.dataclass(frozen=True)
 class ForcingSection:
-    # Towers: tower meteorology and the CLM history file (both required)
-    meteorology: Optional[MeteorologySection] = None
-    # The CLM history file: initial conditions, and LAI/SAI/soil water with source clm_history
-    clm_history: Optional[ClmHistorySection] = None
-    vegetation: LandDataSection = LandDataSection()  # LAI, SAI
-    soil_water: SoilWaterSection = SoilWaterSection()  # volumetric soil water
-    # Grid runs (Phase 6b): CRUJRA datm streams, CO2, monthly CLM history soil data
-    # (clm_ml.grid_forcing); vegetation from the surface data
-    gridded: Optional[GriddedForcingSection] = None
+    """Meteorology and prescribed land data."""
 
-
-#: Earlier forcing keys and what replaced them (plan §4.1)
-_OLD_FORCING_KEYS = {
-    "interpolation": "forcing.meteorology.interpolation",
-    "soil_moisture_adjustment": "forcing.soil_water.adjustment",
-}
-
-
-@dataclasses.dataclass(frozen=True)
-class ExecutionSection:
-    """How the run is divided into compiled chunks and how often it saves restarts."""
-
-    # Compiled chunk length (decision 33): "N days" (fixed length, one compiled program; a
-    # short last chunk is padded) or "1 month" (calendar months, each length compiles once)
-    chunk: str = "10 days"
-    restart_every: Optional[str] = None  # "N month(s)" / "N year(s)"; null: end of run only
-    # Pad the domain to this many patches / gridcells (weight-0 copies, not in the output), so
-    # domains of different sizes share one compiled program; null: the domain's own counts
-    patch_count: Optional[int] = None
-    gridcell_count: Optional[int] = None
-    # Devices to spread the patches over (step 5: jax.shard_map; e.g. 4 on a Derecho GPU node)
-    devices: int = 1
+    meteorology: MeteorologySection = option(doc="Tower meteorology.", applies="towers")
+    clm_history: ClmHistorySection = option(doc="The CLM history file.", applies="towers")
+    gridded: GriddedForcingSection = option(
+        doc="Gridded forcing: CRUJRA datm streams, CO2, monthly CLM soil history (vegetation "
+        "comes from the surface data).",
+        applies="grid",
+    )
+    vegetation: LandDataSection = option(
+        LandDataSection(), "Leaf and stem area index.", applies="towers"
+    )
+    soil_water: SoilWaterSection = option(
+        SoilWaterSection(), "Volumetric soil water.", applies="towers"
+    )
 
 
 def parse_chunk(text: str, key: str) -> Optional[int]:
@@ -153,666 +172,85 @@ def parse_every(text: Optional[str], key: str):
 
 
 @dataclasses.dataclass(frozen=True)
+class ExecutionSection:
+    """How the run is divided into compiled chunks, where it runs and how often it saves
+    restarts. None of this changes the results."""
+
+    chunk: str = option(
+        "10 days",
+        "Compiled chunk length: 'N days' (one compiled program; a short last chunk is padded) "
+        "or '1 month' (calendar months). Sets how much forcing is in memory and how often the "
+        "checks run.",
+    )
+    restart_every: Optional[str] = option(
+        None, "Restart files every 'N months' or 'N years'; null: at the end of the run only."
+    )
+    devices: int = option(
+        1, "Number of devices (e.g. 4 GPUs on a Derecho node) the patches are spread over."
+    )
+    # Test and timing settings (hidden): pad the domain to this many patches / gridcells
+    # (weight-0 copies, not in the output), so domains of different sizes share one program
+    patch_count: Optional[int] = option(None, hidden=True)
+    gridcell_count: Optional[int] = option(None, hidden=True)
+
+
+@dataclasses.dataclass(frozen=True)
 class InitialConditionsSection:
-    source: Literal["clm_history", "restart"] = "clm_history"
-    restart_file: Optional[str] = None
+    """The state before the first step."""
+
+    source: Literal["clm_history", "restart"] = option(
+        "clm_history",
+        "clm_history: canopy air and leaves from the first forcing record, soil temperature "
+        "from the CLM history (towers) or the monthly soil history (grid); restart: a restart "
+        "file of an earlier run.",
+    )
+    restart_file: Optional[str] = option(None, "With source restart: the restart file.",
+                                         path=True)  # fmt: skip
 
 
 @dataclasses.dataclass(frozen=True)
 class OutputStreamSection:
-    """One output stream (plan §4.1, decision 16): accumulated during the run."""
+    """One output stream, accumulated during the run (decision 16)."""
 
-    name: str
-    frequency: Literal["step", "hourly", "daily", "monthly", "yearly"] = "step"
-    statistic: Literal["mean", "instantaneous", "min", "max"] = "mean"
-    variables: tuple[str, ...] = ("all",)
-    level: tuple[Literal["patch", "gridcell"], ...] = ("patch", "gridcell")
-    file_per: Literal["run", "year", "month"] = "run"
+    name: str = option(doc="Name of the stream (in its file names).")
+    frequency: Literal["step", "hourly", "daily", "monthly", "yearly"] = option(
+        "step", "How often a record is written."
+    )
+    statistic: Literal["mean", "instantaneous", "min", "max"] = option(
+        "mean", "What a record holds for its interval."
+    )
+    variables: tuple[str, ...] = option(
+        ("all",),
+        "Variables: all, or names from clm_ml.outputs.VARIABLES (e.g. " "latent_heat_flux, gpp).",
+    )
+    level: tuple[Literal["patch", "gridcell"], ...] = option(
+        ("patch", "gridcell"), "Patch values, area-weighted gridcell sums, or both."
+    )
+    file_per: Literal["run", "year", "month"] = option("run", "One file per run, year or month.")
 
 
 @dataclasses.dataclass(frozen=True)
 class OutputSection:
-    directory: str = "output"
-    streams: tuple[OutputStreamSection, ...] = (OutputStreamSection(name="step"),)
-    # The six Fortran-format .out files (validation against Fortran only; runs the model a
-    # second time, step-by-step output).
-    legacy_ascii: bool = False
+    """What the run writes."""
 
-
-#: Phase 1 output keys and what replaced them (decision 16).
-_OLD_OUTPUT_KEYS = {
-    "format": "output.legacy_ascii: true (netCDF is always written)",
-    "variables": "output.streams[].variables",
-    "frequency": "output.streams[].frequency",
-    "level": "output.streams[].level",
-}
+    directory: str = option("output", "Output directory.", path=True)
+    streams: tuple[OutputStreamSection, ...] = option(
+        (OutputStreamSection(name="step"),), "The output streams."
+    )
+    legacy_ascii: bool = option(
+        False,
+        "Also write the six Fortran-format .out files (one patch; for the comparison with "
+        "Fortran CLM-ml v2 only).",
+        applies="towers",
+    )
 
 
 @dataclasses.dataclass(frozen=True)
 class RunFile:
-    """The ``run.yaml`` file as written (paths not yet resolved)."""
-
-    time: TimeSection
-    domain: DomainSection
-    forcing: ForcingSection
-    # params file (complete: every parameter of every PFT) path or built-in name
-    # (clm5_defaults, chats, clm6); required
-    params: str
-    model: Optional[str] = None  # model.yaml path; null = all defaults
-    execution: ExecutionSection = ExecutionSection()
-    initial_conditions: InitialConditionsSection = InitialConditionsSection()
-    output: OutputSection = OutputSection()
-
-
-# --------------------------------------------------------------------------------------
-# Loaded run
-# --------------------------------------------------------------------------------------
-
-
-@dataclasses.dataclass(frozen=True)
-class Run:
-    """Everything needed for one experiment, loaded and validated."""
-
-    run_file: RunFile
-    base_dir: Path  # directory of run.yaml; relative paths are resolved against it
-    config: ModelConfig
-    params: Params
-    domain: Domain
-    start: dt.datetime
-    n_steps: int
-    source: str = "run.yaml"
-    path_: Optional[Path] = None  # run.yaml itself
-    overrides: tuple = ()
-
-    @property
-    def is_grid(self) -> bool:
-        return self.run_file.domain.type == "grid"
-
-    # -- paths -------------------------------------------------------------------------
-
-    def path(self, text: str, tower: Optional[str] = None) -> Path:
-        if tower is not None:
-            text = text.replace("{tower}", tower)
-        path = Path(text).expanduser()
-        return path if path.is_absolute() else (self.base_dir / path).resolve()
-
-    def files(self, entry, tower: str, key: str = "files") -> list[Path]:
-        """The files of a ``files`` entry, in order. ``{year}`` and ``{month}`` are
-        expanded for every month from one month before the run to one month after it (the
-        neighbouring records interpolation needs); files for months inside the run must
-        exist, the others are used when they exist."""
-        entries = [entry] if isinstance(entry, str) else list(entry)
-        end = self.time_after((self.n_steps - 1) * self.step_seconds)  # last step
-        months, (y, m) = [], (self.start.year, self.start.month)
-        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
-        while (y, m) <= ((end.year, end.month + 1) if end.month < 12 else (end.year + 1, 1)):
-            months.append((y, m))
-            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
-        run_months = set(months[1:-1])
-        out = []
-        for text in entries:
-            if "{year" not in text and "{month" not in text:
-                path = self.path(text.replace("{tower}", tower))
-                if not path.exists():
-                    raise ConfigError(f"{self.source}: {key}: file not found: {path}")
-                out.append(path)
-                continue
-            for y, m in months:
-                try:
-                    name = text.format(tower=tower, year=y, month=m)
-                except (KeyError, IndexError, ValueError) as err:
-                    raise ConfigError(f"{self.source}: {key}: {text!r}: {err}") from None
-                path = self.path(name)
-                if path.exists():
-                    out.append(path)
-                elif (y, m) in run_months:
-                    raise ConfigError(
-                        f"{self.source}: {key}: file not found for {y}-{m:02d}: {path}"
-                    )
-        return list(dict.fromkeys(out))
-
-    @property
-    def output_directory(self) -> Path:
-        return self.path(self.run_file.output.directory)
-
-    @property
-    def calkindflag(self) -> str:
-        """The model calendar as the time manager names it (``GREGORIAN``, ``NOLEAP``)."""
-        from clm_ml.calendar import CALENDARS
-
-        return CALENDARS[self.run_file.time.calendar]
-
-    def time_after(self, seconds: float) -> dt.datetime:
-        """The date-time ``seconds`` after the run start, in the model calendar."""
-        from clm_ml.calendar import add_seconds
-
-        return add_seconds(self.start, seconds, self.calkindflag)
-
-    @property
-    def chunk_steps(self) -> Optional[int]:
-        """Model steps per compiled chunk (``execution.chunk``; None: calendar months)."""
-        days = parse_chunk(self.run_file.execution.chunk, "execution.chunk")
-        return None if days is None else days * 86400 // self.step_seconds
-
-    @property
-    def step_seconds(self) -> int:
-        """The model step (model.yaml numerics.step_seconds, default the forcing interval)."""
-        return self.config.numerics.step_seconds or self.run_file.time.step_seconds
-
-    @property
-    def restart_path(self) -> Path:
-        """Where this run writes its restart (the previous one is kept as ``.prev``)."""
-        return self.output_directory / "restart" / f"{self.name}_restart.nc"
-
-    # -- running -----------------------------------------------------------------------
-
-    def execute(
-        self, *, write: bool = True, quiet: bool = False, return_outputs: bool = True
-    ) -> dict:
-        """Run the model in this process and (if ``write``) write the output streams configured
-        in run.yaml:
-        one netCDF file per stream, level and ``file_per`` period, each written as soon as
-        its period is complete.
-
-        Returns ``{stream name: Outputs}`` (all records in memory), or ``{}`` with
-        ``return_outputs=False``, so long runs keep only the files' records in memory.
-        """
-        from clm_ml.outputs import Outputs
-
-        out = self.run_file.output
-        arrays = self._run_in_process(write, return_outputs)
-
-        if not return_outputs:
-            return {}
-        from clm_ml.outputs import domain_meta
-
-        meta = dict(domain_meta(self.domain), soil_depth=arrays["static.soil_depth"])
-        results = {}
-        for stream in out.streams:
-            prefix = f"{stream.name}/"
-            records = {k[len(prefix) :]: v for k, v in arrays.items() if k.startswith(prefix)}
-            results[stream.name] = Outputs.from_records(records, meta)
-        return results
-
-    def _run_in_process(self, write: bool, return_outputs: bool) -> dict:
-        """Set the run up and run it in this process (``clm_ml.driver``), writing the output
-        files as their periods complete. Returns the records as arrays
-        (``"<stream>/<key>"``) and ``"static.soil_depth"``."""
-        import time
-
-        from clm_ml import driver
-        from clm_ml.output_streams import StreamSpec
-        from clm_ml.outputs import StreamFileWriter, domain_meta, records_to_arrays
-
-        out = self.run_file.output
-        ex = self.run_file.execution
-        t0 = time.perf_counter()
-        sim = driver.simulation(self).laid_out(
-            int(ex.devices or 1), ex.patch_count, ex.gridcell_count
-        )
-        if self.is_grid:  # progress of long runs
-            print(f"timing: setup {time.perf_counter() - t0:.1f} s ({sim.n_real} patches, "
-                  f"{sim.n_real_gridcells} gridcells, layout {sim.layout})", flush=True)  # fmt: skip
-        streams = [
-            StreamSpec(st.name, st.frequency, st.statistic, self.stream_variables(st))
-            for st in out.streams
-        ]
-        levels = [tuple(st.level) for st in out.streams]
-        keys = [
-            tuple(s.variables)
-            + tuple(f"gridcell:{n}" for n in driver.gridcell_variables(s.variables, level))
-            for s, level in zip(streams, levels)
-        ]
-        meta = dict(domain_meta(self.domain), soil_depth=sim.soil_depth)
-        writers = None
-        if write:
-            writers = [
-                StreamFileWriter(st, k, meta, self.output_directory, self.name, self.start)
-                for st, k in zip(out.streams, keys)
-            ]
-        collected: list[list] = [[] for _ in streams]
-        ascii_writer = None
-        if write and out.legacy_ascii:  # one patch (validation): an internal per-step stream
-            from clm_ml.io import legacy as legacy_io
-
-            streams.append(StreamSpec("_legacy_ascii", "step", "instantaneous",
-                                      legacy_io._variables()))  # fmt: skip
-            levels.append(("patch",))
-            interpolation = self.run_file.forcing.meteorology.interpolation
-            ascii_writer = legacy_io.LegacyAsciiWriter(
-                self.output_directory, self.legacy_tower_name(0), self.start.year,
-                self.start.month, met_type=3 if interpolation == "three_point" else 0,
-                step_seconds=self.step_seconds, soil_z=sim.soil_depth[0],
-                append=self.run_file.initial_conditions.source == "restart",
-            )  # fmt: skip
-
-        def on_records(i, records):
-            if i == len(keys):  # the legacy ASCII stream: patch 0, legacy patch axis
-                for key, _end, values in records:
-                    fields = {k: np.asarray(v)[0] for k, v in values.items()}  # patch 0
-                    ascii_writer.write(sim.time_of(int(key)).calday, fields)
-                return
-            if writers is not None:
-                writers[i].add(records)  # files are written as their periods complete
-            if return_outputs:
-                collected[i].extend(records)
-
-        def save_extra():
-            # the output files in progress; a restart holds what the next run needs, not the
-            # records so far (review R6)
-            return {"writers": [w.state() for w in writers] if writers is not None else None}
-
-        def restore_extra(saved):
-            if saved is not None and writers is not None and saved.get("writers") is not None:
-                for w, ws in zip(writers, saved["writers"]):
-                    w.restore(ws)
-
-        ic = self.run_file.initial_conditions
-        restart = None
-        if ic.source == "restart":
-            name = self.domain.gridcells.names[0]
-            restart = driver.read_restart(self.path(ic.restart_file, name))
-        every = parse_every(ex.restart_every, "restart_every")
-        numerics = self.config.numerics
-        try:
-            driver.run_streams(
-                sim,
-                streams,
-                on_records,
-                restart=restart,
-                restart_path=self.restart_path if write else None,
-                restart_every=tuple(every) if every else None,
-                save_extra=save_extra,
-                restore_extra=restore_extra,
-                levels=levels,
-                on_patch_error=numerics.on_patch_error,
-                max_failed_patch_fraction=numerics.max_failed_patch_fraction,
-                ignore_checks=tuple(numerics.ignore_checks),
-                chunk_steps=self.chunk_steps,
-                timing=self.is_grid,
-            )
-        finally:  # also when the run stops: the files hold the records before the stop
-            for w in writers or ():
-                w.close()
-            if ascii_writer is not None:
-                ascii_writer.close()
-        if self.is_grid:
-            import jax
-
-            stats = [dev.memory_stats() or {} for dev in jax.local_devices()]
-            peak = [round(st.get("peak_bytes_in_use", 0) / 1e9, 2) for st in stats]
-            print(f"timing: peak device memory GB {peak}", flush=True)
-        arrays = {"static.soil_depth": sim.soil_depth}
-        if return_outputs:
-            for stream, stream_keys, records in zip(streams, keys, collected):
-                if not records:
-                    raise RuntimeError(f"output stream {stream.name} produced no records")
-                for key, value in records_to_arrays(records, stream_keys).items():
-                    arrays[f"{stream.name}/{key}"] = value
-        return arrays
-
-    def stream_variables(self, stream) -> tuple[str, ...]:
-        """A stream's variable names, with ``all`` expanded."""
-        from clm_ml.outputs import VARIABLES
-
-        names = []
-        for v in stream.variables:
-            names += [x.name for x in VARIABLES] + ["soil_temperature"] if v == "all" else [v]
-        return tuple(dict.fromkeys(names))
-
-    @property
-    def name(self) -> str:
-        """The run's name in file names: its tower, or ``domain`` for several gridcells."""
-        names = self.domain.gridcells.names
-        return names[0] if len(names) == 1 else "domain"
-
-    def legacy_tower_name(self, patch: int) -> str:
-        """Patch ``patch``'s entry in the legacy tower table: its gridcell's name, with
-        ``#k`` (its place on the gridcell) when the gridcell has several patches."""
-        gidx = self.domain.patches.gridcell_index
-        g = int(gidx[patch])
-        name = self.domain.gridcells.names[g]
-        if int(np.sum(gidx == g)) == 1:
-            return name
-        return f"{name}#{int(np.sum(gidx[:patch] == g))}"
-
-    def summary(self) -> str:
-        """What ``clm-ml check`` prints."""
-        d, c = self.domain, self.config
-        end = self.time_after(self.n_steps * self.step_seconds)
-        lines = [
-            f"Run: {self.source}",
-            f"  time       {self.start:%Y-%m-%d %H:%M} to {end:%Y-%m-%d %H:%M}, "
-            f"{self.n_steps} steps of {self.step_seconds} s",
-            f"  params     {self.params.source}",
-            f"  gridcells  {d.n_gridcells}   patches {d.n_patches}",
-        ]
-        shown_patches = 20 if self.is_grid else d.n_patches
-        for i, n_layers in enumerate(d.layer_counts(c)[:shown_patches]):
-            g = d.patches.gridcell_index[i]
-            shown = "from CLM history" if n_layers == 0 else str(n_layers)
-            lines.append(
-                f"    patch {i}: {d.gridcells.names[g]}  {PFT_NAMES[d.patches.pft_index[i]]}  "
-                f"weight {d.patches.weight[i]:g}  canopy layers {shown} "
-                f"(max_layers {c.canopy_layers.max_layers})"
-            )
-        if shown_patches < d.n_patches:
-            lines.append(f"    ... ({d.n_patches - shown_patches} more patches)")
-        unvalidated = c.non_default_options()
-        if unvalidated:
-            lines.append(
-                "  note: these options differ from the CLM-ml v2 defaults and have not been "
-                f"validated against Fortran in the JAX translation: {', '.join(unvalidated)}"
-            )
-        lines.append("  OK")
-        return "\n".join(lines)
-
-
-def load_run(path: Path | str, overrides: tuple[str, ...] | list[str] = ()) -> Run:
-    """Read ``run.yaml`` and everything it references, and validate it.
-
-    ``overrides`` use dotted keys, as on the command line (``clm-ml run --set``)::
-
-        load_run("run.yaml", ["model.physics.stomatal_conductance=medlyn", "time.days=7"])
-
-    Keys starting with ``model.`` change the model configuration; others change run.yaml.
-    """
-    path = Path(path).resolve()
-    data = read_yaml(path)
-    model_overrides = [o[len("model.") :] for o in overrides if o.startswith("model.")]
-    run_overrides = [o for o in overrides if not o.startswith("model.")]
-    apply_overrides(data, run_overrides, source=path.name)
-    old = sorted(set(data.get("output") or {}) & set(_OLD_OUTPUT_KEYS))
-    if old:
-        raise ConfigError(
-            f"{path.name}: output: "
-            + "; ".join(f"{k} was replaced by {_OLD_OUTPUT_KEYS[k]}" for k in old)
-        )
-    _check_forcing_keys(data.get("forcing"), path.name)
-    run_file = from_dict(RunFile, data, source=path.name)
-    base_dir = path.parent
-
-    model_data = read_yaml(base_dir / run_file.model) if run_file.model else {}
-    apply_overrides(model_data, model_overrides, source="model.yaml")
-    config = ModelConfig.from_dict(model_data, source=run_file.model or "model.yaml")
-
-    params_ref = run_file.params
-    if params_ref.endswith((".yaml", ".yml")) and not Path(params_ref).is_absolute():
-        params_ref = str(base_dir / params_ref)
-    params = Params.from_yaml(params_ref)
-
-    _check_supported(run_file, path.name)
-    if config.physics.solar_radiation == "norman":
-        raise ConfigError(
-            "model.yaml: physics.solar_radiation: norman is not supported: its JAX translation "
-            "was never validated and stops at the first CHATS7 step with a conservation error "
-            "(plan, open issues of Phases 4-5); use two_stream"
-        )
-    if config.physics.stomatal_conductance == "wue" and config.physics.wue_solver == "brent":
-        raise ConfigError(
-            "model.yaml: physics.wue_solver: brent is not supported: the JAX model has no "
-            "traceable Brent solver (Phase 7 decision C16; global_input.md issue 18); use "
-            "bisection"
-        )
-    if config.physics.flux_profile_solution == "well_mixed":
-        raise ConfigError(
-            "model.yaml: physics.flux_profile_solution: well_mixed is not supported: Fortran "
-            "stops for it too (legacy code; Phase 7 decision D8); use implicit"
-        )
-    model_step = config.numerics.step_seconds or run_file.time.step_seconds
-    if run_file.domain.type == "grid":
-        return _load_grid_run(
-            run_file, base_dir, config, params, path, tuple(overrides), model_step
-        )
-    towers_file = run_file.domain.towers_file
-    domain = Domain.from_towers(
-        run_file.domain.towers,
-        (base_dir / towers_file) if towers_file else None,
-        params=params,
-        config=config,
-        min_patch_weight=run_file.domain.min_patch_weight,
-    )
-    ex = run_file.execution
-    for key, count, own in (
-        ("patch_count", ex.patch_count, domain.n_patches),
-        ("gridcell_count", ex.gridcell_count, domain.n_gridcells),
-    ):
-        if count is not None and count < own:
-            raise ConfigError(f"{path.name}: execution.{key} ({count}) is less than {own}")
-    if (ex.patch_count or domain.n_patches) > domain.n_patches and not (
-        (ex.gridcell_count or domain.n_gridcells) > domain.n_gridcells
-    ):
-        raise ConfigError(
-            f"{path.name}: execution.patch_count pads the patches: set gridcell_count above "
-            f"{domain.n_gridcells} too (padding patches go on a padding gridcell)"
-        )
-    if ex.devices < 1:
-        raise ConfigError(f"{path.name}: execution.devices must be at least 1")
-    if ex.devices > 1 and (ex.patch_count or ex.gridcell_count):
-        raise ConfigError(
-            f"{path.name}: execution.patch_count/gridcell_count with devices > 1 is not "
-            "supported (the device blocks are padded automatically)"
-        )
-    if run_file.output.legacy_ascii and domain.n_patches > 1:
-        raise ConfigError(
-            f"{path.name}: output.legacy_ascii: the legacy .out files (validation) hold one "
-            f"patch; this domain has {domain.n_patches}"
-        )
-    # One clock for the whole run (decision 24): every gridcell's forcing has the run's step
-    for g, name in enumerate(domain.gridcells.names):
-        step_minutes = int(domain.gridcells.forcing_step_minutes[g])
-        if run_file.time.step_seconds != step_minutes * 60:
-            raise ConfigError(
-                f"{path.name}: time.step_seconds is {run_file.time.step_seconds} but tower "
-                f"{name} has forcing_step_minutes {step_minutes}"
-            )
-
-    if run_file.time.calendar != "gregorian":
-        raise ConfigError(
-            f"{path.name}: time.calendar: {run_file.time.calendar} only for grid runs; tower "
-            "forcing is a real (Gregorian) time series"
-        )
-    if model_step <= 0 or run_file.time.step_seconds % model_step:
-        raise ConfigError(
-            f"model.yaml: numerics.step_seconds ({model_step}) must divide the forcing "
-            f"interval (run.yaml time.step_seconds, {run_file.time.step_seconds} s)"
-        )
-    start, n_steps = _resolve_time(run_file.time, path.name, model_step)
-    run = Run(run_file, base_dir, config, params, domain, start, n_steps, source=path.name,
-              path_=path, overrides=tuple(overrides))  # fmt: skip
-    forcing = run_file.forcing
-    if forcing.meteorology is None or forcing.clm_history is None:
-        raise ConfigError(
-            f"{path.name}: forcing.meteorology and forcing.clm_history are required for towers"
-        )
-    for tower in domain.gridcells.names:  # every gridcell's forcing files ({tower} expanded)
-        run.files(forcing.meteorology.files, tower, "forcing.meteorology.files")
-        for key in ("vegetation", "soil_water"):
-            section = getattr(forcing, key)
-            if section.source == "file":
-                if not section.files:
-                    raise ConfigError(
-                        f"{path.name}: forcing.{key}.files: required with source file"
-                    )
-                run.files(section.files, tower, f"forcing.{key}.files")
-        files = {"forcing.clm_history.file": forcing.clm_history.file}
-        if forcing.soil_water.adjustment:
-            files["forcing.soil_water.adjustment.file"] = forcing.soil_water.adjustment.file
-        for key, text in files.items():
-            if not run.path(text, tower).exists():
-                raise ConfigError(f"{path.name}: {key}: file not found: {run.path(text, tower)}")
-    met = {tuple(run.files(forcing.meteorology.files, t)) for t in domain.gridcells.names}
-    if run_file.execution.devices > 1 and len(met) > 1:
-        # the device layout's padding slots can make a gridcell read another tower's forcing
-        # (Phase 6 review R1); several towers on several devices is not a use case
-        raise ConfigError(
-            f"{path.name}: execution.devices > 1 with towers that have different meteorology "
-            "files is not supported (one tower, or towers sharing their forcing)"
-        )
-    substeps = model_step / config.numerics.substep_seconds
-    if substeps != int(substeps):
-        raise ConfigError(
-            f"model.yaml: numerics.substep_seconds ({config.numerics.substep_seconds:g}) must "
-            f"divide the model step ({model_step} s)"
-        )
-    return run
-
-
-def _load_grid_run(run_file, base_dir, config, params, path, overrides, model_step) -> Run:
-    """A ``domain.type: grid`` run (Phase 6b): the domain from the surface data
-    (:mod:`clm_ml.grid`), the gridded forcing (:mod:`clm_ml.grid_forcing`)."""
-    from clm_ml.grid import load_grid_domain
-
-    d, f, src = run_file.domain, run_file.forcing, path.name
-    if d.grid is None:
-        raise ConfigError(f"{src}: domain.grid: required with domain.type grid")
-    if f.gridded is None:
-        raise ConfigError(f"{src}: forcing.gridded: required with domain.type grid")
-    if config.physics.acclimation_temperature != "running_mean":
-        raise ConfigError(
-            f"{src}: model.yaml physics.acclimation_temperature: grid runs need running_mean "
-            "(the Fortran whole-run mean needs all of a run's forcing before it starts)"
-        )
-    if run_file.output.legacy_ascii:
-        raise ConfigError(f"{src}: output.legacy_ascii: not available for grid runs")
-    if run_file.initial_conditions.source != "clm_history" and not (
-        run_file.initial_conditions.source == "restart"
-    ):
-        raise ConfigError(f"{src}: initial_conditions.source: clm_history or restart")
-    if run_file.time.step_seconds != model_step:
-        raise ConfigError(
-            f"{src}: time.step_seconds: for grid runs, the model step ({model_step} s); the "
-            "gridded streams are interpolated to it"
-        )
-    start, n_steps = _resolve_time(run_file.time, src, model_step)
-
-    def resolve(text):
-        p = Path(str(text)).expanduser()
-        return p if p.is_absolute() else (base_dir / p).resolve()
-
-    domain = load_grid_domain(
-        d.grid, params=params, config=config, start=start, step_seconds=model_step,
-        min_patch_weight=d.min_patch_weight, resolve=resolve,
-    )  # fmt: skip
-    ex = run_file.execution
-    for key, count, own in (
-        ("patch_count", ex.patch_count, domain.n_patches),
-        ("gridcell_count", ex.gridcell_count, domain.n_gridcells),
-    ):
-        if count is not None and count < own:
-            raise ConfigError(f"{src}: execution.{key} ({count}) is less than {own}")
-    if ex.devices > 1 and (ex.patch_count or ex.gridcell_count):
-        raise ConfigError(
-            f"{src}: execution.patch_count/gridcell_count with devices > 1 is not supported"
-        )
-    substeps = model_step / config.numerics.substep_seconds
-    if substeps != int(substeps):
-        raise ConfigError(
-            f"model.yaml: numerics.substep_seconds ({config.numerics.substep_seconds:g}) must "
-            f"divide the model step ({model_step} s)"
-        )
-    return Run(run_file, base_dir, config, params, domain, start, n_steps, source=src,
-               path_=path, overrides=overrides)  # fmt: skip
-
-
-def _check_forcing_keys(forcing, source: str) -> None:
-    """Reject the earlier forcing layout with the replacement, and let ``files`` be one
-    path (normalized to a list, in place)."""
-    if not isinstance(forcing, dict):
-        return
-    if isinstance(forcing.get("meteorology"), str):
-        raise ConfigError(
-            f"{source}: forcing.meteorology is now a section: "
-            f"meteorology: {{files: {forcing['meteorology']}}}"
-        )
-    old = sorted(set(forcing) & set(_OLD_FORCING_KEYS))
-    if old:
-        raise ConfigError(
-            f"{source}: forcing: "
-            + "; ".join(f"{k} was replaced by {_OLD_FORCING_KEYS[k]}" for k in old)
-        )
-    for key in ("meteorology", "vegetation", "soil_water"):
-        section = forcing.get(key)
-        if isinstance(section, dict):
-            if "file" in section:
-                raise ConfigError(f"{source}: forcing.{key}.file was replaced by files")
-            if isinstance(section.get("files"), str):
-                section["files"] = [section["files"]]
-            elif "files" in section and section["files"] is None:
-                section["files"] = []
-
-
-def _domain_meta(domain) -> dict:
-    from clm_ml.outputs import domain_meta
-
-    return domain_meta(domain)
-
-
-def _check_supported(run_file: RunFile, source: str) -> None:
-    towers = list(run_file.domain.towers)
-    if len(set(towers)) != len(towers):
-        raise ConfigError(f"{source}: domain.towers: a tower is listed twice ({towers})")
-    ic = run_file.initial_conditions
-    if ic.source == "restart" and not ic.restart_file:
-        raise ConfigError(
-            f"{source}: initial_conditions.restart_file: required with source restart"
-        )
-    parse_chunk(run_file.execution.chunk, f"{source}: execution.chunk")
-    parse_every(run_file.execution.restart_every, f"{source}: execution.restart_every")
-    names = [st.name for st in run_file.output.streams]
-    if len(set(names)) != len(names):
-        raise ConfigError(f"{source}: output.streams: stream names must be unique ({names})")
-    if not names:
-        raise ConfigError(f"{source}: output.streams: at least one stream is needed")
-    from clm_ml.outputs import VARIABLES_BY_NAME, field_names
-
-    # raw step fields (validation): "diagnostics.<name>", "state.<name>", "layers.<name>"
-    raw = set(field_names())
-    for st in run_file.output.streams:
-        unknown = [
-            v for v in st.variables
-            if v not in ("all", "soil_temperature")
-            and v not in VARIABLES_BY_NAME
-            and v not in raw
-        ]  # fmt: skip
-        if unknown:
-            raise ConfigError(
-                f"{source}: output.streams[{st.name}].variables: unknown {unknown}; "
-                "see clm_ml.outputs.VARIABLES"
-            )
-
-
-def _parse_datetime(text: str, key: str) -> dt.datetime:
-    try:
-        return dt.datetime.fromisoformat(str(text))
-    except ValueError:
-        raise ConfigError(f"run.yaml: {key}: {text!r} is not a date-time like 2007-05-01T00:00")
-
-
-def _resolve_time(t: TimeSection, source: str, step_seconds: int) -> tuple[dt.datetime, int]:
-    """Start and number of model steps (``step_seconds`` long), in the model calendar."""
-    from clm_ml.calendar import CALENDARS, seconds_between
-
-    calendar = CALENDARS[t.calendar]
-    start = _parse_datetime(t.start, "time.start")
-    given = [k for k in ("end", "days", "steps") if getattr(t, k) is not None]
-    if len(given) != 1:
-        raise ConfigError(f"{source}: time: give exactly one of end, days, steps (got {given})")
-    try:
-        if t.steps is not None:
-            n = t.steps
-            seconds_between(start, start, calendar)  # the start exists in the calendar
-        else:
-            seconds = (
-                seconds_between(start, _parse_datetime(t.end, "time.end"), calendar)
-                if t.end is not None
-                else t.days * 86400.0
-            )
-            n = seconds / step_seconds
-            if n != int(n):
-                raise ConfigError(f"{source}: time: run length is not a whole number of steps")
-    except ValueError as e:  # 29 February in the noleap calendar
-        raise ConfigError(f"{source}: time: {e}")
-    if int(n) < 1:
-        raise ConfigError(f"{source}: time: the run must be at least one step long")
-    return start, int(n)
+    """The contents of ``run.yaml``."""
+
+    time: TimeSection = option(doc="")
+    forcing: ForcingSection = option(doc="")
+    initial_conditions: InitialConditionsSection = option(InitialConditionsSection(), "")
+    output: OutputSection = option(OutputSection(), "")
+    execution: ExecutionSection = option(ExecutionSection(), "")

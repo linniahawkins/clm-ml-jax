@@ -176,10 +176,12 @@ src/clm_ml/
                   namelist converter (clm-ml convert), psihat tables, YAML schema
   outputs.py      named output variables from a step's fields; netCDF writers
   output_streams.py, checks.py, calendar.py, options.py, config.py, params.py, domain.py,
-  run.py (run.yaml; Run.execute), model.py (Model: chunks and gradients), cli.py
-  data/           towers.yaml, params/*.yaml, psihat.nc (package data)
-configs/          runnable configurations (run.yaml + model.yaml per experiment); model.yaml
-                  = every model setting at its default, generated (clm-ml model-yaml)
+  run.py (run.yaml schema), domain.py (domain.yaml), config.py (model.yaml), params.py,
+  experiment.py (experiment folders: load, new, upgrade; Experiment.execute),
+  model.py (Model: chunks and gradients), cli.py
+  presets/        towers/, params/, experiments/: what `clm-ml new` copies (package data)
+  data/           psihat.nc (package data)
+configs/          the presets written out as experiment folders (run, domain, model, params)
 data/             CHATS7 forcing (input_files/) and the CLM-ml namelists (namelists/nl.*)
 tests/
   clm_ml/              unit tests (fast)
@@ -248,12 +250,13 @@ docs/design/           plan, decisions.md, open_items.md, model_overview.md, pha
 ```bash
 pip install -e ".[dev]"                     # dev extras include pytest-cov, which pytest.ini needs (--no-cov)
 
-clm-ml run configs/chats7_1day/run.yaml    # a ready configuration (configs/README.md)
-clm-ml model-yaml -o configs/model.yaml    # regenerate the complete model.yaml after changing config.py
-clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/   # namelist -> run.yaml + complete model.yaml
-clm-ml check chats7/run.yaml               # validate + summary, no run
-clm-ml params ctsm60_params.nc -o p.yaml   # CLM parameter file -> complete params.yaml (built-in clm6 = CTSM 6.0)
-clm-ml run chats7/run.yaml [--set key=value]   # run (netCDF output; output.legacy_ascii: the .out files)
+clm-ml new my_site --from chats7_1day      # an experiment folder from a preset (configs/README.md)
+clm-ml check my_site                        # validate + summary, no run
+clm-ml run my_site [--set run.time.days=3]  # run (netCDF output, config copy in OUTPUT/config)
+clm-ml upgrade my_site                      # rewrite with every current setting (also old layout)
+clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/   # namelist -> experiment folder
+clm-ml params ctsm60_params.nc -o p.yaml   # CLM parameter file -> complete params.yaml (preset clm6 = CTSM 6.0)
+clm-ml new configs/chats7_1day --from chats7_1day --force   # regenerate configs/ after changing options
 
 python -m pytest tests/clm_ml tests/fortran_validation -m "not slow" -q   # unit + golden tests (fast)
 python -m pytest tests/regression -m regression -q                    # all end-to-end regression tests (~20 min CPU)
@@ -318,19 +321,25 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
 `docs/design/api_sketch.py` (historical), and runnable config files are in `configs/`.
 
 **Decisions:**
-- **Built-in towers: CHATS7 only** (`src/clm_ml/data/towers.yaml`). Other towers go in a
-  user `towers.yaml`, with explicit layer counts per patch (`n_layers_within`/
-  `n_layers_above`) where default spacing gives too many layers.
+- **Tower presets: CHATS7 only** (`src/clm_ml/presets/towers/chats7.yaml`). Other towers
+  go in an experiment's `domain.yaml`, with explicit layer counts per patch
+  (`n_layers_within`/`n_layers_above`) where default spacing gives too many layers.
 - **Names.** Import as `import clm_ml`. The install name is `clm-ml-jax`. The command-line tool
-  is `clm-ml run | check | convert`.
-- **Configuration** is in three YAML files:
-  - `run.yaml` is the experiment (towers, dates, forcing files, initial conditions, output). It
-    replaces the namelist.
-  - `model.yaml` holds scheme choices and numerics. These are static, so changing them
-    recompiles.
-  - `params.yaml` holds parameters **per PFT**. Every file is complete (every parameter of
-    every PFT 1-16; no `extends`, no filled-in defaults; maintainer 2026-11-01), and each
-    patch looks up its PFT's values. `run.yaml` must name one.
+  is `clm-ml new | check | run | upgrade | convert | params`.
+- **Experiment folders** (decision 91, `docs/design/experiment_folders.md`): an experiment is
+  a folder with four complete files (fixed names), and a run reads nothing else but data:
+  - `run.yaml`: when and with what (dates, calendar, forcing and land-data files and the
+    tower forcing interval, initial conditions, output, chunks, restarts). Replaces the namelist.
+  - `domain.yaml`: where (towers or a grid).
+  - `model.yaml`: scheme choices and numerics, including the model step. Static: changing
+    them recompiles.
+  - `params.yaml`: parameters **per PFT**, every parameter of every PFT 1-16 (no `extends`).
+  - Strict: missing, unknown or misplaced keys are errors; `clm-ml upgrade` adds new keys at
+    their defaults. Every option is declared once in the code with `yaml_schema.option`
+    (explanation, Fortran name, `applies`, `hidden`, `path`); the files are generated from
+    it (`clm-ml new --from PRESET`, presets in `src/clm_ml/presets/`). `configs/` holds the
+    presets written out; regenerate after changing an option
+    (`clm-ml new configs/NAME --from NAME --force`; `tests/clm_ml/test_configs.py`).
 - YAML loads into typed dataclass pytrees. Validation is plain Python, with errors that name the
   file and key. No Hydra, no Flax.
 - **Readable option names** (`stomatal_conductance: wue`). Fortran integer codes are accepted
@@ -340,8 +349,8 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
   - **gridcell**: a location with its own atmospheric forcing.
   - **patch**: one PFT's canopy on a gridcell, with an area weight. **The unit of computation.**
   - **soil column**: the soil under a patch.
-  - **tower**: a named flux-tower location in the registry (`towers.yaml`), which defines a
-    gridcell and its patches.
+  - **tower**: a named flux-tower location in `domain.yaml`, which defines a gridcell and
+    its patches.
 - **Spatial scope:** from one tower up to global (many gridcells, no lateral exchange).
   - Patches are a flat list with `gridcell_index`/`column_index`.
   - The physics is written for one patch, and `vmap` runs it over the patch axis.

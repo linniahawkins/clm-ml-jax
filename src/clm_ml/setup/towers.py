@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from clm_ml.run import _parse_datetime
+from clm_ml.experiment import _parse_datetime
 from clm_ml.tower_forcing import TowerForcingSource
 
 
@@ -31,7 +31,8 @@ def history_index_function(run_start: dt.datetime, step_seconds: int, clm_start,
 
 
 def gridcell_sources(run) -> list:
-    """The :class:`TowerForcingSource` of each gridcell of a tower run (``clm_ml.run.Run``)."""
+    """The :class:`TowerForcingSource` of each gridcell of a tower run
+    (``clm_ml.experiment.Experiment``)."""
     from clm_ml.io.clm_history import history_interval
     from clm_ml.io.tower import TowerFiles
 
@@ -42,8 +43,8 @@ def gridcell_sources(run) -> list:
     g = run.domain.gridcells
     step = run.step_seconds
     sources = []
+    record_seconds = int(met.interval_seconds)
     for i, name in enumerate(g.names):
-        record_seconds = int(g.forcing_step_minutes[i]) * 60
         if record_seconds % step:
             raise ValueError(
                 f"model step {step} s must divide the forcing interval {record_seconds} s"

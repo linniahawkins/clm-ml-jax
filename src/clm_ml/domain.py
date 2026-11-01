@@ -8,7 +8,7 @@ Vocabulary (modernization plan §3.1):
   computation.
 - **soil column**: the soil under a patch. With ``soil.columns: per_patch`` (the only
   option implemented) every patch has its own column.
-- **tower**: a named flux-tower location in ``towers.yaml``; it defines one gridcell and
+- **tower**: a named flux-tower location in ``domain.yaml``; it defines one gridcell and
   its patches.
 
 Patches are a flat list. ``Patches.gridcell_index`` says which gridcell each one is on.
@@ -17,71 +17,110 @@ Patches are a flat list. ``Patches.gridcell_index`` says which gridcell each one
 from __future__ import annotations
 
 import dataclasses
-from importlib import resources
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Literal, Optional
 
 import numpy as np
 
 from clm_ml.config import ModelConfig
-from clm_ml.io.yaml_schema import ConfigError, from_dict, read_yaml
+from clm_ml.grid import GridSection
+from clm_ml.io.yaml_schema import ConfigError, from_dict, option, read_yaml
 from clm_ml.params import PFT_NAMES, Params, pft_index
 
 # --------------------------------------------------------------------------------------
-# towers.yaml schema
+# domain.yaml schema
 # --------------------------------------------------------------------------------------
+
+HEADER = """\
+domain.yaml: where the experiment runs: towers (location, forcing height, soil, patches) or a
+grid (a CLM surface dataset). Part of an experiment folder (run.yaml, domain.yaml, model.yaml,
+params.yaml). Every setting is listed; REQUIRED keys have no default. {generated}"""
 
 
 @dataclasses.dataclass(frozen=True)
 class SoilSpec:
-    texture_class: Optional[str] = None  # used when sand/clay are null
-    sand_percent: Optional[float] = None
-    clay_percent: Optional[float] = None
-    organic_matter: Optional[float] = None  # kg m-3
-    color_class: int = 15  # CLM soil color class, 1 (light) to 20 (dark)
-    bedrock_depth: Optional[float] = None  # m
+    """The soil of the tower's column(s)."""
+
+    texture_class: Optional[str] = option(
+        None, "USDA texture class (e.g. silty clay loam), used when sand and clay are null."
+    )
+    sand_percent: Optional[float] = option(None, "Sand content (%).")
+    clay_percent: Optional[float] = option(None, "Clay content (%).")
+    organic_matter: Optional[float] = option(None, "Soil organic matter density (kg m-3).")
+    color_class: int = option(15, "CLM soil colour class, 1 (light) to 20 (dark): soil albedo.")
+    bedrock_depth: Optional[float] = option(None, "Depth to bedrock (m); null: none.")
 
 
 @dataclasses.dataclass(frozen=True)
 class PatchSpec:
-    pft: str
-    weight: float = 1.0  # fraction of the gridcell
-    canopy_height: Optional[float] = None  # m (null: from CLM history file)
-    root_biomass: Optional[float] = None  # g m-2 (null: PFT default)
-    leaf_area_profile_beta: Optional[tuple[float, float]] = None  # null: PFT default profile
-    stem_area_profile_beta: Optional[tuple[float, float]] = None
-    # Explicit canopy-air layer counts for this patch (null: model.yaml canopy_layers), e.g. a
-    # short canopy under a tall tower (Bonan et al. 2021: 5-10 layers within the canopy)
-    n_layers_within: Optional[int] = None
-    n_layers_above: Optional[int] = None
+    """One patch: one PFT's canopy on the tower's gridcell."""
+
+    pft: str = option(doc="Plant functional type (a name from params.yaml, e.g. "
+                      "broadleaf_deciduous_temperate_tree).")  # fmt: skip
+    weight: float = option(1.0, "Fraction of the gridcell; the weights of a tower sum to 1.")
+    canopy_height: Optional[float] = option(None, "Canopy height (m); null: from the CLM "
+                                            "history file.")  # fmt: skip
+    root_biomass: Optional[float] = option(None, "Root biomass (g m-2); null: the PFT default.")
+    leaf_area_profile_beta: Optional[tuple[float, float]] = option(
+        None, "Beta distribution (p, q) of leaf area with height; null: the PFT default."
+    )
+    stem_area_profile_beta: Optional[tuple[float, float]] = option(
+        None, "Beta distribution (p, q) of stem area with height; null: the PFT default."
+    )
+    n_layers_within: Optional[int] = option(
+        None,
+        "Canopy-air layers within the canopy for this patch; null: model.yaml "
+        "canopy_layers. Set with n_layers_above (e.g. a short canopy under a tall tower; "
+        "5-10 layers within the canopy suffice for fluxes, Bonan et al. 2021).",
+    )
+    n_layers_above: Optional[int] = option(
+        None, "Canopy-air layers above the canopy for this patch; null: model.yaml."
+    )
 
 
 @dataclasses.dataclass(frozen=True)
 class TowerSpec:
-    latitude: float  # degrees north
-    longitude: float  # degrees east
-    patches: tuple[PatchSpec, ...]
-    measurement_height: Optional[float] = None  # forcing height, m (null: 30 m)
-    forcing_step_minutes: int = 30
-    soil: SoilSpec = SoilSpec()
+    """One tower: a gridcell with its own forcing, its soil and its patches."""
+
+    latitude: float = option(doc="Latitude, degrees north.")
+    longitude: float = option(doc="Longitude, degrees east.")
+    patches: tuple[PatchSpec, ...] = option(doc="The patches on the tower's gridcell.")
+    measurement_height: Optional[float] = option(
+        None, "Forcing (reference) height (m); null: 30 m.", fortran="tower_ht"
+    )
+    soil: SoilSpec = option(SoilSpec(), "The soil.")
 
 
-def builtin_towers_path() -> Path:
-    return Path(str(resources.files("clm_ml") / "data" / "towers.yaml"))
+@dataclasses.dataclass(frozen=True)
+class DomainFile:
+    """The contents of ``domain.yaml``."""
+
+    type: Literal["towers", "grid"] = option(
+        doc="towers: the towers listed below; grid: the gridcells of a CLM surface dataset."
+    )
+    towers: dict[str, TowerSpec] = option(
+        doc="The towers, by name (each one gridcell with its own forcing).", applies="towers"
+    )
+    grid: GridSection = option(doc="The grid.", applies="grid")
+    min_patch_weight: float = option(
+        0.0,
+        "Patches covering less than this fraction of their gridcell are left out (the others' "
+        "weights renormalized to sum to 1).",
+    )
 
 
-def load_towers(path: Path) -> dict[str, TowerSpec]:
-    data = read_yaml(path)
-    towers = {}
-    for name, entry in data.items():
-        tower = from_dict(TowerSpec, entry, source=path.name, key=str(name))
+def check_towers(towers: dict[str, TowerSpec], source: str) -> None:
+    """Each tower has patches whose weights sum to 1, known PFTs and paired layer counts."""
+    if not towers:
+        raise ConfigError(f"{source}: towers: list at least one tower")
+    for name, tower in towers.items():
         if not tower.patches:
-            raise ConfigError(f"{path.name}: {name}.patches: at least one patch is required")
+            raise ConfigError(f"{source}: towers.{name}.patches: at least one patch is required")
         total = sum(p.weight for p in tower.patches)
         if abs(total - 1.0) > 1e-6:
-            raise ConfigError(f"{path.name}: {name}.patches: weights sum to {total:g}, not 1")
+            raise ConfigError(f"{source}: towers.{name}.patches: weights sum to {total:g}, not 1")
         for i, patch in enumerate(tower.patches):
-            where = f"{path.name}: {name}.patches[{i}]"
+            where = f"{source}: towers.{name}.patches[{i}]"
             pft_index(patch.pft, f"{where}.pft")
             if (patch.n_layers_within is None) != (patch.n_layers_above is None):
                 raise ConfigError(
@@ -91,7 +130,16 @@ def load_towers(path: Path) -> dict[str, TowerSpec]:
                 patch.n_layers_within < 1 or patch.n_layers_above < 1
             ):
                 raise ConfigError(f"{where}: n_layers_within and n_layers_above must be >= 1")
-        towers[str(name)] = tower
+
+
+def load_towers(path: Path) -> dict[str, TowerSpec]:
+    """A towers file (``{name: tower}``; the presets in ``clm_ml/presets/towers``)."""
+    data = read_yaml(path)
+    towers = {
+        str(name): from_dict(TowerSpec, entry, source=path.name, key=str(name))
+        for name, entry in data.items()
+    }
+    check_towers(towers, path.name)
     return towers
 
 
@@ -106,7 +154,6 @@ class Gridcells:
     latitude: np.ndarray  # (ng,)
     longitude: np.ndarray  # (ng,)
     measurement_height: np.ndarray  # (ng,) m
-    forcing_step_minutes: np.ndarray  # (ng,) int
     # Grid domains (Phase 6b): each gridcell's (row, column) on the surface-data grid
     grid_index: Optional[np.ndarray] = None  # (ng, 2) int
 
@@ -145,7 +192,7 @@ class Domain:
     gridcells: Gridcells
     patches: Patches
     columns: SoilColumns
-    towers: dict  # name -> TowerSpec, as loaded (for provenance and the legacy adapter)
+    towers: dict  # name -> TowerSpec, as loaded (for provenance)
 
     @property
     def n_gridcells(self) -> int:
@@ -158,26 +205,15 @@ class Domain:
     @classmethod
     def from_towers(
         cls,
-        names: Sequence[str],
-        towers_file: Optional[Path] = None,
+        available: dict[str, TowerSpec],
         *,
         params: Params,
         config: ModelConfig,
         min_patch_weight: float = 0.0,
     ) -> "Domain":
-        """Build a domain from built-in towers and/or a user ``towers.yaml``
-        (user entries take precedence over built-in ones with the same name)."""
-        available = load_towers(builtin_towers_path())
-        if towers_file is not None:
-            available.update(load_towers(Path(towers_file)))
-        missing = [n for n in names if n not in available]
-        if missing:
-            raise ConfigError(
-                f"run.yaml: domain.towers: unknown tower(s) {missing}; "
-                f"available: {sorted(available)}"
-            )
-        if not names:
-            raise ConfigError("run.yaml: domain.towers: list at least one tower")
+        """Build a domain from towers (``domain.yaml`` ``towers``, in their order)."""
+        check_towers(available, "domain.yaml")
+        names = list(available)
 
         g_rows, p_rows, c_rows = [], [], []
         for g, name in enumerate(names):
@@ -186,7 +222,8 @@ class Domain:
             kept = [p for p in tower.patches if p.weight >= min_patch_weight]
             if not kept:
                 raise ConfigError(
-                    f"{name}: every patch is below domain.min_patch_weight={min_patch_weight}"
+                    f"domain.yaml: towers.{name}: every patch is below min_patch_weight="
+                    f"{min_patch_weight}"
                 )
             total = sum(p.weight for p in kept)
             for patch in kept:
@@ -204,7 +241,6 @@ class Domain:
             latitude=np.array([t.latitude for t in g_rows]),
             longitude=np.array([t.longitude for t in g_rows]),
             measurement_height=np.array([nan(t.measurement_height) for t in g_rows]),
-            forcing_step_minutes=np.array([t.forcing_step_minutes for t in g_rows]),
         )
         patches = Patches(
             gridcell_index=np.array([g for g, _, _ in p_rows]),
@@ -244,7 +280,7 @@ class Domain:
         """Number of canopy-air layers per patch (ground to measurement height).
 
         Same rule as the legacy ``initVerticalStructure``, with the patch's explicit counts
-        (``towers.yaml``) in place of model.yaml's when set. Patches whose canopy height comes
+        (``domain.yaml``) in place of model.yaml's when set. Patches whose canopy height comes
         from the CLM history file (NaN here) are counted when the run starts instead, and
         reported as 0.
 

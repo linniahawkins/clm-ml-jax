@@ -43,34 +43,24 @@ def _run(workdir: Path, six_hourly: bool):
     import sys
 
     sys.path.insert(0, str(ROOT / "src"))
-    from clm_ml.io.namelist import convert_namelist
-    from clm_ml.run import load_run
+    sys.path.insert(0, str(ROOT))
+    from clm_ml.experiment import load_experiment
+    from tests.experiment_tools import make_experiment
 
-    convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", workdir)
-    run_yaml = workdir / "run.yaml"
-    data = yaml.safe_load(run_yaml.read_text())
-    data["time"] = {"start": "2007-05-01T00:00", "days": DAYS}
-    data["output"] = {
+    run = {"time": {"start": "2007-05-01T00:00", "days": DAYS, "steps": None}}
+    run["output"] = {
         "directory": str(workdir / "out"),
         "streams": [{"name": "daily", "frequency": "daily", "statistic": "mean",
                      "variables": ["latent_heat_flux", "sensible_heat_flux", "gpp",
                                    "incident_visible_radiation", "net_radiation"]}],
     }  # fmt: skip
     if six_hourly:
-        with open(ROOT / "src" / "clm_ml" / "data" / "towers.yaml") as fh:
-            towers = yaml.safe_load(fh)
-        tower = dict(towers["CHATS7"], forcing_step_minutes=360)
-        (workdir / "towers.yaml").write_text(yaml.safe_dump({"CHATS7_6H": tower}))
         _six_hourly_file(workdir / "six_hourly.nc")
-        data["domain"].update(towers=["CHATS7_6H"], towers_file="towers.yaml")
-        data["forcing"]["meteorology"]["files"] = str(workdir / "six_hourly.nc")
-        data["time"]["step_seconds"] = 21600  # the forcing data interval
-        model_yaml = workdir / data["model"]
-        model = yaml.safe_load(model_yaml.read_text()) or {}
-        model.setdefault("numerics", {})["step_seconds"] = 1800  # the model step
-        model_yaml.write_text(yaml.safe_dump(model))
-    run_yaml.write_text(yaml.safe_dump(data))
-    return load_run(run_yaml).execute(quiet=True)["daily"]
+        # the forcing data interval (the model step stays 1800 s, model.yaml)
+        run["forcing"] = {"meteorology": {"files": [str(workdir / "six_hourly.nc")],
+                                          "interval_seconds": 21600}}  # fmt: skip
+    make_experiment(workdir, namelist=ROOT / "data" / "namelists" / "nl.CHATS7.1day", run=run)
+    return load_experiment(workdir).execute(quiet=True)["daily"]
 
 
 def test_six_hourly_forcing_at_a_half_hourly_step(tmp_path):

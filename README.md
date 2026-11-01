@@ -42,65 +42,49 @@ This installs the `clm-ml` command and the `clm_ml` package (the only package in
 
 ## Run a Simulation
 
-### With YAML configuration (`clm-ml`)
+### Experiment folders (`clm-ml`)
 
-A run is described by `run.yaml` (dates, tower, forcing files, output), which points to
-`model.yaml` (physics schemes and numerics) and a complete parameter file (every parameter of
-every plant functional type). Ready-to-run configurations are in `configs/`
-(`configs/README.md`); `configs/model.yaml` lists every model setting with its default.
+An experiment is a folder with four files, and every setting the model has is written out in
+them with an explanation (keys marked REQUIRED have no default):
+
+| File | What it sets |
+|---|---|
+| `run.yaml` | when and with what: dates, calendar, forcing and land-data files, initial conditions, output streams, chunks and restarts |
+| `domain.yaml` | where: towers (location, forcing height, soil, patches) or a grid (CLM surface dataset, region) |
+| `model.yaml` | how: physics schemes and numerics (a change recompiles the model) |
+| `params.yaml` | which plants: every parameter of every PFT (the numbers gradients come back for) |
+
+Start from a preset; ready-made folders are in `configs/` (`configs/README.md`):
 
 ```bash
-clm-ml run configs/chats7_1day/run.yaml   # one day at CHATS7
+clm-ml new my_site --from chats7_1day      # write the four complete files
+clm-ml check my_site                        # validate everything and print a summary
+clm-ml run my_site                          # run; one netCDF file per output stream
+clm-ml run my_site --set run.time.days=7 --set model.physics.stomatal_conductance=medlyn
+clm-ml upgrade my_site                      # after updating clm-ml: add new settings
 ```
 
-Or convert an existing namelist:
-
-```bash
-clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/   # writes run.yaml + model.yaml
-clm-ml check chats7/run.yaml        # validate everything and print a summary, without running
-clm-ml run chats7/run.yaml          # run; writes one netCDF file per output stream
-clm-ml run chats7/run.yaml --set time.days=7 --set model.physics.stomatal_conductance=medlyn
-```
-
-Or from Python:
+Each run also writes the four files as it read them into `OUTPUT/config/`, a folder that
+repeats the run. From Python:
 
 ```python
-from clm_ml.run import load_run
+import clm_ml
 
-run = load_run("chats7/run.yaml")
-out = run.execute()["step"]   # one result per output stream (run.yaml output.streams)
-ds = out.to_xarray()          # dims (time, patch, layer, ...), with units
+exp = clm_ml.load_experiment("my_site")
+out = exp.execute()["halfhourly"]   # one result per output stream (run.yaml output.streams)
+ds = out.to_xarray()                # dims (time, patch, layer, ...), with units
 ds["latent_heat_flux"].plot()
 ```
 
-Output is configured as streams in `run.yaml`; each is accumulated during the run, so
-memory does not grow with the number of model steps:
-
-```yaml
-output:
-  directory: output/
-  streams:
-    - name: step                  # every variable at every model step
-      frequency: step
-    - name: daily
-      frequency: daily            # step | hourly | daily | monthly | yearly
-      statistic: mean             # mean | instantaneous | min | max
-      variables: [latent_heat_flux, sensible_heat_flux, gpp]
-      level: [patch, gridcell]
-      file_per: year              # run | year | month
-  legacy_ascii: false             # true: also the Fortran-format .out files (validation)
-```
-
-The built-in parameter sets are `clm5_defaults`, `chats` (the CHATS walnut-orchard values of
-Bonan, Burns & Patton 2026, Table 2) and `clm6` (CTSM 6.0); see `src/clm_ml/data/params/`.
-Each is a complete table; to make your own, copy one (`clm-ml params chats -o mine.yaml`)
-and edit it. See
-`docs/design/modernization_plan.md` for where this interface is heading.
+Output streams are accumulated during the run, so memory does not grow with the number of
+model steps. The parameter presets are `clm5_defaults`, `chats` (the CHATS walnut-orchard
+values of Bonan, Burns & Patton 2026, Table 2) and `clm6` (CTSM 6.0); a folder's
+params.yaml is a complete copy of one. The design: `docs/design/experiment_folders.md`.
 
 ### From a CLM-ml namelist
 
-The Fortran-style namelists (`data/namelists/nl.*`) are converted to YAML with
-`clm-ml convert` (above); the former `clm-ml-offline` driver was retired in Phase 7. The
+The Fortran-style namelists (`data/namelists/nl.*`) are converted to an experiment folder
+with `clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/`; the former `clm-ml-offline` driver was retired in Phase 7. The
 Fortran-format `.out` files are still written with `output.legacy_ascii: true` (one patch,
 for the comparison with the Fortran model).
 
@@ -170,8 +154,8 @@ and file with `domain.towers` and `domain.towers_file` in `run.yaml`.
 
 Physics schemes and numerics are in `model.yaml` (e.g. `physics.stomatal_conductance:
 medlyn | ball_berry | wue`, `numerics.integrator: rk4`); any key can be changed on the command
-line with `--set model.<section>.<key>=<value>`. Every setting is explained in
-`configs/model.yaml`.
+line with `--set model.<section>.<key>=<value>`. Every setting is explained in each
+folder's `model.yaml` (e.g. `configs/chats7_1day/model.yaml`).
 
 ---
 

@@ -1,6 +1,13 @@
 """CLM-ML-JAX: multilayer canopy model (CLM-ml v2) in JAX.
 
-See docs/design/modernization_plan.md. Public API is re-exported here as it is built.
+An experiment is a folder with run.yaml, domain.yaml, model.yaml and params.yaml
+(docs/design/experiment_folders.md)::
+
+    import clm_ml
+
+    clm_ml.new_experiment("my_site", "chats7_1day")    # write a complete folder from a preset
+    exp = clm_ml.load_experiment("my_site")              # the four files, validated
+    results = exp.execute()                              # run; outputs per stream
 """
 
 import os as _os
@@ -15,3 +22,21 @@ import os as _os
 _SPLIT = "--xla_cpu_parallel_codegen_split_count=1"
 if "xla_cpu_parallel_codegen_split_count" not in _os.environ.get("XLA_FLAGS", ""):
     _os.environ["XLA_FLAGS"] = (_os.environ.get("XLA_FLAGS", "") + " " + _SPLIT).strip()
+
+
+_EXPORTS = {
+    "load_experiment": "clm_ml.experiment",
+    "new_experiment": "clm_ml.experiment",
+    "upgrade_experiment": "clm_ml.experiment",
+    "Experiment": "clm_ml.experiment",
+    "Model": "clm_ml.model",
+}
+
+
+def __getattr__(name):
+    """The public names, imported when first used (``import clm_ml`` stays light)."""
+    if name in _EXPORTS:
+        import importlib
+
+        return getattr(importlib.import_module(_EXPORTS[name]), name)
+    raise AttributeError(f"module 'clm_ml' has no attribute {name!r}")

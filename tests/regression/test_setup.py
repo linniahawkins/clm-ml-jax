@@ -30,17 +30,17 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = """
 import sys, tempfile, copy
 from pathlib import Path
-ROOT = Path({root!r}); sys.path.insert(0, str(ROOT / "src"))
+ROOT = Path({root!r}); sys.path.insert(0, str(ROOT / "src")); sys.path.insert(0, str(ROOT))
 import numpy as np, yaml, jax
 jax.config.update("jax_enable_x64", True)
 from clm_ml.io.namelist import convert_namelist
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 from clm_ml.setup.patches import build_patches
 from clm_ml.setup.towers import gridcell_sources, first_values
+from tests.experiment_tools import chats7_tower, edit
 tmp = Path(tempfile.mkdtemp())
 convert_namelist(ROOT / "data/namelists/nl.CHATS7.1day", tmp)
-base = yaml.safe_load((tmp / "run.yaml").read_text())
-chats = yaml.safe_load((ROOT / "src/clm_ml/data/towers.yaml").read_text())["CHATS7"]
+chats = chats7_tower()
 walnut = chats["patches"][0]
 def tower(lat, lon, ht, soil, patches):
     t = copy.deepcopy(chats); t.update(latitude=lat, longitude=lon, measurement_height=ht); t["soil"].update(soil); t["patches"] = patches; return t
@@ -54,10 +54,8 @@ towers = {{
   "G3": tower(10.0, 20.0, 21.0, {{"texture_class": "loam", "sand_percent": None, "clay_percent": None, "bedrock_depth": 3.0, "color_class": 10}},
         [dict(walnut, weight=0.6), {{"pft": "needleleaf_evergreen_temperate_tree", "weight": 0.4, "canopy_height": 9.0, "root_biomass": 700.0}}]),
 }}
-(tmp / "towers.yaml").write_text(yaml.safe_dump(towers))
-d = copy.deepcopy(base); d["domain"].update(towers=list(towers), towers_file="towers.yaml")
-(tmp / "r.yaml").write_text(yaml.safe_dump(d))
-run = load_run(tmp / "r.yaml")
+edit(tmp, domain=lambda d: d.update(towers=towers))
+run = load_experiment(tmp)
 
 # the new setup first, in a fresh process (no legacy module state)
 sources = gridcell_sources(run)

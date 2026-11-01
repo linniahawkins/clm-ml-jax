@@ -40,7 +40,7 @@ sys.path.insert(0, {src!r})
 import jax
 import numpy as np
 from clm_ml.io.namelist import convert_namelist
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 from clm_ml.model import Model
 from clm_ml.outputs import VARIABLES
 from clm_ml.output_streams import StreamSpec
@@ -52,7 +52,7 @@ stream = StreamSpec("s", "step", "instantaneous", names)
 first, n = 1, 6
 out = {{}}
 for size in {sizes!r}:
-    model = Model.from_run(load_run(tmp / "run.yaml",
+    model = Model.from_experiment(load_experiment(tmp,
                                     ["model.canopy_layers.max_layers=" + str(size)]))
     state, params = model.initial_state(), model.default_params()
     forcing = model.forcing(first, n)

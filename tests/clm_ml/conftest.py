@@ -15,7 +15,8 @@ CHATS_NAMELISTS = PROJECT_ROOT / "data" / "namelists"
 
 @pytest.fixture
 def chats_run_dir(tmp_path):
-    """A converted nl.CHATS7.50steps (run.yaml + model.yaml) in a temporary directory."""
+    """The experiment folder of nl.CHATS7.50steps (``clm-ml convert``) in a temporary
+    directory."""
     from clm_ml.io.namelist import convert_namelist
 
     convert_namelist(CHATS_NAMELISTS / "nl.CHATS7.50steps", tmp_path)

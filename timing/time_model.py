@@ -37,21 +37,26 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=8)
     parser.add_argument("--label", default="")
     parser.add_argument("--no-grad", action="store_true")
-    parser.add_argument("--set", action="append", default=[], help="run.yaml/model.yaml override")
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        help="override, the file named first (run.time.days=2, model.physics...)",
+    )
     args = parser.parse_args()
 
     import jax
 
+    from clm_ml.experiment import load_experiment
     from clm_ml.io.namelist import convert_namelist
     from clm_ml.model import Model
     from clm_ml.output_streams import StreamSpec
-    from clm_ml.run import load_run
 
     tmp = Path(tempfile.mkdtemp())
     convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", tmp)
-    run = load_run(tmp / "run.yaml", args.set)
+    run = load_experiment(tmp, args.set)
     t0 = time.perf_counter()
-    model = Model.from_run(run)
+    model = Model.from_experiment(run)
     setup_s = time.perf_counter() - t0
     state, params = model.initial_state(), model.default_params()
     first, n = 1, args.steps

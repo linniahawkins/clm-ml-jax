@@ -74,7 +74,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O67 | PFT optics keep the old 1-based layout `[unused, vis, nir]` | housekeeping | 8a | I |
 | O68 | Stale docstrings and comments (`model.py`, `legacy_ascii`, `clm_ml/__init__.py`, CLAUDE.md `rtol`) | housekeeping | 8a | I |
 | O69 | Plan says output is a nested scan (records × steps); the code is one scan with a record slot per step | housekeeping | 8a | I |
-| O70 | Implement experiment folders (decision 91, `experiment_folders.md`) | housekeeping | 8a | I (open questions: M) |
+| O70 | ~~Implement experiment folders~~ (closed: decision 91 implemented) | housekeeping | closed | I |
 | **5. Documentation (8b)** |||||
 | O45 | Getting-started guide | documentation | 8b | I |
 | O46 | Reference of every YAML key, generated from the code | documentation | 8b (code part in 8a) | I |
@@ -521,6 +521,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** model map (2026-11-01).
 
 ### O70. Implement experiment folders
+- **Closed 2026-11-01:** implemented (decision 91).
 - **What:** decision 91: four complete files per experiment folder (`run`, `domain`, `model`,
   `params`), strict loading, `clm-ml new`/`upgrade`, presets in the package, `configs/`
   regenerated as folders, configuration copied into each run's output.
@@ -624,6 +625,9 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 ---
 
 ## Recently closed (for reference, not open)
+
+- Experiment folders implemented: four complete files, `clm-ml new`/`upgrade`, presets,
+  configuration copy with each run's output (O70; decision 91; 2026-11-01).
 
 - Configuration files: `configs/` with complete, generated model.yaml files; complete params
   files, `run.yaml` must name one (O17, O41; decisions 89, 90; 2026-11-01).

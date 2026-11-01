@@ -36,7 +36,12 @@ VARS = ["latent_heat_flux", "sensible_heat_flux", "gpp", "net_radiation"]
 
 
 def _towers() -> dict:
-    chats = yaml.safe_load((ROOT / "src" / "clm_ml" / "data" / "towers.yaml").read_text())["CHATS7"]
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from tests.experiment_tools import chats7_tower
+
+    chats = chats7_tower()
     walnut = dict(chats["patches"][0])
     needle = {
         "pft": "needleleaf_evergreen_temperate_tree",
@@ -62,16 +67,12 @@ def _execute(tmp: Path, name: str, towers: dict, order: list):
     import sys
 
     sys.path.insert(0, str(ROOT / "src"))
-    from clm_ml.io.namelist import convert_namelist
-    from clm_ml.run import load_run
+    sys.path.insert(0, str(ROOT))
+    from clm_ml.experiment import load_experiment
+    from tests.experiment_tools import make_experiment
 
     work = tmp / name
-    work.mkdir()
-    convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", work)
-    (work / "towers.yaml").write_text(yaml.safe_dump(towers))
-    d = yaml.safe_load((work / "run.yaml").read_text())
-    d["domain"].update(towers=order, towers_file="towers.yaml")
-    d["output"] = {
+    output = {
         "directory": str(work / "out"),
         "streams": [
             {"name": "step", "frequency": "step", "statistic": "mean", "variables": VARS,
@@ -80,8 +81,10 @@ def _execute(tmp: Path, name: str, towers: dict, order: list):
              "variables": ["sensible_heat_flux"], "level": ["gridcell"]},
         ],
     }  # fmt: skip
-    (work / "run.yaml").write_text(yaml.safe_dump(d))
-    return load_run(work / "run.yaml").execute(write=False, quiet=True)
+    make_experiment(work, namelist=ROOT / "data" / "namelists" / "nl.CHATS7.1day",
+                    domain=lambda d: d.update(towers={t: towers[t] for t in order}),
+                    run={"output": output})  # fmt: skip
+    return load_experiment(work).execute(write=False, quiet=True)
 
 
 def _close(actual, expected, name):

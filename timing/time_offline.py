@@ -37,20 +37,20 @@ RESULTS_FILE = Path(__file__).resolve().parent / "results.jsonl"
 
 
 def run(namelist: Path, cold_cache: bool) -> dict:
+    from clm_ml.experiment import load_experiment
     from clm_ml.io.namelist import convert_namelist
-    from clm_ml.run import load_run
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         convert_namelist(namelist, tmp)
-        run_cfg = load_run(tmp / "run.yaml")
+        run_cfg = load_experiment(tmp)
         env = dict(os.environ)
         env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(SRC_DIR), env.get("PYTHONPATH")]))
         if cold_cache:
             env["JAX_COMPILATION_CACHE_DIR"] = str(tmp / "jax_cache")
         t0 = time.perf_counter()
         proc = subprocess.run(
-            [sys.executable, "-m", "clm_ml.cli", "run", str(tmp / "run.yaml")],
+            [sys.executable, "-m", "clm_ml.cli", "run", str(tmp)],
             env=env, capture_output=True, text=True,
         )  # fmt: skip
         total = time.perf_counter() - t0

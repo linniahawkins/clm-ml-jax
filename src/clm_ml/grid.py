@@ -2,15 +2,14 @@
 Grid domains (plan Phase 6b, step 2): gridcells and vegetated patches from a CLM surface
 dataset, as CLM's subgrid setup does for its natural-vegetation and crop land units.
 
-``run.yaml``::
+``domain.yaml``::
 
-    domain:
-      type: grid
-      min_patch_weight: 0.01        # of the gridcell's vegetated area (then renormalized)
-      grid:
-        surface_data: .../surfdata_0.9x1.25_hist_2000_16pfts_c251022.nc
-        land_mask: .../<case>.clm2.h0a.2000-01.nc   # CLM history file: landmask == 1
-        region: {lat: [25, 50], lon: [-125, -65]}   # optional box (degrees north / east)
+    type: grid
+    min_patch_weight: 0.01        # of the gridcell's vegetated area (then renormalized)
+    grid:
+      surface_data: .../surfdata_0.9x1.25_hist_2000_16pfts_c251022.nc
+      land_mask: .../<case>.clm2.h0a.2000-01.nc   # CLM history file: landmask == 1
+      region: {lat: [25, 50], lon: [-125, -65]}   # optional box (degrees north / east)
 
 What the loader takes from the surface data, and how (decisions 26-29 and the input
 decisions in ``docs/design/global_input.md``):
@@ -55,7 +54,7 @@ from typing import Optional
 
 import numpy as np
 
-from clm_ml.io.yaml_schema import ConfigError
+from clm_ml.io.yaml_schema import ConfigError, option
 
 #: Days per month (CLM's interpMonthlyVeg, a no-leap table also in Gregorian runs)
 NDAYPM = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
@@ -70,21 +69,35 @@ ORGANIC_MAX = 130.0
 
 @dataclasses.dataclass(frozen=True)
 class RegionSection:
-    lat: tuple[float, float] = (-90.0, 90.0)  # degrees north, [south, north]
-    lon: tuple[float, float] = (-180.0, 360.0)  # degrees east, [west, east] (may wrap)
+    """A latitude-longitude box."""
+
+    lat: tuple[float, float] = option((-90.0, 90.0), "Latitudes [south, north], degrees north.")
+    lon: tuple[float, float] = option(
+        (-180.0, 360.0), "Longitudes [west, east], degrees east (may wrap)."
+    )
 
 
 @dataclasses.dataclass(frozen=True)
 class GridSection:
-    """``run.yaml`` ``domain.grid``."""
+    """``domain.yaml`` ``grid``: the gridcells and patches from a CLM surface dataset."""
 
-    surface_data: str
-    land_mask: str  # a CLM history file with ``landmask`` on the surface-data grid
-    region: Optional[RegionSection] = None
-    root_biomass: float = 500.0  # g m-2, every patch
-    forcing_height: float = 30.0  # m above the zero-plane displacement + z0m (CLM: Sa_z)
-    # Gridcells or patches beyond this many are dropped (for tests; null: all)
-    max_gridcells: Optional[int] = None
+    surface_data: str = option(
+        doc="CLM surface dataset (natural PFTs, their weights, canopy heights, monthly LAI and "
+        "SAI, soil texture and colour).",
+        path=True,
+    )
+    land_mask: str = option(
+        doc="A CLM history file with landmask on the surface-data grid.", path=True
+    )
+    region: Optional[RegionSection] = option(
+        None, "Only the gridcells in this box; null: the whole globe."
+    )
+    root_biomass: float = option(500.0, "Root biomass of every patch (g m-2).")
+    forcing_height: float = option(
+        30.0, "Forcing height above the zero-plane displacement plus z0m (m; CLM's Sa_z)."
+    )
+    # Test setting (hidden): gridcells beyond this many are dropped; null: all
+    max_gridcells: Optional[int] = option(None, hidden=True)
 
 
 def clm_monthly_weights(month: int, day: int) -> tuple[int, int, float, float]:
@@ -152,7 +165,7 @@ def load_grid_domain(
 ):
     """The :class:`clm_ml.domain.Domain` of a grid run (module docstring). ``start`` and
     ``step_seconds`` give the first step (for the canopy heights, CLM's time weights);
-    ``resolve`` turns run.yaml paths into absolute paths."""
+    ``resolve`` turns the folder's relative paths into absolute paths."""
     import netCDF4 as nc
 
     from clm_ml.domain import Domain, Gridcells, Patches, SoilColumns
@@ -160,7 +173,7 @@ def load_grid_domain(
     surf, mask_file = resolve(section.surface_data), resolve(section.land_mask)
     for key, path in (("surface_data", surf), ("land_mask", mask_file)):
         if not Path(path).exists():
-            raise ConfigError(f"run.yaml: domain.grid.{key}: file not found: {path}")
+            raise ConfigError(f"domain.yaml: grid.{key}: file not found: {path}")
 
     with nc.Dataset(mask_file) as ds:
         landmask = np.asarray(ds.variables["landmask"][:]) == 1
@@ -191,7 +204,7 @@ def load_grid_domain(
         if section.max_gridcells is not None:
             rows, cols = rows[: section.max_gridcells], cols[: section.max_gridcells]
         if rows.size == 0:
-            raise ConfigError("run.yaml: domain.grid: no vegetated land gridcell in the domain")
+            raise ConfigError("domain.yaml: grid: no vegetated land gridcell in the domain")
 
         # CLM's satellite-phenology heights at the first step
         when = satellite_phenology_date(start, step_seconds)
@@ -248,7 +261,6 @@ def load_grid_domain(
         latitude=lat.astype(float),
         longitude=lon.astype(float),
         measurement_height=np.full(rows.size, float(section.forcing_height)),
-        forcing_step_minutes=np.full(rows.size, step_seconds // 60),
         grid_index=np.stack([rows, cols], axis=1),
     )
     patches = Patches(

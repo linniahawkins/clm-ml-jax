@@ -24,10 +24,11 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = """
 import json, sys, tempfile
 from pathlib import Path
-sys.path.insert(0, {src!r})
+sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import yaml
+from tests.experiment_tools import edit
 from clm_ml.io.namelist import convert_namelist
-from clm_ml.run import load_run
+from clm_ml.experiment import load_experiment
 from clm_ml.model import Model
 from clm_ml.output_streams import StreamSpec
 
@@ -45,16 +46,15 @@ result = {{}}
 models = {{}}
 for name in {models!r}:
     overrides = ["model.physics.stomatal_conductance=" + name]
-    models[name] = Model.from_run(load_run(tmp / "run.yaml", overrides))
+    models[name] = Model.from_experiment(load_experiment(tmp, overrides))
     result[name] = run(models[name])
 if len({models!r}) > 1:
-    result["wue_again"] = run(Model.from_run(load_run(tmp / "run.yaml")))
+    result["wue_again"] = run(Model.from_experiment(load_experiment(tmp)))
     towers = yaml.safe_load(open({towers!r}))
-    (tmp / "towers.yaml").write_text(yaml.safe_dump({{"OTHER": towers["CHATS7"]}}))
-    d = yaml.safe_load((tmp / "run.yaml").read_text())
-    d["domain"].update(towers=["OTHER"], towers_file="towers.yaml")
-    (tmp / "other.yaml").write_text(yaml.safe_dump(d))
-    result["other_tower"] = run(Model.from_run(load_run(tmp / "other.yaml")))
+    other = Path(tempfile.mkdtemp()) / "other"
+    convert_namelist(Path({namelist!r}), other)
+    edit(other, domain=lambda d: d.update(towers={{"OTHER": towers["CHATS7"]}}))
+    result["other_tower"] = run(Model.from_experiment(load_experiment(other)))
     result["wue_after_other"] = run(models["wue"])
 print("RESULT" + json.dumps(result))
 """
@@ -64,7 +64,8 @@ def _run(models):
     script = SCRIPT.format(
         src=str(ROOT / "src"),
         namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.1day"),
-        towers=str(ROOT / "src" / "clm_ml" / "data" / "towers.yaml"),
+        towers=str(ROOT / "src" / "clm_ml" / "presets" / "towers" / "chats7.yaml"),
+        root=str(ROOT),
         models=list(models),
     )
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)

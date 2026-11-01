@@ -1,12 +1,12 @@
-# Built-in towers. Generated in Phase 1 from the legacy TowerDataMod.py (deleted in Phase
-# 7.4). Only CHATS7 (validated against Fortran CLM-ml v2) is shipped.
+# The CHATS7 tower (preset for `clm-ml new`): the CHATS walnut orchard, Dixon, California
+# (Bonan, Burns & Patton 2026). Generated in Phase 1 from the legacy TowerDataMod.py
+# (deleted in Phase 7.4); the forcing interval (30 min) is a run.yaml setting.
 # null means 'use the default' (was -999).
 
 CHATS7:
   latitude: 38.49
   longitude: -121.84
   measurement_height: 23.0
-  forcing_step_minutes: 30
   soil:
     texture_class: silty clay loam
     sand_percent: 10.0

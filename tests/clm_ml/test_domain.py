@@ -1,25 +1,26 @@
-"""towers.yaml and the Domain (gridcells, patches, soil columns)."""
+"""domain.yaml towers and the Domain (gridcells, patches, soil columns)."""
 
 import numpy as np
 import pytest
+import yaml
 
 from clm_ml.config import ModelConfig
-from clm_ml.domain import Domain, builtin_towers_path, load_towers
+from clm_ml.domain import Domain, load_towers
+from clm_ml.experiment import presets_dir
 from clm_ml.io.yaml_schema import ConfigError
 from clm_ml.params import Params
 
 PARAMS = Params.from_yaml("chats")
+CHATS7 = load_towers(presets_dir() / "towers" / "chats7.yaml")
 
 
-def test_builtin_towers_hold_chats7_only():
-    import yaml
-
-    shipped = yaml.safe_load(builtin_towers_path().read_text())
-    assert list(shipped) == ["CHATS7"]
+def test_tower_presets_hold_chats7_only():
+    assert sorted(p.name for p in (presets_dir() / "towers").glob("*.yaml")) == ["chats7.yaml"]
+    assert list(CHATS7) == ["CHATS7"]
 
 
 def test_chats7_domain_and_layer_count():
-    domain = Domain.from_towers(["CHATS7"], params=PARAMS, config=ModelConfig())
+    domain = Domain.from_towers(CHATS7, params=PARAMS, config=ModelConfig())
     assert (domain.n_gridcells, domain.n_patches) == (1, 1)
     assert domain.patches.weight.tolist() == [1.0]
     # 20 layers within the 10 m canopy at 0.5 m, 26 above it to the 23 m measurement height.
@@ -29,19 +30,13 @@ def test_chats7_domain_and_layer_count():
 def test_too_few_max_layers_names_the_patch():
     config = ModelConfig.from_dict({"canopy_layers": {"max_layers": 40}})
     with pytest.raises(ConfigError, match="CHATS7 patch 0 .* needs 46 canopy layers"):
-        Domain.from_towers(["CHATS7"], params=PARAMS, config=config)
+        Domain.from_towers(CHATS7, params=PARAMS, config=config)
 
 
 def test_explicit_layer_counts():
     config = ModelConfig.from_dict({"canopy_layers": {"n_layers_within": 10, "n_layers_above": 5}})
-    domain = Domain.from_towers(["CHATS7"], params=PARAMS, config=config)
+    domain = Domain.from_towers(CHATS7, params=PARAMS, config=config)
     assert domain.layer_counts(config) == [15]
-
-
-def _write(tmp_path, text):
-    path = tmp_path / "towers.yaml"
-    path.write_text(text)
-    return path
 
 
 MIXED = """
@@ -55,6 +50,12 @@ MIXED:
 """
 
 
+def _towers(tmp_path, text=MIXED):
+    path = tmp_path / "towers.yaml"
+    path.write_text(text)
+    return load_towers(path)
+
+
 # With the default spacing a 0.5 m grass patch gets 0.1 m layers all the way up to the 30 m
 # measurement height (300 layers), so mixed towers set layer counts explicitly.
 EXPLICIT_LAYERS = ModelConfig.from_dict(
@@ -65,16 +66,14 @@ EXPLICIT_LAYERS = ModelConfig.from_dict(
 def test_short_canopy_with_default_spacing_is_rejected(tmp_path):
     with pytest.raises(ConfigError, match="c3_non-arctic_grass\\) needs 300 canopy layers"):
         Domain.from_towers(
-            ["MIXED"],
-            _write(tmp_path, MIXED),
+            _towers(tmp_path),
             params=PARAMS,
             config=ModelConfig.from_dict({"canopy_layers": {"max_layers": 60}}),  # tree needs 60
         )
 
 
-def test_user_tower_with_two_patches(tmp_path):
-    domain = Domain.from_towers(["MIXED"], _write(tmp_path, MIXED), params=PARAMS,
-                                config=EXPLICIT_LAYERS)  # fmt: skip
+def test_tower_with_two_patches(tmp_path):
+    domain = Domain.from_towers(_towers(tmp_path), params=PARAMS, config=EXPLICIT_LAYERS)
     assert domain.n_patches == 2
     np.testing.assert_array_equal(domain.patches.gridcell_index, [0, 0])
     np.testing.assert_array_equal(domain.patches.column_index, [0, 1])
@@ -82,10 +81,16 @@ def test_user_tower_with_two_patches(tmp_path):
 
 
 def test_min_patch_weight_drops_and_renormalizes(tmp_path):
-    domain = Domain.from_towers(["MIXED"], _write(tmp_path, MIXED), params=PARAMS,
-                                config=EXPLICIT_LAYERS, min_patch_weight=0.5)  # fmt: skip
+    domain = Domain.from_towers(_towers(tmp_path), params=PARAMS, config=EXPLICIT_LAYERS,
+                                min_patch_weight=0.5)  # fmt: skip
     assert domain.n_patches == 1
     assert domain.patches.weight.tolist() == [1.0]
+
+
+def test_towers_in_order_of_the_file(tmp_path):
+    towers = dict(_towers(tmp_path), **CHATS7)
+    domain = Domain.from_towers(towers, params=PARAMS, config=EXPLICIT_LAYERS)
+    assert domain.gridcells.names == ("MIXED", "CHATS7")
 
 
 @pytest.mark.parametrize(
@@ -98,10 +103,15 @@ def test_min_patch_weight_drops_and_renormalizes(tmp_path):
 )
 def test_invalid_towers(tmp_path, text, message):
     with pytest.raises(ConfigError) as exc:
-        load_towers(_write(tmp_path, text))
+        _towers(tmp_path, text)
     assert message in str(exc.value)
 
 
-def test_unknown_tower():
-    with pytest.raises(ConfigError, match="unknown tower"):
-        Domain.from_towers(["US-UMB"], params=PARAMS, config=ModelConfig())
+def test_no_towers():
+    with pytest.raises(ConfigError, match="list at least one tower"):
+        Domain.from_towers({}, params=PARAMS, config=ModelConfig())
+
+
+def test_chats7_preset_is_the_shipped_tower():
+    data = yaml.safe_load((presets_dir() / "towers" / "chats7.yaml").read_text())
+    assert data["CHATS7"]["measurement_height"] == 23.0

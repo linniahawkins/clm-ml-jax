@@ -267,7 +267,7 @@ defaults (the code), so the file cannot drift.
 Source: maintainer, 2026-11-01 (open_items O17).
 
 **91. Experiment folders: four complete files with fixed names, strict, with `clm-ml upgrade`**
-2026-11-01 · Phase 8a · maintainer · decided, to be implemented (open_items O70) · Departure from Fortran: no
+2026-11-01 · Phase 8a · maintainer · in force (implemented 2026-11-01) · Departure from Fortran: no
 An experiment is a folder with `run.yaml` (when, forcing, output), `domain.yaml` (towers or
 grid), `model.yaml` (schemes, numerics) and `params.yaml` (every parameter of every PFT); a run
 reads only these and the data files they name, never a preset by name. Every file is complete
@@ -279,7 +279,19 @@ lives in one file; each run writes a copy of the four files into its output. Det
 Reason: one start point where every user setting is visible and the required ones are marked,
 for ecologists; one definition of every option in the code (as jax-gcm), so files, errors and
 reference documentation agree.
-Source: maintainer, 2026-11-01 (strict with upgrade, fixed names).
+Implemented (2026-11-01): `clm_ml.experiment` (load, new, upgrade, the configuration copy),
+`run.py`/`domain.py`/`config.py` options declared with `yaml_schema.option`, presets in
+`clm_ml/presets/`, `configs/` the presets written out. Behaviour that changed with it: the
+model step is `numerics.step_seconds` (default 1800 s; no longer "null = the forcing
+interval"); the tower forcing interval is run.yaml `forcing.meteorology.interval_seconds`
+(was run.yaml `time.step_seconds` and towers.yaml `forcing_step_minutes`); towers are written
+in domain.yaml (no towers file, no registry at run time); `--set` keys name the file first
+(`run.`, `domain.`, `model.`, `params.<pft>.<name>`); hidden test settings
+(`execution.patch_count`/`gridcell_count`, `grid.max_gridcells`) are given only as `--set` or
+from Python; `clm-ml model-yaml` and `configs/model.yaml` (decision 90) removed. CHATS7 bit for
+bit and noise twin unchanged.
+Source: maintainer, 2026-11-01 (strict with upgrade, fixed names; names kept, data interval in
+run.yaml, test-only settings hidden).
 
 ## C. Spatial structure: gridcells, patches, layers, soil
 
