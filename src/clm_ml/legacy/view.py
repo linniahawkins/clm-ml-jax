@@ -10,19 +10,25 @@ checked bit for bit against the Phase 6 reference (phase7_scope.md §3). The out
 of ``clm_ml.outputs`` (``_Raw``), the validation stream variables (``mlcanopy.<field>``) and
 the legacy ``.out`` files are computed from it, so nothing reads a step's containers.
 
-The entries the new state does not hold (index 0 of layer and leaf axes, unused soil levels:
-constant fill values) come from the template (the containers after the first step). At the
-end of Phase 7 the reference is re-recorded in the new names and this module goes.
+The entries the new state does not hold (index 0 of layer, leaf and band axes, the legacy
+snow levels and unused soil levels) hold the containers' fill value, ``spval`` (Phase 7.4:
+checked to be the only value there; before, they were copied from the template). At the end
+of Phase 7 the reference is re-recorded in the new names and this module goes.
 """
 
 from __future__ import annotations
 
 from typing import Mapping
 
+import jax.numpy as jnp
+
 from clm_ml.legacy.state import (
+    BAND,
     CANOPY_FIELDS,
+    LAYER,
+    SCALAR,
     SOIL_FIELDS,
-    instances_with_step_state,
+    _diagnostic_layout,
     patch_layers,
     step_state_from_instances,
 )
@@ -42,29 +48,75 @@ FIELDS = (
     + (("mlcanopy", "zw_profile"),)
 )
 
+#: Legacy snow levels in front of the soil levels of ``t_soisno_col`` (index ``-nlevsno + 1
+#: .. nlevgrnd``, stored from 0), by the number of ground levels (clm_varpar)
+_SNOW_LEVELS = {25: 12, 15: 5}
 
-def legacy_view(template, step: StepState, layers: PatchLayers) -> Mapping[str, object]:
+_SPVAL = 1.0e36  # clm_varcon.spval: the legacy containers' fill value
+
+
+def _legacy(value, layout: tuple):
+    """``value`` (0-based, no patch axis) as a legacy array: ``layout[i]`` fill slots in front
+    of axis ``i`` and a leading patch axis of length 1."""
+    value = jnp.asarray(value)
+    if value.ndim == 0:
+        return value[None]
+    pads = [(s, 0) for s in layout] + [(0, 0)] * (value.ndim - len(layout))
+    return jnp.pad(value, pads, constant_values=_SPVAL)[None]
+
+
+def _layout(name: str, value) -> tuple:
+    """The legacy layout of diagnostic ``name`` (``_diagnostic_layout`` from the 0-based
+    array: scalars and band arrays are told apart by their rank)."""
+    if name.endswith(("_leaf", "_profile")) or name == "balance_error":
+        return _diagnostic_layout(name, 0)
+    return SCALAR if jnp.ndim(value) == 0 else BAND
+
+
+def legacy_view(step: StepState, layers: PatchLayers) -> Mapping[str, object]:
     """``{"mlcanopy.<field>": array, "temperature.<field>": array}`` of one step's results
     ``step`` for the patch with layer grid ``layers``, in the legacy layout (leading patch
-    axis, 1-based profile axes). ``template``: the patch's containers after the first step
-    (``ClmInstances``), for the entries the state does not hold. Arrays are jax arrays."""
-    insts = instances_with_step_state(template, step, layers)
-    return {f"{c}.{f}": getattr(getattr(insts, c), f) for c, f in FIELDS}
+    axis, 1-based profile axes, ``spval`` where the state holds nothing). Arrays are jax
+    arrays."""
+    out = {}
+    for name in Diagnostics._fields:
+        if name != "balance_error":
+            value = getattr(step.diagnostics, name)
+            out[f"mlcanopy.{name}"] = _legacy(value, _layout(name, value))
+    for part, fields in ((step.state.canopy, CANOPY_FIELDS), (step.state.soil, SOIL_FIELDS)):
+        for name, (inst, field, layout) in fields.items():
+            value = getattr(part, name)
+            if field == "t_soisno_col":  # soil level j at index j; snow slots after them
+                n = value.shape[-1]
+                snow = _SNOW_LEVELS[n]
+                full = jnp.pad(value, (1, snow - 1), constant_values=_SPVAL)
+                out[f"{inst}.{field}"] = full[None]
+            else:
+                out[f"{inst}.{field}"] = _legacy(value, layout)
+    for field, value in (
+        ("ncan_canopy", layers.n_layers),
+        ("ntop_canopy", layers.n_within),
+        ("nbot_canopy", layers.first_leafy + 1),
+    ):
+        out[f"mlcanopy.{field}"] = jnp.asarray(value, dtype=jnp.int32)[None]
+    out["mlcanopy.dz_profile"] = _legacy(layers.dz, LAYER)
+    out["mlcanopy.zs_profile"] = _legacy(layers.zs, LAYER)
+    out["mlcanopy.zw_profile"] = jnp.asarray(layers.zw)[None]
+    return {f"{c}.{f}": out[f"{c}.{f}"] for c, f in FIELDS}
 
 
 def view_of_instances(insts) -> Mapping[str, object]:
     """The legacy view of a step's containers ``insts`` (one patch), through the step state:
     the first (initializing) step, and output shapes."""
-    return legacy_view(insts, step_state_from_instances(insts), patch_layers(insts))
+    return legacy_view(step_state_from_instances(insts), patch_layers(insts))
 
 
-def view_series(template, steps: StepState) -> Mapping[str, object]:
+def view_series(steps: StepState, layers: PatchLayers) -> Mapping[str, object]:
     """The legacy view of a chunk's steps (``steps`` with a leading step axis, as a
     one-patch chunk returns them): every field with a leading step axis."""
     import jax
 
-    layers = patch_layers(template)
-    return jax.vmap(lambda s: legacy_view(template, s, layers))(steps)
+    return jax.vmap(lambda s: legacy_view(s, layers))(steps)
 
 
 def raw_fields(view: Mapping[str, object], xp) -> dict:

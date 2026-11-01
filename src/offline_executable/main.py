@@ -765,9 +765,8 @@ def _patch_step(run: LegacyRun, filt, grid, names, max_layers: int):
     params, tables) -> (state, {variable: value}, errors)``, with ``x`` one step's
     ``clm_ml.step.StepInputs``, ``constants`` the patch's ``PatchConstants``
     (``patch_constants(template)``, formed once per chunk), the output variables ``names``
-    (``clm_ml.outputs``, computed with jax.numpy from the legacy view, which takes the entries
-    the step state does not hold from ``template``; leading axis the legacy patch axis of
-    length 1) and ``errors`` the step's largest error of each Fortran conservation check.
+    (``clm_ml.outputs``, computed with jax.numpy from the legacy view; leading axis the
+    legacy patch axis of length 1) and ``errors`` the step's largest error of each Fortran conservation check.
     Used by the one-patch (:func:`make_stream_runner`) and batched
     (:func:`make_batch_runner`) chunks."""
     from clm_ml.legacy.view import legacy_view
@@ -777,7 +776,7 @@ def _patch_step(run: LegacyRun, filt, grid, names, max_layers: int):
 
     def step(template, constants, state, x, params, tables):
         step = patch_step(constants, state, x, params, tables)
-        view = legacy_view(template, step, patch_layers(template))
+        view = legacy_view(step, constants.layers)
         return step.state, variables(view), step.diagnostics.balance_error
 
     return step
@@ -2155,7 +2154,7 @@ def main(opts: Optional[MLOptions] = None):
                 errors = steps.diagnostics.balance_error[:n]
                 check_balance(errors, f"time steps {first + 1}-{first + n}")
                 state = jax.tree.map(lambda a: a[n - 1], steps.state)
-                views = view_series(template, steps)
+                views = view_series(steps, layers)
                 for k in range(n):
                     calday = run.time_of(first + k).calday
                     write_output(calday, {f: v[k] for f, v in views.items()})
@@ -2172,7 +2171,7 @@ def main(opts: Optional[MLOptions] = None):
                 step = one_step(constants, state, x, run.canopy_params, run.rsl_tables)
                 check_balance(step.diagnostics.balance_error, f"time step {_itim}")
                 state = step.state
-                write_output(run.time_of(_itim - 1).calday, legacy_view(template, step, layers))
+                write_output(run.time_of(_itim - 1).calday, legacy_view(step, layers))
                 report(_itim, time.perf_counter() - step_t0)
     finally:
         for fh in (fout1, fout2, fout3, fout4, fout5, fout6):

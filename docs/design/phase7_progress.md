@@ -328,6 +328,21 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   `test_land_data_files`, `test_grid_setup`, `test_stream_runner`, `test_patches_batched`,
   `test_ensemble` pass (11.3 min); CPU gradient tier 8 pass (6.1 min; logs `logs7/p73_*`).
 
+- **7.3 review fixes.** Independent review of `5c946f5`: nothing serious; the previous
+  forcing record in NumPy (no device work on the reader thread), grid input test by field
+  name, a test helper removed (C24). Tests: lint; `tests/clm_ml` + fast golden 420 pass;
+  bit-for-bit + noise twin 177 pass; `test_grid_setup` + `test_stream_runner` 4 pass.
+  **Package 7.3 done.**
+
+### 7.4 Setup without module globals (started 2026-10-31)
+
+- **7.4a, the legacy view without the template (C25): bit for bit.**
+  `clm_ml.legacy.view.legacy_view(step, layers)` fills the entries the state does not hold
+  with `spval` (probe `probe74/fills.py`: every such entry of the CHATS7 template is `spval`)
+  instead of copying them from the template; `view_series(steps, layers)`. Tests: lint;
+  `tests/clm_ml` + fast golden 420 pass; bit-for-bit + noise twin 177 pass;
+  `test_stream_runner` pass.
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,

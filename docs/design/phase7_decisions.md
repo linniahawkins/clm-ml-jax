@@ -935,8 +935,8 @@ only). One bug, fixed; the rest recorded:
 - **Producers** (`clm_ml/chunk_inputs.py`): `met_inputs(bef, cur, nxt, calday, calday_beg)`
   from derived-meteorology dicts (`TowerMet` names) and `forcing_inputs(forcing, ...)` from a
   tower `clm_ml.forcing.Forcing` chunk, both vectorized over the chunk with NumPy on the host
-  (the previous record through `physics.atm_forcing.clm_forcing_to_ml`, the same arithmetic
-  as the step's current record). Tower runs: `main.chunk_inputs` (one tower: gridcell and
+  (the previous record with the expressions of `physics.atm_forcing.clm_forcing_to_ml`,
+  the step's current record, in NumPy: review, so the reader thread never computes on a GPU). Tower runs: `main.chunk_inputs` (one tower: gridcell and
   patch axes of length 1), `main.patch_inputs` (one patch: `StepInputs` stacked per step,
   for `make_chunk_runner`/`make_stream_runner`), `main.read_batch_inputs` (runs joined
   along the gridcell and patch axes, then gathered to the batch's slots; NumPy on the host,
@@ -959,3 +959,33 @@ Alternatives: nesting `MetInputs`/`LandInputs` inside `StepInputs` (every physic
 would change for no gain); keeping one `StepInputs` per patch in the chunk (sends the
 meteorology once per patch instead of once per gridcell: the Phase 6 layout keeps it per
 gridcell).
+- **Review (independent, 7.3):** nothing serious; three minor points applied: the previous
+  record in NumPy (above), the grid input test drops the calendar days by name, a no-op test
+  helper removed.
+
+### C25. Package 7.4 plan, and 7.4a: the legacy view without the template (7.4, 2026-10-31)
+
+Probes before starting (`probe74/consts.py`, `which.py`, `initvals.py`, `fills.py`; CHATS7,
+47 steps after the first):
+- The time step reads the template (containers after the first step) only through
+  `PatchConstants`. With the constants of the *initialized* containers (before the first
+  step's physics: `spval` in every slot no setup routine writes) instead, the later steps
+  change only in slots the outputs never show: the levels above the canopy of the longwave
+  profiles and the leaf fluxes of padding and above-canopy layers (kept from the start
+  values; the output variables mask them, the `.out` writer writes 0 there), and the
+  state's padding slots. Every value in use is bit for bit the same.
+- Of the sub-step carry's start values only `pref_forcing` and `wind_profile` are not
+  `spval` after initialization (pressure of the first record, initial wind); no step reads
+  them before writing them.
+- The first step run by `clm_ml.step.step` from the initialized containers differs from the
+  legacy container step by round-off (compiled vs eager), and in `balance_error`.
+- The entries of the legacy view outside the state are all `spval` (7.4a).
+Plan (in commits): (a) the view without the template; (b) the padding and start values the
+step kept from `PatchConstants` become fill values inside the step (constants shrink to
+setup values); (c) the setup as pure functions (`clm_ml/setup/`) with ported readers,
+tested against the legacy initialized containers; (d) runs on the new setup in-process, the
+first step an ordinary step of the first chunk; (e) grid runs without prototypes; (f) the
+legacy setup, worker and containers deleted.
+7.4a: `legacy_view(step, layers)` builds each legacy array by padding the 0-based value with
+`spval` (no template argument; the legacy snow levels of `t_soisno_col` by soil structure).
+Bit for bit.

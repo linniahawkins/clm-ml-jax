@@ -24,6 +24,7 @@ from tests.regression.record_run import write_portable_namelist
 import jax, jax.numpy as jnp, numpy as np
 from clm_ml.legacy.state import state_from_instances
 from clm_ml.legacy.view import view_series
+from clm_ml.legacy.state import patch_layers
 from clm_ml import output_streams as S
 from clm_ml.outputs import VARIABLES, _Raw
 
@@ -37,7 +38,7 @@ first, n = 1, 49
 xs = M.patch_inputs(run, run.load_chunk(first, n))
 names = tuple(v.name for v in VARIABLES) + ("soil_temperature",)
 _, steps = M.make_chunk_runner(run, template, filt)(state0, xs, tables=run.rsl_tables)
-views = view_series(template, steps)  # (step, patch, ...) legacy fields of each step
+views = view_series(steps, patch_layers(template))  # (step, patch, ...) legacy fields of each step
 r = _Raw({{k: np.asarray(v) for k, v in views.items() if k.startswith("mlcanopy.")}}, 50)
 ref = {{v.name: np.asarray(v.compute(r), float)[:, 0] for v in VARIABLES}}
 
