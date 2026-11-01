@@ -6,6 +6,8 @@ The ``clm-ml`` command.
     clm-ml convert NAMELIST -o DIR              write run.yaml + model.yaml from a namelist
     clm-ml params SOURCE -o PARAMS.yaml          write a complete params.yaml from a CLM
                                                 parameter file (.nc) or a params file
+    clm-ml model-yaml [-o FILE] [--from M.yaml]  write a complete, commented model.yaml (the
+                                                defaults, or every key of M.yaml)
 
 ``--set`` changes one setting without editing files: ``--set time.days=7`` changes
 run.yaml; ``--set model.physics.stomatal_conductance=medlyn`` changes model.yaml.
@@ -40,8 +42,24 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--base", default="clm5_defaults",
                    help="params file for what a CLM file lacks (default clm5_defaults)")  # fmt: skip
 
+    p = sub.add_parser("model-yaml", help="write a complete, commented model.yaml")
+    p.add_argument("-o", "--out", type=Path, help="output file (default: print)")
+    p.add_argument("--from", dest="source", type=Path,
+                   help="a model.yaml to complete (default: the defaults)")  # fmt: skip
+
     args = parser.parse_args(argv)
     try:
+        if args.command == "model-yaml":
+            from clm_ml.config import ModelConfig, model_yaml_text
+
+            config = ModelConfig.from_yaml(args.source) if args.source else ModelConfig()
+            text = model_yaml_text(config)
+            if args.out:
+                args.out.write_text(text)
+                print(f"wrote {args.out}")
+            else:
+                print(text, end="")
+            return 0
         if args.command == "params":
             from clm_ml.params_convert import write_params_yaml
 

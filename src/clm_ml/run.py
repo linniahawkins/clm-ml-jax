@@ -195,8 +195,10 @@ class RunFile:
     time: TimeSection
     domain: DomainSection
     forcing: ForcingSection
+    # params file (complete: every parameter of every PFT) path or built-in name
+    # (clm5_defaults, chats, clm6); required
+    params: str
     model: Optional[str] = None  # model.yaml path; null = all defaults
-    params: str = "clm5_defaults"  # params file path or built-in name (clm5_defaults, chats)
     execution: ExecutionSection = ExecutionSection()
     initial_conditions: InitialConditionsSection = InitialConditionsSection()
     output: OutputSection = OutputSection()

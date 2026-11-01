@@ -122,15 +122,12 @@ def _twin_params_file(directory: Path, sign: float) -> Path:
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
     from clm_ml.params import Params
+    from clm_ml.params_convert import params_table, write_table
 
-    emissivity = float(Params.from_yaml("chats").get(TWIN_PFT, "leaf_emissivity"))
-    path = directory / "twin_params.yaml"
-    path.write_text(
-        "extends: chats\n"
-        f"pft:\n  {TWIN_PFT}:\n"
-        f"    leaf_emissivity: {emissivity * (1.0 + sign * TWIN_PERTURBATION)!r}\n"
-    )
-    return path
+    chats = Params.from_yaml("chats")
+    emissivity = float(chats.get(TWIN_PFT, "leaf_emissivity"))
+    twin = chats.set(TWIN_PFT, leaf_emissivity=emissivity * (1.0 + sign * TWIN_PERTURBATION))
+    return write_table(params_table(twin), directory / "twin_params.yaml", ["noise twin of chats"])
 
 
 def _provenance(name: str) -> dict[str, np.ndarray]:

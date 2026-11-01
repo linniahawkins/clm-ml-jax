@@ -11,11 +11,9 @@ Thresholds (from CLAUDE.md):
 Run after a full-month CHATS7 May-2007 simulation (the Fortran reference covers May), with
 the Fortran acclimation temperature (``physics.acclimation_temperature: run_mean``; the
 default 10-day running mean, decision 15, departs from Fortran by design, by up to ~1%) and
-the legacy ASCII output (``output.legacy_ascii: true``)::
+the legacy ASCII output (``output.legacy_ascii: true``): ``configs/chats7_may2007_fortran``::
 
-    clm-ml convert data/namelists/nl.CHATS7.05.2007 -o may/
-    clm-ml run may/run.yaml --set model.physics.acclimation_temperature=run_mean \
-        --set output.legacy_ascii=true --set output.directory=<dir>
+    clm-ml run configs/chats7_may2007_fortran/run.yaml --set output.directory=<dir>
     CLM_ML_COMPARE_DIR=<dir> pytest tests/test_fortran_python_comparison.py -m slow -v
 
 (Phase 7.6: ``clm-ml-offline`` is retired; without ``CLM_ML_COMPARE_DIR`` the tests skip.)

@@ -7,9 +7,8 @@ model time step configurable, and adopts a 10-day running-mean acclimation tempe
 
 **Companion files:**
 - [`api_sketch.py`](api_sketch.py): the proposed Python API, as typed signatures with docstrings.
-- [`examples/`](examples/): example `run.yaml`, `model.yaml`, `params_chats.yaml` and
-  `towers.yaml` files, written as a user would write them. `run_global_example.yaml` shows the
-  target form of a 150-year global run (hypothetical; it does not run yet).
+- [`../../configs/`](../../configs/): runnable `run.yaml`/`model.yaml` files (Phase 8a,
+  replacing the design-era `examples/`).
 - [`timing.md`](timing.md): timing-test results.
 - [`numerics_and_regression.md`](numerics_and_regression.md): decisions on iterative solvers,
   differentiability, the model's round-off sensitivity, and the regression-testing policy.
@@ -187,8 +186,9 @@ Smaller decisions: see §8.
 
 ## 4. Configuration files
 
-Full examples are in [`examples/`](examples/). Every key has a default, except where marked
-required, so most files stay short.
+Runnable files are in [`configs/`](../../configs/) (Phase 8a). Every key of `run.yaml` and
+`model.yaml` has a default, except where marked required; params files are complete (Phase
+8a: no `extends`).
 
 ### 4.1 `run.yaml`: the experiment (replaces the namelist)
 
@@ -354,7 +354,7 @@ CHATS7:
   (both or neither), in place of model.yaml's `canopy_layers` (Phase 6 step 2), e.g. for a
   short canopy under a tall tower.
 
-See [`examples/towers_example.yaml`](examples/towers_example.yaml), which includes a
+See [`configs/towers_example.yaml`](../../configs/towers_example.yaml), which includes a
 hypothetical two-patch tower.
 
 ### 4.5 Commands

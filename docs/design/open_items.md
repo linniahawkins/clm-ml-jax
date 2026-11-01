@@ -39,7 +39,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O15 | Wet needleleaf canopies: large latent heat with CLM6's `dleaf` | science issue | after 8 | M |
 | O16 | CO₂ profile reset covers the wrong levels (no effect today) | science issue (latent) | after 8 | M |
 | **2. Other maintainer decisions pending** |||||
-| O17 | Repository organization: where the real model.yaml, params.yaml, towers.yaml, run.yaml live | maintainer decision | 8a | M |
+| O17 | ~~Repository organization: where the real configuration files live~~ (closed: decisions 89, 90) | maintainer decision | closed | M |
 | O18 | Norman and well-mixed code in git history only (D8 said "kept") | maintainer decision | 8a | M |
 | O19 | Options that only ever refuse (`wue_solver: brent`, `mlcan_to_clm`) | maintainer decision | 8a | M |
 | O20 | `nitrogen_decay_kn` is a static option, not a differentiable parameter | maintainer decision | 8a | M |
@@ -65,7 +65,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O38 | CONTRIBUTING out of date | housekeeping | 8a | I |
 | O39 | `data/namelists/README.md` describes the retired `clm-ml-offline` | housekeeping | 8a | I |
 | O40 | Namelists: `nl.US-UMB.test` points to scratch; `nl.CHATS7.debug`, `nl.CHATS7.test3` unclear | housekeeping | 8a | M |
-| O41 | `run_global_example.yaml` fails `clm-ml check`; examples not checked in CI | housekeeping | 8a | I |
+| O41 | ~~Example files not checked~~ (closed: `configs/` checked by `test_configs.py`) | housekeeping | closed | I |
 | O42 | Stale design documents (plan header and §8, `api_sketch.py`, numerics §4 title, `timing.md`) | housekeeping | 8a | I |
 | O43 | CI lint skips `timing/` | housekeeping | 8a | I |
 | O44 | ~~One open-items list and one decision log~~ (done: this document, `decisions.md`, `model_overview.md`) | housekeeping | closed | I |
@@ -252,6 +252,9 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 ## 2. Other maintainer decisions pending
 
 ### O17. Repository organization: where the real configuration files live
+- **Closed 2026-11-01:** `configs/` with complete, generated model.yaml files (decision 90);
+  params files complete, no `extends`, `run.yaml` must name one (decision 89). Kept below
+  as it was found.
 - **Kind:** maintainer decision · **Target:** 8a · **Decides:** M
 - **What:** a user cannot find "the" CHATS7 configuration. Today:
   - **model.yaml:** no file in the repo is used by the model; the defaults are in the code
@@ -448,6 +451,9 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 8 survey.
 
 ### O41. Example files not checked
+- **Closed 2026-11-01:** `docs/design/examples/` removed (the global example was
+  hypothetical); `configs/` replaces it and `tests/clm_ml/test_configs.py` (run in CI) checks
+  every model.yaml is complete and current and every run.yaml loads.
 - **What:** `docs/design/examples/run_global_example.yaml` fails `clm-ml check` (`domain:
   unknown key 'surface_dataset'`). The plan's risk table says `clm-ml check` runs in CI on
   every example; it does not.
@@ -610,6 +616,9 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 ---
 
 ## Recently closed (for reference, not open)
+
+- Configuration files: `configs/` with complete, generated model.yaml files; complete params
+  files, `run.yaml` must name one (O17, O41; decisions 89, 90; 2026-11-01).
 
 - One open-items list (this document), one decision register (`decisions.md`) and a map of
   the model (`model_overview.md`) (O44; maintainer request, 2026-11-01).

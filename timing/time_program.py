@@ -9,7 +9,7 @@ size (``compiled.memory_analysis().generated_code_size_in_bytes``), the chunk's 
 patch-steps per second, and peak device memory. Appends one JSON line to
 ``timing/results_program.jsonl``.
 
-    python timing/time_program.py docs/design/examples/run_grid_1deg.yaml \
+    python timing/time_program.py configs/grid_1deg_2000/run.yaml \
         'domain.grid.region=null' execution.devices=1 [--label ...]
 """
 

@@ -4,15 +4,24 @@ Physical parameters per plant functional type (PFT): the contents of ``params.ya
 Every patch looks up its PFT's row, so parameters are shared by all patches of the same
 PFT and gradients come back per PFT. All values are differentiable.
 
-A params file usually *extends* another and lists only what changes::
+A params file is **complete** (decision in ``docs/design/decisions.md``): it lists every
+parameter of every PFT 1-16, with nothing inherited from another file, so a run's parameters
+are all in the one file it names::
 
-    extends: clm5_defaults          # or a path to another params file
+    units: {vcmax25: umol m-2 s-1, ...}
     pft:
-      broadleaf_deciduous_temperate_tree:
-        vcmax25: 125.0
+      needleleaf_evergreen_temperate_tree:
+        vcmax25: 62.5
+        ...                         # every parameter
+      ...                           # every PFT 1-16
 
-Built-in files (``clm_ml/data/params/``): ``clm5_defaults`` (CLM5 / CLM-ml v1 values)
-and ``chats`` (CHATS walnut orchard; Bonan, Burns & Patton 2026, Table 2).
+Only the canopy roughness ratios (``z0m_to_height_ratio``, ``displacement_to_height_ratio``),
+which only grid runs use, may be left out; a grid run then refuses the file. To make a new
+parameter set, copy a complete file (``clm-ml params chats -o mine.yaml``) and edit it.
+
+Built-in files (``clm_ml/data/params/``): ``clm5_defaults`` (CLM5 / CLM-ml v1 values),
+``chats`` (``clm5_defaults`` with the CHATS walnut orchard values; Bonan, Burns & Patton
+2026, Table 2) and ``clm6``.
 
 Every params file is YAML in this one format. To use a CLM parameter file (netCDF, e.g. the
 CTSM 6.0 file), convert it once (``clm-ml params ctsm60_params.nc -o params_clm6.yaml``,
@@ -171,10 +180,19 @@ class Params:
 
     @classmethod
     def from_yaml(cls, path_or_name: Path | str) -> "Params":
-        """Load a params file (a path, or a built-in name such as ``"chats"``), resolving
-        ``extends:`` chains."""
-        merged, source = _load_merged(path_or_name, seen=())
-        return cls._from_merged(merged, source)
+        """Load a complete params file (a path, or a built-in name such as ``"chats"``)."""
+        merged, source = _load(path_or_name)
+        params = cls._from_merged(merged, source)
+        missing = params.missing_for(list(range(1, len(PFT_NAMES))))
+        if missing:
+            shown = ", ".join(missing[:8]) + (
+                f" and {len(missing) - 8} more" if len(missing) > 8 else ""
+            )
+            raise ConfigError(
+                f"{source}: a params file must give every parameter of every PFT 1-16 "
+                f"(no defaults are filled in); missing: {shown}"
+            )
+        return params
 
     @classmethod
     def _from_merged(cls, merged: dict[str, dict[str, object]], source: str) -> "Params":
@@ -275,35 +293,31 @@ def _check_value(spec: ParamSpec, value, where: str):
     return float(value)
 
 
-def _resolve(path_or_name: Path | str, relative_to: Optional[Path]) -> Path:
+def _resolve(path_or_name: Path | str) -> Path:
     text = str(path_or_name)
     if not text.endswith((".yaml", ".yml")) and "/" not in text:
         return builtin_params_path(text)
-    path = Path(text)
-    if not path.is_absolute() and relative_to is not None:
-        path = relative_to / path
-    return path
+    return Path(text)
 
 
-def _load_merged(path_or_name, seen: tuple, relative_to: Optional[Path] = None):
-    path = _resolve(path_or_name, relative_to)
-    if path in seen:
-        raise ConfigError(f"{path.name}: circular 'extends' chain")
+def _load(path_or_name):
+    """``({pft: {name: value}}, file name)`` of one params file, checked for unknown keys."""
+    path = _resolve(path_or_name)
     data = read_yaml(path)
-    unknown = sorted(set(data) - {"extends", "pft", "units", "description"})
+    if "extends" in data:
+        raise ConfigError(
+            f"{path.name}: 'extends' is not supported: a params file gives every parameter of "
+            f"every PFT itself. Write a complete copy to edit with "
+            f"`clm-ml params {data['extends']} -o {path.name}`"
+        )
+    unknown = sorted(set(data) - {"pft", "units", "description"})
     if unknown:
         hint = (
             "; a CLM parameter file is converted with `clm-ml params FILE.nc -o FILE.yaml`"
             if "clm_parameters" in unknown
             else ""
         )
-        raise ConfigError(
-            f"{path.name}: unknown key(s) {unknown}; allowed: extends, pft, units{hint}"
-        )
-    merged: dict[str, dict[str, object]] = {}
-    if data.get("extends"):
-        merged, _ = _load_merged(data["extends"], seen + (path,), relative_to=path.parent)
-        merged = {pft: dict(entries) for pft, entries in merged.items()}
+        raise ConfigError(f"{path.name}: unknown key(s) {unknown}; allowed: pft, units{hint}")
     pfts = data.get("pft") or {}
     if not isinstance(pfts, dict):
         raise ConfigError(f"{path.name}: pft: expected a mapping of PFT names to parameters")
@@ -311,5 +325,4 @@ def _load_merged(path_or_name, seen: tuple, relative_to: Optional[Path] = None):
         pft_index(pft, path.name)
         if not isinstance(entries, dict):
             raise ConfigError(f"{path.name}: pft.{pft}: expected a mapping of parameters")
-        merged.setdefault(pft, {}).update(entries)
-    return merged, path.name
+    return {pft: dict(entries) for pft, entries in pfts.items()}, path.name

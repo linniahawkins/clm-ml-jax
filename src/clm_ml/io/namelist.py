@@ -137,15 +137,13 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
         "canopy_layers": {"min_plant_area_per_layer": float(g.get("dpai_min", 0.01))},
     }
 
+    from clm_ml.config import ModelConfig, model_yaml_text
+
     header = f"# Converted from {namelist_path.name} by `clm-ml convert`.\n"
-    written = {}
-    for name, content in (("run.yaml", run), ("model.yaml", model)):
-        path = out_dir / name
-        with open(path, "w") as fh:
-            fh.write(header)
-            if name == "model.yaml":
-                fh.write("# Only settings that came from the namelist are listed; everything\n")
-                fh.write("# else uses the defaults (CLM-ml v2 / CHATS configuration).\n")
-            yaml.safe_dump(content, fh, sort_keys=False)
-        written[name] = path
-    return written
+    with open(out_dir / "run.yaml", "w") as fh:
+        fh.write(header)
+        yaml.safe_dump(run, fh, sort_keys=False)
+    # the complete model.yaml: the namelist's settings, every other key at its default
+    config = ModelConfig.from_dict(model, source=namelist_path.name)
+    (out_dir / "model.yaml").write_text(header + model_yaml_text(config))
+    return {"run.yaml": out_dir / "run.yaml", "model.yaml": out_dir / "model.yaml"}

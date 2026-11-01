@@ -29,13 +29,31 @@ def test_chats_values_match_paper_table_2():
     np.testing.assert_array_equal(p.get(WALNUT, "stem_reflectance"), [0.21, 0.49])
 
 
-def test_extends_and_override(tmp_path):
-    (tmp_path / "mine.yaml").write_text(f"extends: chats\npft:\n  {WALNUT}:\n    vcmax25: 100.0\n")
-    p = Params.from_yaml(tmp_path / "mine.yaml")
+def test_a_copy_edited_is_a_new_parameter_set(tmp_path):
+    """The way to make a parameter set: a complete copy (`clm-ml params chats -o`), edited."""
+    import yaml
+
+    from clm_ml.params_convert import write_params_yaml
+
+    path = write_params_yaml("chats", tmp_path / "mine.yaml")
+    data = yaml.safe_load(path.read_text())
+    data["pft"][WALNUT]["vcmax25"] = 100.0
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    p = Params.from_yaml(path)
     assert p.get(WALNUT, "vcmax25") == 100.0
-    assert p.get(WALNUT, "iota") == 375.0  # from chats
-    assert p.get("c4_grass", "g0_ball_berry") == 0.04  # from clm5_defaults
+    assert p.get(WALNUT, "iota") == 375.0
+    assert p.get("c4_grass", "g0_ball_berry") == 0.04
     assert np.isnan(p.values["vcmax25"][PFT_NAMES.index("not_vegetated")])
+
+
+def test_params_files_are_complete(tmp_path):
+    """No inheritance and no filled-in defaults: `extends` and missing values are errors."""
+    (tmp_path / "ext.yaml").write_text(f"extends: chats\npft:\n  {WALNUT}:\n    vcmax25: 1.0\n")
+    with pytest.raises(ConfigError, match="'extends' is not supported.*clm-ml params chats"):
+        Params.from_yaml(tmp_path / "ext.yaml")
+    (tmp_path / "part.yaml").write_text(f"pft:\n  {WALNUT}:\n    vcmax25: 1.0\n")
+    with pytest.raises(ConfigError, match="every parameter of every PFT 1-16.*missing"):
+        Params.from_yaml(tmp_path / "part.yaml")
 
 
 @pytest.mark.parametrize(
@@ -44,7 +62,7 @@ def test_extends_and_override(tmp_path):
         (f"pft:\n  {WALNUT}:\n    vcmax: 1.0\n", "unknown parameter"),
         ("pft:\n  walnut:\n    vcmax25: 1.0\n", "unknown PFT 'walnut'"),
         (f"pft:\n  {WALNUT}:\n    leaf_reflectance: 0.1\n", "expected [vis, nir]"),
-        ("extends: mine.yaml\n", "circular"),
+        ("extends: mine.yaml\n", "'extends' is not supported"),
         ("pfts: {}\n", "unknown key(s) ['pfts']"),
     ],
 )
@@ -116,17 +134,17 @@ def test_params_from_a_clm_parameter_file(tmp_path):
     assert "extends" not in text and "clm.nc" in text  # standalone, source recorded
 
 
-def test_flattened_params_file_equals_its_extends_chain(tmp_path):
+def test_copy_of_a_params_file_is_identical(tmp_path):
     from clm_ml.params_convert import write_params_yaml
 
-    out = write_params_yaml("chats", tmp_path / "chats_full.yaml")
+    out = write_params_yaml("chats", tmp_path / "chats_copy.yaml")
     a, b = Params.from_yaml("chats"), Params.from_yaml(out)
     for name in a.values:
         np.testing.assert_array_equal(a.values[name], b.values[name])
 
 
 def test_clm_parameter_files_are_not_read_by_params_yaml(tmp_path):
-    (tmp_path / "p.yaml").write_text("extends: clm5_defaults\nclm_parameters: x.nc\n")
+    (tmp_path / "p.yaml").write_text("clm_parameters: x.nc\n")
     with pytest.raises(ConfigError, match="clm-ml params"):
         Params.from_yaml(tmp_path / "p.yaml")
 

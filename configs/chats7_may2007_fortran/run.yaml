@@ -1,0 +1,43 @@
+# CHATS7, May 2007: the run compared with Fortran CLM-ml v2 (tests/test_fortran_python_comparison.py).
+# Same as chats7_1day for 31 days, with the Fortran acclimation temperature (model.yaml) and
+# the legacy .out files the comparison reads.
+#   clm-ml run configs/chats7_may2007_fortran/run.yaml --set output.directory=<dir>
+# Paths are relative to this file.
+
+model: model.yaml                  # the defaults, except acclimation_temperature: run_mean
+params: chats                      # built-in complete table: clm5_defaults with the walnut values
+
+time:
+  start: 2007-05-01T00:00
+  days: 31
+  step_seconds: 1800               # the tower data interval
+
+domain:
+  type: towers
+  towers: [CHATS7]                 # the built-in tower (src/clm_ml/data/towers.yaml)
+
+forcing:
+  meteorology:
+    files: ../../data/input_files/tower-forcing/CHATS7/2007-05.nc
+    interpolation: three_point     # previous, current and next records within each step (met_type 3)
+  clm_history:                     # LAI, SAI, soil water and the initial soil temperature
+    file: ../../data/input_files/clm5_0/CHATS7/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    start: 2007-04-01T00:00
+  soil_water:
+    source: clm_history
+    adjustment:                    # CLM soil water adjusted to the observations (top 3 levels)
+      file: ../../data/input_files/clm5_0/CHATS7/CHATS_soil_moisture_correction_29Jul25.nc
+      levels: 3
+
+initial_conditions:
+  source: clm_history
+
+output:
+  directory: output                # next to this file; the comparison test reads CLM_ML_COMPARE_DIR
+  legacy_ascii: true               # the six Fortran-format .out files (one patch)
+  streams:
+  - name: halfhourly
+    frequency: step
+    statistic: mean
+    variables: [all]
+    level: [patch]

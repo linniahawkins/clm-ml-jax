@@ -178,6 +178,8 @@ src/clm_ml/
   output_streams.py, checks.py, calendar.py, options.py, config.py, params.py, domain.py,
   run.py (run.yaml; Run.execute), model.py (Model: chunks and gradients), cli.py
   data/           towers.yaml, params/*.yaml, psihat.nc (package data)
+configs/          runnable configurations (run.yaml + model.yaml per experiment); model.yaml
+                  = every model setting at its default, generated (clm-ml model-yaml)
 data/             CHATS7 forcing (input_files/) and the CLM-ml namelists (namelists/nl.*)
 tests/
   clm_ml/              unit tests (fast)
@@ -186,7 +188,7 @@ tests/
   test_fortran_python_comparison.py  end-to-end vs Fortran .out files (slow; 2.5% / r >= 0.9999)
   test_differentiability.py          jax.grad through one step (gradient tier)
 timing/                time_offline.py, time_model.py, time_vmap.py, time_global.py, time_program.py
-docs/design/           modernization plan, Phase 7 scope/progress/decisions, examples
+docs/design/           plan, decisions.md, open_items.md, model_overview.md, phase logs
 ```
 
 ### Gotchas in the current code
@@ -246,7 +248,9 @@ docs/design/           modernization plan, Phase 7 scope/progress/decisions, exa
 ```bash
 pip install -e ".[dev]"                     # dev extras include pytest-cov, which pytest.ini needs (--no-cov)
 
-clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/   # namelist -> run.yaml + model.yaml
+clm-ml run configs/chats7_1day/run.yaml    # a ready configuration (configs/README.md)
+clm-ml model-yaml -o configs/model.yaml    # regenerate the complete model.yaml after changing config.py
+clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/   # namelist -> run.yaml + complete model.yaml
 clm-ml check chats7/run.yaml               # validate + summary, no run
 clm-ml params ctsm60_params.nc -o p.yaml   # CLM parameter file -> complete params.yaml (built-in clm6 = CTSM 6.0)
 clm-ml run chats7/run.yaml [--set key=value]   # run (netCDF output; output.legacy_ascii: the .out files)
@@ -254,7 +258,7 @@ clm-ml run chats7/run.yaml [--set key=value]   # run (netCDF output; output.lega
 python -m pytest tests/clm_ml tests/fortran_validation -m "not slow" -q   # unit + golden tests (fast)
 python -m pytest tests/regression -m regression -q                    # all end-to-end regression tests (~20 min CPU)
 python -m pytest tests/regression/test_end_to_end_regression.py tests/regression/test_clm_ml_equivalence.py -m regression -q   # bit-for-bit + noise twin (~40 s)
-CLM_ML_COMPARE_DIR=<dir> python -m pytest tests/test_fortran_python_comparison.py -m slow -q   # vs Fortran output (see its docstring)
+CLM_ML_COMPARE_DIR=<dir> python -m pytest tests/test_fortran_python_comparison.py -m slow -q   # vs Fortran output of configs/chats7_may2007_fortran
 python tests/gradient_tier.py [--focused]                  # CPU gradient tier (tests marked `gradient`, LLVM optimization off; issue 16)
 qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs          # GPU gradient tier (develop queue, warm GPU compile cache)
 
@@ -311,7 +315,7 @@ Python >= 3.10. CI tests 3.10 and 3.12.
 ## Modernization plan
 
 The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is in
-`docs/design/api_sketch.py`, and example config files are in `docs/design/examples/`.
+`docs/design/api_sketch.py` (historical), and runnable config files are in `configs/`.
 
 **Decisions:**
 - **Built-in towers: CHATS7 only** (`src/clm_ml/data/towers.yaml`). Other towers go in a
@@ -324,8 +328,9 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
     replaces the namelist.
   - `model.yaml` holds scheme choices and numerics. These are static, so changing them
     recompiles.
-  - `params.yaml` holds parameters **per PFT**. It uses `extends: clm5_defaults` with
-    overrides, and each patch looks up its PFT's values.
+  - `params.yaml` holds parameters **per PFT**. Every file is complete (every parameter of
+    every PFT 1-16; no `extends`, no filled-in defaults; maintainer 2026-11-01), and each
+    patch looks up its PFT's values. `run.yaml` must name one.
 - YAML loads into typed dataclass pytrees. Validation is plain Python, with errors that name the
   file and key. No Hydra, no Flax.
 - **Readable option names** (`stomatal_conductance: wue`). Fortran integer codes are accepted

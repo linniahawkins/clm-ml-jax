@@ -45,8 +45,15 @@ This installs the `clm-ml` command and the `clm_ml` package (the only package in
 ### With YAML configuration (`clm-ml`)
 
 A run is described by `run.yaml` (dates, tower, forcing files, output), which points to
-`model.yaml` (physics schemes and numerics) and a parameter file (per plant functional type).
-Convert an existing namelist to get started:
+`model.yaml` (physics schemes and numerics) and a complete parameter file (every parameter of
+every plant functional type). Ready-to-run configurations are in `configs/`
+(`configs/README.md`); `configs/model.yaml` lists every model setting with its default.
+
+```bash
+clm-ml run configs/chats7_1day/run.yaml   # one day at CHATS7
+```
+
+Or convert an existing namelist:
 
 ```bash
 clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/   # writes run.yaml + model.yaml
@@ -84,8 +91,10 @@ output:
   legacy_ascii: false             # true: also the Fortran-format .out files (validation)
 ```
 
-The built-in parameter sets are `clm5_defaults` and `chats` (the CHATS walnut-orchard
-values of Bonan, Burns & Patton 2026, Table 2); see `src/clm_ml/data/params/`. See
+The built-in parameter sets are `clm5_defaults`, `chats` (the CHATS walnut-orchard values of
+Bonan, Burns & Patton 2026, Table 2) and `clm6` (CTSM 6.0); see `src/clm_ml/data/params/`.
+Each is a complete table; to make your own, copy one (`clm-ml params chats -o mine.yaml`)
+and edit it. See
 `docs/design/modernization_plan.md` for where this interface is heading.
 
 ### From a CLM-ml namelist
@@ -161,7 +170,8 @@ and file with `domain.towers` and `domain.towers_file` in `run.yaml`.
 
 Physics schemes and numerics are in `model.yaml` (e.g. `physics.stomatal_conductance:
 medlyn | ball_berry | wue`, `numerics.integrator: rk4`); any key can be changed on the command
-line with `--set model.<section>.<key>=<value>`. See `docs/design/examples/`.
+line with `--set model.<section>.<key>=<value>`. Every setting is explained in
+`configs/model.yaml`.
 
 ---
 

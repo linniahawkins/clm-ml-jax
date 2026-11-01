@@ -63,10 +63,8 @@ jobs:
 
       - name: Run May 2007 CHATS7 simulation (Fortran acclimation, legacy .out files)
         run: |
-          clm-ml convert data/namelists/nl.CHATS7.05.2007 -o $RUNNER_TEMP/may
-          clm-ml run $RUNNER_TEMP/may/run.yaml \
-            --set model.physics.acclimation_temperature=run_mean \
-            --set output.legacy_ascii=true --set output.directory=$RUNNER_TEMP/may/out
+          clm-ml run configs/chats7_may2007_fortran/run.yaml \
+            --set output.directory=$RUNNER_TEMP/may/out
         timeout-minutes: 30
 
       - name: Run Fortran comparison

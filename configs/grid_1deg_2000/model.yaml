@@ -1,0 +1,181 @@
+# Model configuration: how the physics and numerics work (model.yaml).
+# Every setting. Differs from the defaults (configs/model.yaml) in: numerics.on_patch_error,
+# numerics.max_failed_patch_fraction, canopy_layers.max_layers, canopy_layers.n_layers_above,
+# canopy_layers.n_layers_within.
+# Written by `clm-ml model-yaml`; changing anything here recompiles the model.
+
+physics:
+  # Physics schemes. The defaults are CLM-ml v2 as run for CHATS (Bonan et al. 2026); the JAX
+  # model is validated against Fortran with these.
+
+  # Stomatal conductance model: water-use-efficiency optimization (iota) with the plant hydraulics
+  # constraint (CLM-ml v2), or the Medlyn or Ball-Berry relation.
+  # choices: medlyn | ball_berry | wue; Fortran: gs_type 0/1/2; default: wue.
+  stomatal_conductance: wue
+
+  # Reduce stomatal conductance as leaf water potential falls, gs = max(gs / (1 +
+  # (psi_leaf/psi50_gs)^shape_gs), gs_min) (Bonan et al. 2021, supplement eq. 14).
+  # Fortran: gspot_type 1/0; default: true.
+  water_stress_on_conductance: true
+
+  # Root finder of the WUE optimization: bisection (CLM-ml v2). brent is refused (not translated
+  # as traceable code; decisions.md).
+  # choices: brent | bisection; Fortran: gs_solver 1/2; default: bisection.
+  wue_solver: bisection
+
+  # Co-limitation (smoothed minimum) of the Rubisco, light and product limited rates; false takes
+  # the plain minimum.
+  # Fortran: colim_type 1/0; default: true.
+  photosynthesis_colimitation: true
+
+  # Acclimation of the photosynthetic temperature responses (Kattge and Knorr 2007) to the
+  # acclimation temperature below.
+  # Fortran: acclim_type 1/0; default: true.
+  temperature_acclimation: true
+
+  # The air temperature photosynthesis acclimates to: a running mean over acclimation_days,
+  # carried in the state (as CLM), or the mean over the whole run (Fortran CLM-ml v2; needs all
+  # forcing before the run starts: validation only).
+  # choices: running_mean | run_mean; Fortran: run_mean = init_acclim (CLMml_driver); default:
+  # running_mean.
+  acclimation_temperature: running_mean
+
+  # Length of the acclimation running mean (days).
+  # default: 10.0.
+  acclimation_days: 10.0
+
+  # Leaf nitrogen (Vcmax25) decay coefficient through the canopy; null computes it from Vcmax25 at
+  # the canopy top, exp(0.00963 Vcmax25 - 2.43) (Bonan et al. 2021).
+  # Fortran: kn_val (-999 = computed); default: null.
+  nitrogen_decay_kn: null
+
+  # Turbulence above and within the canopy: Harman and Finnigan roughness sublayer with the psihat
+  # tables (the only scheme).
+  # choices: harman_finnigan; Fortran: turb_type 1; default: harman_finnigan.
+  roughness_sublayer: harman_finnigan
+
+  # Harman-Finnigan adjustments for sparse canopies: the displacement height and the canopy-top
+  # Prandtl number depend on the plant area index.
+  # Fortran: sparse_canopy_type 1/0; default: true.
+  sparse_canopy: true
+
+  # Aerodynamic conductance of the lowest canopy layer to the ground: a log wind profile (CLM-ml
+  # v2), or the Harman-Finnigan exponential profile extended down to the ground.
+  # choices: extend_hf | log_profile; Fortran: HF_extension_type 2/1; default: log_profile.
+  ground_conductance: log_profile
+
+  # Coupled implicit solution of air temperature, vapour and leaf temperature in every layer.
+  # well_mixed is refused (Fortran calls it legacy, not supported).
+  # choices: well_mixed | implicit; Fortran: flux_profile_type 1/0; default: implicit.
+  flux_profile_solution: implicit
+
+  # Leaf boundary-layer conductance: laminar forced convection, turbulent forced convection, or
+  # forced plus free convection (CLM-ml v2).
+  # choices: laminar | turbulent | free_convection; Fortran: gb_type 1/2/3; default:
+  # free_convection.
+  leaf_boundary_layer: free_convection
+
+  # Shortwave radiation through the canopy: two-stream, integrated over each layer. norman is
+  # refused (not yet supported).
+  # choices: norman | two_stream; Fortran: light_type 2/1; default: two_stream.
+  solar_radiation: two_stream
+
+  # Leaf optical properties varying with height in the canopy (not supported).
+  # Fortran: leaf_optics_type 0/1; default: false.
+  leaf_optics_vary_with_height: false
+
+  # Longwave radiation through the canopy: Norman (the only scheme).
+  # choices: norman; Fortran: longwave_type 1; default: norman.
+  longwave_radiation: norman
+
+numerics:
+  # Time stepping, solvers and run control.
+
+  # Model time step (s); null = the forcing data interval. The forcing is interpolated to it; it
+  # must divide the data interval. run.yaml time.step_seconds sets the same.
+  # default: null.
+  step_seconds: null
+
+  # Canopy sub-step (s): each step is split into sub-steps, forcing interpolated within the step,
+  # output averaged over them.
+  # Fortran: dtime_ml; default: 300.0.
+  substep_seconds: 300.0
+
+  # Time integration of the sub-step state (air temperature, vapour, leaf temperature, leaf water
+  # potential, intercepted water, ground temperature): 4th-order Runge-Kutta in CLM-ml v2 (v1 used
+  # Euler).
+  # choices: euler | rk2_trapezoid | rk2_midpoint | rk2_ralston | rk3_heun | rk3_ralston |
+  # rk3_kutta | rk4; Fortran: runge_kutta_type; default: rk4.
+  integrator: rk4
+
+  # Recompute each step during gradients instead of storing it (less memory). Currently has no
+  # effect: steps are always checkpointed (open_items.md O65).
+  # default: true.
+  checkpoint_steps: true
+
+  # A patch that fails a conservation check or whose state becomes unhealthy: stop the run naming
+  # it (as Fortran), or exclude it from then on (global runs; its output is fill values and
+  # gridcell sums use the remaining weights).
+  # choices: stop | exclude; default: stop.
+  on_patch_error: exclude
+
+  # With exclude: stop the run when more than this fraction of patches has failed.
+  # default: 0.01.
+  max_failed_patch_fraction: 0.05
+
+  # Conservation checks that neither stop the run nor exclude a patch (their largest error is
+  # still reported), by (part of) their name in clm_ml.checks.BALANCE_CHECKS, e.g.
+  # 'CanopyFluxesDiagnostics 3'. Normally empty: every check passes for CHATS7 and the 1-degree
+  # grid runs.
+  # default: [].
+  ignore_checks: []
+
+canopy_layers:
+  # The vertical layers of the canopy air space, from the ground to the forcing height.
+
+  # Layer slots of every patch (one compiled program for all patches; unused slots are masked).
+  # CHATS7 uses 46.
+  # Fortran: nlevmlcan; default: 50.
+  max_layers: 20
+
+  # Layer thickness (m) for canopies taller than tall_canopy_threshold.
+  # Fortran: dz_tall; default: 0.5.
+  dz_tall: 0.5
+
+  # Layer thickness (m) for shorter canopies.
+  # Fortran: dz_short; default: 0.1.
+  dz_short: 0.1
+
+  # Canopy height (m) above which dz_tall is used.
+  # Fortran: dz_param; default: 2.0.
+  tall_canopy_threshold: 2.0
+
+  # Explicit number of layers above the canopy; null = from the spacing. Set with n_layers_within
+  # (both or neither); towers with short canopies under tall towers need it (5-10 within-canopy
+  # layers suffice for fluxes, Bonan et al. 2021).
+  # Fortran: nlayer_above; default: null.
+  n_layers_above: 10
+
+  # Explicit number of layers within the canopy; null = from the spacing.
+  # Fortran: nlayer_within; default: null.
+  n_layers_within: 10
+
+  # At setup, layers holding less than this fraction of the canopy's plant area are emptied and
+  # their area given to the other layers.
+  # Fortran: dpai_min; default: 0.01.
+  min_plant_area_per_layer: 0.01
+
+  # Every leafy layer keeps at least this plant area (m2 m-2) at every step, the missing part
+  # added as stem area: thinner layers transmit more diffuse radiation than they receive
+  # (decisions.md; CLM-ml v1's dpai_min). 0 reproduces CLM-ml v2.
+  # default: 0.01.
+  min_layer_plant_area: 0.01
+
+soil:
+  # The soil under the patches (the CLM soil layer structure: 20 hydrologically active levels, 25
+  # in all).
+
+  # per_patch: each patch has its own soil column (option A). shared: patches on a gridcell share
+  # one column (option B; not yet implemented).
+  # choices: per_patch | shared; default: per_patch.
+  columns: per_patch

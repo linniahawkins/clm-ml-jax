@@ -1,0 +1,41 @@
+# CHATS7, 1 May 2007: one day at the CHATS walnut orchard (Dixon, California), the CLM-ml v2
+# test case of Bonan, Burns & Patton (2026). The quickest complete run.
+#   clm-ml run configs/chats7_1day/run.yaml
+# Paths are relative to this file.
+
+model: ../model.yaml               # the defaults: CLM-ml v2 as run for CHATS
+params: chats                      # built-in complete table: clm5_defaults with the walnut values
+
+time:
+  start: 2007-05-01T00:00
+  days: 1
+  step_seconds: 1800               # the tower data interval
+
+domain:
+  type: towers
+  towers: [CHATS7]                 # the built-in tower (src/clm_ml/data/towers.yaml)
+
+forcing:
+  meteorology:
+    files: ../../data/input_files/tower-forcing/CHATS7/2007-05.nc
+    interpolation: three_point     # previous, current and next records within each step (met_type 3)
+  clm_history:                     # LAI, SAI, soil water and the initial soil temperature
+    file: ../../data/input_files/clm5_0/CHATS7/CHATS_A15.clm2.h1.2007-04-01-00000_22Jul25.nc
+    start: 2007-04-01T00:00
+  soil_water:
+    source: clm_history
+    adjustment:                    # CLM soil water adjusted to the observations (top 3 levels)
+      file: ../../data/input_files/clm5_0/CHATS7/CHATS_soil_moisture_correction_29Jul25.nc
+      levels: 3
+
+initial_conditions:
+  source: clm_history
+
+output:
+  directory: output                # next to this file
+  streams:
+  - name: halfhourly
+    frequency: step
+    statistic: mean
+    variables: [all]
+    level: [patch]

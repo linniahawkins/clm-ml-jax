@@ -165,9 +165,9 @@ Reason: Fortran users can bring their namelists; one run path to maintain.
 Source: plan §0 11; §8 4; C30.
 
 **12. Parameters: a per-PFT table in YAML only**
-2026-10-27, revised 2026-10-29 · plan, Phase 6b · maintainer · in force · Departure from Fortran: no
-Each patch looks up its PFT's row, so gradients come out per PFT; `params.yaml` uses
-`extends:` with overrides; params files are YAML only: a CLM parameter netCDF file is converted
+2026-10-27, revised 2026-10-29 · plan, Phase 6b · maintainer · in force (revised by 89: no `extends`) · Departure from Fortran: no
+Each patch looks up its PFT's row, so gradients come out per PFT; `params.yaml` used
+`extends:` with overrides (until 89); params files are YAML only: a CLM parameter netCDF file is converted
 once (`clm-ml params FILE.nc -o FILE.yaml`), which writes a complete table.
 Reason: calibration targets PFT parameters; one format avoids two code paths.
 Source: plan §0 9; G15; `phase6_progress.md` 2026-10-29 ("params files are YAML only").
@@ -240,6 +240,31 @@ YAML is validated at load (`clm-ml check` validates without running); model erro
 `endrun`.
 Reason: runs are in-process (entry 15); a caller must be able to catch a failure.
 Source: plan §6.8; C28.
+
+**89. Params files are complete; every run names one**
+2026-11-01 · Phase 8a · maintainer · in force · Departure from Fortran: no
+A params file gives every parameter of every PFT 1-16 itself: no `extends`, no values filled in
+from another file (`extends` and missing values are errors; only the canopy roughness ratios,
+used by grid runs alone, may be left out, and a grid run then refuses the file). `run.yaml`
+must name a params file (no default). The built-in `chats` is now a complete table
+(`clm5_defaults` with the walnut values; same numbers as before); a new parameter set is a
+copy (`clm-ml params chats -o mine.yaml`) edited.
+Reason: a run's parameters are all in the one file it names, so what a run used is never hidden
+in a chain of files.
+Source: maintainer, 2026-11-01 (open_items O17).
+
+**90. `configs/`: runnable configurations with complete model.yaml files**
+2026-11-01 · Phase 8a · maintainer · in force · Departure from Fortran: no
+Runnable experiments live in `configs/` (one folder each: `chats7_1day`, `chats7_may2007_fortran`,
+`grid_1deg_2000`), replacing `docs/design/examples/`. `configs/model.yaml` lists every model
+setting at its default with its explanation, generated from `clm_ml.config` (`clm-ml
+model-yaml`; the explanations are in the code, field metadata); an experiment that changes
+settings carries its own complete model.yaml; `clm-ml convert` writes a complete one; a test
+checks every model.yaml in `configs/` is complete and current and every run.yaml loads. The
+built-in params, towers and psihat files stay package data (used by name).
+Reason: validated configurations as named, commented files (as jax-gcm); one source for the
+defaults (the code), so the file cannot drift.
+Source: maintainer, 2026-11-01 (open_items O17).
 
 ## C. Spatial structure: gridcells, patches, layers, soil
 

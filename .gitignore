@@ -133,3 +133,6 @@ comparison_plots/
 
 
 Paper/jaxes_paper/
+
+# outputs of the runs in configs/
+configs/*/output/
