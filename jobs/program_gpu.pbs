@@ -1,0 +1,33 @@
+#!/bin/bash
+#PBS -N clmml_program
+#PBS -A UCLB0069
+#PBS -q develop
+#PBS -l select=1:ncpus=16:ngpus=1:mem=200GB
+#PBS -l walltime=01:30:00
+#PBS -j oe
+# Program size and compile time of the 1° global chunk (10 days) on one A100, on a snapshot
+# of REV (timing/time_program.py; Phase 7 "done when").
+#
+#   qsub -v REV=<commit>,TAG=<name> jobs/program_gpu.pbs
+set -u
+SCRATCH=${SCRATCH:-/glade/derecho/scratch/$USER}
+REPO=${REPO:-/glade/work/$USER/clm-ml-jax}
+ENV_BIN=${ENV_BIN:-/glade/work/$USER/conda-envs/clm-ml-jax/bin}
+LOG=$SCRATCH/clm-ml-jax/jobs/program_gpu_${TAG:-run}.log
+mkdir -p $(dirname $LOG)
+exec > >(tee -a $LOG) 2>&1
+export PATH=$ENV_BIN:$PATH
+export JAX_COMPILATION_CACHE_DIR=$SCRATCH/jax_compile_cache_gpu
+export TMPDIR=$SCRATCH/tmp
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export JAX_PLATFORMS=cuda
+TREE=$SCRATCH/clm-ml-jax/trees/program_$(date +%s)
+git -C $REPO worktree add --detach $TREE ${REV:-HEAD} >/dev/null 2>&1 \
+  || { echo "worktree add failed: ${REV:-HEAD}"; exit 1; }
+cd $TREE && export PYTHONPATH=$TREE/src:$TREE
+git log --oneline -1; nvidia-smi --query-gpu=name,memory.total --format=csv,noheader; date
+python -u timing/time_program.py docs/design/examples/run_grid_1deg.yaml 'domain.grid.region=null' \
+  execution.devices=1 --label "${TAG:-run}" 2>&1 | grep -v "pjrt_executable\|^W1"
+cp timing/results_program.jsonl $SCRATCH/clm-ml-jax/jobs/results_program_${TAG:-run}.jsonl 2>/dev/null
+cd /; git -C $REPO worktree remove --force $TREE
+echo "ALL DONE $(date)"
