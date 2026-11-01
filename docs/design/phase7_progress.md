@@ -305,20 +305,23 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   maintainer (C23). Tests: lint; photosynthesis unit tests + fast golden 188 pass;
   bit-for-bit + noise twin 177 pass (default regime unchanged).
 
+- **Timing, 7.2 done (2026-10-31).** `timing/time_model.py --steps 8` on CPU with the
+  gradient flags (LLVM optimization off, issue 16), the end of 7.1 (`bdde552`, worktree)
+  and HEAD alternated twice (`p72-*` in `timing/results_model.jsonl`, `logs7/timing72.sh`):
+  forward 26.8/25.9 -> 30.7/30.8 ms/step (1.16x slower; below the 1.5x threshold);
+  gradient 640/567 -> 405/376 ms/step (1.5x faster); setup 32 -> 19 s; peak memory
+  4.3-4.4 -> 3.6-3.9 GB. (With the default flags the forward step was 15.6 ms at 10c.)
+
 ## Next (resume here)
 
-**Package 7.2 in progress. Sessions 1-7 (2026-10-30/31) did processes 1-9; session 8
-planned process 10 (C19) and did 10a; session 9 did 10b (C20); session 10 did 10c (C21);
-session 11 (2026-10-31) did 10d (the psihat tables as an input of the compiled step, C22,
-bit for bit). All 7.2 processes are done; last commit = the one that wrote this.** Next:
-the **package-end tests** of 7.2: the CPU gradient tier (`python tests/gradient_tier.py`),
-the feature tests 7.2 touched (`test_stream_runner`, `test_ensemble`,
-`test_patches_batched`, `test_c3_c4_groups`, `test_sites_one_program`,
-`test_patch_padding`, `test_one_program_any_layers`, `test_model_patches`, the process
-replay), an independent review of the package's diff (`git diff <start of 7.2>..HEAD`, a
-reviewer agent that sees the diff only), timing against `p71-*` with gradient
-(`logs7/timing.sh`; forward ~27-28 ms/step, gradient ~604 ms/step; discuss a slowdown
-above ~1.5x), then stop and report to the maintainer.
+**Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,
+review fixes C23, timing above); last commit = the one that wrote this.** Stopped to report
+to the maintainer. Next: **package 7.3, forcing in the chunk** (`phase7_scope.md`), after
+discussing it with the maintainer; its package-end feature tests: `test_coarse_forcing`,
+`test_land_data_files`, `test_grid_setup`, `test_stream_runner`. Timing baseline for the
+end of 7.3: `p72-clm-ml-jax-*`. Open for the maintainer from 7.2: the C23 observations
+(template compiled in as a constant by `run_streams`, proposed for 7.4; the Euler tableau
+trap) and the list below.
 
 Same pattern as processes 2-9 (C10, C12-C18): physics on plain 0-based arrays in `clm_ml/physics/` (mask helpers in `physics/layers.py`, layer grid `PatchLayers`), legacy
 adapters with the old names and a `DECLARED` reads/writes table in `clm_ml/legacy/`, a test on
