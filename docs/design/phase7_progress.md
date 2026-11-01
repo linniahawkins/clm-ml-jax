@@ -343,6 +343,14 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   `tests/clm_ml` + fast golden 420 pass; bit-for-bit + noise twin 177 pass;
   `test_stream_runner` pass.
 
+- **7.4b, the constants are setup values (C26): bit for bit.** `PatchConstants` lost the
+  sub-step carry's start values and the padding slots the step kept (`substep`, `dlai`,
+  `dsai`, `dpai`, `lwp_mean`, `tleaf_hist`, `lwp_hist`, `hk_l`, `smp_l`); the step starts
+  the carry from `physics.canopy.initial_substep` (`spval`, errors 0) with the state put in,
+  and keeps `spval` where it computes nothing. Tests: lint; `tests/clm_ml` + fast golden 420
+  pass; bit-for-bit + noise twin 177 pass (no re-recording: the reference already holds
+  `spval` in those slots); focused CPU gradient test pass (2.3 min).
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,

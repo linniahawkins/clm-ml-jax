@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
-from clm_ml.legacy.canopy import substep_from_container, substep_options
+from clm_ml.legacy.canopy import substep_options
 from clm_ml.legacy.state import mlcanopy_layers
 from clm_ml.step import PatchConstants, StepOptions
 
@@ -60,20 +60,12 @@ def patch_constants(template, p: int = 0) -> PatchConstants:
     ml, s, site = template.mlcanopy, template.soilstate, template.site
     n, n_soil = clm_varpar.nlevgrnd, clm_varpar.nlevsoi
     lev, lev_soil = slice(1, n + 1), slice(1, n_soil + 1)
-    leaf = (p, slice(1, None), slice(1, None))
     colour = site.isoicol_col[c] - 1  # 1-based class into the tables (data)
     bands = slice(1, clm_varpar.numrad + 1)
     return PatchConstants(
         layers=mlcanopy_layers(ml, p),
-        substep=substep_from_container(ml, p),
         dlai_frac=ml.dlai_frac_profile[p, 1:],
         dsai_frac=ml.dsai_frac_profile[p, 1:],
-        dlai=ml.dlai_profile[p, 1:],
-        dsai=ml.dsai_profile[p, 1:],
-        dpai=ml.dpai_profile[p, 1:],
-        lwp_mean=ml.lwp_mean_profile[p, 1:],
-        tleaf_hist=ml.tleaf_hist_leaf[leaf],
-        lwp_hist=ml.lwp_hist_leaf[leaf],
         zref=ml.zref_forcing[p],
         ztop=ml.ztop_canopy[p],
         root_biomass=ml.root_biomass_canopy[p],
@@ -90,8 +82,6 @@ def patch_constants(template, p: int = 0) -> PatchConstants:
         tkmg=s.tkmg_col[c, lev],
         tkdry=s.tkdry_col[c, lev],
         csol=s.csol_col[c, lev],
-        hk_l=s.hk_l_col[c, lev_soil],
-        smp_l=s.smp_l_col[c, lev_soil],
         albsat=jnp.asarray(SurfaceAlbedoMod.albsat)[colour, bands],
         albdry=jnp.asarray(SurfaceAlbedoMod.albdry)[colour, bands],
         latdeg=site.latdeg_grc[g],

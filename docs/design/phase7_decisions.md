@@ -989,3 +989,20 @@ legacy setup, worker and containers deleted.
 7.4a: `legacy_view(step, layers)` builds each legacy array by padding the 0-based value with
 `spval` (no template argument; the legacy snow levels of `t_soisno_col` by soil structure).
 Bit for bit.
+
+### C26. 7.4b: the step's constants are setup values (7.4, 2026-10-31)
+- `PatchConstants` holds only what the setup computes (layer grid, area fractions, heights,
+  roots, soil column, soil albedos, location). The sub-step carry starts from
+  `physics.canopy.initial_substep(n_layers, stage_slots, n_checks)`: `spval` in every slot
+  (the legacy containers' fill; stage slots = the method's stages + 1, the legacy
+  `nrk + 1`) and zero errors, with the prognostic state put in. Slots the step does not
+  compute (layers above the top in use for the plant area, mean leaf water potential and
+  the output leaf temperature/water potential; soil levels below bedrock for the hydraulic
+  conductivity and matric potential) hold `spval` (`step._fill`).
+- Before, these values came from the template (containers after the first step). C25's
+  probes showed no value in use depends on them; the CHATS7 reference already held `spval`
+  in every recorded slot concerned, so the change is bit for bit.
+Why: the setup can now produce the constants directly (7.4c), and per-patch memory drops
+(the carry's ~120 start arrays per patch are no longer inputs of the chunk).
+Alternatives: zeros instead of `spval` (would change recorded fill slots; `spval` keeps the
+legacy meaning "not set").

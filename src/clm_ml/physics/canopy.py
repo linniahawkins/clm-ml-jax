@@ -598,6 +598,38 @@ SUBSTEP_KINDS = {
 Substep = NamedTuple("Substep", [(f, Array) for fields in SUBSTEP_KINDS.values() for f in fields])
 
 
+#: The fill value of the legacy containers (clm_varcon.spval): slots no routine has written
+SPVAL = 1.0e36
+
+
+def initial_substep(n_layers: int, n_stage_slots: int, n_checks: int) -> Substep:
+    """The sub-step carry at the start of a step, before the prognostic state is put in:
+    ``spval`` in every slot (the work values are written before they are read; the slots no
+    step writes, above the canopy or the top layer, keep it, as the legacy containers did)
+    and no conservation errors. ``n_layers``: layer slots; ``n_stage_slots``: the
+    Runge-Kutta increments' slots (the method's stages + 1). Phase 7.4 (C26)."""
+    shapes = {
+        "scalar": (), "band": (2,), "layer": (n_layers,), "level": (n_layers + 1,),
+        "level_band": (n_layers + 1, 2), "leaf": (n_layers, 2), "leaf_band": (n_layers, 2, 2),
+        "stage": (n_stage_slots,), "layer_stage": (n_layers, n_stage_slots),
+        "leaf_stage": (n_layers, 2, n_stage_slots), "checks": (n_checks,),
+    }  # fmt: skip
+    values = {}
+    for kind, fields in SUBSTEP_KINDS.items():
+        for f in fields:
+            fill = 0.0 if kind == "checks" else SPVAL
+            values[f] = jnp.full(shapes[kind], fill, dtype=jnp.float64)
+    return Substep(**values)
+
+
+def stage_slots(integrator: str) -> int:
+    """Slots of the Runge-Kutta increments in the carry: the method's stages + 1 (the
+    legacy ``nrk + 1``)."""
+    from clm_ml.physics.integrators import TABLEAUS
+
+    return len(TABLEAUS[integrator].b) + 1
+
+
 def _record(errors: Array, check: int, err) -> Array:
     """``errors`` with ``|err|`` (largest element) recorded for ``check`` (as
     ``MLCanopyFluxesType.record_balance_error``)."""

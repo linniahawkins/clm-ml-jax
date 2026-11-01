@@ -11,10 +11,8 @@ and everything it changes is returned; the legacy containers are not used.
   record, the forcing records of the previous and next steps for the time interpolation) and
   its time.
 - :class:`PatchConstants`: the patch's values that every step reads and none changes: the
-  layer grid, PFT and soil properties, location, and the values the step reads before
-  writing them (the work fields of the sub-step carry, padding slots kept), as they are after
-  the first step. Extracted once from the first step's containers
-  (``clm_ml.legacy.step.patch_constants``) until the setup is rewritten (Phase 7.4).
+  layer grid, PFT and soil properties, location (set up once; slots the step does not
+  compute hold ``spval``, Phase 7.4b).
 - :class:`StepOptions`: the static choices (code paths, step lengths).
 
 Fortran reference: CLM-ml v2 ``clm_driver.F90::clm_drv`` and
@@ -135,18 +133,9 @@ class PatchConstants(NamedTuple):
     """The patch's values every step reads and no step changes (0-based, no patch axis)."""
 
     layers: PatchLayers
-    # Values of the sub-step carry at the start of every step, besides the state (work
-    # fields and padding slots, as after the first step; legacy names)
-    substep: canopy.Substep
-    # Leaf, stem and plant area: the layers' fractions, and the slots the step keeps
+    # Leaf and stem area fractions of the layers
     dlai_frac: Array  # (layer,) (dlai_frac_profile)
     dsai_frac: Array  # (layer,) (dsai_frac_profile)
-    dlai: Array  # (layer,) padding kept (dlai_profile)
-    dsai: Array  # (layer,) padding kept (dsai_profile)
-    dpai: Array  # (layer,) padding kept (dpai_profile)
-    lwp_mean: Array  # (layer,) padding kept (lwp_mean_profile)
-    tleaf_hist: Array  # (layer, leaf) padding kept (tleaf_hist_leaf)
-    lwp_hist: Array  # (layer, leaf) padding kept (lwp_hist_leaf)
     zref: Array  # () reference height, m (zref_forcing)
     ztop: Array  # () canopy height, m (ztop_canopy)
     root_biomass: Array  # () fine root biomass, g/m2 (root_biomass_canopy)
@@ -164,8 +153,6 @@ class PatchConstants(NamedTuple):
     tkmg: Array  # (soil_level,) thermal conductivity of the soil minerals
     tkdry: Array  # (soil_level,) thermal conductivity of dry soil
     csol: Array  # (soil_level,) heat capacity of the soil solids
-    hk_l: Array  # (n_soil,) hydraulic conductivity, kept below bedrock (soilstate.hk_l_col)
-    smp_l: Array  # (n_soil,) matric potential, kept below bedrock (soilstate.smp_l_col)
     albsat: Array  # (band,) saturated soil albedo of the soil colour
     albdry: Array  # (band,) dry soil albedo of the soil colour
     latdeg: Array  # () latitude, degrees
@@ -215,6 +202,12 @@ def solar_zenith(calday_beg, latdeg, londeg, options: StepOptions) -> Array:
     lon = londeg * pi / 180.0
     coszen = shr_orb_cosz(calday_beg, lat, lon, declin)
     return jnp.arccos(jnp.maximum(jnp.asarray(0.01), jnp.asarray(coszen)))
+
+
+def _fill(like: Array) -> Array:
+    """``spval`` shaped as ``like``: the value of slots the step does not compute (above the
+    top layer in use, soil levels below bedrock), as the legacy containers' fill (C26)."""
+    return jnp.full(jnp.shape(like), canopy.SPVAL, dtype=jnp.float64)
 
 
 def _record(errors: Array, check: int, err) -> Array:
@@ -274,7 +267,7 @@ def step(
     )  # fmt: skip
     hk_l, smp_l = soil.soil_hydraulic_properties(
         liq[:n_soil], k.dz[:n_soil], k.watsat[:n_soil], k.hksat[:n_soil], k.sucsat[:n_soil],
-        k.bsw[:n_soil], k.nbedrock, k.hk_l, k.smp_l,
+        k.bsw[:n_soil], k.nbedrock, _fill(k.dz[:n_soil]), _fill(k.dz[:n_soil]),
     )  # fmt: skip
 
     # The canopy's forcing of this step — GetCLMVar
@@ -290,9 +283,10 @@ def step(
     area = canopy.plant_area(
         lay, k.dlai_frac, k.dsai_frac, inputs.elai, inputs.esai, options.layer_pai_floor
     )
-    dlai = keep(use, area.dlai, k.dlai)
-    dsai = keep(use, area.dsai, k.dsai)
-    dpai = keep(use, area.dpai, k.dpai)
+    fill_layer = _fill(lay.dz)
+    dlai = keep(use, area.dlai, fill_layer)
+    dsai = keep(use, area.dsai, fill_layer)
+    dpai = keep(use, area.dpai, fill_layer)
     errors = _record(jnp.zeros(len(BALANCE_CHECKS), t_soil.dtype), PLANT_AREA, area.error)
 
     # Plant hydraulics and leaf heat capacity (every layer slot). The ice of soil level j is
@@ -321,7 +315,10 @@ def step(
         psis=roots.psis,
     )  # fmt: skip
     c = state.canopy
-    start = k.substep._replace(
+    n_slots = lay.dz.shape[-1]
+    start = canopy.initial_substep(
+        n_slots, canopy.stage_slots(options.substep.integrator), len(BALANCE_CHECKS)
+    )._replace(
         tair_profile=c.air_temperature,
         eair_profile=c.vapor_pressure,
         cair_profile=c.co2,
@@ -459,7 +456,7 @@ def step(
         mflx_profile=keep(use, means.mflx, end.mflx_profile),
         gac_profile=keep(use, means.gac, end.gac_profile),
         lsc_profile=lsc,
-        lwp_mean_profile=keep(use, totals.lwp_mean, k.lwp_mean),
+        lwp_mean_profile=keep(use, totals.lwp_mean, fill_layer),
         td_profile=end.td_profile,
         lwdwn_profile=keep(up_to_top, means.lwdwn, end.lwdwn_profile),
         lwupw_profile=keep(up_to_top, means.lwupw, end.lwupw_profile),
@@ -473,8 +470,8 @@ def step(
         anet_leaf=means.anet,
         gs_leaf=means.gs,
         vcmax25_leaf=end.vcmax25_leaf,
-        tleaf_hist_leaf=keep(use, merged.tleaf_hist, k.tleaf_hist),
-        lwp_hist_leaf=keep(use, merged.lwp_hist, k.lwp_hist),
+        tleaf_hist_leaf=keep(use, merged.tleaf_hist, _fill(end.tleaf_leaf)),
+        lwp_hist_leaf=keep(use, merged.lwp_hist, _fill(end.tleaf_leaf)),
         balance_error=errors,
     )
     return StepState(state=new_state, diagnostics=diagnostics)
