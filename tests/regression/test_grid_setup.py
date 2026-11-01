@@ -197,7 +197,8 @@ if batch.land_fn is not None:
     xp = jax.jit(jax.vmap(lambda w: batch.land_fn(w, land, gidx)))(xw)
 real = np.asarray(batch.real_index); gi = np.asarray(batch.runner_gidx)[real]
 out = {{}}
-for name, tree, idx in (("xg", xg[2:], gi), ("xp", xp, real)):  # xg[:2]: the calendar days
+xg = {{k: v for k, v in xg._asdict().items() if k not in ("calday", "calday_beg")}}
+for name, tree, idx in (("xg", xg, gi), ("xp", xp, real)):  # without the calendar days
     for path, leaf in jax.tree_util.tree_leaves_with_path(tree):
         a = np.asarray(leaf)
         out[name + jax.tree_util.keystr(path)] = a[:, idx] if a.ndim >= 2 else a

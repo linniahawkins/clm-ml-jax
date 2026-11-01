@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 
 from clm_ml.forcing import Forcing
-from clm_ml.physics.atm_forcing import ForcingRecord, clm_forcing_to_ml
+from clm_ml.physics.atm_forcing import ForcingRecord
 from clm_ml.step import LandInputs, MetInputs
 
 #: ``TowerMet`` field -> ``clm_ml.forcing.TowerForcing`` field
@@ -55,19 +55,15 @@ def _bands(x) -> np.ndarray:
 
 def previous_record(met: dict) -> ForcingRecord:
     """The previous step's forcing record as ``GetCLMVar`` derives it from the CLM forcing
-    (wind resultant with no north component, CO2 mole fraction from the partial pressure),
-    with the same arithmetic as the current step's record inside the step."""
-    import jax.numpy as jnp
-
-    a = lambda x: jnp.asarray(_f(x))  # noqa: E731
-    solad, solai = _bands(met["solad"]), _bands(met["solai"])
-    u, t, q, p, co2, *_ = clm_forcing_to_ml(
-        a(met["uref"]), jnp.zeros(()), a(met["tref"]), a(met["qref"]), a(met["pref"]),
-        a(met["pco2"]), None, None, a(met["lwsky"]),
-    )  # fmt: skip
+    (wind resultant with no north component, CO2 mole fraction from the partial pressure):
+    the expressions of ``physics.atm_forcing.clm_forcing_to_ml`` (the step's current record),
+    in NumPy so the host never computes on a device (square root and division are correctly
+    rounded in both, so the values are the same bit for bit)."""
+    u, pref = _f(met["uref"]), _f(met["pref"])
     return ForcingRecord(
-        uref=_f(u), tref=_f(t), qref=_f(q), pref=_f(p), co2ref=_f(co2),
-        swskyb=solad, swskyd=solai, lwsky=_f(met["lwsky"]),
+        uref=np.sqrt(u**2 + 0.0**2), tref=_f(met["tref"]), qref=_f(met["qref"]), pref=pref,
+        co2ref=_f(met["pco2"]) / pref * 1.0e6, swskyb=_bands(met["solad"]),
+        swskyd=_bands(met["solai"]), lwsky=_f(met["lwsky"]),
     )  # fmt: skip
 
 

@@ -25,17 +25,13 @@ def _run(days, mode="running_mean"):
     )
 
 
-def _inputs(t):
-    return t  # the step's forcing air temperature (K)
-
-
 def test_mean_of_all_steps_during_the_first_period_then_running():
     temps = [280.0, 290.0, 300.0, 310.0, 320.0]
     run = _run(days=3)  # period: 3 steps
     state = _state(temps[0], 1.0)  # the first step initializes the mean
     means = [temps[0]]
     for t in temps[1:]:
-        state = advance_acclimation(run, state, _inputs(t))
+        state = advance_acclimation(run, state, t)
         means.append(float(state.canopy.acclimation_temperature))
     expected = [280.0, 285.0, 290.0]  # plain means of steps 1..3
     expected.append(290.0 + (310.0 - 290.0) / 3)  # then weight 1/3
@@ -46,4 +42,4 @@ def test_mean_of_all_steps_during_the_first_period_then_running():
 
 def test_run_mean_leaves_the_state_unchanged():
     state = _state(288.0, 1.0)
-    assert advance_acclimation(_run(3, "run_mean"), state, _inputs(300.0)) is state
+    assert advance_acclimation(_run(3, "run_mean"), state, 300.0) is state
