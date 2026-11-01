@@ -51,8 +51,10 @@ def _tableau(rows: dict, b, c) -> Tableau:
 #: Integrators by name (``numerics.integrator``) -> tableau; Fortran ``runge_kutta_type``
 #: codes in the comments. Entries computed as Fortran writes them (e.g. ``2/6``).
 TABLEAUS = {
-    # Euler (10): one stage, no state update (Fortran never calls RungeKuttaUpdate)
-    "euler": Tableau(np.full((1, 1), _UNUSED), np.zeros(1), np.zeros(1)),
+    # Euler (10): one stage. The canopy sub-step keeps the processes' own result and never
+    # calls the update (Fortran never calls RungeKuttaUpdate); b = [1] is still the correct
+    # weight, so an update would give bef + k = cur, not reset the state (open item O33)
+    "euler": Tableau(np.full((1, 1), _UNUSED), np.ones(1), np.zeros(1)),
     # 2nd-order trapezoidal rule (21; Butcher 1996)
     "rk2_trapezoid": _tableau({(1, 0): 1.0}, [1.0 / 2.0, 1.0 / 2.0], [0.0, 1.0]),
     # 2nd-order midpoint rule (22; Butcher 1996)

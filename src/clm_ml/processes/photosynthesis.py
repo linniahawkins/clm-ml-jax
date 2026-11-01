@@ -69,10 +69,10 @@ from clm_ml.processes.math import quadratic
 from clm_ml.processes.water_vapor import sat_vap
 from clm_ml.state import PatchLayers
 
-#: Stomatal conductance models by name (model.yaml ``physics.stomatal_conductance``; Fortran
+#: Stomatal conductance models by name (model.yaml ``processes.stomatal_conductance.scheme``; Fortran
 #: ``gs_type`` 0, 1, 2)
 STOMATAL_CONDUCTANCE = ("medlyn", "ball_berry", "wue")
-#: Root finders of the WUE optimization by name (model.yaml ``physics.wue_solver``; Fortran
+#: Root finders of the WUE optimization by name (model.yaml ``processes.stomatal_conductance.wue_solver``; Fortran
 #: ``gs_solver`` 1 Brent, 2 bisection). Brent's method is registered but not supported
 #: (Phase 7 decision C16, open issue 18 in ``global_input.md``).
 WUE_SOLVER = ("bisection", "brent")

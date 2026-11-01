@@ -118,3 +118,10 @@ def test_rk_update_keeps_padding():
     np.testing.assert_array_equal(np.asarray(inc.tair)[pad], 7.0)
     # stage 1 of rk4: the next stage starts from bef + k1 / 2
     np.testing.assert_allclose(np.asarray(new.tair)[~pad], np.asarray(v + 0.5)[~pad], rtol=1e-15)
+
+
+@pytest.mark.parametrize("name", list(integrators.TABLEAUS))
+def test_every_tableau_weights_sum_to_one(name):
+    """Consistency of every method, Euler included (b = [1]: an update would give the
+    processes' own result, open item O33; the canopy sub-step skips it for Euler)."""
+    assert float(np.sum(integrators.TABLEAUS[name].b)) == pytest.approx(1.0, abs=1e-15)

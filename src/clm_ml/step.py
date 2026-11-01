@@ -2,7 +2,7 @@
 
 ``step(state, inputs, constants, params, options) -> StepState``: the soil routines of
 CLM-ml v2's ``clm_driver`` around the multilayer canopy's ``MLCanopyFluxes``, built from the
-physics in ``clm_ml.processes`` (soil, plant area and hydraulics, the canopy sub-steps, the
+processes in ``clm_ml.processes`` (soil, plant area and hydraulics, the canopy sub-steps, the
 averages, totals and the sunlit/shaded merge). Pure: everything the step reads is an argument
 and everything it changes is returned.
 

@@ -36,9 +36,6 @@ from clm_ml.io.restart import read_restart, write_restart  # noqa: F401  (netCDF
 
 jax.config.update("jax_enable_x64", True)
 
-#: jax.checkpoint on the step of compiled chunks, as in jax-gcm (a switch for experiments)
-CHECKPOINT_STEP = True
-
 
 def _setup_compilation_cache() -> None:
     """Every compiled program cached on disk (``JAX_COMPILATION_CACHE_DIR``, default
@@ -98,6 +95,9 @@ class Simulation:
     n_real_gridcells: Optional[int] = None
     source: Optional[np.ndarray] = None  # the domain patch each slot holds (padding: copied)
     real_index: Optional[np.ndarray] = None  # the slot of each domain patch
+    # jax.checkpoint on the step of compiled chunks, as in jax-gcm (model.yaml
+    # numerics.checkpoint_steps): gradients recompute each step instead of storing it
+    checkpoint: bool = True
     layout: Optional[tuple] = None  # (devices, gridcells per device, C3 slots, C4 slots)
 
     def __post_init__(self):
@@ -393,6 +393,7 @@ def simulation(run) -> Simulation:
         n_gridcells=int(d.n_gridcells),
         names=list(_patch_names(run)),
         soil_depth=setup.soil_depth,
+        checkpoint=bool(run.config.numerics.checkpoint_steps),
         reader=parts["reader"],
         land_fn=parts["land_fn"],
     )
@@ -569,7 +570,7 @@ def make_runner(sim: Simulation, streams, gridcell_vars):
             new = jax.tree.map(lambda a, b: jnp.where(active[0], a, b), new, carry)
         return new, None
 
-    checkpointed_step = jax.checkpoint(step) if CHECKPOINT_STEP else step
+    checkpointed_step = jax.checkpoint(step) if sim.checkpoint else step
 
     def run_chunk(
         state, xg, xp, slots, buffers, params, weight, alive, gidx, constants, active=None,

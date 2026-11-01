@@ -488,7 +488,7 @@ def wind_profile(layers: PatchLayers, ztop, zdisp, obu, beta, PrSc, ustar, lm_ov
 
 
 #: Aerodynamic conductance between the ground and the lowest layer (model.yaml
-#: ``physics.ground_conductance``; Fortran ``HF_extension_type`` 1 and 2)
+#: ``processes.turbulence.ground_conductance``; Fortran ``HF_extension_type`` 1 and 2)
 GROUND_CONDUCTANCE = ("extend_hf", "log_profile")
 
 
@@ -690,6 +690,6 @@ def harman_finnigan(
     )  # fmt: skip
 
 
-#: Roughness sublayer schemes by name (model.yaml ``physics.roughness_sublayer``; Fortran
+#: Roughness sublayer schemes by name (model.yaml ``processes.turbulence.roughness_sublayer``; Fortran
 #: ``turb_type``)
 ROUGHNESS_SUBLAYER = {"harman_finnigan": harman_finnigan}

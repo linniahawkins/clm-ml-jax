@@ -4,7 +4,7 @@ thermal emission.
 One patch. Layers are 0-based slots on axis 0 (``clm_ml.state.PatchLayers``; leaves in the
 leafy layers ``first_leafy .. n_within - 1``); levels are the ground (0) and the layers;
 leaves 0 sunlit, 1 shaded. The scheme is chosen by name (``LONGWAVE_RADIATION``, model.yaml
-``physics.longwave_radiation``): ``norman`` (Fortran ``longwave_type = 1``, the only one).
+``processes.radiation.longwave``): ``norman`` (Fortran ``longwave_type = 1``, the only one).
 
 Fortran reference: CLM-ml v2 ``MLLongwaveRadiationMod.F90::LongwaveRadiation``, ``Norman``.
 Bonan (2019) Climate Change and Terrestrial Ecosystem Modeling, chapter 14.
@@ -144,5 +144,5 @@ def norman(
     )
 
 
-#: Longwave radiative transfer variants by name (model.yaml ``physics.longwave_radiation``).
+#: Longwave radiative transfer variants by name (model.yaml ``processes.radiation.longwave``).
 LONGWAVE_RADIATION = {"norman": norman}

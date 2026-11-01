@@ -41,8 +41,8 @@ from clm_ml.io.yaml_schema import ConfigError, read_yaml
 
 
 class CanopyParams(NamedTuple):
-    """Parameters of one patch's PFT (JAX scalars; spectral fields are ``[unused, vis, nir]``,
-    indexed by the 1-based waveband as in the tables)."""
+    """Parameters of one patch's PFT (JAX scalars; spectral fields are ``[vis, nir]``, band 0
+    visible, band 1 near-infrared, as everywhere in the model)."""
 
     # Photosynthesis and stomatal conductance
     vcmax25: object
@@ -232,19 +232,15 @@ class Params:
         return Params(values=values, source=self.source)
 
     def canopy_params(self, pft: str):
-        """The parameters of one PFT as the physics takes them
-        (:class:`CanopyParams`, JAX scalars). Spectral
-        ``[vis, nir]`` pairs become ``[0, vis, nir]`` (the physics indexes wavebands 1, 2)."""
+        """The parameters of one PFT as the processes take them
+        (:class:`CanopyParams`, JAX scalars; spectral ``[vis, nir]``)."""
         import jax.numpy as jnp
 
         row = pft_index(pft, "canopy_params()")
-        fields = {}
-        for name in CanopyParams._fields:
-            value = jnp.asarray(self.values[name][row], dtype=jnp.float64)
-            if SPECS_BY_NAME[name].spectral:
-                value = jnp.concatenate([jnp.zeros(1), value])
-            fields[name] = value
-        return CanopyParams(**fields)
+        return CanopyParams(**{
+            name: jnp.asarray(self.values[name][row], dtype=jnp.float64)
+            for name in CanopyParams._fields
+        })  # fmt: skip
 
     def missing_for(self, pft_rows: list[int], names=None) -> list[str]:
         """Parameters with no value (NaN) for any of the given PFT rows: the required ones,

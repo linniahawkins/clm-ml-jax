@@ -191,8 +191,9 @@ class NumericsOptions:
     )
     checkpoint_steps: bool = option(
         True,
-        "Recompute each step during gradients instead of storing it (less memory). Currently "
-        "has no effect: steps are always checkpointed (open_items.md O65).",
+        "Recompute each step when taking gradients instead of storing its intermediate values "
+        "(jax.checkpoint, as jax-gcm): much less memory for gradients over a chunk, some more "
+        "compute. Results are the same either way.",
         "",
     )
     on_patch_error: Literal["stop", "exclude"] = option(

@@ -4,7 +4,7 @@ over each canopy layer, for the visible and near-infrared bands.
 One patch. Layers are 0-based slots on axis 0 (``clm_ml.state.PatchLayers``; leaves in the
 leafy layers ``first_leafy .. n_within - 1``); levels are the ground (0) and the layers;
 bands are 0-based (0 visible, 1 near infrared); leaves 0 sunlit, 1 shaded. The scheme is a
-variant chosen by name (``SOLAR_RADIATION``, model.yaml ``physics.solar_radiation``):
+variant chosen by name (``SOLAR_RADIATION``, model.yaml ``processes.radiation.solar``):
 ``two_stream`` (Fortran ``light_type = 2``, CLM-ml v2's default); ``norman`` (Fortran
 ``light_type = 1``) is registered but not supported (Phase 7 decision D8: its JAX translation
 was never validated and stops at the first CHATS7 step; the translation is in the git history,
@@ -411,7 +411,7 @@ def norman(*args, **kwargs):
     )
 
 
-#: Radiative transfer variants by name (model.yaml ``physics.solar_radiation``).
+#: Radiative transfer variants by name (model.yaml ``processes.radiation.solar``).
 SOLAR_RADIATION = {"two_stream": two_stream, "norman": norman}
 
 

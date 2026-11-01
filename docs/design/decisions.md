@@ -626,6 +626,19 @@ Reason: one place and one form for each setting, so a user cannot set two things
 silently override each other (maintainer).
 Source: maintainer, 2026-11-01; open_items O2.
 
+**94. Group C code tidying: `checkpoint_steps` works, PFT optics 0-based, Euler weight**
+2026-11-01 · Phase 8a · implementation · in force · Departure from Fortran: no
+model.yaml `numerics.checkpoint_steps` now switches `jax.checkpoint` on the step (it was
+ignored: the driver used a module constant; default true as before); a model with it off
+does not share its compiled program with one with it on. The PFT optics of `CanopyParams`
+(leaf/stem reflectance and transmittance) are `[vis, nir]`, 0-based as the rest of the model
+(were `[unused, vis, nir]`). The Euler tableau's weight is `b = [1]` (was `[0]`, a trap: an
+update would have reset the state; the canopy sub-step still skips the update for Euler, as
+Fortran). Bit for bit; gradient tier passes.
+Reason: a setting that does nothing, a leftover 1-based layout and a wrong constant are traps
+for users and future code.
+Source: open_items O33, O65, O67.
+
 **56. Soil colour class 0 refused**
 2026-11-01 · Phase 7.4 review · implementation · in force · Departure from Fortran: (unclear: the legacy JAX code wrapped class 0 to class 20; whether Fortran does was not checked)
 A soil colour class of 0 is an error.

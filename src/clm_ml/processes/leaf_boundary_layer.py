@@ -20,7 +20,7 @@ from jax import Array
 
 from clm_ml.processes.constants import dc0, dh0, dv0, gb_factor, gbh_min, grav, tfrz, visc0
 
-#: Flow regimes by name (model.yaml ``physics.leaf_boundary_layer``; Fortran ``gb_type``
+#: Flow regimes by name (model.yaml ``processes.turbulence.leaf_boundary_layer``; Fortran ``gb_type``
 #: 1, 2, 3): laminar forced convection; the larger of laminar and turbulent forced
 #: convection; that plus free convection.
 REGIMES = ("laminar", "turbulent", "free_convection")

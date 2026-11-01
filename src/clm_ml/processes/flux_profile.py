@@ -6,7 +6,7 @@ sunlit, 1 shaded (axis 1). Every slot is computed: padding slots take the top la
 (:func:`clm_ml.processes.layers.pad_with_top`) and become identity rows of the tridiagonal
 system after the top layer, whose upward coupling is zero, so the solution is the one for
 the layers in use. The solution is chosen by name (``FLUX_PROFILE``, model.yaml
-``physics.flux_profile_solution``): ``implicit`` (Fortran ``flux_profile_type = 1``);
+``processes.canopy_air.flux_profile_solution``): ``implicit`` (Fortran ``flux_profile_type = 1``);
 ``well_mixed`` is registered but not supported (Phase 7 decision D8: Fortran stops after it
 too, "legacy code, not supported").
 
@@ -476,5 +476,5 @@ def well_mixed(*args, **kwargs):
     )
 
 
-#: Flux-profile solutions by name (model.yaml ``physics.flux_profile_solution``).
+#: Flux-profile solutions by name (model.yaml ``processes.canopy_air.flux_profile_solution``).
 FLUX_PROFILE = {"implicit": implicit, "well_mixed": well_mixed}

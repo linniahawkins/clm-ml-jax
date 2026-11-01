@@ -56,7 +56,7 @@ def _bands(x) -> np.ndarray:
 def previous_record(met: dict) -> ForcingRecord:
     """The previous step's forcing record as ``GetCLMVar`` derives it from the CLM forcing
     (wind resultant with no north component, CO2 mole fraction from the partial pressure):
-    the expressions of ``physics.atm_forcing.clm_forcing_to_ml`` (the step's current record),
+    the expressions of ``processes.atm_forcing.clm_forcing_to_ml`` (the step's current record),
     in NumPy so the host never computes on a device (square root and division are correctly
     rounded in both, so the values are the same bit for bit)."""
     u, pref = _f(met["uref"]), _f(met["pref"])

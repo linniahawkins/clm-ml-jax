@@ -505,25 +505,25 @@ def merge_sun_shade(
 class SubstepOptions(NamedTuple):
     """The static choices of the sub-step (model.yaml names; hashable, a static argument)."""
 
-    interpolation: str  # forcing time interpolation (physics.atm_forcing.TIME_INTERPOLATION)
+    interpolation: str  # forcing time interpolation (processes.atm_forcing.TIME_INTERPOLATION)
     acclimation: bool  # temperature acclimation of photosynthesis
     kn_val: float  # nitrogen decay coefficient (-999: from Vcmax25)
     sparse_canopy: bool  # turbulence: sparse canopy
-    ground_conductance: str  # turbulence: physics.turbulence.GROUND_CONDUCTANCE
-    regime: str  # leaf boundary layer: physics.leaf_boundary_layer.REGIMES
-    stomatal_conductance: str  # physics.photosynthesis.STOMATAL_CONDUCTANCE
+    ground_conductance: str  # turbulence: processes.turbulence.GROUND_CONDUCTANCE
+    regime: str  # leaf boundary layer: processes.leaf_boundary_layer.REGIMES
+    stomatal_conductance: str  # processes.photosynthesis.STOMATAL_CONDUCTANCE
     water_stress: bool  # stomatal conductance limited by leaf water potential
     colimitation: bool  # photosynthesis colimitation
     wue_solver: str  # stomatal optimization solver
     dtime: float  # sub-step length, s
-    integrator: str  # physics.integrators.TABLEAUS
+    integrator: str  # processes.integrators.TABLEAUS
 
 
 class SubstepInputs(NamedTuple):
     """Values fixed over a step's sub-steps (legacy container field in parentheses)."""
 
     layers: PatchLayers
-    forcing_bef: object  # physics.atm_forcing.ForcingRecord at the previous step
+    forcing_bef: object  # processes.atm_forcing.ForcingRecord at the previous step
     forcing_cur: object  # ... at this step
     forcing_next: object  # ... at the next step
     time_bef: Array  # () calendar days of the three records for the interpolation
@@ -676,11 +676,10 @@ def _radiation(c: Substep, x: SubstepInputs, params, calday, opt: SubstepOptions
 
     # Solar radiation — Fortran SolarRadiation (two-stream; values in the layers in use,
     # padding kept)
-    bands = slice(1, 3)  # legacy band columns of the PFT parameters
     optics = solar_radiation.canopy_optics(
         x.solar_zen, x.dlai, x.dsai, x.dpai, lay,
-        params.leaf_reflectance[bands], params.leaf_transmittance[bands],
-        params.stem_reflectance[bands], params.stem_transmittance[bands],
+        params.leaf_reflectance, params.leaf_transmittance,  # [vis, nir]
+        params.stem_reflectance, params.stem_transmittance,
         params.leaf_angle_index, params.clumping_index,
     )  # fmt: skip
     errors = _record(errors, SUNLIT_FRACTION, optics.sunlit_fraction_error)

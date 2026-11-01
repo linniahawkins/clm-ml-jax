@@ -195,6 +195,7 @@ class Model:
                 mine.max_layers,
                 mine.n_patches,
                 mine.layout,
+                mine.checkpoint,
             ) == (
                 theirs.options,
                 theirs.acclimation,
@@ -202,6 +203,7 @@ class Model:
                 theirs.max_layers,
                 theirs.n_patches,
                 theirs.layout,
+                theirs.checkpoint,
             )
             if not same or (mine.land_fn is None) != (theirs.land_fn is None):
                 raise ValueError(

@@ -56,24 +56,24 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O30 | Smaller Phase 6 review items (R11) | robustness | 8a (verify) | I |
 | O31 | netCDF read on a background thread while writing on the main thread | robustness | 8a | I |
 | O32 | `Model.chunks()` start at step 1 while runs chunk from step 0 | robustness (API) | 8a / 8b document | M |
-| O33 | The `euler` tableau has `b = [0]` (trap for future code) | robustness | 8a | I |
+| O33 | ~~The `euler` tableau has `b = [0]` (trap for future code)~~ (closed: decision 94) | robustness | closed | I |
 | **4. Housekeeping and repository organization (8a)** |||||
-| O34 | `.gitignore` names absent directories (`docs/` rule removed) | housekeeping | 8a | I |
-| O35 | Empty `.gitmodules`; CONTRIBUTING describes a submodule | housekeeping | 8a | I |
+| O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
+| O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
 | O36 | `.github/copilot-instructions.md` describes deleted packages | housekeeping | 8a | M (delete or rewrite) |
 | O37 | README out of date (badges, features, citation, PR workflow) | housekeeping | 8a | M (with O23) |
-| O38 | CONTRIBUTING out of date | housekeeping | 8a | I |
-| O39 | `data/namelists/README.md` describes the retired `clm-ml-offline` | housekeeping | 8a | I |
+| O38 | ~~CONTRIBUTING out of date~~ (closed: rewritten) | housekeeping | closed | I |
+| O39 | ~~`data/namelists/README.md` describes the retired `clm-ml-offline`~~ (closed: rewritten) | housekeeping | closed | I |
 | O40 | Namelists: `nl.US-UMB.test` points to scratch; `nl.CHATS7.debug`, `nl.CHATS7.test3` unclear | housekeeping | 8a | M |
 | O41 | ~~Example files not checked~~ (closed: `configs/` checked by `test_configs.py`) | housekeeping | closed | I |
-| O42 | Stale design documents (plan header and §8, `api_sketch.py`, numerics §4 title, `timing.md`) | housekeeping | 8a | I |
-| O43 | CI lint skips `timing/` | housekeeping | 8a | I |
+| O42 | ~~Stale design documents (plan header and §8, `api_sketch.py`, numerics §4 title, `timing.md`)~~ (closed: updated) | housekeeping | closed | I |
+| O43 | ~~CI lint skips `timing/`~~ (closed: CI lints timing/) | housekeeping | closed | I |
 | O44 | ~~One open-items list and one decision log~~ (done: this document, `decisions.md`, `model_overview.md`) | housekeeping | closed | I |
-| O65 | `numerics.checkpoint_steps` in model.yaml does nothing | housekeeping | 8a | I |
+| O65 | ~~`numerics.checkpoint_steps` in model.yaml does nothing~~ (closed: decision 94) | housekeeping | closed | I |
 | O66 | PFT parameters used only at setup have no effect through `Model.run_chunk` | maintainer decision | 8a | M |
-| O67 | PFT optics keep the old 1-based layout `[unused, vis, nir]` | housekeeping | 8a | I |
-| O68 | Stale docstrings and comments (`model.py`, `legacy_ascii`, `clm_ml/__init__.py`, CLAUDE.md `rtol`) | housekeeping | 8a | I |
-| O69 | Plan says output is a nested scan (records × steps); the code is one scan with a record slot per step | housekeeping | 8a | I |
+| O67 | ~~PFT optics keep the old 1-based layout `[unused, vis, nir]`~~ (closed: decision 94) | housekeeping | closed | I |
+| O68 | ~~Stale docstrings and comments (`model.py`, `legacy_ascii`, `clm_ml/__init__.py`, CLAUDE.md `rtol`)~~ (closed: updated) | housekeeping | closed | I |
+| O69 | ~~Plan says output is a nested scan (records × steps); the code is one scan with a record slot per step~~ (closed: plan and CLAUDE.md corrected) | housekeeping | closed | I |
 | O70 | ~~Implement experiment folders~~ (closed: decision 91 implemented) | housekeeping | closed | I |
 | **5. Documentation (8b)** |||||
 | O45 | Getting-started guide | documentation | 8b | I |
@@ -379,6 +379,18 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **What:** padding slots (for equal device shares) on real gridcells combine one
   gridcell's meteorology with another patch's site data, and stop mode checked them as if
   real. Phase 7's health check by layer masks (C28) may have changed this: verify.
+- **Diagnosis (2026-11-01, code reading):** still so. `Simulation.blocked` (multi-device
+  runs) fills a device block's empty slots with weight-0 copies of a patch of the same
+  pathway but puts them on the block's *last* gridcell, whose weather can differ from the
+  copied patch's own gridcell (`padded()`, for `patch_count`, is consistent: the last real
+  patch on the last real gridcell's forcing). Weight 0 keeps them out of every gridcell sum
+  and gradient; but in stop mode `check_batch` checks every slot, so an unphysical padding
+  slot that fails a conservation or health check would stop the run ("padding N"); in exclude
+  mode it is excluded quietly (not counted). Only grid runs on several devices (towers on
+  several devices must share one meteorology file, R1).
+- **Proposed fix:** check only the real slots (`sim.real_index`) in `check_batch` and
+  `batch_failures`, and put each padding copy on its source patch's gridcell when that
+  gridcell is in the block. Results unchanged.
 - **Source:** Phase 6 review R5.
 
 ### O30. Smaller Phase 6 review items
@@ -388,12 +400,47 @@ The model as it is now: [`model_overview.md`](model_overview.md).
   order with devices > 1; a run starting in the first forcing year cannot start; 184
   gridcells use the nearest point where ESMF may interpolate; R7 (tower setup not bit for
   bit when the porosity cap binds; setup rewritten in 7.4: likely closed).
+- **Diagnosis (2026-11-01):**
+  - *Per-variable exclusion in `gridcell_sum`* (`driver.py`, `make_runner`): still so. A
+    patch is left out of a variable's gridcell sum when that variable is not finite, so in a
+    step where a patch has NaN in one output but not another, the gridcell sums of different
+    variables use different patches (the energy budget of the gridcell output can then fail
+    to close for that step). Such a patch fails its checks in that chunk (stop mode stops;
+    exclude mode excludes it from the next chunk). Proposed fix: leave a patch out of all
+    sums of a step when any of its outputs is not finite.
+  - *Unmasked first-step gridcell sums:* closed (the first step is an ordinary step of the
+    first chunk since C28).
+  - *`Model.weights()` in slot order with devices > 1:* documented (its docstring says
+    "device blocks with execution.devices"; `run_chunk` outputs are in the same order).
+    Proposed: document it in 8b.
+  - *A grid run cannot start in the first forcing year:* confirmed by a probe (a 1-day grid
+    run from 1901-01-01, the first CRUJRA year: "forcing stream: the files do not cover the
+    model time"; from 1902-01-01 it reads). The first steps' time interpolation needs the
+    record before 1 January. Proposed fix: CDEPS's rule at the edge of the data (datm
+    `taxmode`: `extend` uses the first record, `cycle` wraps to the last year): a science
+    choice for the maintainer.
+  - *184 gridcells use the nearest point where ESMF may interpolate:* unchanged (a
+    regridding difference from CTSM's mapping files; listed as a known departure).
+  - *R7 (setup not bit for bit when the porosity cap binds):* the setup was rewritten in
+    7.4 and `test_setup` compares every constant and the initial state bit for bit; not
+    re-checked with a column whose cap binds. Proposed: close, or add such a column to
+    `test_setup` in 8b.
 - **Source:** Phase 6 review R7, R11.
 
 ### O31. netCDF read on a background thread while writing on the main thread
 - **Kind:** robustness · **Target:** 8a · **Decides:** I
 - **What:** the forcing reader thread reads netCDF while the output writers write netCDF on
   the main thread; HDF5 builds without thread safety could crash. As since Phase 4.
+- **Diagnosis (2026-11-01):** the risk is real in this environment: the netCDF4 1.7.4 wheel
+  bundles HDF5 1.14.6 built with "Threadsafety: no" (its `libhdf5.settings` string), and
+  netCDF4-python releases the GIL during library calls (per its release notes; not tested
+  here), so the forcing reader thread and the output writers can be inside HDF5 at the
+  same time. No crash has been seen (the reader reads while the device runs the chunk; the
+  writers write after it), but nothing prevents the overlap when output records complete
+  while the next chunk is read.
+- **Proposed fix:** one lock (e.g. `clm_ml.io.netcdf_lock`) held by every netCDF read and
+  write: reading and writing then never overlap, while the device still runs the chunk
+  during the read. Results unchanged.
 - **Source:** C31; Phase 7 "Not done".
 
 ### O32. `Model.chunks()` start at step 1, runs chunk from step 0
@@ -403,6 +450,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** C31; CLAUDE.md gotchas.
 
 ### O33. The `euler` tableau has `b = [0]`
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **Kind:** robustness · **Target:** 8a · **Decides:** I
 - **What:** `runge_kutta_update` with the Euler tableau would reset the state; the model is
   right only because `canopy._stage` returns before calling it. A trap for future code.
@@ -412,6 +460,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 ## 4. Housekeeping and repository organization (8a)
 
 ### O34. `.gitignore` ignores `docs/`
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** new documentation files are silently left out of commits (tracked files are
   added with `git add -u docs`/`-f`). It also lists directories that do not exist here
   (`CLM-ml_v1/`, `clubb_ML/`, `jax-agents/`, `Paper/`, `tests/integration/`, ...).
@@ -420,6 +469,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 8 survey; `phase7_progress.md` practical notes.
 
 ### O35. Empty `.gitmodules`; CONTRIBUTING describes a submodule
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** CONTRIBUTING says to clone `--recurse-submodules` (Fortran in `CLM-ml_v1/`);
   `.gitmodules` is empty. Fortran sources are outside the repo.
 - **Next:** delete `.gitmodules`; say where the Fortran references are.
@@ -437,11 +487,13 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 8 survey.
 
 ### O38. CONTRIBUTING out of date
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** clone URL, submodule, PR workflow; "Adding a Physics Module" should become "add
   a process variant" (8b, O50).
 - **Source:** Phase 8 survey; plan Phase 8.
 
 ### O39. `data/namelists/README.md` describes `clm-ml-offline`
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** 121 lines on the retired executable (C30).
 - **Next:** rewrite: the namelists are inputs of `clm-ml convert` and the Fortran
   comparison.
@@ -465,6 +517,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 8 survey; plan §9.
 
 ### O42. Stale design documents
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** plan header "Status: v4. Phases 0–2 done"; plan §8 rows 4-5 still "Undecided,
   revisit at Phase 7" (row 4 settled by C30; row 5 by Phase 7's `physics/soil.py`);
   `api_sketch.py` (proposed API, pre-implementation); numerics §4 titled "not changed in
@@ -474,6 +527,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** Phase 8 survey; plan §8.
 
 ### O43. CI lint skips `timing/`
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** CI runs `black`/`ruff` on `src/ tests/`; CLAUDE.md's lint command includes
   `timing`.
 - **Source:** `.github/workflows/ci.yml` l. 29-32.
@@ -486,6 +540,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** maintainer request (2026-11-01).
 
 ### O65. `numerics.checkpoint_steps` does nothing
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** the model.yaml key exists (`src/clm_ml/config.py:63`) but the driver always
   checkpoints the step (module constant `CHECKPOINT_STEP = True`, `src/clm_ml/driver.py:40`).
   A user setting it to false gets no effect and no warning.
@@ -502,12 +557,14 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** model map (2026-11-01).
 
 ### O67. PFT optics in the old 1-based layout
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** the spectral fields of `CanopyParams` (leaf/stem reflectance and transmittance)
   are `[unused, vis, nir]`; everything else is 0-based (decision on 0-based indexing).
 - **Next:** convert (a refactor, bit for bit).
 - **Source:** model map (2026-11-01).
 
 ### O68. Stale docstrings and comments
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** the `model.py` header still shows "calendar-month chunks (decision 17)"
   (superseded by fixed-length chunks) and mentions several soil structures (C35);
   `clm_ml/__init__.py` says the public API "is re-exported here as it is built" (nothing
@@ -517,6 +574,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** model map; decision register (2026-11-01).
 
 ### O69. Output accumulation differs from the plan's description
+- **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").
 - **What:** the plan describes a nested scan (outer loop over output records, inner over
   steps); the code is one scan over steps, each step adding into a record slot chosen on
   the host. Memory still scales with output records, as intended.
@@ -628,6 +686,13 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 ---
 
 ## Recently closed (for reference, not open)
+
+- Phase 8a group C (2026-11-01): `.gitignore` pruned (O34), `.gitmodules` deleted (O35),
+  CONTRIBUTING (O38) and the namelists README (O39) rewritten, stale design documents
+  updated (O42), CI lints `timing/` (O43), stale docstrings (O68), the plan's description of
+  output accumulation (O69); `numerics.checkpoint_steps` works (O65), PFT optics 0-based
+  (O67), Euler tableau weight b = [1] (O33) (decision 94). Diagnosed, for the maintainer:
+  O29, O30, O31 (above).
 
 - One way to say each setting (`processes`, choice keys, named fallbacks; `clm-ml check`
   shows where each value comes from); organic matter required (O2) (decision 93; 2026-11-01).
