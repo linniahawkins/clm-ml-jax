@@ -15,7 +15,7 @@ jax.config.update("jax_enable_x64", True)  # before any model module is imported
 from clm_ml.forcing_interpolation import interpolate_records, mean_cosz_function  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
-TOWER_FILE = ROOT / "src" / "input_files" / "tower-forcing" / "CHATS7" / "2007-05.nc"
+TOWER_FILE = ROOT / "data" / "input_files" / "tower-forcing" / "CHATS7" / "2007-05.nc"
 LAT, LON = math.radians(38.49), math.radians(-121.84)  # CHATS7
 START = dt.datetime(2007, 5, 1)
 HALF, SIX = 1800, 21600

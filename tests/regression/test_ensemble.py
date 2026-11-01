@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import jax, jax.numpy as jnp, numpy as np
 jax.config.update("jax_enable_x64", True)
-from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.run import load_run
 from clm_ml.model import Model
 
@@ -53,7 +53,7 @@ def test_parameter_ensemble():
     script = SCRIPT.format(
         src=str(root / "src"),
         root=str(root),
-        namelist=str(root / "src" / "offline_executable" / "nl.CHATS7.50steps"),
+        namelist=str(root / "data" / "namelists" / "nl.CHATS7.50steps"),
     )
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr[-3000:]

@@ -19,10 +19,8 @@ Axes (all 0-based):
 - ``band`` (2): 0 visible, 1 near-infrared.
 - ``soil_level`` (``nlevgrnd``): soil layers from the top down.
 
-The legacy containers (1-based, with a leading patch axis) are converted at the boundary
-(``clm_ml.legacy.state``) while the physics still runs on them (Phase 7.2 moves it). Arrays
-are JAX arrays (a pytree), so ``jax.grad`` differentiates with respect to them. Batched runs
-add a leading patch axis to every field.
+Arrays are JAX arrays (a pytree), so ``jax.grad`` differentiates with respect to them.
+Batched runs add a leading patch axis to every field.
 """
 
 from __future__ import annotations

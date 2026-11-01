@@ -8,8 +8,7 @@ slot is computed; slots without plant area (``dpai == 0``) and the padding get 0
 Fortran reference: CLM-ml v2 ``MLCanopyNitrogenProfileMod.F90``.
 
 Reads and writes are the arguments and results; ``Reads``/``Writes`` in the docstrings name
-the legacy container fields they come from and go to (through the adapter in
-``clm_ml.legacy.nitrogen_profile`` until the containers leave the step, Phase 7.2 process 10).
+the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations

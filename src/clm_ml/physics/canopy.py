@@ -10,9 +10,7 @@ on axis 1; bands 0 visible, 1 near-infrared on the last axis.
 Fortran reference: CLM-ml v2 ``MLCanopyFluxesMod.F90`` (``MLCanopyFluxes``,
 ``MLTimeStepFluxIntegration``, ``CanopyFluxesDiagnostics``).
 
-Reads and writes are the arguments and results; the docstrings name the legacy container
-fields they come from and go to (through the adapters in ``clm_ml.legacy.canopy`` until the
-containers leave the step, Phase 7.2 process 10).
+Reads and writes are the arguments and results; the docstrings name the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations

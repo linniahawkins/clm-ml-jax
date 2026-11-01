@@ -12,8 +12,7 @@ Fortran reference: CLM-ml v2 ``MLGetAtmForcingMod.F90::GetAtmForcing``,
 ``TimeInterpolation3``; ``MLCanopyFluxesMod.F90::GetCLMVar`` (``clm_forcing_to_ml``).
 
 Reads and writes are the arguments and results; ``Reads``/``Writes`` in the docstrings name
-the legacy container fields they come from and go to (through the adapter in
-``clm_ml.legacy.atm_forcing`` until the containers leave the step, Phase 7.2 process 10).
+the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations

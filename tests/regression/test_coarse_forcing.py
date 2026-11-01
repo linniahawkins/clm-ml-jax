@@ -17,7 +17,7 @@ import yaml
 pytestmark = pytest.mark.regression
 
 ROOT = Path(__file__).resolve().parents[2]
-TOWER_FILE = ROOT / "src" / "input_files" / "tower-forcing" / "CHATS7" / "2007-05.nc"
+TOWER_FILE = ROOT / "data" / "input_files" / "tower-forcing" / "CHATS7" / "2007-05.nc"
 DAYS = 3
 
 
@@ -43,10 +43,10 @@ def _run(workdir: Path, six_hourly: bool):
     import sys
 
     sys.path.insert(0, str(ROOT / "src"))
-    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.io.namelist import convert_namelist
     from clm_ml.run import load_run
 
-    convert_namelist(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day", workdir)
+    convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", workdir)
     run_yaml = workdir / "run.yaml"
     data = yaml.safe_load(run_yaml.read_text())
     data["time"] = {"start": "2007-05-01T00:00", "days": DAYS}

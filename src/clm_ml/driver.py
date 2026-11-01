@@ -431,43 +431,34 @@ def advance_acclimation(sim: Simulation, state, tref):
 
 
 def step_variables(names, max_layers: int):
-    """``variables(view) -> {name: value}``: the output variables ``names`` of one patch's
-    step from its legacy view (``clm_ml.legacy.view``), computed with jax.numpy (leading axis
-    the legacy patch axis of length 1)."""
-    from clm_ml.legacy.view import raw_fields
+    """``variables(fields) -> {name: value}``: the output variables ``names`` of one patch's
+    step from its fields (``clm_ml.outputs.step_fields``), computed with jax.numpy; raw
+    field names (``diagnostics.<name>``, ``state.<name>``, ``layers.<name>``) give the field
+    itself (validation)."""
     from clm_ml.outputs import VARIABLES_BY_NAME, _Raw
 
-    def variables(view) -> dict:
-        r = _Raw(raw_fields(view, jnp), max_layers, xp=jnp)
+    def variables(fields) -> dict:
+        r = _Raw({k: jnp.asarray(v)[None, None] for k, v in fields.items()}, max_layers, xp=jnp)
         out = {}
         for n in names:
-            if n == "soil_temperature":  # soil levels (legacy index 1..nlevgrnd)
-                t = view["temperature.t_soisno_col"]
-                out[n] = t[:, 1 : 1 + _soil_levels(t)]
-            elif "." in n:  # raw legacy field, e.g. "mlcanopy.tair_profile" (validation)
-                out[n] = jnp.asarray(view[n], dtype=float)
+            if n == "soil_temperature":
+                out[n] = fields["state.soil_temperature"]
+            elif "." in n:  # raw step field (validation)
+                out[n] = jnp.asarray(fields[n], dtype=float)
             else:
-                out[n] = VARIABLES_BY_NAME[n].compute(r)[0]
+                out[n] = VARIABLES_BY_NAME[n].compute(r)[0, 0]
         return out
 
     return variables
 
 
-def _soil_levels(t_soisno) -> int:
-    """nlevgrnd from the legacy soil temperature's width (nlevsno + nlevgrnd)."""
-    from clm_ml.legacy.view import _SNOW_LEVELS
-
-    width = t_soisno.shape[-1]
-    return next(n for n, snow in _SNOW_LEVELS.items() if n + snow == width)
-
-
 def patch_step(sim: Simulation, c3: bool, names):
     """One patch's time step for compiled chunks: ``step(constants, state, x, params,
     tables) -> (state, {variable: value}, errors)``: the acclimation update, then
-    ``clm_ml.step.step``; the output variables ``names`` from the legacy view; ``errors``
+    ``clm_ml.step.step``; the output variables ``names`` from the step's fields; ``errors``
     the step's largest error of each conservation check."""
     from clm_ml import step as S
-    from clm_ml.legacy.view import legacy_view
+    from clm_ml.outputs import step_fields
 
     variables = step_variables(names, sim.max_layers)
     options = sim.options
@@ -475,18 +466,10 @@ def patch_step(sim: Simulation, c3: bool, names):
     def step(constants, state, x, params, tables):
         state = advance_acclimation(sim, state, x.tref)
         result = S.step(state, x, constants, params, tables, options=options, c3=c3)
-        view = legacy_view(result, constants.layers)
-        return result.state, variables(view), result.diagnostics.balance_error
+        fields = step_fields(result, constants.layers)
+        return result.state, variables(fields), result.diagnostics.balance_error
 
     return step
-
-
-def unbatch_patch_axis(x, n_patches: int):
-    """A batched output value ``(P, 1, ...)`` (the legacy patch axis of one patch) as
-    ``(P, ...)``."""
-    if x.shape[1] != 1:
-        raise ValueError(f"expected a legacy patch axis of length 1, got shape {x.shape}")
-    return x.reshape((n_patches,) + x.shape[2:])
 
 
 def make_runner(sim: Simulation, streams, gridcell_vars):
@@ -570,7 +553,6 @@ def make_runner(sim: Simulation, streams, gridcell_vars):
         state, values, step_errors = batched_step(
             constants, state, combine_inputs(met, xp), params, tables
         )
-        values = {n: unbatch_patch_axis(v, n_p) for n, v in values.items()}
         new_buffers = []
         for spec, b, slot, gvars in zip(streams, buffers, slots, gridcell_vars):
             vals = {n: values[n] for n in spec.variables}
@@ -743,7 +725,7 @@ def _output_shapes(sim: Simulation, names) -> dict:
     x = combine(jax.tree.map(jnp.asarray, met), jax.tree.map(jnp.asarray, land0))
     args = (one(sim.constants), one(sim.state0), x, one(sim.patch_params()), sim.tables)
     out = jax.eval_shape(step, *args)
-    return {n: tuple(v.shape[1:]) for n, v in out[1].items()}
+    return {n: tuple(v.shape) for n, v in out[1].items()}
 
 
 # ---------------------------------------------------------------------------------------

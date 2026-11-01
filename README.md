@@ -33,10 +33,10 @@ cd clm-ml-jax
 pip install -e .
 
 # 3. Verify installation
-clm-ml-offline --help
+clm-ml --help
 ```
 
-This installs the `clm-ml-offline` command and all physics modules (`clm_share`, `clm_src_*`, `multilayer_canopy`, etc.).
+This installs the `clm-ml` command and the `clm_ml` package (the only package in `src/`).
 
 ---
 
@@ -49,7 +49,7 @@ A run is described by `run.yaml` (dates, tower, forcing files, output), which po
 Convert an existing namelist to get started:
 
 ```bash
-clm-ml convert src/offline_executable/nl.CHATS7.1day -o chats7/   # writes run.yaml + model.yaml
+clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/   # writes run.yaml + model.yaml
 clm-ml check chats7/run.yaml        # validate everything and print a summary, without running
 clm-ml run chats7/run.yaml          # run; writes one netCDF file per output stream
 clm-ml run chats7/run.yaml --set time.days=7 --set model.physics.stomatal_conductance=medlyn
@@ -88,22 +88,12 @@ The built-in parameter sets are `clm5_defaults` and `chats` (the CHATS walnut-or
 values of Bonan, Burns & Patton 2026, Table 2); see `src/clm_ml/data/params/`. See
 `docs/design/modernization_plan.md` for where this interface is heading.
 
-### With a namelist (`clm-ml-offline`)
+### From a CLM-ml namelist
 
-Execute a 1-day tower-site simulation with the CHATS7 site:
-
-```bash
-# Using the installed command (recommended)
-clm-ml-offline < nl.CHATS7.1day
-
-# Or with explicit namelist argument  
-clm-ml-offline input_files/nl.CHATS7.1day
-
-# Or run directly with Python
-python -m offline_executable.main input_files/nl.CHATS7.1day
-```
-
-Output files are written to the `output_files/` directory.
+The Fortran-style namelists (`data/namelists/nl.*`) are converted to YAML with
+`clm-ml convert` (above); the former `clm-ml-offline` driver was retired in Phase 7. The
+Fortran-format `.out` files are still written with `output.legacy_ascii: true` (one patch,
+for the comparison with the Fortran model).
 
 ---
 
@@ -125,7 +115,7 @@ and every change must stay within the model's own round-off sensitivity, measure
 "noise twin" runs (see `docs/design/numerics_and_regression.md`):
 
 ```bash
-python -m pytest tests/regression/ -m regression -q     # ~5 min on CPU
+python -m pytest tests/regression/ -m regression -q     # ~20 min on CPU
 ```
 
 If results change **on purpose** (a science change or bug fix), or a change alters only
@@ -139,7 +129,8 @@ python tests/regression/record_run.py --update-reference
 ### Timing test
 
 ```bash
-python timing/time_offline.py     # wall-clock time of a 50-step run; appends to timing/results.jsonl
+python timing/time_offline.py     # wall-clock time of a 50-step `clm-ml run`; timing/results.jsonl
+python timing/time_model.py       # the compiled chunk and its gradient; timing/results_model.jsonl
 ```
 
 ---
@@ -148,46 +139,29 @@ python timing/time_offline.py     # wall-clock time of a 50-step run; appends to
 
 ### Adding a New Physics Module
 
-1. Create `multilayer_canopy/MyPhysicsMod.py` mirroring Fortran module structure
-2. Include Fortran source reference in docstring:
-   ```python
-   """
-   JAX translation of Fortran module MyPhysics.
-
-   Mirrors Fortran subroutine ``my_physics_sub`` (lines 45-120).
-   """
-   ```
-3. Use module-level globals from `MLclm_varctl.py` for configuration
-4. Add tests in `tests/multilayer_canopy/test_my_physics.py`
-5. Register output variables in `src/clm_ml/outputs.py` (`VARIABLES`)
+1. Write the process as pure functions on 0-based arrays in `src/clm_ml/physics/` (one file
+   per process, e.g. `photosynthesis.py`): everything it reads is an argument, everything it
+   changes is returned; compute on every layer slot and keep results with the layer masks
+   (`clm_ml.physics.layers`).
+2. Name the Fortran source in the docstring (`Fortran reference: MLFooMod.F90::Bar`).
+3. Static choices (schemes) come from `model.yaml` through `clm_ml.config`; numeric
+   parameters are per PFT in `params.yaml` (`clm_ml.params`) and stay differentiable.
+4. Call it from the time step (`src/clm_ml/step.py`, `src/clm_ml/physics/canopy.py`) and
+   add unit tests in `tests/clm_ml/`.
+5. Register output variables in `src/clm_ml/outputs.py` (`VARIABLES`).
 
 ### Adding a New Tower Site
 
-Edit `offline_driver/TowerDataMod.py`:
-
-```python
-ntower = 16  # Increment from 15
-
-# Extend all arrays by one element
-tower_id[16] = 'MYNEWSITE'
-tower_lon[16] = -120.5
-tower_lat[16] = 38.2
-tower_elev[16] = 500.0
-# ... (add other fields)
-```
-
-Then create a namelist file: `src/offline_executable/nl.MYNEWSITE.1day`
+Towers are entries of a `towers.yaml` (the built-in one, `src/clm_ml/data/towers.yaml`, holds
+CHATS7): location, forcing height and interval, soil, and the patches (PFT, weight, canopy
+height, root biomass, optional leaf/stem profiles and layer counts). A run names its towers
+and file with `domain.towers` and `domain.towers_file` in `run.yaml`.
 
 ### Configuration & Switches
 
-Global physics switches are in `multilayer_canopy/MLclm_varctl.py`—change directly, no config object needed:
-
-```python
-gs_type = 0              # Stomatal model: 0=Medlyn, 1=Ball-Berry, 2=WUE
-flux_profile_type = 1    # Flux-profile: -1=dataset, 0=well-mixed, 1=implicit
-runge_kutta_type = 41    # Time integration: 10=Euler, 21=2nd-order, 41=4th-order
-dtime_ml = 60.0          # Sub-step interval (s); must divide CLM timestep
-```
+Physics schemes and numerics are in `model.yaml` (e.g. `physics.stomatal_conductance:
+medlyn | ball_berry | wue`, `numerics.integrator: rk4`); any key can be changed on the command
+line with `--set model.<section>.<key>=<value>`. See `docs/design/examples/`.
 
 ---
 

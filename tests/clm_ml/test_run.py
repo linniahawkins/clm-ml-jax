@@ -5,8 +5,8 @@ import datetime as dt
 import pytest
 import yaml
 
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.io.yaml_schema import ConfigError
-from clm_ml.legacy.namelist import convert_namelist
 from clm_ml.run import load_run
 
 from .conftest import CHATS_NAMELISTS

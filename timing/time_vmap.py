@@ -45,13 +45,13 @@ def main() -> None:
     import jax
     import numpy as np
 
-    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.io.namelist import convert_namelist
     from clm_ml.model import Model
     from clm_ml.output_streams import StreamSpec
     from clm_ml.run import load_run
 
     tmp = Path(tempfile.mkdtemp())
-    convert_namelist(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day", tmp)
+    convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", tmp)
     first, n, npatch = 1, args.steps, args.patches
     # the CHATS7 patch and N - 1 padded copies of it (execution.patch_count; weight 0 for the
     # copies, which compute everything all the same): one batched program, as a domain runs

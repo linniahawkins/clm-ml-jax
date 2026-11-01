@@ -7,16 +7,15 @@ bands are 0-based (0 visible, 1 near infrared); leaves 0 sunlit, 1 shaded. The s
 variant chosen by name (``SOLAR_RADIATION``, model.yaml ``physics.solar_radiation``):
 ``two_stream`` (Fortran ``light_type = 2``, CLM-ml v2's default); ``norman`` (Fortran
 ``light_type = 1``) is registered but not supported (Phase 7 decision D8: its JAX translation
-was never validated and stops at the first CHATS7 step; it stays in the legacy adapter
-``clm_ml.legacy.solar_radiation`` until it is fixed after Phase 8).
+was never validated and stops at the first CHATS7 step; the translation is in the git history,
+``src/clm_ml/legacy/solar_radiation.py`` at commit 1f1b651, for the fix after Phase 8: C34).
 
 Fortran reference: CLM-ml v2 ``MLSolarRadiationMod.F90::SolarRadiation``, ``TwoStream``.
 Bonan (2019) Climate Change and Terrestrial Ecosystem Modeling, chapter 14; Bonan et al.
 (2021) Agric. For. Meteorol. 306, 108435, supplement eqs. (1)-(5).
 
 Reads and writes are the arguments and results; ``Reads``/``Writes`` in the docstrings name
-the legacy container fields they come from and go to (through the adapter in
-``clm_ml.legacy.solar_radiation`` until the containers leave the step, Phase 7.2 process 10).
+the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations
@@ -402,9 +401,9 @@ def two_stream(
 def norman(*args, **kwargs):
     """Norman (1979) radiative transfer: registered but not supported (Phase 7 decision D8).
 
-    Fortran reference: MLSolarRadiationMod.F90::Norman. The legacy JAX translation stays in
-    ``clm_ml.legacy.solar_radiation`` (never validated; stops at the first CHATS7 step with a
-    conservation error) until it is fixed and validated after Phase 8.
+    Fortran reference: MLSolarRadiationMod.F90::Norman. The legacy JAX translation (never
+    validated; stops at the first CHATS7 step with a conservation error) is in the git
+    history (``src/clm_ml/legacy/solar_radiation.py`` at 1f1b651) for the fix after Phase 8.
     """
     raise NotImplementedError(
         "solar_radiation: norman is not supported (Phase 7 decision D8; see the plan, "

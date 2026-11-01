@@ -30,7 +30,7 @@ sys.path.insert(0, {src!r})
 from clm_ml.model import Model
 import numpy as np
 from clm_ml import output_streams as S
-from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.run import load_run
 from clm_ml.outputs import VARIABLES
 
@@ -69,7 +69,7 @@ print("RESULT" + json.dumps(out))
 def test_one_compiled_program_for_different_layer_counts():
     script = SCRIPT.format(
         src=str(ROOT / "src"),
-        namelist=str(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day"),
+        namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.1day"),
     )
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr[-3000:]

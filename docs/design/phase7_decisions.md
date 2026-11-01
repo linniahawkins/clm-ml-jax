@@ -1194,3 +1194,42 @@ Why: D2 (restarts as netCDF): readable with standard tools, no pickled Python ob
   `axis_<k>`, and the output variable's `units`; a pickle restart of formats 1-5 is refused
   with a clear message; reading `.prev` instead of the file prints a warning; the calendar
   check comes before any date arithmetic; the layout is written as plain integers.
+
+### C33. 7.6a: outputs from the step state, reference in the new names, data out of src (7.6, 2026-11-01)
+- **Output variables** (`clm_ml.outputs`) are computed from a step's fields
+  (`step_fields(step, layers)`: `diagnostics.<name>`, `state.<name>`,
+  `state.soil_temperature`, `layers.<name>`; 0-based) instead of the legacy view; `_Raw`
+  indexes 0-based (bands 0/1, leaves 0/1, layers from 0, level fields' layer tops `[1:]`).
+  Validation streams name these fields; run.yaml validation lists them
+  (`outputs.field_names`).
+- **Diagnostics keep their CLM-ml names** (`rnet_canopy`, `tair_profile`'s state twin is
+  `state.air_temperature`, ...): the readable names are the output variables'; the internal
+  names stay traceable to the Fortran (`Fortran reference:` lines). (The 7.1 note "they get
+  readable names in 7.6" is replaced by this decision.)
+- **Reference re-recorded in the new names** (same values): before re-recording, the new
+  fields of a CHATS7 run, converted back to the legacy layout, equal the old reference's 88
+  fields at all 50 steps exactly (`probe74d/names.py`). The reference now holds all 96 step
+  fields (diagnostics, state, layer grid), 0-based.
+- **`clm_ml.legacy` removed:** `state.py`/`view.py` deleted (the legacy layout survives only
+  in `io/legacy.py::legacy_fields`, for the `.out` writer; the `.out` files of a CHATS7 day
+  are byte-identical to before), `namelist.py` moved to `clm_ml/io/namelist.py`.
+- **Data out of `src/`:** `data/input_files/` (CHATS7 forcing), `data/namelists/` (the
+  namelists, still `../input_files` relative); deleted the stale generated `.out` files of
+  `src/output_files/` (in git history), `src/__init__.py`, the duplicate
+  `src/pyproject.toml`/`pytest.ini` and an empty `src/rsl_lookup_tables/`. One
+  `pyproject.toml` (packages `clm_ml*`, package data in `clm_ml/data`). The Fortran
+  comparison test reads `CLM_ML_COMPARE_DIR` (skips without it; its docstring gives the
+  `clm-ml run` commands).
+- README, CONTRIBUTING and CLAUDE.md (layout, gotchas, commands) updated to the new layout
+  (the full documentation is Phase 8).
+
+### C34. The unsupported Norman and well-mixed translations live in git history only (7.4f, 2026-11-01)
+Phase 7 decision D8 said the WellMixed flux-profile solution, the dataset profiles and the
+Norman solar radiation stay "kept, registered as unsupported". Their legacy JAX translations
+were in the container adapters (`clm_ml/legacy/solar_radiation.py`, `flux_profile.py`,
+and the legacy `MLCanopyFluxesMod`/`ReadCanopyProfiles`), which went with the containers in
+7.4f; they ran only on the containers. The options are still registered and refused with a
+clear error (`physics.solar_radiation.norman`, `physics.flux_profile.well_mixed`); the
+translations are in the git history at commit `1f1b651` for the fix after Phase 8 (the
+docstrings say where). **For the maintainer:** if D8 meant keeping the code in the tree,
+they can be restored as reference files (they would not run without porting).

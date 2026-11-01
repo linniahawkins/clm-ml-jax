@@ -35,7 +35,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 REFERENCE_DIR = Path(__file__).resolve().parent / "reference"
 
 # Reference case: CHATS7 from 2007-05-01 00Z, 50 half-hour steps (one full diurnal cycle).
-REFERENCE_NAMELIST = SRC_DIR / "offline_executable" / "nl.CHATS7.50steps"
+REFERENCE_NAMELIST = PROJECT_ROOT / "data" / "namelists" / "nl.CHATS7.50steps"
 REFERENCE_FILE = REFERENCE_DIR / "CHATS7_50steps.npz"
 TWIN_FILES = {
     "plus": REFERENCE_DIR / "CHATS7_50steps_twin_plus.npz",
@@ -44,24 +44,9 @@ TWIN_FILES = {
 TWIN_PERTURBATION = 1e-12  # relative change of leaf_emissivity in the twins
 TWIN_PFT = "broadleaf_deciduous_temperate_tree"  # CHATS7's PFT
 
-# Prefixes of the recorded fields kept in the reference: every mlcanopy field the legacy
-# output writer reads, soil temperature, and the calendar day.
-RECORDED_PREFIXES = ("mlcanopy.", "temperature.")
-
-
-def write_portable_namelist(source: Path, dest: Path, output_dir: Path) -> Path:
-    """Copy a namelist, making input paths absolute and redirecting output to ``output_dir``."""
-    import f90nml
-
-    nml = f90nml.read(str(source))
-    group = nml["clmML_inparm"]
-    for key in ("fin_tower", "fin_clm", "fin_soil_adjust"):
-        raw = str(group[key]).strip()
-        if raw and not Path(raw).is_absolute():
-            group[key] = str((SRC_DIR / Path(*Path(raw).parts[1:])).resolve())
-    group["dirout"] = str(output_dir) + "/"
-    nml.write(str(dest), force=True)
-    return dest
+# Prefixes of the recorded fields kept in the reference: every field of a step's results
+# (``clm_ml.outputs.step_fields``: diagnostics, prognostic state, layer grid; Phase 7.6).
+RECORDED_PREFIXES = ("diagnostics.", "state.", "layers.")
 
 
 def run_case(
@@ -74,21 +59,21 @@ def run_case(
     """Run the reference case through ``clm_ml`` in ``workdir``.
 
     Returns ``(run, {stream: Outputs})`` with streams ``step`` (all named variables) and
-    ``fields`` (the raw legacy fields, in ``.raw``). ``params`` overrides the params file
+    ``fields`` (every step field, in ``.raw``). ``params`` overrides the params file
     (e.g. for twins).
     """
     if str(SRC_DIR) not in sys.path:
         sys.path.insert(0, str(SRC_DIR))
     import yaml
 
-    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.io.namelist import convert_namelist
     from clm_ml.run import load_run
 
     workdir = Path(workdir)
     convert_namelist(REFERENCE_NAMELIST, workdir)
     run_yaml = workdir / "run.yaml"
     data = yaml.safe_load(run_yaml.read_text())
-    from clm_ml.io.legacy import MLCANOPY_FIELDS, TEMPERATURE_FIELDS
+    from clm_ml.outputs import field_names
 
     data["output"] = {
         "directory": str(workdir / "out"),
@@ -96,13 +81,12 @@ def run_case(
         "streams": [
             # every named variable at every step
             {"name": "step", "frequency": "step", "statistic": "mean", "variables": ["all"]},
-            # validation: the raw legacy fields the regression compares, at every step
+            # validation: every step field (clm_ml.outputs.step_fields), at every step
             {
                 "name": "fields",
                 "frequency": "step",
                 "statistic": "instantaneous",
-                "variables": [f"mlcanopy.{f}" for f in MLCANOPY_FIELDS]
-                + [f"temperature.{f}" for f in TEMPERATURE_FIELDS],
+                "variables": list(field_names()),
                 "level": ["patch"],
             },
         ],

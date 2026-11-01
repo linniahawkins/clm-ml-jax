@@ -10,13 +10,13 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-CHATS_NAMELISTS = SRC_DIR / "offline_executable"
+CHATS_NAMELISTS = PROJECT_ROOT / "data" / "namelists"
 
 
 @pytest.fixture
 def chats_run_dir(tmp_path):
     """A converted nl.CHATS7.50steps (run.yaml + model.yaml) in a temporary directory."""
-    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.io.namelist import convert_namelist
 
     convert_namelist(CHATS_NAMELISTS / "nl.CHATS7.50steps", tmp_path)
     return tmp_path

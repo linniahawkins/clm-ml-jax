@@ -228,18 +228,19 @@ path = grid_run_files(tmp, {{"lat": [41.5, 42.5], "lon": [-109.0, -108.5]}}, "20
                       days=16, co2="{{ppm: 369}}")
 r = yaml.safe_load(path.read_text())
 r["output"]["streams"] = [{{"name": "s", "frequency": "step", "statistic": "instantaneous",
-    "level": ["patch"], "variables": ["mlcanopy.td_profile", "mlcanopy.dpai_profile",
-    "mlcanopy.tleaf_leaf", "stem_area_added", "stem_area_index", "leaf_area_index"]}}]
+    "level": ["patch"], "variables": ["diagnostics.td_profile", "diagnostics.dpai_profile",
+    "state.leaf_temperature", "stem_area_added", "stem_area_index", "leaf_area_index"]}}]
 path.write_text(yaml.safe_dump(r))
 run = load_run(path)
 pft = [str(x) for x in run.domain.patches.pft_index]
 out = run.execute(write=False)["s"]
 d = {{k: np.asarray(v) for k, v in {{**out.data, **out.raw}}.items()}}
-td, dpai, tl = d["mlcanopy.td_profile"], d["mlcanopy.dpai_profile"], d["mlcanopy.tleaf_leaf"]
+td, dpai = d["diagnostics.td_profile"], d["diagnostics.dpai_profile"]
+tl = d["state.leaf_temperature"]  # (time, patch, layer, leaf), 0-based
 leafy = (dpai > 0) & (dpai < 1e30)
 print("max td of leafy layers", float(td[leafy].max()))
 print("min dpai of leafy layers", float(dpai[leafy].min()))
-print("leaf T range", float(tl[..., 1:3][leafy].min()), float(tl[..., 1:3][leafy].max()))
+print("leaf T range", float(tl[leafy].min()), float(tl[leafy].max()))
 print("stem area added max by patch", np.round(d["stem_area_added"].max(axis=0), 4).tolist(), pft)
 """
 

@@ -16,8 +16,7 @@ Meteorol. 250-251, 64-89 (appendix A); Harman and Finnigan (2007, 2008); Harman 
 beta in unstable conditions (Bonan et al. 2026, eq. 2).
 
 Reads and writes are the arguments and results; ``Reads``/``Writes`` in the docstrings name
-the legacy container fields they come from and go to (through the adapter in
-``clm_ml.legacy.turbulence`` until the containers leave the step, Phase 7.2 process 10).
+the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations

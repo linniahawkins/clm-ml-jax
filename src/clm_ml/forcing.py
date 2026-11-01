@@ -14,7 +14,7 @@ and soil water) is per patch/column, shape ``(time, patch)`` / ``(time, column, 
 Wavebands are ``(vis, nir)``.
 
 ``Forcing`` holds arrays only: no files are opened while a chunk runs. It is built by
-:func:`clm_ml.legacy.forcing.load_forcing`, which applies the same derivations as the
+:func:`clm_ml.tower_forcing.load_forcing`, which applies the same derivations as the
 Fortran ``TowerMetMod`` (humidity from relative humidity, longwave from emissivity, solar
 partitioning).
 """
@@ -101,7 +101,7 @@ class ForcingSource(Protocol):
     ``first_step ... first_step + n_steps - 1`` with one halo record at each end, already at
     the model step. Implementations read only the files covering those times. A run asks
     for consecutive chunks; the next one is read in the background while the current one
-    runs. Implemented by :class:`clm_ml.legacy.forcing.TowerForcingSource` (tower meteorology
+    runs. Implemented by :class:`clm_ml.tower_forcing.TowerForcingSource` (tower meteorology
     and the CLM history file, as CHATS7); readers for coarser streams (6-hourly meteorology,
     daily or monthly LAI, SAI and soil water, interpolated to the model step) implement the
     same interface.

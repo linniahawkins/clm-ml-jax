@@ -30,7 +30,7 @@ import pickle, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 from clm_ml import driver as D
-from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.output_streams import StreamSpec
 from clm_ml.run import load_run
 
@@ -56,7 +56,7 @@ def _run(tmp_path, resume: bool, chunk=23):
     script = SCRIPT.format(
         src=str(root / "src"),
         root=str(root),
-        namelist=str(root / "src" / "offline_executable" / "nl.CHATS7.50steps"),
+        namelist=str(root / "data" / "namelists" / "nl.CHATS7.50steps"),
         restart=str(tmp_path / "restart.nc"),
         resume=resume,
         chunk=chunk,

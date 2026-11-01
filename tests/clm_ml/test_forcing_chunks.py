@@ -8,7 +8,7 @@ import pytest
 
 from clm_ml.forcing import chunk_run_steps
 
-from .conftest import SRC_DIR
+from .conftest import PROJECT_ROOT, SRC_DIR
 
 
 def test_chunk_run_steps_interior_and_run_edges():
@@ -76,7 +76,11 @@ print(json.dumps({"problems": problems, "records": records}))
 def test_chunked_reads_equal_one_whole_run_read():
     """Three chunks, including halos, are identical to the matching slices of one read."""
     result = subprocess.run(
-        [sys.executable, "-c", _SCRIPT], cwd=SRC_DIR, capture_output=True, text=True, check=True
+        [sys.executable, "-c", _SCRIPT],
+        cwd=PROJECT_ROOT / "data",
+        capture_output=True,
+        text=True,
+        check=True,
     )
     report = json.loads(result.stdout.strip().splitlines()[-1])
     assert report["problems"] == []

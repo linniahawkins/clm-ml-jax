@@ -8,8 +8,7 @@ Fortran reference: CLM-ml v2 ``MLPlantHydraulicsMod.F90``. Bonan et al. (2014) G
 Dev. 7, 2193-2222, appendix A (eqs. A19-A28).
 
 Reads and writes are the arguments and results; ``Reads``/``Writes`` in the docstrings name
-the legacy container fields they come from and go to (through the adapters in
-``clm_ml.legacy.plant_hydraulics`` until the containers leave the step, Phase 7.2 process 10).
+the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations

@@ -37,7 +37,7 @@ import yaml
 import jax, jax.numpy as jnp
 import numpy as np
 from clm_ml import driver as D
-from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.output_streams import StreamSpec
 from clm_ml.run import load_run
 
@@ -86,7 +86,7 @@ print("RESULT" + json.dumps(result))
 def test_failing_patch_stop_or_exclude():
     script = SCRIPT.format(
         src=str(ROOT / "src"),
-        namelist=str(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day"),
+        namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.1day"),
         towers=str(ROOT / "src" / "clm_ml" / "data" / "towers.yaml"),
     )
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)

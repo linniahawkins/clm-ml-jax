@@ -2,18 +2,23 @@
 Integration test: compare JAX offline simulation outputs against Fortran reference.
 
 Reference files: tests/fortran_output_files/CHATS7_2007-05_*.out
-JAX outputs:     src/output_files/CHATS7_2007-05_*.out
+JAX outputs:     the legacy ``.out`` files of a ``clm-ml run`` (``CLM_ML_COMPARE_DIR``)
 
 Thresholds (from CLAUDE.md):
   - Mean absolute relative error < 2.5 %
   - Pearson correlation >= 0.9999
 
 Run after a full-month CHATS7 May-2007 simulation (the Fortran reference covers May), with
-the Fortran acclimation temperature (add ``acclimation = 'run_mean'`` to the namelist; the
-default 10-day running mean, decision 15, departs from Fortran by design, by up to ~1%):
-    clm-ml-offline src/offline_executable/nl.CHATS7.05.2007
-    pytest tests/test_fortran_python_comparison.py -m slow -v
-(CLM_ML_COMPARE_DIR=<dir> compares the .out files in another directory.)
+the Fortran acclimation temperature (``physics.acclimation_temperature: run_mean``; the
+default 10-day running mean, decision 15, departs from Fortran by design, by up to ~1%) and
+the legacy ASCII output (``output.legacy_ascii: true``)::
+
+    clm-ml convert data/namelists/nl.CHATS7.05.2007 -o may/
+    clm-ml run may/run.yaml --set model.physics.acclimation_temperature=run_mean \
+        --set output.legacy_ascii=true --set output.directory=<dir>
+    CLM_ML_COMPARE_DIR=<dir> pytest tests/test_fortran_python_comparison.py -m slow -v
+
+(Phase 7.6: ``clm-ml-offline`` is retired; without ``CLM_ML_COMPARE_DIR`` the tests skip.)
 """
 
 from __future__ import annotations
@@ -29,9 +34,8 @@ import pytest
 # ---------------------------------------------------------------------------
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FORTRAN_DIR = REPO_ROOT / "tests" / "fortran_output_files"
-# The JAX run's legacy .out files (May 2007, nl.CHATS7.05.2007); override with
-# CLM_ML_COMPARE_DIR to compare another run's output directory.
-JAX_DIR = Path(os.environ.get("CLM_ML_COMPARE_DIR", REPO_ROOT / "src" / "output_files"))
+# The JAX run's legacy .out files (May 2007, nl.CHATS7.05.2007): CLM_ML_COMPARE_DIR
+JAX_DIR = Path(os.environ.get("CLM_ML_COMPARE_DIR", REPO_ROOT / "missing-CLM_ML_COMPARE_DIR"))
 
 OUTPUT_TAGS = ["flux", "aux", "fsun", "soiltemp", "profile", "fluxprofile"]
 
@@ -111,6 +115,8 @@ def compare_files(tag: str) -> tuple[dict[str, dict], int, int]:
     jax_path = JAX_DIR / fname
 
     assert ref_path.exists(), f"Fortran reference not found: {ref_path}"
+    if "CLM_ML_COMPARE_DIR" not in os.environ:
+        pytest.skip("set CLM_ML_COMPARE_DIR to a May-2007 run's legacy .out files (docstring)")
     assert jax_path.exists(), f"JAX output not found: {jax_path}  (run the simulation first)"
 
     ref = load_out(ref_path)

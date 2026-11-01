@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"wrote {write_params_yaml(args.source, args.out, args.base)}")
             return 0
         if args.command == "convert":
-            from clm_ml.legacy.namelist import convert_namelist
+            from clm_ml.io.namelist import convert_namelist
 
             for path in convert_namelist(args.namelist, args.out_dir).values():
                 print(f"wrote {path}")

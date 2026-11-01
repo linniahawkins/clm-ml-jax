@@ -157,184 +157,117 @@ using Harman & Finnigan (2007, 2008).
   - Soil heat flux biased high (but the point measurement is likely unrepresentative).
   - Soil moisture is prescribed rather than predicted.
 
-## Repository layout (current)
+## Repository layout (current, after Phase 7)
 
-The code mirrors the Fortran module structure one file per module. This is being modernized;
-see below.
+Organized by process and role (Phase 7: the Fortran-mirroring packages were deleted;
+`src/` holds only `clm_ml`).
 
 ```
-src/
-  multilayer_canopy/   ML*Mod.py: canopy physics (radiation, turbulence, photosynthesis, ...)
-  clm_src_biogeophys/  CLM soil/surface routines and *Type state containers
-  clm_src_main/        CLM state containers (clm_instMod globals), constants, driver (clm_driver.py)
-  clm_src_utils/       time manager (module globals), orbital parameters
-  clm_src_cpl/         coupler stubs (InitializeRealize, ModelAdvance)
-  offline_driver/      tower table (TowerDataMod), forcing readers, CLMml_driver (output writer)
-  offline_executable/  main.py (the `clm-ml-offline` entry point) and namelists nl.*
-  input_files/         CHATS7 tower forcing and CLM history netCDF
+src/clm_ml/
+  physics/        the processes, pure functions on 0-based arrays (soil, atm_forcing,
+                  solar_radiation, longwave, turbulence, leaf_boundary_layer, photosynthesis,
+                  flux_profile, canopy_water, plant_hydraulics, nitrogen_profile, integrators,
+                  canopy (the sub-step), constants (Python floats), orbit, math, layers)
+  step.py         one time step of one patch: State + StepInputs + PatchConstants -> StepState
+  state.py        State (prognostic), Diagnostics (CLM-ml names, 0-based), PatchLayers
+  setup/          every patch's constants and initial state (soil, canopy, patches, towers,
+                  grid, tables): pure functions, no globals
+  driver.py       Simulation, the compiled chunk (vmap over patches, C3/C4 groups,
+                  shard_map), run_streams (chunks, checks, restarts)
+  chunk_inputs.py MetInputs (per gridcell) / LandInputs (per patch) from the forcing
+  tower_forcing.py, grid_forcing.py, forcing.py, forcing_interpolation.py   forcing streams
+  io/             tower and CLM history readers, restart (netCDF), legacy .out writer,
+                  namelist converter (clm-ml convert), psihat tables, YAML schema
+  outputs.py      named output variables from a step's fields; netCDF writers
+  output_streams.py, checks.py, calendar.py, options.py, config.py, params.py, domain.py,
+  run.py (run.yaml; Run.execute), model.py (Model: chunks and gradients), cli.py
+  data/           towers.yaml, params/*.yaml, psihat.nc (package data)
+data/             CHATS7 forcing (input_files/) and the CLM-ml namelists (namelists/nl.*)
 tests/
+  clm_ml/              unit tests (fast)
   fortran_validation/  160+ routine-level tests against Fortran golden JSON (rtol 1e-9)
-  regression/          end-to-end regression against committed reference (rtol 1e-6)
-  test_fortran_python_comparison.py  end-to-end vs Fortran .out files (slow; 2.5% / r ≥ 0.9999)
-  test_differentiability.py          jax.grad through the canopy model (slow)
-timing/                time_offline.py (timing test) and results.jsonl
-docs/design/           modernization plan, API sketch, example YAML, timing results
+  regression/          end-to-end runs against committed references
+  test_fortran_python_comparison.py  end-to-end vs Fortran .out files (slow; 2.5% / r >= 0.9999)
+  test_differentiability.py          jax.grad through one step (gradient tier)
+timing/                time_offline.py, time_model.py, time_vmap.py, time_global.py
+docs/design/           modernization plan, Phase 7 scope/progress/decisions, examples
 ```
 
 ### Gotchas in the current code
 
-- **Enable float64 before importing any model module.** Modules create `jnp.float64` arrays at
-  import time. `offline_executable/main.py` sets `jax_enable_x64` at the top. Import it (or set
-  the flag yourself) first, or arrays silently become float32.
-- **Do not import `clm_instMod` (or anything that imports it, such as
-  `offline_driver.CLMml_driver`) before `InitializeRealize` runs.** It captures `nlevgrnd = -1`
-  and later fails with a negative-shape error.
-- State lives in **module globals** (`clm_instMod.*_inst`, `MLclm_varctl.*`). Running the
-  model mutates them, so run end-to-end tests in a **subprocess**.
-- **Forcing and time are data** (Phase 2). All tower and CLM-history records are read
-  before the time loop (`clm_ml.legacy.forcing.load_forcing` → `clm_ml.forcing.Forcing`).
-  The physics receives `StepTime` (`clm_time_manager.step_time`) instead of reading the
-  time manager, and receives the previous/next-step forcing as an `AtmForcingWindow`
-  argument. Don't reintroduce file reads or `clm_time_manager.itim` in the run path.
-- **Two layouts until the physics moves (Phase 7.1-7.2).** The legacy containers' profile
-  axes (layers, leaves `isun=1`/`isha=2`, bands `ivis=1`/`inir=2`, soil levels, RK stages) are
-  **1-based** with an unused index 0 (the ground in a few layer fields), behind a "patch" axis
-  of length 1 (patch index 0 in the run path). The step state (`clm_ml/state.py`: `State`,
-  `Diagnostics`, `StepState`, `PatchLayers`) is **0-based without the patch axis** (D1;
-  axes `layer`, `level` = ground + layers, `leaf`, `band`, `soil_level`); batched states have
-  one leading patch axis. `clm_ml/legacy/state.py` converts between them (blocks written with
-  `dynamic_update_slice` into the template).
-- **The time step is `clm_ml/step.py::step` (Phase 7.2 process 10c):** pure, on `State` +
-  `StepInputs` + `PatchConstants` (0-based; the constants come from the template once per
-  chunk, `clm_ml/legacy/step.py::patch_constants`) + `CanopyParams`, returning a `StepState`;
-  `offline_executable.main.state_step` wraps it for the chunk runners. Only the first
-  (initializing) step, the batched first step and the legacy view still use the containers
-  (`clm_drv`/`MLCanopyFluxes`) until 7.4.
-- **The legacy view (Phase 7):** the regression reference stores raw legacy fields
-  (`mlcanopy.<field>`, 1-based, patch axis). `clm_ml/legacy/view.py::legacy_view(template,
-  step, layers)` maps a `StepState` to them; the output variables (`outputs._Raw`),
-  validation streams and the legacy `.out` writer read a step's results only through it.
-  When the state changes, change the view, never the reference. Fields no longer returned by
-  the step: `docs/design/phase7_removed_diagnostics.md`.
-- Since Phase 3c each physics routine has **one** traceable implementation taking a `GridInfo`
-  (since Phase 5b only the patch index and the static C3/C4 flag; layer counts are data, see
-  below). Guard checks that need concrete numbers with
-  `MLMathToolsMod.is_concrete(...)`. `MLCanopyFluxes` drives one `_substep` function with a
-  Python loop in normal runs and `lax.scan` + `jax.checkpoint` when traced. Deviations of
-  the running model from Fortran are listed in `docs/design/numerics_and_regression.md` §4;
-  don't "fix" them inside a refactor.
-- **Runs are compiled fixed-length chunks** (decision 33, `execution.chunk`, default 10 days;
-  a short last chunk padded with inactive steps, so one program per run;
-  `offline_executable/main.py`: `run_streams`, `chunk_schedule`, `make_batch_runner`);
-  forcing goes to the devices split by patch (`place_inputs`); output streams accumulate
-  inside the scan (`clm_ml/output_streams.py`, variables defined once for numpy and jax.numpy in `clm_ml/outputs.py`). Restarts and health
-  checks between chunks. `clm_ml.model.Model` runs chunks in-process for gradients.
-- **XLA CPU gradient crash (issue 16, JAX 0.9.2):** running compiled CPU gradients of a CHATS7
-  chunk segfaults in LLVM-optimized code. Run CPU gradient tests with
-  `XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1 --xla_backend_optimization_level=0"`
-  (gradient tests only: round-off differs; `tests/gradient_tier.py` sets it, and the
-  regression tests and `record_run.py` refuse to run with it). (JAX 0.6.2 had a different
-  gradient crash;
-  `clm_ml.model` sets `--xla_cpu_use_thunk_runtime=false` only for JAX < 0.7.)
-- **Never scatter into a scan's carry with array indices** (`.at[idx].set` inside the chunk's
-  `lax.scan`): with JAX 0.9.2 on CPU it gave wrong states and intermittent segfaults (Phase 6
-  step 4). Patch groups are contiguous slices joined by concatenation (numerics doc §6).
-- **CPU compile crash (JAX 0.9.2):** large batched programs segfaulted intermittently while
-  compiling (LLVM JIT linker recursion overflowing a thread stack); `clm_ml/__init__.py` sets
-  `XLA_FLAGS=--xla_cpu_parallel_codegen_split_count=1` on import unless already chosen.
-- **Read `clm_varpar` layer counts at call time** (`clm_varpar.nlevsoi`), not with
-  `from clm_varpar import nlevsoi` in code that may run before the first setup: that copies -1
-  (the vectorized setup did; `test_vector_setup.py` now runs it first in a fresh process).
-- The `-999` value in tower and parameter tables means "use the default".
-- **Options reach the physics only as `opts` (Phase 5a);** the module variables of
-  `MLclm_varctl` are setup inputs. `pftcon_val` is still copied at import by `pftconMod` and
-  `MLpftconMod` (`from ... import pftcon_val`), so `clm_ml.legacy.worker` sets the options,
-  PFT tables (and their `Init` functions, which `initialize2` calls again) and the tower
-  table *before* those modules are imported, in a fresh process (goes in Phase 7.4).
-- The standalone soil temperature (`MLSoilTemperatureMod`) assumes **one patch per soil column**
-  (p == c). Multiple PFTs sharing a column is not supported by the current code.
-- **Options are passed explicitly (Phase 5a):** `MLclm_varctl.MLOptions` (built from model.yaml
-  by `setup_run`, kept in `LegacyRun.opts`) goes to every routine as `opts=`; compiled
-  functions take it as a static argument. Don't read options from `MLclm_varctl` module
-  variables in physics code. The time step receives `opts.step_options()` (setup-only layer
-  fields at defaults, Phase 6). A process can hold models of **any towers** with one soil
-  layer structure (`clm_ml.model.Model`).
-- **Per-site data are in the containers (Phase 6 step 2):** `ClmInstances.site`
-  (`clm_src_main.SiteType`: soil z/dz/zi, bedrock index, soil colour, lat/lon) is passed to
-  the time-step routines; don't read `ColumnType.col`/`GridcellType.grc`/`isoicol` there.
-- **Runs are batches of patches (Phase 6 steps 3-6):** `offline_executable.main.PatchBatch`
-  (one-patch legacy runs as prototypes, `make_batch_runner` vmaps the step over patches,
-  C3/C4 as contiguous groups, `shard_map` over devices with `execution.devices`, padding with
-  `execution.patch_count/gridcell_count`); setup by `clm_ml.legacy.vector_setup` (bit for bit
-  the per-patch legacy setup, `worker.setup_batch_legacy`); the first step is batched and
-  compiled (`batched_first_step`). Outputs carry `gridcell:<var>` sums formed in the scan.
-  Failures per patch: `numerics.on_patch_error: stop | exclude`.
-- **Layer counts are data (Phase 5b):** every profile array has `max_layers` slots
-  (model.yaml `canopy_layers.max_layers`, default 50); `MLLayersMod.layers(inst, p)` gives
-  the counts and masks (`in_use` 1..ncan, `in_canopy`, `above_canopy`, `leafy`). Compute on
-  every slot, give padding the top layer's inputs (`pad_with_top`), write back with masks
-  (`keep`, `restore_padding`). Tridiagonal solves pad with identity rows after the top layer
-  and run as `lax.scan` (`tridiag_scan`, `tridiag_2eq`). No Python loops over layers in the
-  time step. The template containers are an *input* of the compiled chunk.
-- **Fortran error checks are recorded, not raised (Phase 5a/5b):** `record_balance_error`
-  stores the largest error of each check (`MLCanopyFluxesType.BALANCE_CHECKS`, 13 checks with
-  Fortran's tolerances) and `check_balance` stops the run on the host after each eager step or
-  compiled chunk. **Never add `jax.debug.callback`/`print` to compiled code:** it makes the
-  program uncacheable.
-- **Compilation cache:** every compiled program is cached on disk
-  (`JAX_COMPILATION_CACHE_DIR`, default `~/.cache/jax_compile_cache`; 2 GB cap with
-  `filelock`). A repeated run in a new process is ~3× faster.
-- **C3/C4 is a static choice per group of patches** (decision 22), not per-patch data.
-- **Grid runs (Phase 6b, `domain.type: grid`):** `clm_ml/grid.py` (domain from the surface
-  data), `clm_ml/grid_forcing.py` (CRUJRA/CO2/LAI/soil water as CDEPS and CTSM handle them),
-  `clm_ml/legacy/grid_setup.py` (prototypes per PFT from tower-format files of one gridcell,
-  every forcing-dependent field per patch, `GridChunkReader`). Vegetation and soil water are
-  interpolated inside the compiled chunk (`PatchBatch.land_fn`). Decisions G1-G20 and open
-  issues in `docs/design/global_input.md`: when a choice comes up, copy CLM (source in
-  `/glade/work/linnia/ctsm5.4.004`). Example configs `docs/design/examples/*grid*`.
-- **Don't import legacy record modules (`clmDataMod`, `TowerMetMod`, ...) before the first
-  legacy setup** in grid setup code either: the grid setup builds its first-step data after
-  the prototypes (`setup_arrays(first=callable)`).
-- **CPU compilation cache bug (JAX 0.9.2):** loading some large cached CPU programs back
-  crashes in LLVM's object loader (deterministic); the batched first step is compiled without
-  the cache on CPU (`main.without_persistent_cache_on_cpu`). A deterministic segfault right
-  after "Initialization complete." on CPU is this; try an empty cache directory.
 - **Login nodes have GPUs** (derecho3, derecho7: two A100s each) and JAX uses them by
-  default: tests and the reference recording force the CPU (`tests/conftest.py`,
-  `record_run.py`); probes must set `JAX_PLATFORMS=cpu` too. On the GPU, two fresh compiles of
-  the same program can differ by ~1e-11 (decision C4 in `phase7_decisions.md`), so bit for bit
-  is a CPU test.
+  default: tests and the reference recording force the CPU (`tests/conftest.py`); probes
+  must set `JAX_PLATFORMS=cpu` too. On the GPU, two fresh compiles of the same program can
+  differ by ~1e-11 (decision C4 in `phase7_decisions.md`), so bit for bit is a CPU test.
+- **Runs are in-process** (Phase 7.4): `Run.execute` and `Model` set the run up with
+  `clm_ml.setup` and run `clm_ml.driver`. No module globals hold model state; a process can
+  hold several models (any towers, soil structures). netCDF is not thread-safe: do not run
+  two runs in parallel threads of one process (tests run them one after the other or in
+  subprocesses); the device count is fixed when JAX starts (`test_devices` uses
+  subprocesses).
+- **The first step is an ordinary step** of the first chunk: the setup gives the state
+  before it (acclimation count 0). Fixed-length chunks count from step 0 (decision 33; a
+  short last chunk padded with inactive steps, one program per run). `Model` runs the first
+  step at setup; its `chunks()` start at step 1.
+- **Constants are an input of the compiled chunk** (`PatchConstants`, per patch), as are the
+  psihat tables (`tables=`, C22): other layer grids, soils or tables reuse the program.
+- **Indexing is 0-based everywhere** (layers from the ground, `level` = ground + layer tops,
+  leaf 0 sunlit / 1 shaded, band 0 visible / 1 near-infrared, soil levels from the top).
+  Slots above the top layer in use hold `spval` (1e36); outputs mask them with NaN. Only
+  `clm_ml/io/legacy.py` (the `.out` writer) builds the legacy 1-based layout.
+- **Output variables and the reference** are computed from a step's fields
+  (`outputs.step_fields`: `diagnostics.<CLM-ml name>`, `state.<name>`, `layers.<name>`);
+  validation streams can name these raw fields.
+- **XLA CPU gradient crash (issue 16, JAX 0.9.2):** running compiled CPU gradients
+  segfaults in LLVM-optimized code. Run CPU gradient tests with
+  `XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1 --xla_backend_optimization_level=0"`
+  (`tests/gradient_tier.py` sets it; the regression tests refuse to run with it).
+- **CPU compile crash (JAX 0.9.2):** large batched programs segfaulted intermittently while
+  compiling (LLVM JIT linker recursion); `clm_ml/__init__.py` sets
+  `XLA_FLAGS=--xla_cpu_parallel_codegen_split_count=1` on import unless already chosen.
+- **Never scatter into a scan's carry with array indices** (`.at[idx].set` inside the chunk's
+  `lax.scan`): with JAX 0.9.2 on CPU it gave wrong states and intermittent segfaults. Patch
+  groups are contiguous slices joined by concatenation.
+- **Never add `jax.debug.callback`/`print` to compiled code:** it makes the program
+  uncacheable. Conservation checks are recorded in the step (`Diagnostics.balance_error`,
+  `clm_ml.checks.BALANCE_CHECKS`) and checked on the host after each chunk.
+- **Compilation cache:** every compiled program is cached on disk
+  (`JAX_COMPILATION_CACHE_DIR`, default `~/.cache/jax_compile_cache`; set up by
+  `clm_ml.driver`).
+- **C3/C4 is a static choice per group of patches** (decision 22), not per-patch data.
+- **Iterative solvers and padding:** compute on every layer slot, give padding the top
+  layer's inputs (`physics.layers.pad_with_top`), keep results with masks; no Python loops
+  over layers in the time step.
 - **Real 1° patches amplify round-off** (1e-15 in LAI -> ~8 W m-2 after sunrise): grid
   regression tests compare inputs exactly and outputs only through the night.
+- `soil.layer_structure: clm4_5` has never been validated (the legacy path did not run); the
+  history file's soil levels must match the structure (checked).
 
 ## Commands
 
 ```bash
 pip install -e ".[dev]"                     # dev extras include pytest-cov, which pytest.ini needs (--no-cov)
 
-clm-ml convert src/offline_executable/nl.CHATS7.1day -o chats7/   # namelist -> run.yaml + model.yaml
+clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/   # namelist -> run.yaml + model.yaml
 clm-ml check chats7/run.yaml               # validate + summary, no run
 clm-ml params ctsm60_params.nc -o p.yaml   # CLM parameter file -> complete params.yaml (built-in clm6 = CTSM 6.0)
-clm-ml run chats7/run.yaml [--set key=value]   # run via the clm_ml API (netCDF output)
-clm-ml-offline src/offline_executable/nl.CHATS7.1day      # legacy run (writes src/output_files/*.out)
-python -m pytest tests/clm_ml -q                           # clm_ml unit tests (fast)
-python -m clm_ml.legacy.tables --write     # regenerate data/params/*.yaml + data/towers.yaml from legacy tables
+clm-ml run chats7/run.yaml [--set key=value]   # run (netCDF output; output.legacy_ascii: the .out files)
 
-python -m pytest tests/fortran_validation -m "not slow" -q            # routine-level golden tests (fast)
-python -m pytest tests/regression -m regression -q                    # all end-to-end regression tests (~8 min CPU; end of phase)
-python -m pytest tests/regression/test_end_to_end_regression.py tests/regression/test_clm_ml_equivalence.py -m regression -q   # bit-for-bit + noise twin only (~1 min; before each commit)
-python -m pytest tests/test_fortran_python_comparison.py -m slow -q   # vs Fortran output
+python -m pytest tests/clm_ml tests/fortran_validation -m "not slow" -q   # unit + golden tests (fast)
+python -m pytest tests/regression -m regression -q                    # all end-to-end regression tests (~20 min CPU)
+python -m pytest tests/regression/test_end_to_end_regression.py tests/regression/test_clm_ml_equivalence.py -m regression -q   # bit-for-bit + noise twin (~40 s)
+CLM_ML_COMPARE_DIR=<dir> python -m pytest tests/test_fortran_python_comparison.py -m slow -q   # vs Fortran output (see its docstring)
 python tests/gradient_tier.py [--focused]                  # CPU gradient tier (tests marked `gradient`, LLVM optimization off; issue 16)
 qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs          # GPU gradient tier (develop queue, warm GPU compile cache)
 
 python tests/regression/record_run.py --update-reference   # reference + 2 noise twins; only after intended or round-off-only changes; say so in the PR
-python timing/time_offline.py                              # timing test; appends to timing/results.jsonl
+python timing/time_offline.py                              # wall-clock time of a whole run; timing/results.jsonl
 python timing/time_model.py [--steps 8] [--no-grad]        # compiled chunk + gradient timing/memory; results_model.jsonl
 
-black --check --line-length 100 src/ tests/ && ruff check src/ tests/   # what CI runs
+black --check --line-length 100 src tests timing && ruff check src tests timing   # what CI runs
 ```
 
-Python ≥ 3.10. CI tests 3.10 and 3.12.
+Python >= 3.10. CI tests 3.10 and 3.12.
 
 ## Rules for changes
 

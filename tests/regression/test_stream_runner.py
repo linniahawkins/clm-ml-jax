@@ -21,12 +21,12 @@ from pathlib import Path
 sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import jax, jax.numpy as jnp, numpy as np
 jax.config.update("jax_enable_x64", True)
-from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.run import load_run
 from clm_ml.model import Model
 from clm_ml import driver as D, step as S
 from clm_ml import output_streams as OS
-from clm_ml.legacy.view import view_series
+from clm_ml.outputs import step_fields
 from clm_ml.outputs import VARIABLES, _Raw
 
 tmp = Path(tempfile.mkdtemp())
@@ -48,8 +48,8 @@ def body(s, x):
     return r.state, r
 
 _, steps = jax.jit(lambda s, xs: jax.lax.scan(body, s, xs))(one(state), xs)
-views = view_series(steps, constants.layers)  # (step, 1, ...) legacy fields of each step
-r = _Raw({{k: np.asarray(v) for k, v in views.items() if k.startswith("mlcanopy.")}}, 50)
+fields = jax.vmap(lambda st: step_fields(st, constants.layers))(steps)  # (step, ...)
+r = _Raw({{k: np.asarray(v)[:, None] for k, v in fields.items()}}, 50)  # (step, patch, ...)
 ref = {{v.name: np.asarray(v.compute(r), float)[:, 0] for v in VARIABLES}}
 
 names = tuple(v.name for v in VARIABLES) + ("soil_temperature",)
@@ -77,7 +77,7 @@ def test_streams_match_post_hoc_outputs():
     script = SCRIPT.format(
         src=str(root / "src"),
         root=str(root),
-        namelist=str(root / "src" / "offline_executable" / "nl.CHATS7.50steps"),
+        namelist=str(root / "data" / "namelists" / "nl.CHATS7.50steps"),
     )
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr[-3000:]

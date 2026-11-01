@@ -17,7 +17,7 @@ import json, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import jax
-from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.run import load_run
 from clm_ml.model import Model
 from clm_ml.output_streams import StreamSpec
@@ -50,7 +50,7 @@ def test_model_chunk_gradient_matches_finite_difference():
     script = SCRIPT.format(
         src=str(ROOT / "src"),
         root=str(ROOT),
-        namelist=str(ROOT / "src" / "offline_executable" / "nl.CHATS7.50steps"),
+        namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.50steps"),
     )
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr[-3000:]

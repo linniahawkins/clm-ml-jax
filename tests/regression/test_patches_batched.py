@@ -62,12 +62,12 @@ def _execute(tmp: Path, name: str, towers: dict, order: list):
     import sys
 
     sys.path.insert(0, str(ROOT / "src"))
-    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.io.namelist import convert_namelist
     from clm_ml.run import load_run
 
     work = tmp / name
     work.mkdir()
-    convert_namelist(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day", work)
+    convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", work)
     (work / "towers.yaml").write_text(yaml.safe_dump(towers))
     d = yaml.safe_load((work / "run.yaml").read_text())
     d["domain"].update(towers=order, towers_file="towers.yaml")

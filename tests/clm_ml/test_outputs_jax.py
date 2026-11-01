@@ -18,7 +18,9 @@ REFERENCE = Path(__file__).parents[1] / "regression" / "reference" / "CHATS7_50s
 @pytest.mark.skipif(not REFERENCE.exists(), reason="regression reference not present")
 def test_variables_numpy_equals_jax():
     with np.load(REFERENCE) as data:
-        raw = {k: data[k] for k in data.files if k.startswith("mlcanopy.")}
+        raw = {
+            k: data[k] for k in data.files if k.startswith(("diagnostics.", "state.", "layers."))
+        }
     r_np = _Raw(raw, max_layers=50, xp=np)
     r_jx = _Raw({k: jnp.asarray(v) for k, v in raw.items()}, max_layers=50, xp=jnp)
     for spec in VARIABLES:

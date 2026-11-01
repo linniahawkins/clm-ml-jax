@@ -14,8 +14,7 @@ Fortran reference: CLM-ml v2 ``MLFluxProfileSolutionMod.F90``, ``MLLeafFluxesMod
 ``MLSoilFluxesMod.F90``. Bonan et al. (2018) Geosci. Model Dev. 11, 1467-1496.
 
 Reads and writes are the arguments and results; ``Reads``/``Writes`` in the docstrings name
-the legacy container fields they come from and go to (through the adapter in
-``clm_ml.legacy.flux_profile`` until the containers leave the step, Phase 7.2 process 10).
+the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations
@@ -467,8 +466,9 @@ def well_mixed(*args, **kwargs):
     (Phase 7 decision D8).
 
     Fortran reference: MLFluxProfileSolutionMod.F90::WellMixed. Fortran stops after it
-    ("WellMixed option not valid": legacy code, not supported); the legacy translation stays
-    in ``clm_ml.legacy.flux_profile`` until it is fixed and validated after Phase 8.
+    ("WellMixed option not valid": legacy code, not supported); the legacy translation is in
+    the git history (``src/clm_ml/legacy/flux_profile.py`` at 1f1b651) for the fix after
+    Phase 8.
     """
     raise NotImplementedError(
         "flux_profile_solution: well_mixed is not supported (Phase 7 decision D8; Fortran "

@@ -1,7 +1,7 @@
 """The legacy ASCII output (Phase 7.4; from the legacy driver ``CLMml_driver.output``): the
 six ``.out`` files of CLM-ml v2 (``flux``, ``aux``, ``profile``, ``fsun``, ``fluxprofile``,
 ``soiltemp``) of one patch, written step by step from the step's legacy view
-(``clm_ml.legacy.view``; run.yaml ``output.legacy_ascii``, for the comparison with the
+(converted to the legacy layout here; run.yaml ``output.legacy_ascii``, for the comparison with the
 Fortran output, ``tests/test_fortran_python_comparison.py``).
 
 Fortran reference: CLM-ml v2 ``CLMml_driver.F90::output``.
@@ -14,31 +14,61 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import IO
 
-#: The ``mlcanopy`` fields the writer reads (every one recorded by the regression reference)
-MLCANOPY_FIELDS = (
-    "albcan_canopy", "anet_leaf", "apar_leaf", "beta_canopy", "btran_soil", "dpai_profile",
-    "dz_profile", "eair_profile", "etair_profile", "evveg_canopy", "fracminlwp_canopy",
-    "fracsun_profile", "gac_profile", "gppveg_canopy", "gppvegsha_canopy", "gppvegsun_canopy",
-    "gs_leaf", "gsoi_soil", "gsveg_canopy", "gsvegsha_canopy", "gsvegsun_canopy", "lai_canopy",
-    "laisha_canopy", "laisun_canopy", "lhflx_canopy", "lhleaf_leaf", "lhsoi_soil", "lhveg_canopy",
-    "lhvegsha_canopy", "lhvegsun_canopy", "lsc_profile", "lwdwn_profile", "lwp_hist_leaf",
-    "lwp_mean_profile", "lwup_canopy", "lwupw_profile", "mflx_profile", "nbot_canopy",
-    "ncan_canopy", "ntop_canopy", "pref_forcing", "psis_soil", "rhomol_forcing", "rnet_canopy",
-    "rnleaf_leaf", "rnsoi_soil", "sai_canopy", "sai_floor_canopy", "shair_profile",
-    "shflx_canopy", "shleaf_leaf", "shsoi_soil", "shveg_canopy", "shvegsha_canopy",
-    "shvegsun_canopy", "solar_zen_forcing", "stflx_air_canopy", "stflx_veg_canopy",
-    "swbeam_profile", "swdwn_profile", "swskyb_forcing", "swskyd_forcing", "swupw_profile",
-    "swveg_canopy", "swvegsha_canopy", "swvegsun_canopy", "tair_profile", "taveg_canopy",
-    "tavegsha_canopy", "tavegsun_canopy", "tleaf_hist_leaf", "tlveg_canopy", "tlvegsha_canopy",
-    "tlvegsun_canopy", "tref_forcing", "trveg_canopy", "ustar_canopy", "vcmax25_leaf",
-    "vcmax25sha_canopy", "vcmax25sun_canopy", "vcmax25veg_canopy", "wind_profile",
-    "windveg_canopy", "windvegsha_canopy", "windvegsun_canopy", "zs_profile", "zw_profile",
-)  # fmt: skip
-TEMPERATURE_FIELDS = ("t_soisno_col",)
-#: The raw stream variables the writer needs (``clm_ml.driver.step_variables`` names)
-VARIABLES = tuple(f"mlcanopy.{f}" for f in MLCANOPY_FIELDS) + tuple(
-    f"temperature.{f}" for f in TEMPERATURE_FIELDS
-)
+import numpy as np
+
+
+def _variables() -> tuple:
+    from clm_ml.outputs import field_names
+
+    return field_names()
+
+
+#: Legacy name of each state and layer-grid field
+_LEGACY_NAMES = {
+    "state.air_temperature": "tair_profile", "state.vapor_pressure": "eair_profile",
+    "state.co2": "cair_profile", "state.leaf_temperature": "tleaf_leaf",
+    "state.leaf_water_potential": "lwp_leaf", "state.intercepted_water": "h2ocan_profile",
+    "state.ground_temperature": "tg_soil", "layers.n_layers": "ncan_canopy",
+    "layers.n_within": "ntop_canopy", "layers.dz": "dz_profile", "layers.zs": "zs_profile",
+    "layers.zw": "zw_profile",
+}  # fmt: skip
+#: Legacy fields on the level axis (index 0 the ground: no padding in front)
+_LEVEL = {"lwdwn_profile", "lwupw_profile", "zw_profile"}
+_LEVEL_BAND = {"swbeam_profile", "swdwn_profile", "swupw_profile"}
+_SPVAL = 1.0e36
+
+
+def legacy_fields(fields: dict) -> tuple:
+    """One step's 0-based fields (``clm_ml.outputs.step_fields`` names, one patch) in the
+    legacy layout the writer reads: ``(mlcanopy, temperature)`` namespaces of arrays with a
+    patch axis of length 1 and 1-based layer, leaf and band axes (``spval`` in front)."""
+    ml = {}
+    for key, value in fields.items():
+        v = np.asarray(value)
+        if key == "layers.first_leafy":
+            ml["nbot_canopy"] = (v + 1)[None]
+            continue
+        if key.startswith("diagnostics."):
+            name = key.split(".", 1)[1]
+        elif key in _LEGACY_NAMES:
+            name = _LEGACY_NAMES[key]
+        else:
+            continue
+        if name in _LEVEL or v.ndim == 0:
+            pads = []
+        elif name in _LEVEL_BAND:
+            pads = [(0, 0), (1, 0)]
+        elif name.endswith("_leaf"):
+            pads = [(1, 0), (1, 0)]
+        else:  # (layer,) profiles and (band,) arrays
+            pads = [(1, 0)]
+        if pads:
+            v = np.pad(v, pads + [(0, 0)] * (v.ndim - len(pads)), constant_values=_SPVAL)
+        ml[name] = v[None]
+    soil = np.pad(np.asarray(fields["state.soil_temperature"]), (1, 0), constant_values=_SPVAL)
+    return SimpleNamespace(**ml), SimpleNamespace(t_soisno_col=soil[None])
+
+
 TAGS = ("flux", "aux", "profile", "fsun", "fluxprofile", "soiltemp")
 
 
@@ -57,11 +87,8 @@ class LegacyAsciiWriter:
         self.met_type, self.step_seconds, self.soil_z = met_type, step_seconds, soil_z
 
     def write(self, calday: float, fields: dict) -> None:
-        """One step: ``fields`` ``{"mlcanopy.<f>": value, "temperature.<f>": value}`` (legacy
-        layout with a leading patch axis of length 1)."""
-        split = {tuple(k.split(".", 1)): v for k, v in fields.items()}
-        ml = SimpleNamespace(**{f: v for (c, f), v in split.items() if c == "mlcanopy"})
-        temp = SimpleNamespace(**{f: v for (c, f), v in split.items() if c == "temperature"})
+        """One step: ``fields`` (``clm_ml.outputs.step_fields`` names, 0-based, one patch)."""
+        ml, temp = legacy_fields(fields)
         flux, aux, profile, fsun, fluxprofile, soiltemp = self.files
         output(calday, flux, aux, profile, fsun, fluxprofile, soiltemp, ml, temp, self.soil_z,
                met_type=self.met_type, dtstep=self.step_seconds)  # fmt: skip

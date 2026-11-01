@@ -4,7 +4,7 @@
 CLM-ml v2's ``clm_driver`` around the multilayer canopy's ``MLCanopyFluxes``, built from the
 physics in ``clm_ml.physics`` (soil, plant area and hydraulics, the canopy sub-steps, the
 averages, totals and the sunlit/shaded merge). Pure: everything the step reads is an argument
-and everything it changes is returned; the legacy containers are not used.
+and everything it changes is returned.
 
 - :class:`State` (``clm_ml.state``): the prognostic variables carried from step to step.
 - :class:`StepInputs`: this step's forcing and land data (tower meteorology, the CLM history

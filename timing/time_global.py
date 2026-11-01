@@ -53,7 +53,7 @@ def main() -> None:
 
     from clm_ml import driver as D
     from clm_ml import output_streams as S
-    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.io.namelist import convert_namelist
     from clm_ml.run import load_run
 
     n_p, k = args.patches, args.per_gridcell
@@ -63,7 +63,7 @@ def main() -> None:
 
     # the synthetic domain: CHATS7 forcing for every gridcell, every other input at random
     tmp = Path(tempfile.mkdtemp())
-    convert_namelist(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day", tmp)
+    convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", tmp)
     chats = yaml.safe_load((ROOT / "src" / "clm_ml" / "data" / "towers.yaml").read_text())["CHATS7"]
     towers = {}
     for g in range(n_g):

@@ -40,10 +40,10 @@ def _valid(values):
     return np.isfinite(values) & (np.abs(values) < 1e30)  # skip spval (1e36) fill values
 
 
-def test_legacy_view_gives_reference_fields(current_fields):
-    """The recorded field list (``worker.MLCANOPY_FIELDS``/``TEMPERATURE_FIELDS``) is exactly
-    the reference's: none missing, none new (Phase 7 keeps this comparison complete). Each is
-    read through ``clm_ml.legacy.view`` during the run (a field it lacks fails the run)."""
+def test_reference_holds_every_step_field(current_fields):
+    """The recorded fields are exactly the reference's: every step field
+    (``clm_ml.outputs.step_fields``: diagnostics, prognostic state, layer grid), none missing,
+    none new."""
     assert sorted(current_fields) == sorted(FIELDS)
 
 

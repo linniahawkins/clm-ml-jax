@@ -13,47 +13,42 @@ cd clm-ml-jax
 pip install -e ".[dev]"
 
 # Verify the install
-clm-ml-offline --help
-pytest tests/fortran_validation/ -m "not slow" -q
+clm-ml --help
+pytest tests/clm_ml tests/fortran_validation/ -m "not slow" -q
 ```
 
 ## Repository Layout
 
 ```
-src/
-  multilayer_canopy/    # Within-canopy physics  ← most contributions go here
-  clm_src_biogeophys/  # Surface/soil/snow physics
-  clm_src_main/        # State containers, global parameters
-  offline_driver/       # Tower-site forcing and site definitions
+src/clm_ml/
+  physics/      # the processes, pure functions on 0-based arrays  ← most contributions go here
+  step.py       # one time step of one patch (State + inputs + constants -> StepState)
+  state.py      # State, Diagnostics, PatchLayers
+  setup/        # every patch's constants and initial state (pure functions)
+  driver.py     # compiled chunks over all patches, output streams, checks, restarts
+  io/           # tower and CLM history readers, restarts (netCDF), legacy .out writer
+  run.py, model.py, config.py, params.py, outputs.py, cli.py
+data/           # CHATS7 forcing and the converted namelists (test and example data)
 tests/
+  clm_ml/              # unit tests
   fortran_validation/  # 160+ tests vs. Fortran golden values (REL_TOL=1e-9)
-  fortran_validation/golden_IO/  # Golden JSON reference data
+  regression/          # end-to-end runs against committed references
 ```
 
 ## Adding a Physics Module
 
-1. **Mirror the Fortran structure.** Create `src/multilayer_canopy/MyPhysicsMod.py`.
-2. **Add a module docstring** referencing the Fortran source:
-   ```python
-   """
-   JAX translation of Fortran module MyPhysics.
-   Mirrors Fortran subroutine ``my_physics_sub`` (lines 45-120 of
-   CLM-ml_v1/multilayer_canopy/MyPhysicsMod.F90).
-
-   Key differences from Fortran:
-   - DO loops → jax.vmap over layer indices
-   - INTENT(INOUT) arguments → function returns new state via ._replace()
-   """
-   ```
-3. **State management**: use NamedTuples; never mutate in-place; use `._replace()`.
-4. **Array indexing**: Fortran is 1-based; Python is 0-based. Snow layers go in
-   `array[0:nlevsno]`; soil layers in `array[nlevsno:]`.
-5. **64-bit precision**: JAX defaults to 32-bit. Ensure `jax.config.update("jax_enable_x64", True)` is called before any JAX operations (done automatically in test fixtures).
+1. **Write it by process** in `src/clm_ml/physics/`: pure functions on 0-based arrays
+   (layers from the ground up, leaves sunlit/shaded, bands visible/near-infrared); everything
+   read is an argument and everything changed is returned.
+2. **Name the Fortran source** in the docstring (`Fortran reference: MLFooMod.F90::Bar`).
+3. **Masks, not loops:** compute on every layer slot and keep results with the masks of
+   `clm_ml.physics.layers`; no Python loops over layers inside the step.
+4. **64-bit precision**: `clm_ml` enables float64; constants are Python floats.
 
 ## Writing Tests
 
 Test files mirror the source tree:
-`src/multilayer_canopy/MyPhysicsMod.py` → `tests/multilayer_canopy/test_MyPhysicsMod.py`
+`src/clm_ml/physics/foo.py` → `tests/clm_ml/test_physics_foo.py`
 
 For Fortran validation tests, capture golden I/O from the Fortran build and add a JSON file to `tests/fortran_validation/golden_IO/`, then add a parametrized case in `tests/fortran_validation/test_golden_jax.py`.
 
@@ -67,8 +62,8 @@ pytest tests/fortran_validation/ -m "not slow" -q
 ## Code Style
 
 ```bash
-black --line-length 100 src/ tests/   # auto-format
-ruff check src/ tests/                # linting
+black --line-length 100 src/ tests/ timing/   # auto-format
+ruff check src/ tests/ timing/                # linting
 ```
 
 Both are enforced in CI on every pull request.

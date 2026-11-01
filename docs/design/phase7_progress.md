@@ -425,6 +425,18 @@ qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs   # GPU gradient job (develop 
   bit-for-bit + noise twin, `test_patch_exclusion` 180 pass; CPU gradient tier 8 pass
   (6.0 min). **Package 7.5 done.**
 
+### 7.6 Cleanup (2026-11-01)
+
+- **7.6a, outputs from the step state, reference in the new names, data out of `src/`
+  (C33, C34).** `outputs.step_fields`/`_Raw` 0-based; validation fields
+  `diagnostics.*`/`state.*`/`layers.*`; reference re-recorded in those names (values equal
+  to the old reference's 88 legacy fields at every step, checked before re-recording);
+  `clm_ml.legacy` removed (`io/namelist.py`; legacy layout only in the `.out` writer, whose
+  files are byte-identical); `data/input_files`, `data/namelists`; one `pyproject.toml`;
+  stale docstrings, README, CONTRIBUTING, CLAUDE.md updated. Tests: lint; `tests/clm_ml` +
+  fast golden 370 pass; all of `tests/regression` 214 pass + the grid thin-layer test after
+  its field names were updated (18.6 min).
+
 ## Next (resume here)
 
 **Package 7.2 done (2026-10-31; sessions 1-11, processes 1-10d, package-end tests,

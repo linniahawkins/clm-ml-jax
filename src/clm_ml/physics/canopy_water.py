@@ -8,8 +8,7 @@ canopy and the padding) get 0 or keep their water, as in Fortran.
 Fortran reference: CLM-ml v2 ``MLCanopyWaterMod.F90``.
 
 Reads and writes are the arguments and results; ``Reads``/``Writes`` in the docstrings name
-the legacy container fields they come from and go to (through the adapters in
-``clm_ml.legacy.canopy_water`` until the containers leave the step, Phase 7.2 process 10).
+the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations

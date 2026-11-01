@@ -13,8 +13,7 @@ Fortran reference: CLM-ml v2 ``clmDataMod.F90::clmData``, ``SurfaceAlbedoMod.F90
 ``SoilWaterMovementMod.F90::soilwater_moisture_form``/``compute_hydraulic_properties``.
 
 Each function's reads and writes are its arguments and results; ``Reads``/``Writes`` in the
-docstrings name the legacy container fields they come from and go to (through the adapters in
-``clm_ml.legacy.soil`` until the containers leave the step, Phase 7.2 process 10).
+docstrings name the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations

@@ -4,10 +4,10 @@ A run: the contents of ``run.yaml`` and everything it references, loaded and val
 ``run.yaml`` replaces the Fortran namelist. It names the model and params files, the
 towers, the dates, the forcing files, the initial conditions and the output.
 
-``Run.execute()`` runs the legacy (Fortran-translated) physics in a separate process
-(:mod:`clm_ml.legacy.worker`). A run holds any number of towers (gridcells) and patches
-(Phase 6): every patch is set up as a one-patch legacy tower, and the time steps run batched
-over the patches in one compiled program, with one clock for all gridcells (decision 24).
+``Run.execute()`` sets the run up (``clm_ml.setup``) and runs it in this process
+(``clm_ml.driver``; Phase 7.4). A run holds any number of towers (gridcells) and patches
+(Phase 6); the time steps run batched over the patches in one compiled program, with one
+clock for all gridcells (decision 24).
 """
 
 from __future__ import annotations
@@ -219,7 +219,7 @@ class Run:
     start: dt.datetime
     n_steps: int
     source: str = "run.yaml"
-    path_: Optional[Path] = None  # run.yaml itself (grid runs: the worker reloads it)
+    path_: Optional[Path] = None  # run.yaml itself
     overrides: tuple = ()
 
     @property
@@ -374,7 +374,7 @@ class Run:
             from clm_ml.io import legacy as legacy_io
 
             streams.append(StreamSpec("_legacy_ascii", "step", "instantaneous",
-                                      legacy_io.VARIABLES))  # fmt: skip
+                                      legacy_io._variables()))  # fmt: skip
             levels.append(("patch",))
             interpolation = self.run_file.forcing.meteorology.interpolation
             ascii_writer = legacy_io.LegacyAsciiWriter(
@@ -387,7 +387,7 @@ class Run:
         def on_records(i, records):
             if i == len(keys):  # the legacy ASCII stream: patch 0, legacy patch axis
                 for key, _end, values in records:
-                    fields = {k: np.asarray(v)[0:1] for k, v in values.items()}
+                    fields = {k: np.asarray(v)[0] for k, v in values.items()}  # patch 0
                     ascii_writer.write(sim.time_of(int(key)).calday, fields)
                 return
             if writers is not None:
@@ -762,11 +762,10 @@ def _check_supported(run_file: RunFile, source: str) -> None:
         raise ConfigError(f"{source}: output.streams: stream names must be unique ({names})")
     if not names:
         raise ConfigError(f"{source}: output.streams: at least one stream is needed")
-    from clm_ml.legacy.view import FIELDS
-    from clm_ml.outputs import VARIABLES_BY_NAME
+    from clm_ml.outputs import VARIABLES_BY_NAME, field_names
 
-    # raw legacy fields (validation): those of the legacy view, "mlcanopy.<field>" etc.
-    raw = {f"{c}.{f}" for c, f in FIELDS}
+    # raw step fields (validation): "diagnostics.<name>", "state.<name>", "layers.<name>"
+    raw = set(field_names())
     for st in run_file.output.streams:
         unknown = [
             v for v in st.variables

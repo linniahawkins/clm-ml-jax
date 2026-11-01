@@ -2,7 +2,7 @@
 Named outputs and output files of the shared regression run (Phase 1 acceptance).
 
 The run itself is compared with the reference in ``test_end_to_end_regression.py``; this
-checks that the named outputs (stream ``step``) agree with the raw legacy fields (validation
+checks that the named outputs (stream ``step``) agree with the raw step fields (validation
 stream ``fields``) and that the netCDF and legacy ASCII files are written.
 """
 
@@ -14,16 +14,16 @@ import pytest
 pytestmark = pytest.mark.regression
 
 
-def test_named_outputs_match_legacy_fields(current):
+def test_named_outputs_match_step_fields(current):
     _, streams, _ = current
     outputs, raw = streams["step"], streams["fields"].raw
     np.testing.assert_array_equal(
-        outputs.latent_heat_flux, raw["mlcanopy.lhflx_canopy"].astype(float)
+        outputs.latent_heat_flux, raw["diagnostics.lhflx_canopy"].astype(float)
     )
-    np.testing.assert_array_equal(outputs.gpp, raw["mlcanopy.gppveg_canopy"].astype(float))
-    ncan = int(raw["mlcanopy.ncan_canopy"][0, 0])
+    np.testing.assert_array_equal(outputs.gpp, raw["diagnostics.gppveg_canopy"].astype(float))
+    ncan = int(raw["layers.n_layers"][0, 0])
     profile = outputs.air_temperature[0, 0]
-    np.testing.assert_array_equal(profile[:ncan], raw["mlcanopy.tair_profile"][0, 0, 1 : ncan + 1])
+    np.testing.assert_array_equal(profile[:ncan], raw["state.air_temperature"][0, 0, :ncan])
     assert np.isnan(profile[ncan:]).all()  # padding above the 46 real layers
 
 

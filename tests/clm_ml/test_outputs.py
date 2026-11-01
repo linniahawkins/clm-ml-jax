@@ -1,4 +1,4 @@
-"""Named outputs and netCDF writing, built from the Phase 0 reference fields (no model run)."""
+"""Named outputs and netCDF writing, built from the reference's step fields (no model run)."""
 
 import numpy as np
 import pytest
@@ -13,14 +13,23 @@ REFERENCE = PROJECT_ROOT / "tests" / "regression" / "reference" / "CHATS7_50step
 
 @pytest.fixture
 def outputs(chats_run_dir):
+    """The named variables of the reference's step fields (as a run's step stream)."""
+    import datetime as dt
+
+    from clm_ml.outputs import _Raw, domain_meta
+
     with np.load(REFERENCE) as data:
         raw = {k: data[k] for k in data.files if not k.startswith("meta.")}
-    n_steps = raw["mlcanopy.ncan_canopy"].shape[0]
-    # Fields the worker adds that the Phase 0 reference does not record:
-    raw["derived.latvap_tref"] = np.full((n_steps, 1), 44000.0)  # J/mol, roughly
-    raw["static.nlevgrnd"] = np.asarray(25)
-    raw["static.soil_depth"] = np.linspace(0, 10, 37)[None, :]
-    return Outputs.from_legacy(raw, load_run(chats_run_dir / "run.yaml"))
+    run = load_run(chats_run_dir / "run.yaml")
+    r = _Raw(raw, run.config.canopy_layers.max_layers)
+    n_steps = raw["layers.n_layers"].shape[0]
+    step = dt.timedelta(seconds=run.step_seconds)
+    records = {v.name: np.asarray(v.compute(r), dtype=float) for v in VARIABLES}
+    records["time"] = np.array([run.start + (k + 1) * step for k in range(n_steps)],
+                               "datetime64[ns]")  # fmt: skip
+    records["soil_temperature"] = raw["state.soil_temperature"]
+    meta = dict(domain_meta(run.domain), soil_depth=np.linspace(0, 10, 25)[None, :])
+    return Outputs.from_records(records, meta)
 
 
 def test_every_variable_has_expected_shape(outputs):

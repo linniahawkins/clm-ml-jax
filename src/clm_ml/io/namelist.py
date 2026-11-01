@@ -2,7 +2,7 @@
 Convert a Fortran-style ``clmML_inparm`` namelist into ``run.yaml`` + ``model.yaml``.
 
 Used by ``clm-ml convert``. Paths in the namelist are interpreted the way
-``clm-ml-offline`` does (``../input_files/...`` relative to ``src/offline_executable``) and
+the legacy driver did (``../input_files/...`` relative to ``data/namelists``) and
 written relative to the output directory.
 """
 
@@ -16,12 +16,13 @@ import yaml
 
 from clm_ml.io.yaml_schema import ConfigError
 
-_SRC_DIR = Path(__file__).resolve().parents[2]
+#: The repository's data directory (the CHATS7 namelists' ``../input_files``)
+_DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
 
 def _resolve_legacy_path(raw: str, namelist_dir: Path) -> Path | None:
-    """Same search order as ``offline_executable.main._resolve_path``: as given,
-    relative to the namelist, then with leading ``../`` stripped under ``src/``."""
+    """The legacy driver's search order: as given, relative to the namelist, then with
+    leading ``../`` stripped under the repository's ``data/``."""
     raw = raw.strip()
     if not raw:
         return None
@@ -32,7 +33,7 @@ def _resolve_legacy_path(raw: str, namelist_dir: Path) -> Path | None:
     parts = p.parts
     while parts and parts[0] == "..":
         parts = parts[1:]
-    candidate = _SRC_DIR / Path(*parts)
+    candidate = _DATA_DIR / Path(*parts)
     return candidate.resolve() if candidate.exists() else (namelist_dir / p).resolve()
 
 

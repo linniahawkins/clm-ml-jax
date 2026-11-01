@@ -20,7 +20,7 @@ from clm_ml.io.tower import (  # noqa: E402
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-TOWER_FILE = ROOT / "src" / "input_files" / "tower-forcing" / "CHATS7" / "2007-05.nc"
+TOWER_FILE = ROOT / "data" / "input_files" / "tower-forcing" / "CHATS7" / "2007-05.nc"
 
 
 def _split(path: Path, out_dir: Path, records_per_file: int, skip=()) -> list:

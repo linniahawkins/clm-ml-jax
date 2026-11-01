@@ -46,7 +46,7 @@ import yaml
 import numpy as np
 from clm_ml.model import Model
 from clm_ml import output_streams as S
-from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.run import load_run
 
 site_b = {site_b!r}
@@ -102,7 +102,7 @@ print("RESULT" + json.dumps(result))
 def _run(alone: bool) -> dict:
     script = SCRIPT.format(
         src=str(ROOT / "src"),
-        namelist=str(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day"),
+        namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.1day"),
         towers=str(ROOT / "src" / "clm_ml" / "data" / "towers.yaml"),
         site_b=SITE_B,
         alone=alone,

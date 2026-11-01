@@ -39,7 +39,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-NAMELIST = SRC_DIR / "offline_executable" / "nl.CHATS7.1day"
+NAMELIST = PROJECT_ROOT / "data" / "namelists" / "nl.CHATS7.1day"
 
 
 # -----------------------------------------------------------------------
@@ -55,7 +55,7 @@ def _build_initialized_model():
 
     from clm_ml import driver as D
     from clm_ml import step as S
-    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.io.namelist import convert_namelist
     from clm_ml.model import Model
     from clm_ml.run import load_run
 

@@ -1,9 +1,10 @@
 """
 Model output: named variables with units, per patch and per gridcell.
 
-:meth:`Outputs.from_legacy` turns the fields recorded from the legacy driver into the
-variables below. Each variable says which legacy ``.out`` file column it corresponds to,
-so results can be compared with earlier runs and with the Fortran model.
+The variables below are computed from a step's results (:func:`step_fields`: the 0-based
+diagnostics, prognostic state and layer grid; Phase 7.6) inside the compiled chunk, where
+output streams accumulate them. Each variable says which legacy ``.out`` file column it
+corresponds to, so results can be compared with earlier runs and with the Fortran model.
 
 Dimensions: ``time``, ``patch``, ``layer`` (canopy-air layers, bottom first, padded to
 ``max_layers`` with NaN), ``leaf_class`` (sunlit, shaded), ``leaf_group`` (canopy total,
@@ -35,10 +36,46 @@ class VariableSpec:
     compute: Callable[["_Raw"], np.ndarray]  # -> (time, patch, *dims)
 
 
-class _Raw:
-    """Recorded legacy fields, with helpers for slicing profiles to the layer axis.
+def step_fields(step, layers) -> dict:
+    """One patch's step results as named 0-based fields: ``diagnostics.<name>``
+    (:class:`clm_ml.state.Diagnostics`, CLM-ml names), ``state.<name>`` (the prognostic
+    state; ``state.soil_temperature``) and ``layers.<name>`` (:class:`clm_ml.state.
+    PatchLayers`). These are the raw fields a validation stream can name and the regression
+    reference records."""
+    out = {f"diagnostics.{n}": v for n, v in step.diagnostics._asdict().items()
+           if n != "balance_error"}  # fmt: skip
+    out.update({f"state.{n}": v for n, v in step.state.canopy._asdict().items()})
+    out["state.soil_temperature"] = step.state.soil.temperature
+    out.update({f"layers.{n}": getattr(layers, n) for n in layers._fields})
+    return out
 
-    ``xp`` is the array module: ``numpy`` for recorded runs, or ``jax.numpy`` inside a
+
+def field_names() -> tuple:
+    """The names :func:`step_fields` gives."""
+    from clm_ml.state import CanopyState, Diagnostics, PatchLayers
+
+    return (
+        tuple(f"diagnostics.{n}" for n in Diagnostics._fields if n != "balance_error")
+        + tuple(f"state.{n}" for n in CanopyState._fields)
+        + ("state.soil_temperature",)
+        + tuple(f"layers.{n}" for n in PatchLayers._fields)
+    )
+
+
+#: Fields the variables name by their CLM-ml names besides the diagnostics
+_ALIASES = {"tair_profile": "state.air_temperature", "eair_profile": "state.vapor_pressure",
+            "zs_profile": "layers.zs", "dz_profile": "layers.dz", "zw_profile": "layers.zw"}  # fmt: skip
+#: Fields on the level axis (the ground, then the top of each layer): the variables take
+#: the layers' tops
+_LEVEL = {"zw_profile", "lwdwn_profile", "lwupw_profile", "swbeam_profile", "swdwn_profile",
+          "swupw_profile"}  # fmt: skip
+
+
+class _Raw:
+    """Step fields (:func:`step_fields`, leading axes (time, patch)), with helpers for
+    slicing profiles to the layers in use.
+
+    ``xp`` is the array module: ``numpy`` for recorded fields, or ``jax.numpy`` inside a
     compiled chunk (output streams accumulate the variables during the scan). The variable
     definitions below use ``r.xp``, so each is written once for both."""
 
@@ -46,28 +83,30 @@ class _Raw:
         self.raw = raw
         self.max_layers = max_layers
         self.xp = xp
-        self.ncan = raw["mlcanopy.ncan_canopy"].astype(int)  # (nt, np)
-        self.ntop = raw["mlcanopy.ntop_canopy"].astype(int)
+        self.ncan = raw["layers.n_layers"].astype(int)  # (nt, np)
+        self.ntop = raw["layers.n_within"].astype(int)
+        self.first_leafy = raw["layers.first_leafy"].astype(int)
 
     def __getitem__(self, name: str) -> np.ndarray:
-        return self.raw[f"mlcanopy.{name}"]
+        value = self.raw[_ALIASES.get(name, f"diagnostics.{name}")]
+        return value[:, :, 1:] if name in _LEVEL else value
 
     def layer(self, values: np.ndarray, *, within_canopy_only: bool = False) -> np.ndarray:
-        """Legacy 1-based profile (nt, np, nlevmlcan+1, ...) -> (nt, np, max_layers, ...),
-        NaN above the top layer (or above the canopy, if ``within_canopy_only``)."""
+        """Profile (nt, np, max_layers, ...) with NaN above the top layer (or above the
+        canopy, if ``within_canopy_only``)."""
         xp = self.xp
-        out = xp.asarray(values[:, :, 1 : self.max_layers + 1], dtype=float)
+        out = xp.asarray(values[:, :, : self.max_layers], dtype=float)
         top = self.ntop if within_canopy_only else self.ncan
-        k = xp.arange(1, self.max_layers + 1)
-        invalid = k[None, None, :] > top[:, :, None]
+        k = xp.arange(self.max_layers)
+        invalid = k[None, None, :] >= top[:, :, None]
         invalid = invalid.reshape(invalid.shape + (1,) * (out.ndim - 3))
         return xp.where(invalid, xp.nan, out)
 
     def leaf(self, values: np.ndarray) -> np.ndarray:
-        """Legacy leaf profile (nt, np, nlev+1, nleaf+1) -> (nt, np, max_layers, 2),
-        NaN in layers without leaves. Legacy leaf index 1 = sunlit, 2 = shaded."""
+        """Leaf profile (nt, np, max_layers, 2: sunlit, shaded), NaN in layers without
+        leaves."""
         xp = self.xp
-        out = self.layer(values, within_canopy_only=True)[..., 1:3]
+        out = self.layer(values, within_canopy_only=True)
         has_leaf = self.layer(self["dpai_profile"], within_canopy_only=True) > 0  # NaN -> False
         return xp.where(has_leaf[..., None], out, xp.nan)
 
@@ -78,14 +117,12 @@ class _Raw:
         return self.xp.stack(parts, axis=-1)
 
     def at_layer(self, values: np.ndarray, index: np.ndarray) -> np.ndarray:
+        """``values`` (nt, np, layer) at the 0-based layer ``index`` (nt, np)."""
         return self.xp.take_along_axis(values, index[:, :, None], axis=2)[:, :, 0]
 
     def latvap_tref(self) -> np.ndarray:
-        """Molar latent heat of vaporization at the reference air temperature (J/mol),
-        clm_ml.physics.water_vapor.lat_vap (recorded by the legacy worker as derived.latvap_tref).
-        """
-        if "derived.latvap_tref" in self.raw:
-            return self.raw["derived.latvap_tref"]
+        """Molar latent heat of vaporization at the reference air temperature (J/mol), as
+        clm_ml.physics.water_vapor.lat_vap."""
         from clm_ml.physics.constants import hsub, hvap, mmh2o, tfrz
 
         t = self["tref_forcing"]
@@ -94,12 +131,14 @@ class _Raw:
 
 def _shortwave_up(r: _Raw) -> np.ndarray:
     sky = r["swskyb_forcing"] + r["swskyd_forcing"]
-    return (r["albcan_canopy"][..., 1:3] * sky[..., 1:3]).sum(axis=-1)
+    return (r["albcan_canopy"] * sky).sum(axis=-1)
 
 
 def _mid_layer(r: _Raw) -> np.ndarray:
-    nbot, ntop = r["nbot_canopy"].astype(int), r.ntop
-    return r.xp.maximum(1, nbot + (ntop - nbot + 1) // 2 - 1)
+    """The 0-based mid-canopy layer of the legacy aux.out (1-based ``max(1, nbot + (ntop -
+    nbot + 1) / 2 - 1)``)."""
+    nbot, ntop = r.first_leafy + 1, r.ntop
+    return r.xp.maximum(1, nbot + (ntop - nbot + 1) // 2 - 1) - 1
 
 
 def _specific_humidity(r: _Raw) -> np.ndarray:
@@ -129,7 +168,7 @@ VARIABLES: tuple[VariableSpec, ...] = (
     V("longwave_up", "W m-2", "Upward longwave radiation above the canopy", (), "flux.out col 9",
       lambda r: r["lwup_canopy"]),
     V("canopy_top_air_temperature", "K", "Air temperature at the canopy top layer", (),
-      "flux.out col 10", lambda r: r.at_layer(r["tair_profile"], r.ntop)),
+      "flux.out col 10", lambda r: r.at_layer(r["tair_profile"], r.ntop - 1)),
     V("ground_heat_flux", "W m-2", "Soil heat flux (positive into soil)", (), "flux.out col 11",
       lambda r: r["gsoi_soil"]),
     V("soil_net_radiation", "W m-2", "Net radiation at the soil surface", (), "flux.out col 12",
@@ -151,7 +190,7 @@ VARIABLES: tuple[VariableSpec, ...] = (
     V("solar_zenith_angle", "degree", "Solar zenith angle", (), "fsun.out col 1",
       lambda r: r.xp.degrees(r["solar_zen_forcing"])),
     V("incident_visible_radiation", "W m-2", "Incident visible solar radiation", (),
-      "fsun.out col 2", lambda r: r["swskyb_forcing"][..., 1] + r["swskyd_forcing"][..., 1]),
+      "fsun.out col 2", lambda r: r["swskyb_forcing"][..., 0] + r["swskyd_forcing"][..., 0]),
     V("leaf_area_index", "m2 m-2", "Leaf area index", (), "fsun.out col 3 (with sai)",
       lambda r: r["lai_canopy"]),
     V("stem_area_index", "m2 m-2", "Stem area index (prescribed + stem_area_added)", (),
@@ -164,7 +203,7 @@ VARIABLES: tuple[VariableSpec, ...] = (
       lambda r: r.xp.stack([r["laisun_canopy"], r["laisha_canopy"]], axis=-1)),
     V("absorbed_visible_radiation", "W m-2", "Visible radiation absorbed by vegetation",
       ("leaf_group",), "fsun.out cols 6-8",
-      lambda r: r.by_group("swveg_canopy", "swvegsun_canopy", "swvegsha_canopy", band=1)),
+      lambda r: r.by_group("swveg_canopy", "swvegsun_canopy", "swvegsha_canopy", band=0)),
     V("gpp_by_leaf_group", "umol CO2 m-2 s-1", "Gross primary production",
       ("leaf_group",), "fsun.out cols 9-11",
       lambda r: r.by_group("gppveg_canopy", "gppvegsun_canopy", "gppvegsha_canopy")),
@@ -194,11 +233,11 @@ VARIABLES: tuple[VariableSpec, ...] = (
       lambda r: r["btran_soil"]),
     V("top_leaf_specific_conductance", "mmol H2O m-2 s-1 MPa-1",
       "Leaf-specific conductance, canopy top layer", (), "aux.out col 2",
-      lambda r: r.at_layer(r["lsc_profile"], r.ntop)),
+      lambda r: r.at_layer(r["lsc_profile"], r.ntop - 1)),
     V("soil_water_potential", "MPa", "Weighted soil water potential", (), "aux.out col 3",
       lambda r: r["psis_soil"]),
     V("top_leaf_water_potential", "MPa", "Mean leaf water potential, canopy top layer", (),
-      "aux.out col 4", lambda r: r.at_layer(r["lwp_mean_profile"], r.ntop)),
+      "aux.out col 4", lambda r: r.at_layer(r["lwp_mean_profile"], r.ntop - 1)),
     V("mid_leaf_water_potential", "MPa", "Mean leaf water potential, mid-canopy layer", (),
       "aux.out col 5", lambda r: r.at_layer(r["lwp_mean_profile"], _mid_layer(r))),
     V("fraction_at_minimum_leaf_water_potential", "1",
@@ -233,13 +272,13 @@ VARIABLES: tuple[VariableSpec, ...] = (
     V("momentum_flux_profile", "m2 s-2", "Momentum flux at layer top", ("layer",),
       "fluxprofile.out col 5", lambda r: r.layer(r["mflx_profile"])),
     V("direct_shortwave_down_profile", "W m-2", "Direct beam solar radiation", ("layer", "band"),
-      "fluxprofile.out cols 6-7", lambda r: r.layer(r["swbeam_profile"])[..., 1:3]),
+      "fluxprofile.out cols 6-7", lambda r: r.layer(r["swbeam_profile"])),
     V("diffuse_shortwave_down_profile", "W m-2", "Downward diffuse solar radiation",
       ("layer", "band"), "fluxprofile.out cols 8-9",
-      lambda r: r.layer(r["swdwn_profile"])[..., 1:3]),
+      lambda r: r.layer(r["swdwn_profile"])),
     V("diffuse_shortwave_up_profile", "W m-2", "Upward diffuse solar radiation",
       ("layer", "band"), "fluxprofile.out cols 10-11",
-      lambda r: r.layer(r["swupw_profile"])[..., 1:3]),
+      lambda r: r.layer(r["swupw_profile"])),
     V("longwave_down_profile", "W m-2", "Downward longwave radiation (within canopy only)",
       ("layer",), "fluxprofile.out col 12 (0 above canopy there)",
       lambda r: r.layer(r["lwdwn_profile"], within_canopy_only=True)),
@@ -305,37 +344,11 @@ class Outputs:
         raise AttributeError(name)
 
     @classmethod
-    def from_legacy(cls, raw: Mapping[str, np.ndarray], run) -> "Outputs":
-        r = _Raw(raw, run.config.canopy_layers.max_layers)
-        data = {v.name: np.asarray(v.compute(r), dtype=float) for v in VARIABLES}
-
-        n_steps = raw["mlcanopy.ncan_canopy"].shape[0]
-        step = dt.timedelta(seconds=run.step_seconds)
-        time = np.array([run.start + (k + 1) * step for k in range(n_steps)], "datetime64[ns]")
-
-        # Soil layers 1..nlevgrnd (legacy arrays are 1-based in this dimension).
-        nlevgrnd = int(raw["static.nlevgrnd"])
-        soil = raw["temperature.t_soisno_col"][:, :, 1 : nlevgrnd + 1]
-        depth = raw["static.soil_depth"][:, 1 : nlevgrnd + 1]
-
-        d = run.domain
-        return cls(
-            data=data,
-            time=time,
-            patch_gridcell=d.patches.gridcell_index.copy(),
-            patch_weight=d.patches.weight.copy(),
-            patch_pft=tuple(PFT_NAMES[i] for i in d.patches.pft_index),
-            gridcell_names=d.gridcells.names,
-            soil_temperature=np.asarray(soil, dtype=float),
-            soil_depth=np.asarray(depth, dtype=float),
-            raw=dict(raw),
-        )
-
-    @classmethod
     def from_records(cls, records: Mapping[str, np.ndarray], meta: Mapping) -> "Outputs":
         """One output stream's records (``{"time": ..., variable: (record, patch, ...)}``).
         ``meta`` is :func:`domain_meta` plus ``soil_depth`` ``(patch, soil_layer)``. Raw
-        legacy fields (``mlcanopy.<field>``, validation) go to ``raw``."""
+        step fields (``diagnostics.<name>`` etc., validation; :func:`step_fields`) go to
+        ``raw``."""
         soil = records.get("soil_temperature")
         gridcell = "gridcell:"
         return cls(

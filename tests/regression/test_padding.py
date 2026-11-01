@@ -39,7 +39,7 @@ from pathlib import Path
 sys.path.insert(0, {src!r})
 import jax
 import numpy as np
-from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.run import load_run
 from clm_ml.model import Model
 from clm_ml.outputs import VARIABLES
@@ -75,7 +75,7 @@ def _run(gradient: bool, sizes=SIZES, separate: bool = False) -> dict:
     for group in [(size,) for size in sizes] if separate else [tuple(sizes)]:
         script = SCRIPT.format(
             src=str(ROOT / "src"),
-            namelist=str(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day"),
+            namelist=str(ROOT / "data" / "namelists" / "nl.CHATS7.1day"),
             sizes=group,
             gradient=gradient,
         )

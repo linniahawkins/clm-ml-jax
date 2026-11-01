@@ -20,8 +20,7 @@ chapters 11-12; Bonan et al. (2021) Agric. For. Meteorol. 306, 108435, supplemen
 (water stress).
 
 Reads and writes are the arguments and results; ``Reads``/``Writes`` in the docstrings name
-the legacy container fields they come from and go to (through the adapter in
-``clm_ml.legacy.photosynthesis`` until the containers leave the step, Phase 7.2 process 10).
+the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
 """
 
 from __future__ import annotations

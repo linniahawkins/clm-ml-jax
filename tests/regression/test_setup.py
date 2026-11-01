@@ -32,12 +32,12 @@ from pathlib import Path
 ROOT = Path({root!r}); sys.path.insert(0, str(ROOT / "src"))
 import numpy as np, yaml, jax
 jax.config.update("jax_enable_x64", True)
-from clm_ml.legacy.namelist import convert_namelist
+from clm_ml.io.namelist import convert_namelist
 from clm_ml.run import load_run
 from clm_ml.setup.patches import build_patches
 from clm_ml.setup.towers import gridcell_sources, first_values
 tmp = Path(tempfile.mkdtemp())
-convert_namelist(ROOT / "src/offline_executable/nl.CHATS7.1day", tmp)
+convert_namelist(ROOT / "data/namelists/nl.CHATS7.1day", tmp)
 base = yaml.safe_load((tmp / "run.yaml").read_text())
 chats = yaml.safe_load((ROOT / "src/clm_ml/data/towers.yaml").read_text())["CHATS7"]
 walnut = chats["patches"][0]

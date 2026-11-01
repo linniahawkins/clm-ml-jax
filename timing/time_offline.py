@@ -12,7 +12,7 @@ Results are printed and appended to ``timing/results.jsonl``.
 Usage::
 
     python timing/time_offline.py                      # CHATS7, 50 steps
-    python timing/time_offline.py --namelist src/offline_executable/nl.CHATS7.1day
+    python timing/time_offline.py --namelist data/namelists/nl.CHATS7.1day
     python timing/time_offline.py --cold-cache         # empty JAX compilation cache
 """
 
@@ -32,12 +32,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-DEFAULT_NAMELIST = SRC_DIR / "offline_executable" / "nl.CHATS7.50steps"
+DEFAULT_NAMELIST = PROJECT_ROOT / "data" / "namelists" / "nl.CHATS7.50steps"
 RESULTS_FILE = Path(__file__).resolve().parent / "results.jsonl"
 
 
 def run(namelist: Path, cold_cache: bool) -> dict:
-    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.io.namelist import convert_namelist
     from clm_ml.run import load_run
 
     with tempfile.TemporaryDirectory() as tmp:

@@ -22,7 +22,7 @@ import yaml
 pytestmark = pytest.mark.regression
 
 ROOT = Path(__file__).resolve().parents[2]
-HISTORY = ROOT / "src" / "input_files" / "clm5_0" / "CHATS7"
+HISTORY = ROOT / "data" / "input_files" / "clm5_0" / "CHATS7"
 HISTORY = next(HISTORY.glob("*.clm2.h1.*.nc"))
 VARIABLES = ["leaf_area_index", "stem_area_index", "latent_heat_flux", "sensible_heat_flux",
              "gpp", "soil_water_stress", "soil_water_potential"]  # fmt: skip
@@ -48,7 +48,7 @@ def _from_history(path: Path, names, records=slice(None)) -> None:
 def _daily_tower_files(out_dir: Path) -> list[str]:
     import netCDF4 as nc
 
-    tower = ROOT / "src" / "input_files" / "tower-forcing" / "CHATS7" / "2007-05.nc"
+    tower = ROOT / "data" / "input_files" / "tower-forcing" / "CHATS7" / "2007-05.nc"
     out_dir.mkdir()
     paths = []
     with nc.Dataset(tower) as src:
@@ -81,11 +81,11 @@ def _run(workdir: Path, forcing: dict):
     import sys
 
     sys.path.insert(0, str(ROOT / "src"))
-    from clm_ml.legacy.namelist import convert_namelist
+    from clm_ml.io.namelist import convert_namelist
     from clm_ml.run import load_run
 
     workdir.mkdir()
-    convert_namelist(ROOT / "src" / "offline_executable" / "nl.CHATS7.1day", workdir)
+    convert_namelist(ROOT / "data" / "namelists" / "nl.CHATS7.1day", workdir)
     run_yaml = workdir / "run.yaml"
     data = yaml.safe_load(run_yaml.read_text())
     for key, section in forcing.items():  # merge: keep e.g. soil_water.adjustment
