@@ -61,15 +61,16 @@ jobs:
       - name: Install package + dev dependencies
         run: pip install -e ".[dev]"
 
-      - name: Run 1-day CHATS7 simulation
+      - name: Run May 2007 CHATS7 simulation (Fortran acclimation, legacy .out files)
         run: |
-          cd src
-          clm-ml-offline ../input_files/nl.CHATS7.1day
-        timeout-minutes: 15
+          clm-ml convert data/namelists/nl.CHATS7.05.2007 -o $RUNNER_TEMP/may
+          clm-ml run $RUNNER_TEMP/may/run.yaml \
+            --set model.physics.acclimation_temperature=run_mean \
+            --set output.legacy_ascii=true --set output.directory=$RUNNER_TEMP/may/out
+        timeout-minutes: 30
 
-      - name: Run integration comparison
+      - name: Run Fortran comparison
         run: |
-          cd tests/integration
-          PYTHONPATH=${{ github.workspace }}:${{ github.workspace }}/src \
-            pytest test_fortran_python_comparison.py -v --tb=short
+          CLM_ML_COMPARE_DIR=$RUNNER_TEMP/may/out \
+            pytest tests/test_fortran_python_comparison.py -m slow -v --tb=short -o addopts=""
         timeout-minutes: 10

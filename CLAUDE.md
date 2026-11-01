@@ -29,9 +29,8 @@ Guidance for Claude (and other contributors) working in this repository.
   `/glade/work/linnia/ctsm5.4.004`; CLM-ml v1/v2 Fortran sources: see the progress log).
   Science changes are the maintainer's decision; record each as a decision (plan §0) and
   every open issue in `docs/design/global_input.md`.
-- **Resume here:** `docs/design/phase7_progress.md`, section "Next" (one session per work
-  package; end each session at a commit with "Next" updated; stop and report at the end of
-  each package).
+- **Resume here:** `docs/design/phase7_progress.md`, section "Next" (Phase 7 done; the
+  maintainer's review of Phase 7 and the start of Phase 8 come next).
 - **Phase 7 documents:** scope and the maintainer's decisions D1-D12
   (`docs/design/phase7_scope.md`); **log every decision you make** that the scope does not
   settle in `docs/design/phase7_decisions.md` (C1, C2, ...) in the same commit; removed state
@@ -189,7 +188,7 @@ tests/
   regression/          end-to-end runs against committed references
   test_fortran_python_comparison.py  end-to-end vs Fortran .out files (slow; 2.5% / r >= 0.9999)
   test_differentiability.py          jax.grad through one step (gradient tier)
-timing/                time_offline.py, time_model.py, time_vmap.py, time_global.py
+timing/                time_offline.py, time_model.py, time_vmap.py, time_global.py, time_program.py
 docs/design/           modernization plan, Phase 7 scope/progress/decisions, examples
 ```
 
@@ -386,7 +385,7 @@ The full plan is in **`docs/design/modernization_plan.md`**. The proposed API is
 | 5b | Mask-aware layers **in place** (same files, 1-based): one compiled step for any layer count (done; gradient padding test and GPU timing after Phase 6) |
 | 6 | Many patches and gridcells, **on Derecho (GPU)**: steps 0-6 (per-site data, batched patches, C3/C4 groups, devices, vectorized setup) done 2026-10-29; GPU optimization (step 1c) deferred; progress log `docs/design/phase6_progress.md` |
 | 6b | Real global input before Phase 7 (decisions 26-32): steps 1-6 done (grid loader, gridded forcing, setup, regional test), done 2026-10-30 (step 7 closed; review fixes, calendar decision 34); fixes: per-layer minimum plant area (30), no 0.05 LAI cutoff (31), canopy-top latent heat per sub-step (32); open issues in `global_input.md` |
-| 7 | Restructure (decision 35; `phase7_scope.md`): 7.0 preparation, 7.1 step state (0-based), 7.2 physics by process (`clm_ml/physics/`), 7.3 chunk forcing as 0-based arrays (forcing stays prepared on the host: decision 36), 7.4 setup without globals, 7.5 netCDF restarts, 7.6 cleanup. 7.0 and 7.1 done (2026-10-30), 7.2 done (2026-10-31); 7.3 next |
+| 7 | Restructure (decision 35; `phase7_scope.md`): 7.0 preparation, 7.1 step state (0-based), 7.2 physics by process (`clm_ml/physics/`), 7.3 chunk forcing as 0-based arrays (forcing prepared on the host: decision 36), 7.4 setup without globals (in-process runs), 7.5 netCDF restarts, 7.6 cleanup. **Done 2026-11-01** (`phase7_progress.md`; decisions C0-C34) |
 | 8 | Docs and release |
 
 Decisions 18–21 (after Phase 4b): Phase 5 converts to masks in place; masks rather than grouping

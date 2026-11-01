@@ -117,7 +117,13 @@ def convert_namelist(namelist_path: Path, out_dir: Path) -> dict[str, Path]:
         "forcing": forcing,
         "initial_conditions": {"source": "clm_history"},
         "output": {
-            "directory": rel(g.get("dirout", "output")) or "output",
+            # an absolute dirout is kept; a relative one (the CHATS7 namelists'
+            # ../output_files/) becomes "output" next to run.yaml, not inside the repository
+            "directory": (
+                str(g["dirout"]).strip()
+                if Path(str(g.get("dirout", "")).strip()).is_absolute()
+                else "output"
+            ),
             "streams": [{"name": "step", "frequency": "step", "variables": ["all"]}],
         },
     }

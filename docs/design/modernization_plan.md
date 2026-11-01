@@ -1822,6 +1822,14 @@ for Phase 7.
 **Done when:** `multilayer_canopy/` is no longer imported by the run path, `src/` contains only
 `clm_ml/`, restarts are netCDF, and all tests pass.
 
+**Phase 7 status: done (2026-11-01).** Work packages 7.0-7.6 as `phase7_scope.md` (decisions
+D1-D12, plan decision 36), log `phase7_progress.md`, Claude's decisions C0-C34 in
+`phase7_decisions.md`: the step is `clm_ml/physics/` processes on a 0-based `State`; the setup
+is pure functions (`clm_ml/setup/`); runs are in-process (`clm_ml/driver.py`); the chunk's
+forcing is 0-based arrays prepared on the host (decision 36); restarts are netCDF; `src/`
+holds only `clm_ml/` (example and test data in `data/`, not `examples/data/`); the
+Fortran-mirroring packages and `clm-ml-offline` are deleted.
+
 ### Phase 8: Documentation and release
 
 - A getting-started guide (YAML-first), a full reference for every YAML key (generated from the

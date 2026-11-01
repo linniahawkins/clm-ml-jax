@@ -2,9 +2,8 @@
 Run the CHATS7 reference case and record its output at full precision, with noise twins.
 
 The six legacy ``.out`` files hold 3 decimal places, too coarse to catch refactoring mistakes.
-This runs the case through ``clm_ml`` (the same driver as ``clm-ml-offline``; Phase 1 showed
-the two routes are bit-for-bit identical) and saves every field the output writer reads, as
-float64, at every time step.
+This runs the case through ``clm_ml`` (``Run.execute``) and saves every field of each step's
+results (``clm_ml.outputs.step_fields``), as float64, at every time step.
 
 It also records two **noise twins**: the same run with ``leaf_emissivity × (1 ± 1e-12)``. Their
 differences from the reference measure the model's own sensitivity to round-off, which the

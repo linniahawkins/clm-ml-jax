@@ -28,7 +28,7 @@ src/clm_ml/
   driver.py     # compiled chunks over all patches, output streams, checks, restarts
   io/           # tower and CLM history readers, restarts (netCDF), legacy .out writer
   run.py, model.py, config.py, params.py, outputs.py, cli.py
-data/           # CHATS7 forcing and the converted namelists (test and example data)
+data/           # CHATS7 forcing and the CLM-ml namelists (test and example data)
 tests/
   clm_ml/              # unit tests
   fortran_validation/  # 160+ tests vs. Fortran golden values (REL_TOL=1e-9)

@@ -1233,3 +1233,12 @@ clear error (`physics.solar_radiation.norman`, `physics.flux_profile.well_mixed`
 translations are in the git history at commit `1f1b651` for the fix after Phase 8 (the
 docstrings say where). **For the maintainer:** if D8 meant keeping the code in the tree,
 they can be restored as reference files (they would not run without porting).
+- **Review (independent, 7.6):** no correctness bugs (every output variable and the six `.out`
+  files reproduce the old code exactly on the recorded run, `met_type` 0 and 3; `clm-ml
+  convert` resolves the namelists' paths from `data/namelists` and elsewhere). Fixed stale
+  references: the weekly CI job ran `clm-ml-offline` (now `clm-ml convert` + `clm-ml run` of
+  May 2007 and the Fortran comparison); a converted namelist's relative `dirout` became a
+  directory inside the repository (now `output` next to run.yaml; an absolute `dirout` is
+  kept); the 1-day example's output path; the params/towers headers named the deleted
+  generator (these files are now the source of their values). Not changed: `lat.npy` at the
+  repository root (tracked since `b45bd9a`, Phase 6 review; looks stray: for the maintainer).

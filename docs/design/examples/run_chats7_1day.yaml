@@ -45,7 +45,7 @@ initial_conditions:
   restart_file: null
 
 output:                            # independent of forcing interval, model step and chunk
-  directory: ../../../src/output_files/   # was dirout
+  directory: output/   # was dirout
   streams:
     - name: halfhourly
       frequency: step              # step | hourly | daily | monthly | yearly
