@@ -62,7 +62,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O33 | ~~The `euler` tableau has `b = [0]` (trap for future code)~~ (closed: decision 94) | robustness | closed | I |
 | O71 | ~~Forward-mode gradients (`jax.jvp`, `jax.jacfwd`) fail: `tridiag_2eq` has a reverse-only custom rule~~ (closed: decision 104) | bug (gradients) | closed | I (approach agreed with M) |
 | O72 | ~~Environment now has JAX 0.10.2; the regression reference and the JAX workarounds are from 0.9.2~~ (closed: decision 105, keep 0.10.2) | testing / environment | closed | M |
-| O73 | The environment has no CUDA plugin: GPU jobs cannot see the GPUs | environment | now (maintainer: install) | M |
+| O73 | ~~The environment has no CUDA plugin: GPU jobs cannot see the GPUs~~ (closed: plugin 0.10.2 installed, `environment.yml`) | environment | closed | M |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
@@ -515,6 +515,9 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** found while testing O71 (2026-11-02).
 
 ### O73. No CUDA plugin in the environment
+- **Closed 2026-11-02:** `jax[cuda12]==0.10.2` installed (maintainer); pinned in `environment.yml`.
+  On nodes without a GPU, set `JAX_PLATFORMS=cpu` (the plugin otherwise prints a harmless
+  `CUDA_ERROR_NO_DEVICE` traceback at import).
 - **Kind:** environment · **Target:** now · **Decides:** M (install)
 - **What:** the rebuilt environment (`/glade/work/linnia/conda-envs/clm-ml-jax`, JAX 0.10.2)
   has `jax` and `jaxlib` only; the Phase 6 environment had the CUDA 12 plugin. Without it
@@ -761,7 +764,7 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 
 ## Recently closed (for reference, not open)
 
-- JAX 0.10.2 kept: regression reference re-recorded; CPU gradients with LLVM optimization on
+- JAX 0.10.2 kept, with its CUDA 12 plugin (O73, `environment.yml`): regression reference re-recorded; CPU gradients with LLVM optimization on
   (O25); compile crash not seen (O26) (O72; decision 105; 2026-11-02).
 
 - Forward-mode derivatives (`jax.jvp`, `jax.jacfwd`) through the model: `tridiag_2eq` as a

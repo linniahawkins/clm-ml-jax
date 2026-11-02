@@ -35,7 +35,10 @@ pip install -e .
 ```
 
 This installs JAX for the CPU. To run on an NVIDIA GPU, also install the CUDA build of JAX
-(`pip install -U "jax[cuda12]"`; see the [JAX install guide](https://docs.jax.dev/en/latest/installation.html)).
+(`pip install "jax[cuda12]==0.10.2"`, the version the model is tested with; see the
+[JAX install guide](https://docs.jax.dev/en/latest/installation.html)), or create the
+environment from `environment.yml`. With the CUDA build installed, set `JAX_PLATFORMS=cpu` on
+machines without a GPU (otherwise JAX prints a harmless CUDA error at start-up).
 For development (tests, linting) install the extras: `pip install -e ".[dev]"`.
 
 ---

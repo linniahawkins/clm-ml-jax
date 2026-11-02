@@ -225,7 +225,8 @@ docs/design/           plan, decisions.md, open_items.md, model_overview.md, pha
   validation streams can name these raw fields.
 - **JAX 0.10.2** (decision 105): the environment, the regression reference and the
   rechecks below. Another JAX version changes the last bits: bit for bit fails, the noise twin
-  must pass. The environment has no CUDA plugin yet (O73): GPU jobs need it.
+  must pass. The environment has the CUDA 12 plugin (`environment.yml`): on CPU-only nodes
+  (derecho1) set `JAX_PLATFORMS=cpu`, or JAX prints a harmless CUDA_ERROR_NO_DEVICE traceback.
 - **CPU gradients** (issue 16, O25): with JAX 0.9.2 they segfaulted in LLVM-optimized code
   and needed `--xla_backend_optimization_level=0`; with 0.10.2 they run with the default
   optimization (`tests/gradient_tier.py` only forces the CPU; the regression tests still
