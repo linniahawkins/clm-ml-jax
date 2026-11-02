@@ -23,7 +23,9 @@ import os as _os
 # during compilation (JAX 0.9.2 on Derecho, Phase 6; backtrace in llvm::orc
 # RTDyldObjectLinkingLayer::emit). One piece avoids it (5 of 5 compilations clean; without it
 # about half of the compilations of these programs crashed). XLA reads the flag when it
-# starts, so it is set on import, unless the user's XLA_FLAGS already choose it.
+# starts, so it is set on import, unless the user's XLA_FLAGS already choose it. With JAX
+# 0.10.2 the crash was not seen without the flag (5 of 5 cold compiles, decision 105); the flag
+# stays as a precaution.
 _SPLIT = "--xla_cpu_parallel_codegen_split_count=1"
 if "xla_cpu_parallel_codegen_split_count" not in _os.environ.get("XLA_FLAGS", ""):
     _os.environ["XLA_FLAGS"] = (_os.environ.get("XLA_FLAGS", "") + " " + _SPLIT).strip()

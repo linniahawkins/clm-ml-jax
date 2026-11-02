@@ -145,7 +145,7 @@ def update_reference() -> None:
     """Record the reference and both twins (three runs, in parallel processes)."""
     if "--xla_backend_optimization_level=0" in os.environ.get("XLA_FLAGS", ""):
         raise SystemExit(
-            "XLA_FLAGS sets --xla_backend_optimization_level=0 (the CPU gradient tier's flag), "
+            "XLA_FLAGS sets --xla_backend_optimization_level=0 (LLVM optimization off), "
             "which changes round-off; unset it to record the reference."
         )
     # The reference is recorded on CPU: JAX would otherwise use the GPUs of a Derecho login

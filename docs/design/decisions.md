@@ -840,7 +840,7 @@ step.
 Source: numerics §6.1; C0.
 
 **70. Gradient testing**
-2026-10-30 · Phase 7 · maintainer · in force · Departure from Fortran: no
+2026-10-30 · Phase 7 · maintainer · in force, revised by 105 (LLVM optimization on since JAX 0.10.2) · Departure from Fortran: no
 CPU gradient tests run with LLVM optimization off (`tests/gradient_tier.py`; the optimized CPU
 gradient segfaults, issue 16), after each move of a hand-written gradient and at package ends;
 a GPU gradient job (`jobs/grad_gpu.pbs`) at the end of a phase.
@@ -855,6 +855,19 @@ Fortran comparison (May 2007) must stay within 2.5 % per column with r ≥ 0.999
 `acclimation_temperature: run_mean`).
 Reason: they are the link to CLM-ml v2.
 Source: CLAUDE.md "Rules for changes"; Phase 4b.
+
+**105. JAX 0.10.2**
+2026-11-02 · after Phase 8 · maintainer · in force · Departure from Fortran: no
+The model is developed and tested with JAX 0.10.2 (the environment rebuilt on 2026-11-01).
+The regression reference and its noise twins are re-recorded with it (CPU, Derecho). Rechecked
+under 0.10.2 with cold compilation caches: CPU gradients run with LLVM optimization on (9 of 9
+gradient tests; O25 closed), so the gradient tier no longer turns it off; the mixed C3/C4
+grid-box chunk compiles without `--xla_cpu_parallel_codegen_split_count=1` (5 of 5; O26 closed),
+but the flag stays on import as a cheap precaution. The scatter rule of decision 64 is kept
+(not rechecked).
+Reason: the maintainer's choice (2026-11-02) over pinning 0.9.2; the bit-for-bit test needs a
+reference from the JAX version in use.
+Source: O72; maintainer, 2026-11-02.
 
 ## H. Outputs, restarts and runs
 

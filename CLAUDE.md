@@ -223,13 +223,17 @@ docs/design/           plan, decisions.md, open_items.md, model_overview.md, pha
 - **Output variables and the reference** are computed from a step's fields
   (`outputs.step_fields`: `diagnostics.<CLM-ml name>`, `state.<name>`, `layers.<name>`);
   validation streams can name these raw fields.
-- **XLA CPU gradient crash (issue 16, JAX 0.9.2):** running compiled CPU gradients
-  segfaults in LLVM-optimized code. Run CPU gradient tests with
-  `XLA_FLAGS="--xla_cpu_parallel_codegen_split_count=1 --xla_backend_optimization_level=0"`
-  (`tests/gradient_tier.py` sets it; the regression tests refuse to run with it).
-- **CPU compile crash (JAX 0.9.2):** large batched programs segfaulted intermittently while
+- **JAX 0.10.2** (decision 105): the environment, the regression reference and the
+  rechecks below. Another JAX version changes the last bits: bit for bit fails, the noise twin
+  must pass. The environment has no CUDA plugin yet (O73): GPU jobs need it.
+- **CPU gradients** (issue 16, O25): with JAX 0.9.2 they segfaulted in LLVM-optimized code
+  and needed `--xla_backend_optimization_level=0`; with 0.10.2 they run with the default
+  optimization (`tests/gradient_tier.py` only forces the CPU; the regression tests still
+  refuse that flag, which changes round-off).
+- **CPU compile crash (JAX 0.9.2, O26):** large batched programs segfaulted intermittently while
   compiling (LLVM JIT linker recursion); `clm_ml/__init__.py` sets
-  `XLA_FLAGS=--xla_cpu_parallel_codegen_split_count=1` on import unless already chosen.
+  `XLA_FLAGS=--xla_cpu_parallel_codegen_split_count=1` on import unless already chosen (kept as a
+  precaution: 5 of 5 cold compiles clean without it under 0.10.2).
 - **Never scatter into a scan's carry with array indices** (`.at[idx].set` inside the chunk's
   `lax.scan`): with JAX 0.9.2 on CPU it gave wrong states and intermittent segfaults. Patch
   groups are contiguous slices joined by concatenation.
@@ -267,7 +271,7 @@ python -m pytest tests/clm_ml tests/fortran_validation -m "not slow" -q   # unit
 python -m pytest tests/regression -m regression -q                    # all end-to-end regression tests (~20 min CPU)
 python -m pytest tests/regression/test_end_to_end_regression.py tests/regression/test_clm_ml_equivalence.py -m regression -q   # bit-for-bit + noise twin (~40 s)
 CLM_ML_COMPARE_DIR=<dir> python -m pytest tests/test_fortran_python_comparison.py -m slow -q   # vs Fortran output of configs/chats7_may2007_fortran
-python tests/gradient_tier.py [--focused]                  # CPU gradient tier (tests marked `gradient`, LLVM optimization off; issue 16)
+python tests/gradient_tier.py [--focused]                  # CPU gradient tier (tests marked `gradient`, ~7 min)
 qsub -v REV=<commit>,TAG=<name> jobs/grad_gpu.pbs          # GPU gradient tier (develop queue, warm GPU compile cache)
 
 python tests/regression/record_run.py --update-reference   # reference + 2 noise twins; only after intended or round-off-only changes; say so in the PR

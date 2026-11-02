@@ -51,8 +51,8 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O23 | ~~Authorship, citation and canonical repository~~ (closed: decision 97) | maintainer decision | closed | M |
 | O24 | Release logistics (decided: decision 98; `main` moved forward at the end of 8a, 1.0.0 tag at the end of Phase 9: decision 103) | maintainer decision | 8a (merge) / 9 (release) | M |
 | **3. Bugs and robustness** |||||
-| O25 | XLA CPU gradient crash (issue 16) | bug (upstream JAX) | known / recheck on JAX upgrade | I |
-| O26 | XLA CPU compile crash (LLVM linker recursion) | bug (upstream JAX) | known / recheck on JAX upgrade | I |
+| O25 | ~~XLA CPU gradient crash (issue 16)~~ (closed: decision 105, gone with JAX 0.10.2) | bug (upstream JAX) | closed | I |
+| O26 | ~~XLA CPU compile crash (LLVM linker recursion)~~ (closed: decision 105, not seen with JAX 0.10.2; flag kept) | bug (upstream JAX) | closed | I |
 | O27 | GPU: two fresh compiles can differ by ~1e-11 | bug (reproducibility) | after 8 (GPU work) | I |
 | O28 | A patch failing a check still enters its chunk's gridcell sums | robustness | after 8 (maintainer 2026-11-01) | M |
 | O29 | ~~Padding slots combine one gridcell's weather with another patch's data~~ (closed: decision 101) | robustness | closed | I |
@@ -61,7 +61,8 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O32 | `Model.chunks()` start at step 1 while runs chunk from step 0 | robustness (API) | after 8 (maintainer 2026-11-01) | M |
 | O33 | ~~The `euler` tableau has `b = [0]` (trap for future code)~~ (closed: decision 94) | robustness | closed | I |
 | O71 | ~~Forward-mode gradients (`jax.jvp`, `jax.jacfwd`) fail: `tridiag_2eq` has a reverse-only custom rule~~ (closed: decision 104) | bug (gradients) | closed | I (approach agreed with M) |
-| O72 | Environment now has JAX 0.10.2; the regression reference and the JAX workarounds are from 0.9.2 | testing / environment | now (maintainer) | M |
+| O72 | ~~Environment now has JAX 0.10.2; the regression reference and the JAX workarounds are from 0.9.2~~ (closed: decision 105, keep 0.10.2) | testing / environment | closed | M |
+| O73 | The environment has no CUDA plugin: GPU jobs cannot see the GPUs | environment | now (maintainer: install) | M |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
@@ -355,6 +356,8 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 ## 3. Bugs and robustness
 
 ### O25. XLA CPU gradient crash
+- **Closed 2026-11-02** (decision 105): with JAX 0.10.2 the gradient tier passes with LLVM
+  optimization on (9 of 9, cold compilation cache); `tests/gradient_tier.py` no longer turns it off.
 - **Kind:** bug (upstream, JAX 0.9.2) · **Target:** known; recheck at each JAX upgrade · **Decides:** I
 - **What:** running compiled CPU gradients segfaults in LLVM-optimized code. Workaround:
   CPU gradient tests with LLVM optimization off (`tests/gradient_tier.py`); GPU gradients
@@ -364,6 +367,8 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** `global_input.md` issue 16; D12; CLAUDE.md gotchas.
 
 ### O26. XLA CPU compile crash
+- **Closed 2026-11-02** (decision 105): with JAX 0.10.2 the mixed C3/C4 grid-box chunk (130
+  patches) compiled 5 of 5 times without the flag (cold caches); the flag stays as a precaution.
 - **Kind:** bug (upstream, JAX 0.9.2) · **Target:** known; recheck at JAX upgrade · **Decides:** I
 - **What:** large batched programs segfaulted while compiling (LLVM JIT linker recursion).
   Workaround: `clm_ml/__init__.py` sets `--xla_cpu_parallel_codegen_split_count=1`.
@@ -496,6 +501,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** maintainer request (2026-11-02, forward-mode sensitivity runs at CHATS).
 
 ### O72. JAX 0.10.2 in the environment; reference and workarounds from 0.9.2
+- **Closed 2026-11-02** (decision 105): keep 0.10.2; reference re-recorded; O25, O26 rechecked.
 - **Kind:** testing / environment · **Target:** now · **Decides:** M
 - **What:** the conda environment `/glade/work/linnia/conda-envs/clm-ml-jax` has JAX and
   jaxlib 0.10.2 (installed 2026-11-01 17:37), and Python 3.11. The regression reference
@@ -507,6 +513,16 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Next:** the maintainer decides: keep 0.10.2 (recheck O25/O26, then regenerate the
   reference with `record_run.py --update-reference`, in its own commit) or pin 0.9.2.
 - **Source:** found while testing O71 (2026-11-02).
+
+### O73. No CUDA plugin in the environment
+- **Kind:** environment · **Target:** now · **Decides:** M (install)
+- **What:** the rebuilt environment (`/glade/work/linnia/conda-envs/clm-ml-jax`, JAX 0.10.2)
+  has `jax` and `jaxlib` only; the Phase 6 environment had the CUDA 12 plugin. Without it
+  JAX sees only the CPU, so `jobs/grad_gpu.pbs`, `jobs/program_gpu.pbs` and GPU runs
+  (global grid, `execution.devices`) do not use the A100s.
+- **Next:** install the plugin matching JAX (`pip install "jax[cuda12]==0.10.2"`), then run
+  the GPU gradient tier (`jobs/grad_gpu.pbs`) once.
+- **Source:** found while closing O72 (2026-11-02).
 
 ## 4. Housekeeping and repository organization (8a)
 
@@ -744,6 +760,9 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 ---
 
 ## Recently closed (for reference, not open)
+
+- JAX 0.10.2 kept: regression reference re-recorded; CPU gradients with LLVM optimization on
+  (O25); compile crash not seen (O26) (O72; decision 105; 2026-11-02).
 
 - Forward-mode derivatives (`jax.jvp`, `jax.jacfwd`) through the model: `tridiag_2eq` as a
   `custom_linear_solve` (O71; decision 104; 2026-11-02).

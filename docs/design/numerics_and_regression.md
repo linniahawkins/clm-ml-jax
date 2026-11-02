@@ -300,9 +300,10 @@ The policy has two checks:
 3. The bit-for-bit test then guards the next refactors again.
 
 **Where the reference is recorded.** The last bits depend on the machine and the JAX version.
-Since Phase 6 (2026-10-28) the reference is recorded on NCAR Derecho (CPU, JAX 0.9.2);
-moving there from the laptop (JAX 0.6.2) changed 65 fields by ~1e-16 and passed the
-noise-twin test. On another machine or JAX version, rely on the noise-twin test and expect the
+Since Phase 6 (2026-10-28) the reference is recorded on NCAR Derecho (CPU), with JAX 0.9.2
+until 2026-11-02 and JAX 0.10.2 since (decision 105: 67 of 96 fields changed, by at most
+1.9e-9 relative; noise-twin test passed); moving there from the laptop (JAX 0.6.2) changed 65
+fields by ~1e-16 and passed the noise-twin test. On another machine or JAX version, rely on the noise-twin test and expect the
 bit-for-bit test to fail.
 
 **CPU only (Phase 7, decision C4 in `phase7_decisions.md`).** The Derecho login nodes have

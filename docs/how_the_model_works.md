@@ -309,8 +309,7 @@ of sensitivities to a few parameters or forcing directions (`jax.jacfwd` stacks 
 
 `run_chunk` is differentiable, in reverse and forward mode, with respect to the state, the
 forcing, the PFT parameters and the patch weights. Gradients through iterative solvers come from the implicit function
-theorem, so they never change the forward values. On the CPU, compiled gradients need the
-XLA flags set by `tests/gradient_tier.py` (a JAX 0.9.2 defect, open item O25).
+theorem, so they never change the forward values.
 
 ---
 
