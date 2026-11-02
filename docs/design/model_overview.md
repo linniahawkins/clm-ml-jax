@@ -243,7 +243,10 @@ weights (and, as inputs, the constants and psihat tables). `jax.grad` of a loss 
 gives per-PFT parameter gradients. Not differentiable: model.yaml options (static), the setup
 from domain.yaml/params read at setup (canopy height, beta profiles, root profile, soil
 texture → constants are differentiable only as given arrays), C3/C4. Iterative solvers use
-implicit-function gradients that do not change forward values.
+implicit-function gradients that do not change forward values. Forward mode (`jax.jvp`,
+`jax.jacfwd`) works too: the coupled flux-profile solve `tridiag_2eq` is a
+`jax.lax.custom_linear_solve` (decision 104), and the other solvers' gradients are
+mode-independent.
 
 ---
 

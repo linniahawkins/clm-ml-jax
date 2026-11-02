@@ -785,6 +785,21 @@ The model runs in float64 (data-center GPUs handle it; consumer GPUs are 30-60×
 Reason: Fortran double precision; a lower-precision option would need its own validation.
 Source: plan §8 7.
 
+**104. The coupled flux-profile solve differentiated as a linear solve (forward and reverse mode)**
+2026-11-02 · after Phase 8 · maintainer (option C of three) · in force · Departure from Fortran: no
+`tridiag_2eq` (the implicit air temperature and vapor solve) is written with
+`jax.lax.custom_linear_solve`: the solve is Fortran's block Thomas algorithm (forward values
+bit for bit), the transpose solve is the same algorithm on the transposed blocks (the former
+custom-VJP backward rule), and the derivatives with respect to the coefficients come from the
+operator `A x`. JAX then applies the implicit function theorem in either mode, so `jax.jvp`
+and `jax.jacfwd` run through a chunk as well as `jax.grad`.
+Reason: its reverse-only `custom_vjp` rule made forward-mode derivatives fail (O71); removing
+the rule would differentiate the elimination again (huge coefficients, NaN gradients), and a
+hand-written `custom_jvp` would change the reverse gradients' round-off and keep hand-derived
+calculus. Reverse gradients are unchanged (identical on a unit system and on the CHATS7 chunk);
+every other solver was already forward-mode safe (decision 59).
+Source: O71; maintainer, 2026-11-02.
+
 ## G. Regression and testing policy
 
 **66. Bit for bit for refactors, noise twin for round-off changes**

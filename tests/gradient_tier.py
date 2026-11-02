@@ -7,7 +7,7 @@ gradient tests only (the regression tests refuse to run with it). See
 ``docs/design/phase7_progress.md`` ("Testing in Phase 7")::
 
     python tests/gradient_tier.py            # all gradient tests (8, ~10 min on a login node)
-    python tests/gradient_tier.py --focused  # the chunk gradient test only (~5 min), after
+    python tests/gradient_tier.py --focused  # the chunk derivative tests only (~5 min), after
                                              # moving a routine with a hand-written gradient
 
 Extra arguments go to pytest. On GPU, run the same tests without this script
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CPU_GRADIENT_XLA_FLAGS = (
     "--xla_cpu_parallel_codegen_split_count=1 --xla_backend_optimization_level=0"
 )
-FOCUSED = "tests/test_model_api.py::test_model_chunk_gradient_matches_finite_difference"
+FOCUSED = "tests/test_model_api.py"  # the chunk derivative tests (reverse and forward mode)
 # Files holding the tests marked ``gradient`` (named, not collected from all of tests/: other
 # modules set legacy module globals at import)
 GRADIENT_FILES = ["tests/test_model_api.py", "tests/test_differentiability.py"]

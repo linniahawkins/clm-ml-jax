@@ -1,5 +1,6 @@
 """clm_ml.model.Model: a compiled chunk in this process, differentiable with respect to the
-parameters (checked against a finite difference). Slow: compiles a gradient."""
+parameters in reverse mode (``jax.grad``) and forward mode (``jax.jvp``; decision 104), both
+checked against a finite difference. Slow: compiles a gradient and a forward derivative."""
 
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import json, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, {src!r}); sys.path.insert(0, {root!r})
 import jax
+import jax.numpy as jnp
 from clm_ml.io.namelist import convert_namelist
 from clm_ml.experiment import load_experiment
 from clm_ml.model import Model
@@ -40,13 +42,18 @@ d = 1e-3 * params.vcmax25
 g = float((jax.grad(loss)(params).vcmax25 * d).sum())
 fd = (float(loss(params._replace(vcmax25=params.vcmax25 + d)))
       - float(loss(params._replace(vcmax25=params.vcmax25 - d)))) / 2
-print("RESULT" + json.dumps({{"grad": g, "fd": fd}}))
+# forward mode along the same direction (decision 104: tridiag_2eq through
+# custom_linear_solve; a custom_vjp rule refused jvp)
+tangent = jax.tree.map(jnp.zeros_like, params)._replace(vcmax25=d)
+_, jvp = jax.jvp(loss, (params,), (tangent,))
+print("RESULT" + json.dumps({{"grad": g, "fd": fd, "jvp": float(jvp)}}))
 """
 
 
-@pytest.mark.slow
-@pytest.mark.gradient
-def test_model_chunk_gradient_matches_finite_difference():
+@pytest.fixture(scope="module")
+def chunk_derivatives():
+    """d(mean latent heat over 8 steps) along a 0.1 % change of vcmax25: reverse mode,
+    forward mode and a centred finite difference (one subprocess, one model)."""
     script = SCRIPT.format(
         src=str(ROOT / "src"),
         root=str(ROOT),
@@ -55,6 +62,24 @@ def test_model_chunk_gradient_matches_finite_difference():
     run = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr[-3000:]
     line = next(ln for ln in run.stdout.splitlines() if ln.startswith("RESULT"))
-    result = json.loads(line[len("RESULT") :])
+    return json.loads(line[len("RESULT") :])
+
+
+@pytest.mark.slow
+@pytest.mark.gradient
+def test_model_chunk_gradient_matches_finite_difference(chunk_derivatives):
+    result = chunk_derivatives
     assert result["grad"] != 0.0
     assert abs(result["grad"] - result["fd"]) <= 0.05 * abs(result["fd"]), result
+
+
+@pytest.mark.slow
+@pytest.mark.gradient
+def test_model_chunk_forward_mode_matches_reverse_mode(chunk_derivatives):
+    """Forward and reverse mode differentiate the same compiled chunk: equal up to round-off
+    amplified through the model (~1e-8 relative on CHATS7), far below the finite difference's
+    error (~1 %)."""
+    result = chunk_derivatives
+    assert result["jvp"] != 0.0
+    assert abs(result["jvp"] - result["grad"]) <= 1e-6 * abs(result["grad"]), result
+    assert abs(result["jvp"] - result["fd"]) <= 0.05 * abs(result["fd"]), result

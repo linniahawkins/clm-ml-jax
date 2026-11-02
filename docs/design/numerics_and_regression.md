@@ -110,6 +110,14 @@ x = x0 - (step - stop_gradient(step))         # forward: exactly x0; gradient: t
 The forward value is exactly the solver's root, as in the running model. The gradient is
 unchanged.
 
+**Linear solves.** The coupled tridiagonal solve of the flux-profile solution (`tridiag_2eq`)
+is a `jax.lax.custom_linear_solve` (decision 104): the forward value is Fortran's block Thomas
+elimination; derivatives come from the implicit function theorem for `A x = d` (forward mode:
+`A dx = dd − dA x`; reverse mode: the transpose system `Aᵀ z = g`, solved by the same
+elimination, and `dL/dA = −z xᵀ`), never from differentiating the elimination (whose
+intermediate coefficients can be huge). Both `jax.grad` and `jax.jvp` therefore work. The
+other tridiagonal solves (longwave radiation, soil temperature) are differentiated directly.
+
 **Not applied (yet) to stomatal conductance and intercellular CO₂.** For these two, the running
 model itself uses the IFT helpers (`solve_gs_bisection` for WUE; `solve_ci` for
 Medlyn/Ball–Berry). So the Newton-shifted forward value *is* the validated

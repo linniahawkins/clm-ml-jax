@@ -204,32 +204,6 @@ def tridiag(a: Array, b: Array, c: Array, r: Array, min_pivot: float | None = No
 # ---------------------------------------------------------------------------
 
 
-def _tridiag_2eq_fwd(
-    a1: list[float],
-    b11: list[float],
-    b12: list[float],
-    c1: list[float],
-    d1: list[float],
-    a2: list[float],
-    b21: list[float],
-    b22: list[float],
-    c2: list[float],
-    d2: list[float],
-    n: int,
-) -> Tuple[list[float], list[float]]:
-    """Forward-pass implementation of the coupled 2-equation tridiagonal solver.
-
-    All arrays are **0-based** (indices 0..n-1).  Returns ``(t, q)`` solution
-    vectors.  Also used as the plain (non-differentiable) implementation via
-    the custom-VJP trampoline below.
-
-    Fortran reference: MLMathToolsMod.F90::tridiag_2eq.
-    """
-    t, q = _tridiag_2eq_solve(a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, n)
-    return t, q
-
-
-@jax.custom_vjp
 def tridiag_2eq(
     a1: list[float],
     b11: list[float],
@@ -242,7 +216,7 @@ def tridiag_2eq(
     c2: list[float],
     d2: list[float],
     n: int,
-) -> Tuple[list[float], list[float]]:
+) -> Tuple[Array, Array]:
     """
     Solve the coupled tridiagonal system for air temperature ``t`` and
     water vapour mole fraction ``q`` at each canopy layer.
@@ -257,12 +231,17 @@ def tridiag_2eq(
         a2(i)*q(i-1) + b21(i)*T(i) + b22(i)*q(i) + c2(i)*q(i+1) = d2(i)
 
     Solved by forward elimination to express each layer in terms of the
-    layer above, followed by back substitution from the top layer downward.
+    layer above, followed by back substitution from the top layer downward
+    (:func:`_tridiag_2eq_solve`, Fortran's arithmetic).
 
-    A **custom VJP** is registered so that the backward pass solves the
-    transpose system ``A^T λ = g`` directly rather than differentiating
-    through the potentially ill-conditioned forward elimination, which can
-    produce huge intermediate ``e``-coefficients and NaN gradients.
+    Derivatives come from ``jax.lax.custom_linear_solve`` (decision 104, open item O71),
+    not from differentiating the elimination, whose intermediate ``e``-coefficients can be
+    huge and give NaN gradients. For ``A x = d``, JAX applies the implicit function theorem:
+    forward mode solves ``A dx = dd - dA x`` with the same elimination; reverse mode solves
+    the transpose system ``A^T z = g`` (:func:`_tridiag_2eq_transpose_solve`, the same
+    algorithm on the transposed blocks) and forms ``dL/dd = z`` and ``dL/dA[i, j] = -z[i]
+    x[j]`` through the operator :func:`_tridiag_2eq_matvec`. Both modes therefore work
+    (``jax.grad``, ``jax.jvp``, ``jax.jacfwd``), and the forward value is the elimination's.
 
     All arrays are **0-based** (indices 0..n-1), matching the calling
     convention in ``ImplicitFluxProfileSolution``.
@@ -277,94 +256,55 @@ def tridiag_2eq(
     Returns:
         Tuple ``(t, q)`` of solution vectors, each of length ``n``, 0-indexed.
     """
-    t, q = _tridiag_2eq_fwd(a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, n)
-    return t, q
-
-
-def _tridiag_2eq_fwd_rule(a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, n):
-    """Forward rule for custom VJP: runs the solver and saves residuals."""
-    t, q = _tridiag_2eq_fwd(a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, n)
-    # Save the inputs and solution for the backward pass.
-    residuals = (a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, t, q)
-    return (t, q), residuals
-
-
-def _tridiag_2eq_bwd_rule(residuals, g):
-    """Backward rule: solve the transpose system A^T λ = g.
-
-    For the block-tridiagonal system A x = d with x = [t; q]:
-
-      Row i:  a1[i]*T[i-1] + [[b11,b12],[b21,b22]][i] * [T;q][i]
-                            + c1[i]*T[i+1] + c2[i]*q[i+1] = [d1;d2][i]
-
-    where lower-diag block at row i is diag(a1[i], a2[i]),
-    main block is [[b11, b12],[b21, b22]], upper block is diag(c1[i], c2[i]).
-
-    The transpose system A^T λ = g (same block size n) has:
-      - lower-diag block at row i  = diag(c1[i-1], c2[i-1])  (was upper of A)
-      - main block at row i         = [[b11[i], b21[i]], [b12[i], b22[i]]]  (transposed B)
-      - upper-diag block at row i   = diag(a1[i+1], a2[i+1])  (was lower of A)
-
-    We solve A^T λ = g using the same block Thomas algorithm applied to
-    this transposed system.  The solution λ = [z1; z2] satisfies:
-
-        dL/d(d1[i]) = z1[i],    dL/d(d2[i]) = z2[i]
-
-    Gradients w.r.t. matrix coefficients follow from the implicit function
-    theorem.  For A(θ)y = d(θ), the full VJP is λᵀ(∂d/∂θ − ∂A/∂θ · y),
-    so for each matrix entry:
-
-        dL/dA[i,j] = -λ[i] * y[j]
-
-    Expanded for the block structure (0-based index i, solution (t, q)):
-
-        dL/da1[i]  = -z1[i] * t[i-1]   (t[-1] = 0 by boundary)
-        dL/db11[i] = -z1[i] * t[i]
-        dL/db12[i] = -z1[i] * q[i]
-        dL/dc1[i]  = -z1[i] * t[i+1]   (t[n]  = 0 by boundary)
-        dL/da2[i]  = -z2[i] * q[i-1]   (q[-1] = 0 by boundary)
-        dL/db21[i] = -z2[i] * t[i]
-        dL/db22[i] = -z2[i] * q[i]
-        dL/dc2[i]  = -z2[i] * q[i+1]   (q[n]  = 0 by boundary)
-    """
-    a1, b11, b12, c1, d1, a2, b21, b22, c2, d2, _t, _q = residuals
-    g_t, g_q = g  # cotangents for t and q outputs (JAX arrays of length n)
-    a1, b11, b12, c1, a2, b21, b22, c2 = (
-        _as_array(x) for x in (a1, b11, b12, c1, a2, b21, b22, c2)
+    a1, b11, b12, c1, d1, a2, b21, b22, c2, d2 = (
+        _as_array(x) for x in (a1, b11, b12, c1, d1, a2, b21, b22, c2, d2)
     )
-    zero = jnp.zeros(1, dtype=a1.dtype)
-
-    # A^T block structure (0-based, row i):
-    #   lower: the (i-1, i) block of A = diag(c1[i-1], c2[i-1]); 0 in row 0
-    #   main:  B_i^T = [[b11[i], b21[i]], [b12[i], b22[i]]]
-    #   upper: the (i+1, i) block of A = diag(a1[i+1], a2[i+1]); 0 in row n-1
-    a1T, a2T = jnp.concatenate([zero, c1[:-1]]), jnp.concatenate([zero, c2[:-1]])
-    c1T, c2T = jnp.concatenate([a1[1:], zero]), jnp.concatenate([a2[1:], zero])
-
-    # Solve A^T λ = g with the same algorithm as the forward solve.
-    z1, z2 = _tridiag_2eq_solve(
-        a1T, b11, b21, c1T, _as_array(g_t), a2T, b12, b22, c2T, _as_array(g_q), None
+    coefficients = (a1, b11, b12, c1, a2, b21, b22, c2)
+    return jax.lax.custom_linear_solve(
+        functools.partial(_tridiag_2eq_matvec, coefficients),
+        (d1, d2),
+        solve=lambda _, d: _tridiag_2eq_solve(a1, b11, b12, c1, d[0], a2, b21, b22, c2, d[1], n),
+        transpose_solve=lambda _, g: _tridiag_2eq_transpose_solve(coefficients, g),
     )
 
-    # Gradients w.r.t. matrix coefficients: dL/dA[i,j] = -λ[i] * y[j], with y = (t, q)
-    # the primal solution and ghost values t[-1] = t[n] = q[-1] = q[n] = 0.
-    t, q = _as_array(_t), _as_array(_q)
-    t_prev, t_next = jnp.concatenate([zero, t[:-1]]), jnp.concatenate([t[1:], zero])
-    q_prev, q_next = jnp.concatenate([zero, q[:-1]]), jnp.concatenate([q[1:], zero])
 
-    # Cotangents must match the primal input pytree structure.
+def _shift_down(v):
+    """``v[i-1]`` at row ``i``, 0 in row 0 (no row below the ground)."""
+    return jnp.concatenate([jnp.zeros(1, dtype=v.dtype), v[:-1]])
+
+
+def _shift_up(v):
+    """``v[i+1]`` at row ``i``, 0 in the top row."""
+    return jnp.concatenate([v[1:], jnp.zeros(1, dtype=v.dtype)])
+
+
+def _tridiag_2eq_matvec(coefficients, x):
+    """The operator ``A x`` of :func:`tridiag_2eq` (left-hand sides of its two equations),
+    for ``x = (t, q)``; JAX differentiates it for the derivatives with respect to the
+    coefficients. ``a1[0]``, ``a2[0]`` and ``c1[-1]``, ``c2[-1]`` multiply 0."""
+    a1, b11, b12, c1, a2, b21, b22, c2 = coefficients
+    t, q = x
     return (
-        -z1 * t_prev,  # grad a1
-        -z1 * t,  # grad b11
-        -z1 * q,  # grad b12
-        -z1 * t_next,  # grad c1
-        z1,  # grad d1  =  λ_t
-        -z2 * q_prev,  # grad a2
-        -z2 * t,  # grad b21
-        -z2 * q,  # grad b22
-        -z2 * q_next,  # grad c2
-        z2,  # grad d2  =  λ_q
-        None,  # grad n (static int)
+        a1 * _shift_down(t) + b11 * t + b12 * q + c1 * _shift_up(t),
+        a2 * _shift_down(q) + b21 * t + b22 * q + c2 * _shift_up(q),
+    )
+
+
+def _tridiag_2eq_transpose_solve(coefficients, g):
+    """Solve ``A^T z = g`` for the reverse-mode derivative of :func:`tridiag_2eq`, with
+    the same block Thomas algorithm.
+
+    ``A`` is block tridiagonal with 2x2 blocks per row ``i`` (0-based): lower
+    ``diag(a1[i], a2[i])``, main ``[[b11, b12], [b21, b22]][i]``, upper
+    ``diag(c1[i], c2[i])``. ``A^T`` has the same structure with lower
+    ``diag(c1[i-1], c2[i-1])`` (0 in row 0), main ``[[b11, b21], [b12, b22]][i]`` and upper
+    ``diag(a1[i+1], a2[i+1])`` (0 in the top row).
+    """
+    a1, b11, b12, c1, a2, b21, b22, c2 = coefficients
+    a1T, a2T = _shift_down(c1), _shift_down(c2)
+    c1T, c2T = _shift_up(a1), _shift_up(a2)
+    return _tridiag_2eq_solve(
+        a1T, b11, b21, c1T, _as_array(g[0]), a2T, b12, b22, c2T, _as_array(g[1]), None
     )
 
 
@@ -436,9 +376,6 @@ def _tridiag_2eq_solve(
         reverse=True,
     )
     return jnp.concatenate([t, f1[-1:]]), jnp.concatenate([q, f2[-1:]])
-
-
-tridiag_2eq.defvjp(_tridiag_2eq_fwd_rule, _tridiag_2eq_bwd_rule)
 
 
 # ---------------------------------------------------------------------------

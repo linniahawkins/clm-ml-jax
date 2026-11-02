@@ -60,7 +60,8 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O31 | ~~netCDF read on a background thread while writing on the main thread~~ (closed: decision 100) | robustness | closed | I |
 | O32 | `Model.chunks()` start at step 1 while runs chunk from step 0 | robustness (API) | after 8 (maintainer 2026-11-01) | M |
 | O33 | ~~The `euler` tableau has `b = [0]` (trap for future code)~~ (closed: decision 94) | robustness | closed | I |
-| O71 | Forward-mode gradients (`jax.jvp`, `jax.jacfwd`) fail: `tridiag_2eq` has a reverse-only custom rule | bug (gradients) | now (branch `fix/o71-forward-mode`) | I (approach agreed with M) |
+| O71 | ~~Forward-mode gradients (`jax.jvp`, `jax.jacfwd`) fail: `tridiag_2eq` has a reverse-only custom rule~~ (closed: decision 104) | bug (gradients) | closed | I (approach agreed with M) |
+| O72 | Environment now has JAX 0.10.2; the regression reference and the JAX workarounds are from 0.9.2 | testing / environment | now (maintainer) | M |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
@@ -470,6 +471,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** C23 (a).
 
 ### O71. Forward-mode gradients fail
+- **Closed 2026-11-02** (decision 104; see "Recently closed").
 - **Kind:** bug (gradients) · **Target:** now, branch `fix/o71-forward-mode` · **Decides:** I
   (approach discussed with the maintainer, 2026-11-02)
 - **What:** `jax.jvp` / `jax.jacfwd` through `Model.run_chunk` stop with `TypeError: can't
@@ -492,6 +494,19 @@ The model as it is now: [`model_overview.md`](model_overview.md).
   (difference 0.0 on a unit system; same digits and speed on the chunk), forward mode
   equal to a dense solve to 3e-16, jvp/vjp dot-product test to 2e-16.
 - **Source:** maintainer request (2026-11-02, forward-mode sensitivity runs at CHATS).
+
+### O72. JAX 0.10.2 in the environment; reference and workarounds from 0.9.2
+- **Kind:** testing / environment · **Target:** now · **Decides:** M
+- **What:** the conda environment `/glade/work/linnia/conda-envs/clm-ml-jax` has JAX and
+  jaxlib 0.10.2 (installed 2026-11-01 17:37), and Python 3.11. The regression reference
+  (`tests/regression/reference/CHATS7_50steps.npz`) was recorded with JAX 0.9.2 (commit
+  dc7ac35). On `main`, unchanged code, the bit-for-bit test fails on 67 of 96 fields (largest
+  relative difference 1.9e-9, `diagnostics.shair_profile`); the noise-twin test passes on all
+  96. The JAX workarounds in CLAUDE.md and the code (O25 CPU gradient crash, O26 compile
+  crash, decision 64's scatter rule) were found with 0.9.2 and were not rechecked.
+- **Next:** the maintainer decides: keep 0.10.2 (recheck O25/O26, then regenerate the
+  reference with `record_run.py --update-reference`, in its own commit) or pin 0.9.2.
+- **Source:** found while testing O71 (2026-11-02).
 
 ## 4. Housekeeping and repository organization (8a)
 
@@ -729,6 +744,9 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 ---
 
 ## Recently closed (for reference, not open)
+
+- Forward-mode derivatives (`jax.jvp`, `jax.jacfwd`) through the model: `tridiag_2eq` as a
+  `custom_linear_solve` (O71; decision 104; 2026-11-02).
 
 - netCDF lock (O31; decision 100); padding slots (O29; 101); gridded streams cycle over
   their data years, a run can start in the first forcing year (O30 part; 102) (2026-11-01).

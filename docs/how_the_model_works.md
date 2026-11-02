@@ -285,8 +285,30 @@ def loss(p):
 grads = jax.grad(loss)(params)           # d(loss)/d(every PFT parameter)
 ```
 
-`run_chunk` is differentiable with respect to the state, the forcing, the PFT parameters and
-the patch weights. Gradients through iterative solvers come from the implicit function
+That is **reverse mode**: one number (here the mean latent heat flux) differentiated with
+respect to every parameter at once. **Forward mode** answers the opposite question: how every
+output, at every step, changes along one chosen direction (here a 1 % change of Vcmax25),
+in one run:
+
+```python
+import jax.numpy as jnp
+
+halfhourly = StreamSpec("hh", "step", "mean", ("latent_heat_flux", "gpp"))
+
+def outputs(p):
+    _, records = model.run_chunk(state, forcing, first, p, streams=[halfhourly])
+    return records["hh"]
+
+direction = jax.tree.map(jnp.zeros_like, params)._replace(vcmax25=0.01 * params.vcmax25)
+values, sensitivities = jax.jvp(outputs, (params,), (direction,))
+# sensitivities["latent_heat_flux"]: change of each half-hour's latent heat for +1 % Vcmax25
+```
+
+Use reverse mode for calibration (one loss, many parameters) and forward mode for time series
+of sensitivities to a few parameters or forcing directions (`jax.jacfwd` stacks several).
+
+`run_chunk` is differentiable, in reverse and forward mode, with respect to the state, the
+forcing, the PFT parameters and the patch weights. Gradients through iterative solvers come from the implicit function
 theorem, so they never change the forward values. On the CPU, compiled gradients need the
 XLA flags set by `tests/gradient_tier.py` (a JAX 0.9.2 defect, open item O25).
 
