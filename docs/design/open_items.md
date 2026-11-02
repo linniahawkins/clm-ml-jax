@@ -60,6 +60,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O31 | ~~netCDF read on a background thread while writing on the main thread~~ (closed: decision 100) | robustness | closed | I |
 | O32 | `Model.chunks()` start at step 1 while runs chunk from step 0 | robustness (API) | after 8 (maintainer 2026-11-01) | M |
 | O33 | ~~The `euler` tableau has `b = [0]` (trap for future code)~~ (closed: decision 94) | robustness | closed | I |
+| O71 | Forward-mode gradients (`jax.jvp`, `jax.jacfwd`) fail: `tridiag_2eq` has a reverse-only custom rule | bug (gradients) | now (branch `fix/o71-forward-mode`) | I (approach agreed with M) |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
@@ -467,6 +468,30 @@ The model as it is now: [`model_overview.md`](model_overview.md).
   right only because `canopy._stage` returns before calling it. A trap for future code.
 - **Next:** a correct tableau or an assertion.
 - **Source:** C23 (a).
+
+### O71. Forward-mode gradients fail
+- **Kind:** bug (gradients) · **Target:** now, branch `fix/o71-forward-mode` · **Decides:** I
+  (approach discussed with the maintainer, 2026-11-02)
+- **What:** `jax.jvp` / `jax.jacfwd` through `Model.run_chunk` stop with `TypeError: can't
+  apply forward-mode autodiff (jvp) to a custom_vjp function`. The only cause is the coupled
+  flux-profile solver `tridiag_2eq` (`src/clm_ml/processes/math.py`), which has a
+  hand-written reverse-mode rule (`jax.custom_vjp`; the transpose system solved with the
+  same block Thomas algorithm, to avoid differentiating through the elimination). Forward
+  mode gives the sensitivity of whole output time series to one parameter or forcing
+  direction in one run (reverse mode: one scalar with respect to everything).
+- **Diagnosis (2026-11-02, scratch probes, no code change):** every other solver is
+  forward-mode safe: the Obukhov secant, the WUE bisection, the ci secant and the roughness
+  bisection use `x0 - (step - stop_gradient(step))` (decision 59), and `tridiag` (longwave,
+  soil temperature) is differentiated directly. With `tridiag_2eq`'s rule removed, `jvp`
+  runs through a 24-step CHATS7 chunk and agrees with `grad` (1e-8 relative) and with a
+  centred finite difference (0.6 %, as `grad`).
+- **Next:** write `tridiag_2eq` with `jax.lax.custom_linear_solve` (forward solve: the
+  Fortran block Thomas algorithm, unchanged; transpose solve: today's backward rule;
+  the operator `A x` for the coefficient derivatives). Prototype: forward values bit for
+  bit (unit system and the CHATS7 chunk), reverse gradients identical to today's
+  (difference 0.0 on a unit system; same digits and speed on the chunk), forward mode
+  equal to a dense solve to 3e-16, jvp/vjp dot-product test to 2e-16.
+- **Source:** maintainer request (2026-11-02, forward-mode sensitivity runs at CHATS).
 
 ## 4. Housekeeping and repository organization (8a)
 
