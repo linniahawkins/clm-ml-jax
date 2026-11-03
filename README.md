@@ -78,8 +78,10 @@ ds.latent_heat_flux.isel(patch=0).plot()          # through the day
 ds.air_temperature.isel(patch=0, time=24)         # profile: one value per canopy layer
 ```
 
-The first run compiles the model (most of that minute); compiled programs are cached on disk,
-so later runs with the same settings start faster. Times are UTC, at the end of each output
+The first run compiles the model (most of that minute); compiled programs are cached on disk
+(in `$SCRATCH/jax_compile_cache` where `$SCRATCH` is defined, as on NCAR's machines, otherwise
+`~/.cache/jax_compile_cache`; set `JAX_COMPILATION_CACHE_DIR` to choose), so later runs with the
+same settings start faster. Times are UTC, at the end of each output
 interval. Canopy layers are numbered from the ground;
 slots above the top layer are NaN.
 

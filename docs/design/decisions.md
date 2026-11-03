@@ -1013,6 +1013,15 @@ Reason: padding combined one gridcell's weather with another patch's data and wa
 if real.
 Source: open_items O29; Phase 6 review R5.
 
+**106. The compilation cache on scratch by default**
+2026-11-02 · after Phase 8 · maintainer · in force · Departure from Fortran: no
+Without `JAX_COMPILATION_CACHE_DIR`, compiled programs are cached in `$SCRATCH/jax_compile_cache`
+when the system defines `$SCRATCH` (NCAR's machines), and in `~/.cache/jax_compile_cache`
+otherwise (`clm_ml.driver._default_cache_dir`).
+Reason: the cache grows to gigabytes (2.1 GB in the home directory by 2026-11-02) and filled
+the home quota; caches belong on scratch.
+Source: maintainer, 2026-11-02.
+
 ## J. Performance
 
 **87. GPU optimization after the modernization; no science-adjacent speed-ups**

@@ -13,7 +13,7 @@
 #
 # Warm cache: compiled GPU programs persist in CACHE (default below) between jobs, so an
 # unchanged program reloads in ~1 min instead of compiling for ~7 (scope §7 C). Keep CACHE
-# separate from the CPU cache (~/.cache/jax_compile_cache).
+# separate from the CPU cache ($SCRATCH/jax_compile_cache).
 set -u
 SCRATCH=${SCRATCH:-/glade/derecho/scratch/$USER}
 REPO=${REPO:-/glade/work/$USER/clm-ml-jax}

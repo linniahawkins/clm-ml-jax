@@ -37,13 +37,21 @@ from clm_ml.io.restart import read_restart, write_restart  # noqa: F401  (netCDF
 jax.config.update("jax_enable_x64", True)
 
 
+def _default_cache_dir() -> str:
+    """``$SCRATCH/jax_compile_cache`` where the system defines a scratch directory (NCAR's
+    machines do; the cache grows to gigabytes and home quotas are small, decision 106),
+    ``~/.cache/jax_compile_cache`` otherwise."""
+    scratch = os.environ.get("SCRATCH", "")
+    if scratch and os.path.isdir(scratch):
+        return os.path.join(scratch, "jax_compile_cache")
+    return os.path.expanduser("~/.cache/jax_compile_cache")
+
+
 def _setup_compilation_cache() -> None:
     """Every compiled program cached on disk (``JAX_COMPILATION_CACHE_DIR``, default
-    ``~/.cache/jax_compile_cache``; 2 GB with ``filelock``): a repeated run in a new process
-    is ~3x faster."""
-    cache = os.environ.get(
-        "JAX_COMPILATION_CACHE_DIR", os.path.expanduser("~/.cache/jax_compile_cache")
-    )
+    :func:`_default_cache_dir`; 2 GB with ``filelock``): a repeated run in a new process is
+    ~3x faster."""
+    cache = os.environ.get("JAX_COMPILATION_CACHE_DIR", _default_cache_dir())
     os.makedirs(cache, exist_ok=True)
     jax.config.update("jax_compilation_cache_dir", cache)
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)

@@ -242,8 +242,9 @@ docs/design/           plan, decisions.md, open_items.md, model_overview.md, pha
   uncacheable. Conservation checks are recorded in the step (`Diagnostics.balance_error`,
   `clm_ml.checks.BALANCE_CHECKS`) and checked on the host after each chunk.
 - **Compilation cache:** every compiled program is cached on disk
-  (`JAX_COMPILATION_CACHE_DIR`, default `~/.cache/jax_compile_cache`; set up by
-  `clm_ml.driver`).
+  (`JAX_COMPILATION_CACHE_DIR`, default `$SCRATCH/jax_compile_cache`, or
+  `~/.cache/jax_compile_cache` without `$SCRATCH`; set up by `clm_ml.driver`; decision 106).
+  Never delete anything in the maintainer's home directory (the old cache there included).
 - **C3/C4 is a static choice per group of patches** (decision 22), not per-patch data.
 - **Iterative solvers and padding:** compute on every layer slot, give padding the top
   layer's inputs (`processes.layers.pad_with_top`), keep results with masks; no Python loops
@@ -300,7 +301,7 @@ Python >= 3.10. CI tests 3.10 and 3.12.
   - before each commit: the bit-for-bit and noise-twin tests (one shared run, ~1 min), plus the
     changed feature's own end-to-end test;
   - at the end of a phase: all of `tests/regression` (~8 min) and the slow tests (~20 min).
-  Every compiled program goes into JAX's on-disk cache (`~/.cache/jax_compile_cache`), so a
+  Every compiled program goes into JAX's on-disk cache (`$SCRATCH/jax_compile_cache`), so a
   repeated run in a new process takes ~20 s; never add host callbacks (`jax.debug.callback`)
   to compiled code: they make the program uncacheable (record errors instead, §6.8 of the plan).
   New end-to-end tests simulate as little as needed (usually one day) in as few runs as possible.
