@@ -138,7 +138,7 @@ documentation later.
 Source: maintainer, 2026-11-01.
 
 **110. The global example is a case-setup script**
-2026-11-05 · after Phase 8 · maintainer · in force (revises 103's `examples/run_global.py`) · Departure from Fortran: no
+2026-11-05 · after Phase 8 · maintainer · revised by 112 (revises 103's `examples/run_global.py`) · Departure from Fortran: no
 `examples/run_global.py` reads as instructions for setting up a case: settings at the top
 (case folder under `$SCRATCH`, start, length, calendar, region, GPUs, chunk), then create
 the case from the compset, write the settings into its files (`Experiment.write_copy`), print
@@ -971,6 +971,19 @@ vegetated land (decision 28), not per m2 of land as in CLM: a total is
 per-m2-of-land basis for fluxes that bare ground does not have (e.g. GPP, transpiration).
 Reason: maps are how gridded results are read and compared with CLM history files; totals and
 the comparison with CLM need the vegetated fraction, which differs from CLM's land basis.
+Source: maintainer, 2026-11-05.
+
+**112. Derecho batch job with a new case; the global example only sets the case up**
+2026-11-05 · after Phase 8 · maintainer · in force (revises 110) · Departure from Fortran: no
+`new_experiment` (`clm-ml new`) takes the machine, the device (gpu or cpu), the number of
+devices (written to `run.execution.devices`), the account and the walltime. On machine
+`derecho` the account is required and the folder also gets `submit.pbs` (`clm_ml.batch`):
+a PBS job on the `main` queue (1-4 GPUs of one node, or a CPU node) running `clm-ml run` on
+the folder with the Python environment that created it, log in `run.log`. Other machines get
+no job script. `examples/run_global.py` only sets the case up (no `RUN_NOW`): the user submits
+it from the command line (`qsub CASE_DIR/submit.pbs`, or `clm-ml run CASE_DIR`).
+Reason: a global run needs a GPU batch job; writing it with the case, as CESM's case setup
+does, saves writing one by hand and keeps setup and running separate.
 Source: maintainer, 2026-11-05.
 
 ## I. Code architecture

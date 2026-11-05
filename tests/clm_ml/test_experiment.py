@@ -204,6 +204,32 @@ def test_new_from_a_compset(tmp_path, capsys):
         new_experiment(tmp_path / "x", "nope")
 
 
+def test_new_with_a_derecho_job_script(tmp_path):
+    """Decision 112: on Derecho the folder gets submit.pbs (GPUs, account); elsewhere none."""
+    from clm_ml.cli import main
+
+    folder = tmp_path / "gpu_case"
+    args = ["new", str(folder), "--from", "chats7_1day", "--machine", "derecho"]
+    assert main(args + ["--devices", "2", "--account", "ABCD0001"]) == 0
+    job = (folder / "submit.pbs").read_text()
+    assert "#PBS -A ABCD0001" in job and "ngpus=2" in job and "JAX_PLATFORMS=cuda" in job
+    assert f"clm-ml run {folder.resolve()}" in job
+    assert load_experiment(folder).run_file.execution.devices == 2
+    new_experiment(tmp_path / "cpu_case", "chats7_1day", machine="Derecho", device="cpu",
+                   account="ABCD0001")  # fmt: skip
+    assert "JAX_PLATFORMS=cpu" in (tmp_path / "cpu_case" / "submit.pbs").read_text()
+    new_experiment(tmp_path / "laptop", "chats7_1day", machine="laptop")
+    assert not (tmp_path / "laptop" / "submit.pbs").exists()
+    for kwargs, message in (
+        ({}, "account"),
+        ({"account": "A", "devices": 5}, "1 to 4 GPUs"),
+        ({"account": "A", "device": "cpu", "devices": 2}, "CPU run uses 1 device"),
+    ):
+        with pytest.raises(ConfigError, match=message):
+            new_experiment(tmp_path / "bad", "chats7_1day", machine="derecho", **kwargs)
+    assert not (tmp_path / "bad").exists()
+
+
 def test_upgrade_adds_missing_keys_and_keeps_values(chats_run_dir):
     def change(d):
         d["numerics"].pop("integrator")

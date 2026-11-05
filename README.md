@@ -109,12 +109,13 @@ clm-ml run chats7 --set params.broadleaf_deciduous_temperate_tree.vcmax25=100
 - **Your own tower:** copy a folder (`clm-ml new my_tower --from chats7_1day`), then edit
   `domain.yaml` (location, forcing height, soil, patches) and `run.yaml` (dates, forcing and
   CLM history files). `python examples/run_tower.py --folder my_tower` runs it.
-- **Global:** `examples/run_global.py` sets up and runs a case on the 1° CLM grid from the
+- **Global:** `examples/run_global.py` sets up a case on the 1° CLM grid from the
   compset `grid_1deg_2000` (CRUJRA forcing, CLM6 parameters; its input files are on NCAR's
-  Glade storage): edit the settings at its top (case folder, dates, region, GPUs) and run
-  `python examples/run_global.py`; `clm-ml run CASE_DIR` repeats the case. The whole globe
-  needs a GPU; a small region (e.g. `REGION = "{lat: [35, 40], lon: [-100, -95]}"`) runs on
-  a CPU.
+  Glade storage): edit the settings at its top (case folder, dates, region, machine, GPUs,
+  account) and run `python examples/run_global.py`. On Derecho the case folder gets a batch
+  job, submitted with `qsub CASE_DIR/submit.pbs`; elsewhere run `clm-ml run CASE_DIR`
+  (`clm-ml new --machine derecho --account ...` writes the same job). The whole globe needs
+  a GPU; a small region (e.g. `REGION = "{lat: [35, 40], lon: [-100, -95]}"`) runs on a CPU.
 - **Ready-made folders:** `configs/` (`configs/README.md`), including May 2007 set up for the
   comparison with the Fortran model.
 - **From a Fortran CLM-ml namelist:** `clm-ml convert data/namelists/nl.CHATS7.1day -o chats7/`.
