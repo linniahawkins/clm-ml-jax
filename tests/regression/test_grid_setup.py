@@ -36,14 +36,16 @@ needs_data = pytest.mark.skipif(
 def grid_run_files(tmp: Path, region: dict, start: str, days: float = 1, co2: dict | None = None,
                    output: dict | None = None) -> Path:  # fmt: skip
     """A small grid experiment folder (``tmp/grid``) from the grid_1deg_2000 preset: 10 + 10
-    canopy layers, CO2 constant (``co2``, default 383 ppm), hourly latent heat and GPP."""
+    canopy layers, CO2 constant (``co2``, default 383 ppm), hourly latent heat and GPP, Gregorian
+    calendar."""
     import sys
 
     sys.path.insert(0, str(ROOT))
     from tests.experiment_tools import make_experiment
 
     def run(d):
-        d["time"].update(start=start, length=f"{days} days")
+        # Gregorian (the preset's is noleap, decision 109): the tower runs compared with it
+        d["time"].update(start=start, length=f"{days} days", calendar="gregorian")
         d["forcing"]["gridded"]["co2"] = dict({"source": "constant"}, **(co2 or {"ppm": 383}))
         d["output"] = output or {
             "directory": str(tmp / "out"),

@@ -18,7 +18,7 @@ time:
   # Model calendar, as CTSM's GREGORIAN / NO_LEAP: dates, solar geometry, run length and output
   # records follow it. noleap only for grid runs (tower forcing is a real time series).
   # choices: gregorian | noleap; default: gregorian.
-  calendar: gregorian
+  calendar: noleap
 
 forcing:
   # Meteorology and prescribed land data.

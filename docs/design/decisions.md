@@ -518,7 +518,7 @@ Reason: long runs cannot use a CLM history at every forcing step.
 Source: plan §0 14; Phase 4b.
 
 **42. Exact model calendar**
-2026-10-30 · Phase 6 review · maintainer · in force · Departure from Fortran: yes (fixes CLM-ml's year counting; orbit kept fixed)
+2026-10-30 · Phase 6 review · maintainer · in force (grid preset noleap: 109) · Departure from Fortran: yes (fixes CLM-ml's year counting; orbit kept fixed)
 `time.calendar: gregorian` (default) or `noleap` (grid runs), with exact date arithmetic as
 CTSM's clock; a Gregorian 29 February reads no-leap streams' 28 February. Orbital parameters are
 those of the start year (not per year: D4), a known departure from CLM's historical runs
@@ -586,6 +586,15 @@ Unchanged for runs inside the data years with `year_align: year_first` (bit for 
 Reason: copy CLM's rule (maintainer).
 Source: open_items O30; CDEPS `dshr_stream_mod.F90`; CTSM `stream_definition_datm.xml`,
 `SoilMoistureStreamMod.F90`.
+
+**109. Grid runs use the no-leap calendar by default**
+2026-11-05 · after Phase 8 · maintainer · in force (revises 42's default for grid runs) · Departure from Fortran: no
+The preset `grid_1deg_2000` sets `time.calendar: noleap`, so grid experiments made from it run
+the no-leap calendar; the option's default stays `gregorian`, which tower runs need (their
+forcing is a real time series).
+Reason: CLM's TRENDY runs, the CRUJRA forcing and the CTSM run giving the soil moisture are all
+no-leap.
+Source: maintainer, 2026-11-05.
 
 ## E. Science changes and departures from Fortran
 
