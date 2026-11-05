@@ -225,7 +225,8 @@ from the configuration).
   (`outputs.StreamFileWriter`) as soon as a period completes.
 - **Gridcell level:** area-weighted sum of patches, formed at every step in the chunk. A grid
   run writes it on the surface data's latitude-longitude grid (`domain.LatLonMap`, built by
-  `grid.latlon_map`; `Outputs._latlon_xarray`; decision 108); tower runs per gridcell.
+  `grid.latlon_map`; `Outputs._latlon_xarray`; decision 108), with `area`, `landfrac` and
+  `vegetated_fraction` (values are per m2 of vegetated land); tower runs per gridcell.
 - **Legacy `.out`** (`output.legacy_ascii`, one patch only, validation vs Fortran): an extra
   internal per-step stream in the *same* run, written by `io/legacy.py`.
 - **Checks:** 13 conservation checks recorded per patch per step (max over the chunk), checked

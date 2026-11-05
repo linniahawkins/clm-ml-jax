@@ -164,7 +164,10 @@ i, j = g.latlon.index[:, 0], g.latlon.index[:, 1]
 np.savez(tmp / "grid_map.npz", mapped=ds["latent_heat_flux"].values[:, i, j],
          mean=outs["grid"].gridcell_mean()["latent_heat_flux"], map_lat=ds["lat"].values[i],
          map_lon=ds["lon"].values[j], lat=g.latitude, lon=g.longitude,
-         n_run=int(ds["run_mask"].sum()), n_finite=int(np.isfinite(ds["latent_heat_flux"][0]).sum()))
+         n_run=int(ds["run_mask"].sum()), n_finite=int(np.isfinite(ds["latent_heat_flux"][0]).sum()),
+         area=ds["area"].values[i, j], landfrac=ds["landfrac"].values[i, j],
+         vegetated=ds["vegetated_fraction"].values[i, j], domain_area=g.area,
+         domain_landfrac=g.land_fraction, domain_vegetated=g.vegetated_fraction)
 print("ran")
 """
 
@@ -232,6 +235,10 @@ def test_grid_run_equals_tower_runs_of_its_data(tmp_path):
     np.testing.assert_array_equal(m["map_lat"], m["lat"])
     np.testing.assert_allclose(np.mod(m["map_lon"], 360.0), m["lon"], rtol=0, atol=1e-9)
     assert m["n_run"] == m["n_finite"] == m["lat"].size
+    for name in ("area", "landfrac", "vegetated"):  # for totals: area * landfrac * vegetated
+        np.testing.assert_array_equal(m[name], m[f"domain_{name}"])
+    assert (m["area"] > 0).all() and (m["landfrac"] > 0).all() and (m["landfrac"] <= 1).all()
+    assert (m["vegetated"] > 0).all() and (m["vegetated"] <= 1 + 1e-12).all()
 
 
 THIN_LAYER_SCRIPT = """

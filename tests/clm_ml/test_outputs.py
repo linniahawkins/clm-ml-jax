@@ -83,7 +83,10 @@ def _grid_outputs(n_time=2):
     )
     meta = {"patch_gridcell": [0, 1, 1, 2], "patch_weight": [1.0, 0.25, 0.75, 1.0],
             "patch_pft": ["c3_grass"] * 4, "gridcell_names": ["a", "b", "c"],
-            "soil_depth": np.zeros((4, 1)), "gridcell_map": gridcell_map}  # fmt: skip
+            "soil_depth": np.zeros((4, 1)), "gridcell_map": gridcell_map,
+            "gridcell_area": {"area": np.array([1e4, 2e4, 3e4]),
+                              "land_fraction": np.array([1.0, 0.5, 0.9]),
+                              "vegetated_fraction": np.array([0.8, 0.4, 1.0])}}  # fmt: skip
     records = {
         "time": np.array(["2000-01-02", "2000-01-03"][:n_time], "datetime64[ns]"),
         "gpp": rng.random((n_time, 4)),
@@ -108,6 +111,14 @@ def test_grid_gridcell_level_is_on_the_latlon_map():
             ds["gpp_by_leaf_group"].values[:, :, i, j], means["gpp_by_leaf_group"][:, g]
         )
     assert int(ds["run_mask"].sum()) == 3
+    for field, name in (("area", "area"), ("land_fraction", "landfrac"),
+                        ("vegetated_fraction", "vegetated_fraction")):  # fmt: skip
+        assert ds[name].dims == ("lat", "lon")
+        np.testing.assert_array_equal(
+            ds[name].values[out.gridcell_map.index[:, 0], out.gridcell_map.index[:, 1]],
+            out.gridcell_area[field],
+        )
+        assert np.isnan(ds[name].values[ds["run_mask"].values == 0]).all()
     assert np.isnan(ds["gpp"].values[:, ds["run_mask"].values == 0]).all()
     assert ds["lat"].attrs["units"] == "degrees_north"
     np.testing.assert_array_equal(ds["lon"].values, [-5.0, 0.0, 5.0, 10.0])

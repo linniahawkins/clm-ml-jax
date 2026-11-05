@@ -207,6 +207,8 @@ def load_grid_domain(
 
     with netcdf.dataset(mask_file) as ds:
         landmask = np.asarray(ds.variables["landmask"][:]) == 1
+        cell_km2 = np.ma.filled(ds.variables["area"][:], np.nan).astype(float)
+        landfrac = np.ma.filled(ds.variables["landfrac"][:], np.nan).astype(float)
     with netcdf.dataset(surf) as ds:
 
         def var(name):
@@ -293,6 +295,9 @@ def load_grid_domain(
         measurement_height=np.full(rows.size, float(section.forcing_height)),
         grid_index=np.stack([rows, cols], axis=1),
         latlon=latlon_map(lat2, lon2, rows, cols, section.region),
+        area=cell_km2[rows, cols],
+        land_fraction=landfrac[rows, cols],
+        vegetated_fraction=vegetated[rows, cols] / 100.0,  # PCT_* are percent of the land
     )
     patches = Patches(
         gridcell_index=g_of.astype(int),

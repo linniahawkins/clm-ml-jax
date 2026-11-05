@@ -944,7 +944,14 @@ data's latitude-longitude grid, variables `(time, ..., lat, lon)`, instead of a 
 the box for a region (longitudes in the box's convention, increasing eastward), NaN where no
 gridcell was run, and `run_mask` (1 where one was). Patch files stay per patch, and tower runs
 keep the `gridcell` dimension. No separate level and no remapping command (runs are repeated).
-Reason: maps are how gridded results are read and compared with CLM history files.
+The file also holds `area` (km2) and `landfrac`, from the CLM history file of `grid.land_mask`
+(as in CLM's own history files), and `vegetated_fraction`: the fraction of the land covered by
+PFTs 1-16 in the surface data, which the patches represent. Gridcell values are per m2 of
+vegetated land (decision 28), not per m2 of land as in CLM: a total is
+`value * area * landfrac * vegetated_fraction`, and `value * vegetated_fraction` is CLM's
+per-m2-of-land basis for fluxes that bare ground does not have (e.g. GPP, transpiration).
+Reason: maps are how gridded results are read and compared with CLM history files; totals and
+the comparison with CLM need the vegetated fraction, which differs from CLM's land basis.
 Source: maintainer, 2026-11-05.
 
 ## I. Code architecture

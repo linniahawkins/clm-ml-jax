@@ -188,8 +188,8 @@ def load_towers(path: Path) -> dict[str, TowerSpec]:
 @dataclasses.dataclass(frozen=True)
 class LatLonMap:
     """Where a grid run's gridcells go in its latitude-longitude output (decision 108): the
-    axes of the map (the whole surface-data grid for a global run, the rows and columns
-    spanning the gridcells of a region) and each gridcell's (row, column) on them."""
+    axes of the map (the whole surface-data grid for a global run, its rows and columns
+    inside the box of a region) and each gridcell's (row, column) on them."""
 
     lat: np.ndarray  # (nlat,) degrees north
     lon: np.ndarray  # (nlon,) degrees east, increasing
@@ -206,6 +206,12 @@ class Gridcells:
     grid_index: Optional[np.ndarray] = None  # (ng, 2) int
     # Grid domains on a regular latitude-longitude grid: the gridcell output's map
     latlon: Optional[LatLonMap] = None
+    # Grid domains: written with the gridcell output, for totals (decision 108). Area (km2)
+    # and land fraction as CLM's history (land_mask file); the fraction of the land covered
+    # by PFTs 1-16 in the surface data, which the patches represent (decision 28)
+    area: Optional[np.ndarray] = None  # (ng,) km2
+    land_fraction: Optional[np.ndarray] = None  # (ng,)
+    vegetated_fraction: Optional[np.ndarray] = None  # (ng,)
 
 
 @dataclasses.dataclass(frozen=True)
