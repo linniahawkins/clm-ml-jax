@@ -19,7 +19,7 @@ about 15 minutes on one A100, and more than a day on a CPU. On Derecho, from a G
 
 A small box runs on a CPU: `--region 35 40 -100 -95 --length "1 day"` (25 gridcells, 130
 patches) takes under a minute. The same run from the command line:
-`clm-ml run grid_example --set domain.grid.region=whole_globe`.
+`clm-ml run grid_example --set domain.grid.region=global`.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def main() -> None:
         s, n, w, e = args.region
         region = f"{{lat: [{s}, {n}], lon: [{w}, {e}]}}"
     else:
-        region = "whole_globe"
+        region = "global"
     overrides = [
         f"domain.grid.region={region}",
         f"run.time.length={args.length}",

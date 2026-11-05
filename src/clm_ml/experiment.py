@@ -1,6 +1,5 @@
 """
-Experiment folders (decision 91; ``docs/design/experiment_folders.md``): an experiment is a
-folder with four complete files,
+Experiment folders: an experiment is a folder with four complete files,
 
 - ``run.yaml`` (:mod:`clm_ml.run`): when, with which forcing and land data, what it writes;
 - ``domain.yaml`` (:mod:`clm_ml.domain`): where: towers or a grid;
@@ -961,8 +960,8 @@ def _migrate(key: str, data: dict, report: list) -> dict:
                 if w is not None:
                     patch["canopy_layers"] = {"within": w, "above": a}
         grid = data.get("grid")
-        if isinstance(grid, dict) and "region" in grid and grid["region"] is None:
-            grid["region"] = "whole_globe"
+        if isinstance(grid, dict) and "region" in grid and grid["region"] in (None, "whole_globe"):
+            grid["region"] = "global"
     return data
 
 

@@ -14,7 +14,7 @@ setting listed with its explanation:
 |---|---|
 | `chats7_1day/` | One day (1 May 2007) at the CHATS walnut orchard, the CLM-ml v2 test case (Bonan, Burns & Patton 2026). The quickest complete run. |
 | `chats7_may2007_fortran/` | May 2007 at CHATS with the Fortran acclimation temperature and the legacy `.out` files: the run compared with Fortran CLM-ml v2 (`tests/test_fortran_python_comparison.py`). |
-| `grid_1deg_2000/` | A 1° grid run of 2000 (CRUJRA forcing, CLM6 parameters, CTSM 5.4 soil moisture) over 30-50 N, 110-80 W; inputs on NCAR storage. |
+| `grid_1deg_2000/` | A 1° grid run of 2000 (CRUJRA forcing, CLM6 parameters, CTSM 5.4 soil moisture) globally; inputs on NCAR storage. |
 
 ```bash
 clm-ml check configs/chats7_1day     # validate and summarize, no run

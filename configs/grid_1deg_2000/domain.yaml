@@ -18,15 +18,9 @@ grid:
   # REQUIRED.
   land_mask: /glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.2000-01.nc
 
-  # The gridcells used: whole_globe, or those in a box {lat: [south, north], lon: [west, east]}.
-  region:
-    # Latitudes [south, north], degrees north.
-    # default: [-90.0, 90.0].
-    lat: [30.0, 50.0]
-
-    # Longitudes [west, east], degrees east (may wrap).
-    # default: [-180.0, 360.0].
-    lon: [-110.0, -80.0]
+  # The gridcells used: global, or those in a box {lat: [south, north], lon: [west, east]}.
+  # default: global.
+  region: global
 
   # Root biomass of every patch (g m-2).
   # default: 500.0.

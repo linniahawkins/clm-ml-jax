@@ -341,6 +341,15 @@ AI assistants) and the unused namelists `nl.CHATS7.debug`, `nl.CHATS7.test3`,
 Reason: the maintainer's decision.
 Source: open_items O36, O40.
 
+**107. The grid preset runs the whole globe; the region word is `global`**
+2026-11-04 · after Phase 8 · maintainer · in force · Departure from Fortran: no
+The preset `grid_1deg_2000` has no region, so it runs the whole globe (the default); a
+box in `domain.yaml grid.region` runs a region. The named word for the whole globe is
+`global` (was `whole_globe`, decision 93); `clm-ml upgrade` rewrites `whole_globe` and the
+old null as `global`.
+Reason: a global preset should run the globe; `global` is the plainer word (maintainer).
+Source: maintainer, 2026-11-04.
+
 ## C. Spatial structure: gridcells, patches, layers, soil
 
 **21. One tower up to global**
