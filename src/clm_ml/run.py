@@ -245,7 +245,10 @@ class OutputStreamSection:
         "Variables: all, or names from clm_ml.outputs.VARIABLES (e.g. " "latent_heat_flux, gpp).",
     )
     level: tuple[Literal["patch", "gridcell"], ...] = option(
-        ("patch", "gridcell"), "Patch values, area-weighted gridcell sums, or both."
+        ("patch", "gridcell"),
+        "Patch values, area-weighted gridcell sums, or both. A grid run's gridcell file is on "
+        "the latitude-longitude grid of the surface data (the region's box), NaN where no "
+        "gridcell was run.",
     )
     file_per: Literal["run", "year", "month"] = option("run", "One file per run, year or month.")
 

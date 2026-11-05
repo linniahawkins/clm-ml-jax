@@ -27,8 +27,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import numpy as np
-
 import clm_ml
 
 MAPPED = ("latent_heat_flux", "sensible_heat_flux", "gpp", "canopy_top_air_temperature")
@@ -78,7 +76,8 @@ def main() -> None:
 
 
 def plot(exp, files, path: Path) -> Path:
-    """Maps of the run-mean gridcell values (gridcells at their latitude and longitude)."""
+    """Maps of the run-mean gridcell values (the gridcell files are on the latitude-longitude
+    grid, NaN where no gridcell was run)."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -86,20 +85,13 @@ def plot(exp, files, path: Path) -> Path:
     import xarray as xr
 
     ds = xr.concat([xr.load_dataset(f) for f in files], dim="time").mean("time")
-    # the gridcells on their latitude-longitude grid (land only; the rest stays blank)
-    lat, lon = exp.domain.gridcells.latitude, exp.domain.gridcells.longitude
-    lon = np.where(lon > 180.0, lon - 360.0, lon)
-    lats, row = np.unique(lat, return_inverse=True)
-    lons, col = np.unique(lon, return_inverse=True)
     names = [v for v in MAPPED if v in ds]
     fig, axes = plt.subplots(
         (len(names) + 1) // 2, 2, figsize=(13, 3.5 * ((len(names) + 1) // 2)), squeeze=False
     )
     for ax, var in zip(axes.flat, names):
         v = ds[var]
-        grid = np.full((len(lats), len(lons)), np.nan)
-        grid[row, col] = v.values
-        mesh = ax.pcolormesh(lons, lats, grid, shading="nearest", cmap="viridis")
+        mesh = ax.pcolormesh(ds.lon, ds.lat, v, shading="nearest", cmap="viridis")
         fig.colorbar(mesh, ax=ax, label=v.attrs.get("units", ""))
         ax.set_title(f"{var.replace('_', ' ')}: gridcell mean over the run", fontsize=9)
         ax.set_aspect("equal")

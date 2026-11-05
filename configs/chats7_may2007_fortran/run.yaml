@@ -118,7 +118,9 @@ output:
     # default: [all].
     variables: [all]
 
-    # Patch values, area-weighted gridcell sums, or both.
+    # Patch values, area-weighted gridcell sums, or both. A grid run's gridcell file is on the
+    # latitude-longitude grid of the surface data (the region's box), NaN where no gridcell was
+    # run.
     # default: [patch, gridcell].
     level: [patch]
 

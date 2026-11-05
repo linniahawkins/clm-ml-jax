@@ -186,6 +186,17 @@ def load_towers(path: Path) -> dict[str, TowerSpec]:
 
 
 @dataclasses.dataclass(frozen=True)
+class LatLonMap:
+    """Where a grid run's gridcells go in its latitude-longitude output (decision 108): the
+    axes of the map (the whole surface-data grid for a global run, the rows and columns
+    spanning the gridcells of a region) and each gridcell's (row, column) on them."""
+
+    lat: np.ndarray  # (nlat,) degrees north
+    lon: np.ndarray  # (nlon,) degrees east, increasing
+    index: np.ndarray  # (ng, 2) int
+
+
+@dataclasses.dataclass(frozen=True)
 class Gridcells:
     names: tuple[str, ...]
     latitude: np.ndarray  # (ng,)
@@ -193,6 +204,8 @@ class Gridcells:
     measurement_height: np.ndarray  # (ng,) m
     # Grid domains (Phase 6b): each gridcell's (row, column) on the surface-data grid
     grid_index: Optional[np.ndarray] = None  # (ng, 2) int
+    # Grid domains on a regular latitude-longitude grid: the gridcell output's map
+    latlon: Optional[LatLonMap] = None
 
 
 @dataclasses.dataclass(frozen=True)

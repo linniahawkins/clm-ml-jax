@@ -151,9 +151,20 @@ import numpy as np, jax
 jax.config.update("jax_enable_x64", True)
 from clm_ml.experiment import load_experiment
 tmp = Path({tmp!r})
+runs, outs = {{}}, {{}}
 for name in ("grid", "tower"):
-    out = load_experiment(tmp / name).execute(write=False)["h"]
-    np.savez(tmp / f"{{name}}_out.npz", **{{v: np.asarray(out.data[v]) for v in ("latent_heat_flux", "gpp")}})
+    runs[name] = load_experiment(tmp / name)
+    outs[name] = runs[name].execute(write=name == "grid")["h"]  # the grid run's files
+    np.savez(tmp / f"{{name}}_out.npz", **{{v: np.asarray(outs[name].data[v]) for v in ("latent_heat_flux", "gpp")}})
+# the grid run's gridcell file on the latitude-longitude map (decision 108)
+import xarray as xr
+(path,) = sorted((tmp / "out").glob("*_gridcell.nc"))
+ds, g = xr.load_dataset(path), runs["grid"].domain.gridcells
+i, j = g.latlon.index[:, 0], g.latlon.index[:, 1]
+np.savez(tmp / "grid_map.npz", mapped=ds["latent_heat_flux"].values[:, i, j],
+         mean=outs["grid"].gridcell_mean()["latent_heat_flux"], map_lat=ds["lat"].values[i],
+         map_lon=ds["lon"].values[j], lat=g.latitude, lon=g.longitude,
+         n_run=int(ds["run_mask"].sum()), n_finite=int(np.isfinite(ds["latent_heat_flux"][0]).sum()))
 print("ran")
 """
 
@@ -203,7 +214,8 @@ def test_grid_run_equals_tower_runs_of_its_data(tmp_path):
     1° patches amplify round-off (a 1e-15 relative change of LAI alone moves a tower run by
     ~8 W m-2 within hours; open issue in docs/design/global_input.md), and the two
     programs (vegetation and soil water formed inside the chunk vs read per step) round
-    differently."""
+    differently. The grid run's gridcell file has every gridcell at its latitude and
+    longitude (decision 108)."""
     import numpy as np
 
     _python(WRITE_RUNS.format(root=str(ROOT), tmp=str(tmp_path),
@@ -214,6 +226,12 @@ def test_grid_run_equals_tower_runs_of_its_data(tmp_path):
         night = np.max(np.abs(g[v][:12] - t[v][:12])) / np.max(np.abs(t[v]))  # 00-12 UTC
         assert night <= 1e-10, (v, night)
         assert np.max(np.abs(g[v] - t[v])) <= 0.1 * np.max(np.abs(t[v])), v
+    # decision 108: the gridcell file is on the latitude-longitude grid of the surface data
+    m = np.load(tmp_path / "grid_map.npz")
+    np.testing.assert_array_equal(m["mapped"], m["mean"])
+    np.testing.assert_array_equal(m["map_lat"], m["lat"])
+    np.testing.assert_allclose(np.mod(m["map_lon"], 360.0), m["lon"], rtol=0, atol=1e-9)
+    assert m["n_run"] == m["n_finite"] == m["lat"].size
 
 
 THIN_LAYER_SCRIPT = """

@@ -936,6 +936,17 @@ skipping temperatures of exactly 0 in leafless layers.
 Reason: replaces a comparison with a template state that no longer exists.
 Source: C28.
 
+**108. A grid run's gridcell output on the latitude-longitude grid**
+2026-11-05 · after Phase 8 · maintainer · in force · Departure from Fortran: no
+For a grid run, the gridcell level (the `*_gridcell.nc` files) is written on the surface
+data's latitude-longitude grid, variables `(time, ..., lat, lon)`, instead of a flat
+`gridcell` dimension: the whole grid for `region: global`, the grid's rows and columns inside
+the box for a region (longitudes in the box's convention, increasing eastward), NaN where no
+gridcell was run, and `run_mask` (1 where one was). Patch files stay per patch, and tower runs
+keep the `gridcell` dimension. No separate level and no remapping command (runs are repeated).
+Reason: maps are how gridded results are read and compared with CLM history files.
+Source: maintainer, 2026-11-05.
+
 ## I. Code architecture
 
 **79. 0-based indexing everywhere**
