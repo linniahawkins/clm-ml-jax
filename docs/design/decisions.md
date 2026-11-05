@@ -137,6 +137,16 @@ Reason: the maintainer's decision: enough for a user to install and run now; the
 documentation later.
 Source: maintainer, 2026-11-01.
 
+**110. The global example is a case-setup script**
+2026-11-05 · after Phase 8 · maintainer · in force (revises 103's `examples/run_global.py`) · Departure from Fortran: no
+`examples/run_global.py` reads as instructions for setting up a case: settings at the top
+(case folder under `$SCRATCH`, start, length, calendar, region, GPUs, chunk), then create
+the case from the preset, write the settings into its files (`Experiment.write_copy`), print
+the check summary and run (or leave the case for `clm-ml run`). No command-line options,
+functions or plotting.
+Reason: quick to reuse by changing a few values; the case folder records the run.
+Source: maintainer, 2026-11-05.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

@@ -1,106 +1,73 @@
 """
-Run CLM-ML-JAX on the 1° CLM grid (default: the whole globe, the first 10 days of 2000).
+Set up and run a CLM-ML-JAX case on the 1° CLM grid.
 
-The first time, the script writes an experiment folder from the preset `grid_1deg_2000`
-(CLM 5.4 surface data at 0.9x1.25°, CRUJRA meteorology, CTSM 5.4 monthly soil water, CLM6
-parameters; inputs on NCAR's Glade storage), then runs it and maps the daily mean gridcell
-fluxes. Each gridcell's patches (one per natural PFT) are run independently and combined into
-area-weighted gridcell means.
+Edit the settings in step 1 and run the script:
 
-    python examples/run_global.py                                   # whole globe, 10 days
-    python examples/run_global.py --region 35 40 -100 -95 --length "1 day"   # a small box
-    python examples/run_global.py --devices 4                       # four GPUs
-
-The whole globe (about 72 600 patches on 15 900 gridcells) needs a GPU: a 10-day chunk takes
-about 15 minutes on one A100, and more than a day on a CPU. On Derecho, from a GPU node:
-
-    qsub -I -A <account> -q develop -l select=1:ncpus=16:ngpus=1:mem=200GB -l walltime=01:00:00
     python examples/run_global.py
 
-A small box runs on a CPU: `--region 35 40 -100 -95 --length "1 day"` (25 gridcells, 130
-patches) takes under a minute. The same run from the command line:
-`clm-ml run grid_example --set domain.grid.region=global`.
+The case is a folder of four files (run.yaml, domain.yaml, model.yaml, params.yaml) made
+from the preset `grid_1deg_2000` (CLM 5.4 surface data at 0.9x1.25°, CRUJRA meteorology,
+CTSM 5.4 monthly soil water, CLM6 parameters; inputs on NCAR's Glade storage). The script
+writes the settings below into those files, so the folder records the run, and
+`clm-ml run CASE_DIR` repeats it (e.g. from a batch job). Anything else (output variables
+and frequency, model options, parameters) is changed by editing the files.
+
+The whole globe (about 72 600 patches on 14 300 gridcells) needs a GPU: a 10-day chunk
+takes about 15 minutes on one A100. Run the script on a GPU node, or set RUN_NOW = False
+and submit `clm-ml run CASE_DIR` as a batch job. A small region runs on a CPU (set
+JAX_PLATFORMS=cpu on a node without a GPU).
 """
 
-from __future__ import annotations
-
-import argparse
+import os
 from pathlib import Path
 
 import clm_ml
 
-MAPPED = ("latent_heat_flux", "sensible_heat_flux", "gpp", "canopy_top_air_temperature")
+# --- 1. Settings --------------------------------------------------------------------------
 
+CASE_DIR = Path(os.environ["SCRATCH"]) / "global_1mon_test"  # the case folder
+PRESET = "grid_1deg_2000"  # what a new case starts from
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.strip().split("\n\n")[0])
-    parser.add_argument("--folder", default="grid_example", help="experiment folder")
-    parser.add_argument(
-        "--region", nargs=4, type=float, metavar=("SOUTH", "NORTH", "WEST", "EAST"),
-        help="a latitude-longitude box in degrees (default: the whole globe)",
-    )  # fmt: skip
-    parser.add_argument("--length", default="10 days", help='run length (default "10 days")')
-    parser.add_argument("--devices", type=int, default=1, help="GPUs to spread patches over")
-    parser.add_argument(
-        "--set", action="append", default=[], metavar="FILE.KEY=VALUE",
-        help="change a setting without editing the files (repeatable), as `clm-ml run --set`",
-    )  # fmt: skip
-    args = parser.parse_args()
+START = "2000-01-01T00:00"  # first time step
+LENGTH = "31 days"  # e.g. "1 day", "31 days", "until 2001-01-01T00:00"
+CALENDAR = "noleap"  # noleap (as the CRUJRA forcing) or gregorian
 
-    folder = Path(args.folder)
-    if not folder.exists():
-        clm_ml.new_experiment(folder, "grid_1deg_2000")
-        print(f"wrote {folder}/ from the preset grid_1deg_2000")
+REGION = "global"  # or a box: "{lat: [35, 40], lon: [-100, -95]}" (degrees N, degrees E)
 
-    if args.region:
-        s, n, w, e = args.region
-        region = f"{{lat: [{s}, {n}], lon: [{w}, {e}]}}"
-    else:
-        region = "global"
-    overrides = [
-        f"domain.grid.region={region}",
-        f"run.time.length={args.length}",
-        f"run.execution.devices={args.devices}",
-    ] + list(args.set)
-    exp = clm_ml.load_experiment(folder, overrides)
-    print(exp.summary())
+DEVICES = 1  # GPUs the patches are spread over (4 on a full Derecho GPU node)
+CHUNK = "10 days"  # forcing read and compiled per chunk: "N days" or "1 month"
 
-    # A long or large run keeps only the records of the output file being filled in memory:
-    # the results are read back from the netCDF files.
-    exp.execute(return_outputs=False)
-    files = sorted(exp.output_directory.glob("*_gridcell.nc"))
-    print(f"\nwrote {exp.output_directory}/: {', '.join(f.name for f in files)}")
-    if files:
-        figure = plot(exp, files, exp.output_directory / f"{exp.name}_map.png")
-        print(f"figure: {figure}")
+RUN_NOW = True  # False: set the case up only, then `clm-ml run CASE_DIR`
 
+# --- 2. Create the case from the preset (an existing case is kept, with its edits) ----------
 
-def plot(exp, files, path: Path) -> Path:
-    """Maps of the run-mean gridcell values (the gridcell files are on the latitude-longitude
-    grid, NaN where no gridcell was run)."""
-    import matplotlib
+if not CASE_DIR.exists():
+    clm_ml.new_experiment(CASE_DIR, PRESET)
+    print(f"created {CASE_DIR} from the preset {PRESET}")
 
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import xarray as xr
+# --- 3. Write the settings into the case's files --------------------------------------------
 
-    ds = xr.concat([xr.load_dataset(f) for f in files], dim="time").mean("time")
-    names = [v for v in MAPPED if v in ds]
-    fig, axes = plt.subplots(
-        (len(names) + 1) // 2, 2, figsize=(13, 3.5 * ((len(names) + 1) // 2)), squeeze=False
-    )
-    for ax, var in zip(axes.flat, names):
-        v = ds[var]
-        mesh = ax.pcolormesh(ds.lon, ds.lat, v, shading="nearest", cmap="viridis")
-        fig.colorbar(mesh, ax=ax, label=v.attrs.get("units", ""))
-        ax.set_title(f"{var.replace('_', ' ')}: gridcell mean over the run", fontsize=9)
-        ax.set_aspect("equal")
-    for ax in axes.flat[len(names) :]:
-        ax.set_visible(False)
-    fig.tight_layout()
-    fig.savefig(path, dpi=120)
-    return path
+settings = [
+    f"run.time.start={START}",
+    f"run.time.length={LENGTH}",
+    f"run.time.calendar={CALENDAR}",
+    f"domain.grid.region={REGION}",
+    f"run.execution.devices={DEVICES}",
+    f"run.execution.chunk={CHUNK}",
+]
+case = clm_ml.load_experiment(CASE_DIR, settings)  # reads and checks the four files
+case.write_copy(CASE_DIR)
 
+# --- 4. Check: what the run will use and where each value comes from ------------------------
 
-if __name__ == "__main__":
-    main()
+print(case.summary())
+
+# --- 5. Run ---------------------------------------------------------------------------------
+# Output: netCDF files in CASE_DIR/output, per output stream and month (run.yaml output):
+# *_patch.nc per patch, *_gridcell.nc on the latitude-longitude grid.
+
+if RUN_NOW:
+    case.execute(return_outputs=False)
+    print(f"output: {case.output_directory}")
+else:
+    print(f"case ready: clm-ml run {CASE_DIR}")
