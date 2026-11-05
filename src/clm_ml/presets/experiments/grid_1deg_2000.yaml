@@ -2,10 +2,10 @@
 # defaults. `new` writes the four complete files. The inputs are on NCAR's Derecho/Campaign
 # storage (docs/design/global_input.md).
 description: >-
-  A 1 degree (f09) grid run of 2000 over 30-50 N, 110-80 W (the regional test): CRUJRA v4.10
-  forcing, CLM6 parameters, soil moisture prescribed from a CTSM 5.4 run. Remove
-  domain.yaml grid.region for the whole globe (14 346 gridcells, 72 575 patches; use
-  execution.devices: 4 on a 4-GPU node).
+  A 1 degree (f09) grid run of 2000 over the whole globe (14 346 gridcells, 72 575 patches;
+  needs a GPU, execution.devices: 4 on a 4-GPU node): CRUJRA v4.10 forcing, CLM6
+  parameters, soil moisture prescribed from a CTSM 5.4 run. A box in domain.yaml grid.region
+  (e.g. {lat: [30, 50], lon: [-110, -80]}) runs a region, small ones on a CPU.
 run:
   time: {start: 2000-01-01T00:00, length: until 2001-01-01T00:00}
   forcing:
@@ -34,7 +34,6 @@ domain:
   grid:
     surface_data: /glade/campaign/cesm/cesmdata/inputdata/lnd/clm2/surfdata_esmf/ctsm5.4.0/surfdata_0.9x1.25_hist_2000_16pfts_c251022.nc
     land_mask: /glade/derecho/scratch/slevis/archive/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist/lnd/hist/wetlands.n04.ctsm5.4.044_f09BgcCrop_flat_174_Hist.clm2.h0a.2000-01.nc
-    region: {lat: [30, 50], lon: [-110, -80]}
 model:
   canopy_layers: {layer_counts: {within: 10, above: 10}, max_layers: 20}
   numerics: {on_patch_error: exclude, max_failed_patch_fraction: 0.05}

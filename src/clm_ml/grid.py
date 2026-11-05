@@ -1,6 +1,5 @@
 """
-Grid domains (plan Phase 6b, step 2): gridcells and vegetated patches from a CLM surface
-dataset, as CLM's subgrid setup does for its natural-vegetation and crop land units.
+Grid domains: gridcells and vegetated patches from a CLM surface dataset.
 
 ``domain.yaml``::
 
@@ -11,8 +10,7 @@ dataset, as CLM's subgrid setup does for its natural-vegetation and crop land un
       land_mask: .../<case>.clm2.h0a.2000-01.nc   # CLM history file: landmask == 1
       region: {lat: [25, 50], lon: [-125, -65]}   # optional box (degrees north / east)
 
-What the loader takes from the surface data, and how (decisions 26-29 and the input
-decisions in ``docs/design/global_input.md``):
+What the loader takes from the surface data:
 
 - **Gridcells**: the surface-data cells with ``landmask == 1`` in the CLM history file (the
   CLM run whose soil moisture is prescribed) and some vegetation; their latitude and
@@ -90,9 +88,9 @@ class GridSection:
     land_mask: str = option(
         doc="A CLM history file with landmask on the surface-data grid.", path=True
     )
-    region: Union[Literal["whole_globe"], RegionSection] = option(
-        "whole_globe",
-        "The gridcells used: whole_globe, or those in a box {lat: [south, north], "
+    region: Union[Literal["global"], RegionSection] = option(
+        "global",
+        "The gridcells used: global, or those in a box {lat: [south, north], "
         "lon: [west, east]}.",
     )
     root_biomass: float = option(500.0, "Root biomass of every patch (g m-2).")
@@ -142,7 +140,7 @@ def satellite_phenology_date(
 
 
 def _in_region(lat, lon, region):
-    if region is None or region == "whole_globe":
+    if region is None or region == "global":
         return np.ones(lat.shape, dtype=bool)
     s, n = region.lat
     w, e = (float(x) % 360.0 for x in region.lon)

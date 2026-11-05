@@ -235,7 +235,7 @@ reruns identically.
   change of a choice makes the file's settings of the old choice unused: they are ignored for
   that run.
 - No null means "taken from elsewhere": named words (`pft_default`, `from_model_yaml`,
-  `computed`, `whole_globe`, `end_of_run`) or the default value itself; a null left means
+  `computed`, `global`, `end_of_run`) or the default value itself; a null left means
   "none" (no bedrock, no soil-water adjustment).
 - `clm-ml check` prints the values the run uses and where they come from.
 

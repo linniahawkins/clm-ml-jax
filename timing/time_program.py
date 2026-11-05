@@ -10,7 +10,7 @@ patch-steps per second, and peak device memory. Appends one JSON line to
 ``timing/results_program.jsonl``.
 
     python timing/time_program.py configs/grid_1deg_2000 \
-        'domain.grid.region=null' run.execution.devices=1 [--label ...]
+        domain.grid.region=global run.execution.devices=1 [--label ...]
 """
 
 from __future__ import annotations
