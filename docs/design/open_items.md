@@ -99,6 +99,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O58 | Orbital parameters of the start year only | known departure | after 8 (not scheduled) | M |
 | O59 | Forcing preprocessed once to model-step files (repeated runs) | deferred feature | after 8 (idea) | M |
 | O60 | Reduced-precision (float32) option | deferred feature | after 8 (idea) | M |
+| O74 | Compsets separate from the grid, as CESM (`--compset` and `--grid`) | deferred feature | after 8 (idea) | M |
 | **7. Known model limitations** |||||
 | O61 | Strongly stable conditions: near-ground air too warm | known limitation | known | M |
 | O62 | Daytime latent heat biased high (~70 W m⁻²) | known limitation | known | M |
@@ -744,6 +745,15 @@ only. **Source:** decision 36.
 ### O60. Reduced-precision option
 float32 for consumer GPUs (float64 30-60× slower there); never done; needs its own
 validation. **Source:** plan §8 row 7.
+
+### O74. Compsets separate from the grid
+A compset (decision 111) now bundles what CESM chooses separately: the component setup
+(data atmosphere, land model version and modes such as satellite phenology or prescribed
+soil water, time period) and the grid or tower with its input files and run dates. Splitting
+them, e.g. `clm-ml new CASE --compset I2000_CRUJRA --grid f09`, would match CESM's meaning
+exactly and let one compset run on several grids. Worth doing once there are several grids,
+forcing sets or land modes (e.g. predicted soil water, a soil model) to combine.
+**Source:** maintainer, 2026-11-05 (discussion of decision 111).
 
 ## 7. Known model limitations (not to be fixed without discussion)
 
