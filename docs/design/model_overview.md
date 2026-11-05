@@ -21,8 +21,8 @@ An experiment is a folder with four complete files (decision 91,
 
 Every option is declared once in the code (`yaml_schema.option`: explanation, Fortran name,
 the kind of run it applies to, hidden test settings, paths); `clm-ml new` writes the files
-from a preset (`src/clm_ml/presets/`: tower, params and experiment presets), and `configs/`
-holds the presets written out. `src/clm_ml/data/psihat.nc` is the only file the processes read
+from a compset (`src/clm_ml/compsets/`: tower, params and experiment compsets), and `configs/`
+holds the compsets written out. `src/clm_ml/data/psihat.nc` is the only file the processes read
 from the package.
 
 Three kinds of "value" (the JAX distinction):

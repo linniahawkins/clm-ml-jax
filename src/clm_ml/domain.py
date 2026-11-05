@@ -170,7 +170,7 @@ def check_towers(towers: dict[str, TowerSpec], source: str) -> None:
 
 
 def load_towers(path: Path) -> dict[str, TowerSpec]:
-    """A towers file (``{name: tower}``; the presets in ``clm_ml/presets/towers``)."""
+    """A towers file (``{name: tower}``; the compsets in ``clm_ml/compsets/towers``)."""
     data = read_yaml(path)
     towers = {
         str(name): from_dict(TowerSpec, entry, source=path.name, key=str(name))

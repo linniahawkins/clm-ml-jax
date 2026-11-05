@@ -6,7 +6,7 @@ Edit the settings in step 1 and run the script:
     python examples/run_global.py
 
 The case is a folder of four files (run.yaml, domain.yaml, model.yaml, params.yaml) made
-from the preset `grid_1deg_2000` (CLM 5.4 surface data at 0.9x1.25°, CRUJRA meteorology,
+from the compset `grid_1deg_2000` (CLM 5.4 surface data at 0.9x1.25°, CRUJRA meteorology,
 CTSM 5.4 monthly soil water, CLM6 parameters; inputs on NCAR's Glade storage). The script
 writes the settings below into those files, so the folder records the run, and
 `clm-ml run CASE_DIR` repeats it (e.g. from a batch job). Anything else (output variables
@@ -26,7 +26,7 @@ import clm_ml
 # --- 1. Settings --------------------------------------------------------------------------
 
 CASE_DIR = Path(os.environ["SCRATCH"]) / "global_1mon_test"  # the case folder
-PRESET = "grid_1deg_2000"  # what a new case starts from
+COMPSET = "grid_1deg_2000"  # what a new case starts from
 
 START = "2000-01-01T00:00"  # first time step
 LENGTH = "31 days"  # e.g. "1 day", "31 days", "until 2001-01-01T00:00"
@@ -39,11 +39,11 @@ CHUNK = "10 days"  # forcing read and compiled per chunk: "N days" or "1 month"
 
 RUN_NOW = True  # False: set the case up only, then `clm-ml run CASE_DIR`
 
-# --- 2. Create the case from the preset (an existing case is kept, with its edits) ----------
+# --- 2. Create the case from the compset (an existing case is kept, with its edits) --------
 
 if not CASE_DIR.exists():
-    clm_ml.new_experiment(CASE_DIR, PRESET)
-    print(f"created {CASE_DIR} from the preset {PRESET}")
+    clm_ml.new_experiment(CASE_DIR, COMPSET)
+    print(f"created {CASE_DIR} from the compset {COMPSET}")
 
 # --- 3. Write the settings into the case's files --------------------------------------------
 

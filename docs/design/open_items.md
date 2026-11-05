@@ -657,7 +657,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 ### O70. Implement experiment folders
 - **Closed 2026-11-01:** implemented (decision 91).
 - **What:** decision 91: four complete files per experiment folder (`run`, `domain`, `model`,
-  `params`), strict loading, `clm-ml new`/`upgrade`, presets in the package, `configs/`
+  `params`), strict loading, `clm-ml new`/`upgrade`, compsets in the package, `configs/`
   regenerated as folders, configuration copied into each run's output.
 - **Next:** the six steps of `experiment_folders.md` §12 (questions answered, §13).
 - **Source:** maintainer, 2026-11-01.
@@ -789,7 +789,7 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 
 - Soil texture classes take their own values (O1, issue 21; decision 92; 2026-11-01).
 
-- Experiment folders implemented: four complete files, `clm-ml new`/`upgrade`, presets,
+- Experiment folders implemented: four complete files, `clm-ml new`/`upgrade`, compsets,
   configuration copy with each run's output (O70; decision 91; 2026-11-01).
 
 - Configuration files: `configs/` with complete, generated model.yaml files; complete params

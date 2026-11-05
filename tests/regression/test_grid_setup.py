@@ -35,7 +35,7 @@ needs_data = pytest.mark.skipif(
 
 def grid_run_files(tmp: Path, region: dict, start: str, days: float = 1, co2: dict | None = None,
                    output: dict | None = None) -> Path:  # fmt: skip
-    """A small grid experiment folder (``tmp/grid``) from the grid_1deg_2000 preset: 10 + 10
+    """A small grid experiment folder (``tmp/grid``) from the grid_1deg_2000 compset: 10 + 10
     canopy layers, CO2 constant (``co2``, default 383 ppm), hourly latent heat and GPP, Gregorian
     calendar."""
     import sys
@@ -44,7 +44,7 @@ def grid_run_files(tmp: Path, region: dict, start: str, days: float = 1, co2: di
     from tests.experiment_tools import make_experiment
 
     def run(d):
-        # Gregorian (the preset's is noleap, decision 109): the tower runs compared with it
+        # Gregorian (the compset's is noleap, decision 109): the tower runs compared with it
         d["time"].update(start=start, length=f"{days} days", calendar="gregorian")
         d["forcing"]["gridded"]["co2"] = dict({"source": "constant"}, **(co2 or {"ppm": 383}))
         d["output"] = output or {
@@ -54,7 +54,7 @@ def grid_run_files(tmp: Path, region: dict, start: str, days: float = 1, co2: di
         }  # fmt: skip
 
     return make_experiment(
-        tmp / "grid", preset="grid_1deg_2000", run=run,
+        tmp / "grid", compset="grid_1deg_2000", run=run,
         domain={"grid": {"surface_data": SURFACE, "land_mask": f"{HIST}.2000-01.nc",
                          "region": region}},
         model=lambda d: d["numerics"].update(on_patch_error="stop", max_failed_patch_fraction=0.01),

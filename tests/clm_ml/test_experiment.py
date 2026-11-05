@@ -1,4 +1,4 @@
-"""Experiment folders (decision 91): loading and validation, strictness, overrides, presets
+"""Experiment folders (decision 91): loading and validation, strictness, overrides, compsets
 (`clm-ml new`), `clm-ml upgrade`, namelist conversion."""
 
 import datetime as dt
@@ -190,7 +190,7 @@ def test_unsupported_schemes_are_refused(chats_run_dir, setting, message):
         load_experiment(chats_run_dir, [setting])
 
 
-def test_new_from_a_preset(tmp_path, capsys):
+def test_new_from_a_compset(tmp_path, capsys):
     from clm_ml.cli import main
 
     folder = tmp_path / "my_site"
@@ -200,7 +200,7 @@ def test_new_from_a_preset(tmp_path, capsys):
     assert "--from chats7_1day" in (folder / "params.yaml").read_text()
     with pytest.raises(ConfigError, match="already holds"):
         new_experiment(folder, "chats7_1day")
-    with pytest.raises(ConfigError, match="unknown preset 'nope'; presets: chats7_1day"):
+    with pytest.raises(ConfigError, match="unknown compset 'nope'; compsets: chats7_1day"):
         new_experiment(tmp_path / "x", "nope")
 
 

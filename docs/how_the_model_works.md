@@ -44,7 +44,7 @@ in `domain.yaml` that defines a gridcell and its patches.
 
 A run reads nothing but these four files and the data files they name. Every setting is
 written out, with its explanation, in the files themselves (`clm-ml new` writes them from a
-preset; `configs/` holds the presets written out).
+compset; `configs/` holds the compsets written out).
 
 | File | Says | Becomes in Python |
 |---|---|---|
@@ -70,7 +70,7 @@ src/clm_ml/
                     the four files' contents as typed Python objects
   io/yaml_schema.py every setting declared once (explanation, default, Fortran name);
                     the YAML files are generated from these declarations
-  presets/          the presets `clm-ml new` copies (towers, PFT parameter sets, experiments)
+  compsets/          the compsets `clm-ml new` copies (towers, PFT parameter sets, experiments)
 
   setup/            before the run, once (NumPy): each patch's layer grid, leaf/stem area
                     fractions, soil column, roots, and the initial state
