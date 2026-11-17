@@ -925,6 +925,99 @@ if want("compare") and len(glob.glob(str(EXD / "may2007_*_01.npz"))) >= 31:
                      "the default stays with the model", x=0.01, ha="left", fontweight="bold")  # fmt: skip
         save(fig, "compare_4_month.png")
 
+# ===================== the exact derivative against finite differences: every step of May
+if want("scatter") and len(glob.glob(str(EXD / "may2007_*_01.npz"))) >= 31:
+    say("\n== The exact derivative against finite differences, every step of May (one-day windows)")
+    zb = [np.load(BAS / f"may2007_{k:02d}_01.npz", allow_pickle=True) for k in range(31)]
+    ze = [np.load(EXD / f"may2007_{k:02d}_01.npz", allow_pickle=True) for k in range(31)]
+    names, outs, hs = list(ze[0]["names"]), list(ze[0]["vars"]), list(ze[0]["fd_steps"])
+    H = 1e-6  # one relative FD step for every point of the scatter
+    pars = [("iota", "ι"), ("vcmax25", "Vcmax25"), ("psi50_gs", "ψ50"),
+            ("plant_conductance", "plant conductance")]  # fmt: skip
+    rows = ["latent_heat_flux", "sensible_heat_flux", "gpp", "canopy_top_air_temperature"]
+    st = np.concatenate([z["label_top_leaf_water_potential"] < -1.43 for z in zb])
+
+    def series(zs, key, i, m, j=None):
+        return np.concatenate([z[key][i, m] if j is None else z[key][j, i, m] for z in zs])
+
+    def agree(ad, fd, typ):
+        """Within 1 % of the larger of the two, or both below a thousandth of the typical size."""
+        return np.abs(ad - fd) <= 0.01 * np.maximum(np.abs(ad), np.abs(fd)) + 1e-3 * typ
+
+    def sym_ticks(typ, lim):
+        """0 and ±powers of ten every three decades from the typical size up to the limit."""
+        e = np.arange(np.ceil(np.log10(typ)), np.log10(lim) + 1e-9, 3)
+        return np.concatenate([-(10.0 ** e[::-1]), [0.0], 10.0 ** e])
+
+    def tick_label(x):
+        return "0" if x == 0 else f"{'-' if x < 0 else ''}1e{int(round(np.log10(abs(x))))}"
+
+    fig = plt.figure(figsize=(12, 14.5))
+    gs = fig.add_gridspec(len(rows) + 1, len(pars), height_ratios=[1] * len(rows) + [0.8],
+                          hspace=0.5, wspace=0.38, top=0.95)  # fmt: skip
+    share = {"other": np.zeros(len(hs)), "stressed": np.zeros(len(hs))}
+    for c_, (p, plab) in enumerate(pars):
+        i = names.index(p)
+        width = ze[0]["hi"][i] - ze[0]["lo"][i]  # the ±10 % range: derivative × range
+        for r_, v in enumerate(rows):
+            m, ax = outs.index(v), fig.add_subplot(gs[r_, c_])
+            ad = series(ze, "ad_step", i, m) * width
+            typ = np.quantile(np.abs(series(zb, "ad_step", i, m)), 0.95) * width
+            for j, h in enumerate(hs):
+                ok = agree(ad, series(ze, "fd_step", i, m, j) * width, typ)
+                share["other"][j] += ok[~st].mean() / (len(rows) * len(pars))
+                share["stressed"][j] += ok[st].mean() / (len(rows) * len(pars))
+            fd = series(ze, "fd_step", i, m, hs.index(H)) * width
+            ok = agree(ad, fd, typ)
+            ax.scatter(fd[~st], ad[~st], s=7, color=C[0], alpha=0.6, lw=0, label="other steps")
+            ax.scatter(fd[st], ad[st], s=7, color=C[7], alpha=0.6, lw=0,
+                       label="top leaves below -1.43 MPa (water stress)")  # fmt: skip
+            lim = max(np.abs(fd).max(), np.abs(ad).max()) * 2
+            ax.plot([-lim, lim], [-lim, lim], color=GREY, lw=1, zorder=0)
+            ax.set_xscale("symlog", linthresh=typ)
+            ax.set_yscale("symlog", linthresh=typ)
+            ax.set(xlim=(-lim, lim), ylim=(-lim, lim))
+            tk = sym_ticks(typ, lim)
+            ax.set_xticks(tk, [tick_label(x) for x in tk], rotation=90)
+            ax.set_yticks(tk, [tick_label(x) for x in tk])
+            ax.minorticks_off()
+            ax.text(0.03, 0.97, f"agree: {ok[~st].mean():.0%} other\n{ok[st].mean():.0%} stressed",
+                    transform=ax.transAxes, va="top", fontsize=7.5, color=INK2)  # fmt: skip
+            ax.tick_params(labelsize=7)
+            if r_ == 0:
+                ax.set_title(f"d / d {plab}", fontweight="bold")
+            if c_ == 0:
+                ax.set_ylabel(f"{SHORT[v]} ({UNITS[v]})\nexact derivative × range")
+            if r_ == len(rows) - 1:
+                ax.set_xlabel(f"finite difference × range (step {H:g})")
+            say(f"  {SHORT[v]:>16} / {p:<18} agree: other {ok[~st].mean():6.1%}, "
+                f"stressed {ok[st].mean():6.1%}; largest |exact| {np.abs(ad).max():.1e}, "
+                f"largest |FD| {np.abs(fd).max():.1e}")  # fmt: skip
+    ax = fig.add_subplot(gs[len(rows), :2])
+    ax.plot(hs, share["other"], "o-", color=C[0], label="other steps")
+    ax.plot(hs, share["stressed"], "o-", color=C[7], label="water-stressed steps")
+    ax.set(xscale="log", ylim=(0, 1.05), xlabel="finite-difference step (relative to the parameter)",
+           ylabel="share that agrees", title="Agreement against the size of the nudge (all 16 panels)")  # fmt: skip
+    ax.invert_xaxis()
+    ax.legend(fontsize=8, loc="lower left")
+    fig.legend(*fig.axes[0].get_legend_handles_labels(), loc="lower left",
+               bbox_to_anchor=(0.52, 0.2), fontsize=8, markerscale=2.5)  # fmt: skip
+    for h, a_, b_ in zip(hs, share["other"], share["stressed"]):
+        say(f"  FD step {h:g}: agree other {a_:.1%}, stressed {b_:.1%}")
+    fig.suptitle("The exact derivative against finite differences: every 30-min step of May "
+                 "(31 one-day windows, 1487 steps per panel)", x=0.01, y=0.975, ha="left",
+                 fontweight="bold")  # fmt: skip
+    fig.text(0.52, 0.06, "Axes: the derivative of the step's output times the parameter's ±10 %\n"
+             "range (the linearized change across the range), linear near zero, logarithmic\n"
+             "beyond the typical size. Finite differences: central. 'Agree': within 1 % of the\n"
+             "larger of the two, or both below a thousandth of the typical size (95th percentile\n"
+             "of the default derivative). Setting water_stress_derivative: exact. Without stress\n"
+             "any nudge from 1e-5 to 1e-7 agrees; under stress the model's slope holds only for\n"
+             "ever smaller nudges. The points off the line are almost all from the afternoons of\n"
+             "21, 22, 29 and 30 May.", fontsize=8, color=INK2,
+             va="bottom")  # fmt: skip
+    save(fig, "exact_vs_fd_scatter.png")
+
 # ================================================================== step 7: calibration
 cal = sorted(glob.glob(str(RESULTS / "calibration" / "*.npz")))
 if want("calibration") and cal:

@@ -222,6 +222,22 @@ Every day of May and the month were run a second time with
   changes of sign; the default runs through them.
 - `figures/compare_2_regimes.png`: share of step derivatives within 1 % of finite
   differences. Exact: 99-100 % in every regime. Default: 97-100 %, but 40 % under stress.
+- `figures/exact_vs_fd_scatter.png`: the exact derivative against finite differences at
+  every step of May (31 one-day windows, 1487 steps), for latent heat, sensible heat, GPP
+  and canopy-top air temperature against ι, Vcmax25, ψ50 and plant conductance, with one
+  fixed relative step (1e-6) and a per-point test (within 1 % of the larger of the two,
+  or both below a thousandth of the typical size). Without stress: 100 % agree for any
+  step from 1e-5 to 1e-7. Under stress the agreement depends on the step: 41 % at 1e-2,
+  78 % at 1e-4, 93 % at 1e-6, 98 % at 1e-8. The exact derivative is the model's slope,
+  but in stressed afternoons that slope holds only for ever smaller changes; for a 1 %
+  change the model responds like the default derivative (21 May, 17:30 UTC, latent heat
+  against ι: exact 1030, FD 0.1 at 1e-2, -82 at 1e-5, 1030 at 1e-7; default -0.25). The
+  disagreements are almost all on the afternoons of 21, 22, 29 and 30 May, where the
+  exact derivative reaches 1e7-1e9 × range and the finite differences jump with the step
+  even at 1e-8. (`compare_2_regimes.png` takes, for each derivative, the closest of the
+  seven steps and measures against the day's largest derivative, which on those days is
+  huge: it overstates the exact derivative's agreement under stress, 99 %; the scatter's
+  numbers are the fair ones.)
 - `figures/compare_3_daily_prediction.png`: for each one-day window, derivative × range
   against the model's change of mean latent heat over ±10 %. On the four unstressed days
   both predict it. On stressed days the default stays close (worst day 20-37 % of the
