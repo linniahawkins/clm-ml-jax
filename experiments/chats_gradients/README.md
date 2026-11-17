@@ -426,13 +426,13 @@ left out of the sweeps; caps at the physical limits; 8d decided after 8a-8c.
 | 8c | 2-D grids (21 × 21) of ι × ψ50, ψ50 × plant conductance, Vcmax25 × ι: the model against the sum of the two one-at-a-time changes, the gradient (a plane) and gradient plus second derivatives (a curved surface); is the loss one bowl? The month and 9 May | physical | `grid_<a>__<b>_<days>d_<first>.npz` |
 | 8d | twin calibrations with truths 20-40 % away, several starts, against a coarse grid search | physical | to decide after 8a-8c |
 
-Physical ranges (`s8_locality.py`, `PHYSICAL`; proposed, to confirm with the maintainer):
+Physical ranges (`s8_locality.py`, `PHYSICAL`; confirmed by the maintainer, 2026-11-17, with ψ50 only to -2):
 
 | Parameter | Default (CHATS) | Range | Source |
 |---|---|---|---|
 | Vcmax25 | 125 | 40-150 | CLM-ml PFT tables 39-101; CHATS measured |
 | ι | 375 | 250-1500 | PFT tables 500-1500 |
-| ψ50 | -1.6 | -3.0 to -1.0 | CLM-ml default -2.3 |
+| ψ50 | -1.6 | -2.0 to -1.0 | maintainer (CLM-ml default -2.3 left out) |
 | plant conductance | 7 | 2-14 | CLM-ml default 4 |
 | leaf reflectance, near-infrared | 0.42 | 0.28-0.55 | PFT tables 0.28-0.46 (with transmittance 0.43: sum ≤ 0.98) |
 | `shape_gs` | 40 | 20-60 | none (40 for every PFT): ±50 % |

@@ -33,12 +33,12 @@ from jax.flatten_util import ravel_pytree
 from clm_ml.output_streams import StreamSpec
 
 LADDER = (0.01, 0.03, 0.10, 0.25, 0.50)  # relative changes of the one-at-a-time ladder
-# physical ranges (proposed 2026-11-17, see README step 8): the CLM-ml PFT tables
+# physical ranges (maintainer, 2026-11-17; README step 8): the CLM-ml PFT tables
 # (compsets/params) and the CHATS values; shape_gs has no source: +-50 %
 PHYSICAL = {
     "vcmax25": (40.0, 150.0),  # PFT tables 39-101; CHATS 125 (measured)
     "iota": (250.0, 1500.0),  # PFT tables 500-1500; CHATS 375
-    "psi50_gs": (-3.0, -1.0),  # CLM-ml default -2.3; CHATS -1.6
+    "psi50_gs": (-2.0, -1.0),  # CHATS -1.6; to -2 only (maintainer; CLM-ml default -2.3)
     "plant_conductance": (2.0, 14.0),  # CLM-ml default 4; CHATS 7
     "leaf_reflectance[1]": (0.28, 0.55),  # PFT tables 0.28-0.46; CHATS 0.42 (+0.43 < 1)
     "shape_gs": (20.0, 60.0),  # 40 everywhere

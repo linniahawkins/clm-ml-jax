@@ -1077,7 +1077,7 @@ Source: maintainer, 2026-11-17; `experiments/chats_gradients/README.md`.
 Step 8 asks how far from the default the derivative predicts the model's response. It uses
 two kinds of range: a ladder of relative changes (±1, 3, 10, 25, 50 % of each value) for
 the one-at-a-time test of every parameter, and physical ranges (the CLM-ml PFT tables and
-the CHATS values; `s8_locality.py`, `PHYSICAL`) for dense sweeps of ι, Vcmax25, ψ50,
+the CHATS values, ψ50 from -2 to -1 MPa only; `s8_locality.py`, `PHYSICAL`) for dense sweeps of ι, Vcmax25, ψ50,
 plant conductance, near-infrared leaf reflectance and `shape_gs`, and for 2-D grids of
 ι × ψ50, ψ50 × plant conductance and Vcmax25 × ι. Every range is capped where the value
 becomes physically implausible: reflectance + transmittance of a band below 0.99, the
