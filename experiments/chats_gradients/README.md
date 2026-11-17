@@ -17,7 +17,7 @@ to `src/`). Steps 6 and 7 (remedies) were not run, on the maintainer's instructi
 ## Resume here (state on 2026-11-17, 09:15 MST)
 
 - **Done and committed:** steps 1-5, the default-against-exact comparison (every day of May
-  and the month run again with `water_stress_derivative: exact`), 47 figures in `figures/`,
+  and the month run again with `water_stress_derivative: exact`), 45 figures in `figures/`,
   the results below.
 - **Running when this was written: the twin calibration (step 7, asked for by the
   maintainer)**, job 8214770, eight runs of `s7_calibrate.py` (default against exact
