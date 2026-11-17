@@ -75,7 +75,12 @@ Guidance for Claude (and other contributors) working in this repository.
   `experiments/chats_gradients/` (its README is the plan and the status; `harness.py`
   writes one table to `$SCRATCH/clm-ml-jax/chats_gradients/`; experiment folders `may2007`
   and, for long runs, `aprmay2007`). Synthetic-twin loss, parameter ranges ±10 %, one at a
-  time instead of an emulator. Found on the way: `leaf_emissivity` = 1 gives NaN (O83).
+  time instead of an emulator. Steps 1-5 run 2026-11-17 (results and figures: the README):
+  no wrong gradient; the default stabilized water-stress derivative differs from finite
+  differences in water-stressed afternoons (most of May), where the forward model itself
+  amplifies round-off (O84); remedies (steps 6-7) not run, to discuss first. Jobs: the
+  account has no CPU hours, so `run.pbs` asks for a GPU node and uses its CPUs. Found on
+  the way: `leaf_emissivity` = 1 gives NaN (O83); zero derivative at dry leaves (O85).
 - **Testing:** the tiers under "Rules for changes" (Phase 9 adds the docs build; phase9_scope §5).
 - **Where the work is:** NCAR Derecho (CPU login node; GPUs through PBS, account UCLB0069,
   develop queue `gpudev`). Phase 6 history: `docs/design/phase6_progress.md`.

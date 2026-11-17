@@ -69,6 +69,8 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O81 | The consistent forward forms of the water stress and the Obukhov length as settings (prototypes, not built) | science / gradients | after 8 (idea) | M |
 | O82 | Gradient experiments at CHATS: when the gradients can be trusted and when they are useful (`experiments/chats_gradients/`) | robustness (gradients) | after 8 | M |
 | O83 | `leaf_emissivity` = 1 makes every output NaN (not diagnosed) | science issue (robustness) | after 8 | M |
+| O84 | Under water stress the forward model amplifies round-off (1e-12 to 6e-3 W m-2 on 22 May 2007 at CHATS) | science issue (numerics) | after 8 | M |
+| O85 | Dry leaves: the derivative with respect to intercepted water is zero at exactly zero water | robustness (gradients) | after 8 | M |
 | O78 | XLA aborts while writing the compilation cache when a second gradient test file compiles in one process | robustness (upstream JAX?) | after 8 | I |
 | O79 | ~~NaN parameter gradients where leaf water potential is positive (dew): `(psi_l/psi50)^shape_gs`~~ (closed: decision 121) | science issue (differentiability) | closed | M |
 | O77 | ~~Two-stream `avmu` wrong for PFTs with a negative leaf angle index (grasses, crops)~~ (closed: decision 120) | science issue (bug) | closed | M |
@@ -731,8 +733,15 @@ The model as it is now: [`model_overview.md`](model_overview.md).
   ill-conditioned over long runs, right at a point but misleading across a parameter's
   range. Plan, choices (decision 126) and status: `experiments/chats_gradients/README.md`
   (branch `chats_demos`); one harness (`harness.py`) writes one table in scratch.
-- **Status (2026-11-17):** step 1 done (the harness and the two experiment folders,
-  smoke-tested on one day). Next: step 2, the baseline over all of May.
+- **Status (2026-11-17):** steps 1 to 5 run (baseline over May, threshold sweeps,
+  parameter sweeps and Hessian, horizon, Jacobian, windows), figures in the folder,
+  results in its README. In short: no wrong gradient; the default
+  `water_stress_derivative: stabilized` differs from finite differences in the stressed
+  afternoons of 28 of 31 days (40 % of the derivatives within 1 % there, 97-100 %
+  elsewhere), where the exact derivative is erratic because the forward model is (O84);
+  over the month the loss is rough at small scale and the default gradient follows its
+  trend for the parameters that matter. Steps 6 and 7 (remedies) not run, on the
+  maintainer's instruction: next is to discuss the results.
 - **Source:** maintainer, 2026-11-17 (note "Diagnosing gradient failure in a JAX land model").
 
 ### O83. `leaf_emissivity` = 1 makes every output NaN
@@ -747,6 +756,36 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Until then:** the experiments of O82 flag the NaN in their table; keep the emissivity
   below 1.
 - **Source:** O82 step 1, 2026-11-17 (`experiments/chats_gradients/README.md`).
+
+### O84. Under water stress the forward model amplifies round-off
+- **Kind:** science issue (numerics) · **Target:** after 8 · **Decides:** M
+- **What:** at CHATS7, two runs whose start leaf temperatures differ by a relative 1e-12
+  stay 1e-10 W m-2 apart in latent heat on 1-4 May 2007, but drift to 6e-3 W m-2 in the
+  afternoon of 22 May and to 1e-6 on the following days, then come back
+  (`figures/twins.png` in `experiments/chats_gradients/`). The one-step Jacobian with
+  `water_stress_derivative: exact` has single steps with a largest eigenvalue of 12
+  (9 May) and 8700 (21 May, 16:30 UTC); the exact derivative of the fluxes jumps from
+  step to step in the same hours. This is the lagged water-stress feedback of decision
+  124 seen in the forward values: the noise-twin regression test (one clear day,
+  ≤ 4e-11) does not reach these days. Effects: the monthly loss has ripples of about
+  1e-5 across a parameter's range, and small-step finite differences are useless there.
+  Whether a discrete defect (as the secant bug of the numerics doc §5) or the scheme
+  itself is behind the largest single-step growth is not diagnosed.
+- **Until then:** nothing changed. Related: O81 (the consistent forward form).
+- **Source:** O82 step 5, 2026-11-17.
+
+### O85. Dry leaves: zero derivative with respect to intercepted water
+- **Kind:** robustness (gradients) · **Target:** after 8 · **Decides:** M
+- **What:** with exactly no water on the leaves, the derivative of every flux with
+  respect to the intercepted water is zero, while just above zero the slope is the
+  largest of the sweep (about 1e4 W m-2 of latent heat per kg m-2;
+  `figures/threshold_leaf_water_noon_d00.png` in `experiments/chats_gradients/`). The
+  one-day Jacobian therefore says a perturbation of the start state's intercepted water
+  lasts for ever on a dry day (gain 1), when a small amount evaporates within the hour.
+  It matters only for a gradient with respect to the intercepted water of a dry start
+  state (or rain of a dry step); parameters and the other states are not affected.
+- **Until then:** nothing changed.
+- **Source:** O82 steps 3 and 5, 2026-11-17.
 
 ### O34. `.gitignore` ignores `docs/`
 - **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").

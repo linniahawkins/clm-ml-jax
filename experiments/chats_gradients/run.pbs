@@ -1,0 +1,27 @@
+#!/bin/bash
+#PBS -N chats_grad
+#PBS -A UCLB0069
+#PBS -q develop
+#PBS -l select=1:ncpus=32:ngpus=1:mem=235GB
+#PBS -l walltime=06:00:00
+#PBS -j oe
+# (The account UCLB0069 has GPU hours only: a GPU node is asked for, its CPUs are used.)
+# The gradient experiments at CHATS (README.md): the commands of a task file, several at a
+# time on one CPU node. WARM (optional): a file of commands run one after the other first,
+# so that the compiled programs are in the on-disk cache before many processes ask for them.
+#
+#   qsub -v TASKS=/path/tasks.txt,WARM=/path/warm.txt,TAG=name experiments/chats_gradients/run.pbs
+set -u
+export SCRATCH=${SCRATCH:-/glade/derecho/scratch/$USER}
+REPO=${REPO:-/glade/work/$USER/clm-ml-jax-gpu_opt}
+export PATH=${ENV_BIN:-/glade/work/$USER/conda-envs/clm-ml-jax/bin}:$PATH
+export PYTHONPATH=$REPO/src JAX_PLATFORMS=cpu TMPDIR=$SCRATCH/tmp
+LOGS=$SCRATCH/clm-ml-jax/chats_gradients/logs/${TAG:-run}
+mkdir -p $LOGS $TMPDIR
+cd $REPO/experiments/chats_gradients
+exec > $LOGS/job.log 2>&1
+date; git -C $REPO log --oneline -1
+if [ -n "${WARM:-}" ]; then python launch.py $WARM $LOGS/warm --cores 16; fi
+date
+NPAR=${NPAR:-32} python launch.py $TASKS $LOGS --cores ${CORES:-1}
+date

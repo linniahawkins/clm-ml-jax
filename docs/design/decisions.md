@@ -1067,8 +1067,9 @@ for this model; the folder keeps the work reproducible (the earlier probe script
 out of the repository as measurement tools).
 Implementation choices (not science): the twin's parameters are a fixed random draw within
 ±5 %; the loss is the mean squared misfit of latent heat, sensible heat and GPP, each
-divided by its variance over the window; the range of `leaf_emissivity` and
-`clumping_index` is capped at 1.
+divided by its variance over the window; the range of `leaf_emissivity` stops at
+0.999 (maintainer; 1 gives NaN, O83) and that of `clumping_index` at 1. The model's code is
+not changed and no remedy is tried (maintainer, same day): steps 6 and 7 of the plan wait.
 Source: maintainer, 2026-11-17; `experiments/chats_gradients/README.md`.
 
 ## G. Regression and testing policy
