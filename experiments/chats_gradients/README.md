@@ -161,6 +161,14 @@ the 31-day Hessian 3 hours.
   s-1 in GPP (Vcmax). Derivative × range predicts the difference between the maximum and
   the minimum within 5 % for GPP; for the heat fluxes it is off by up to 24 % (month) for
   ψ50 (a curved response and the stabilized derivative together).
+  The green diamonds are the same with `water_stress_derivative: exact` (every day and the
+  month run again with that setting). Over one day the exact derivative is the better
+  predictor (median of 31 days: off by 0.4 % of the largest effect in latent heat against
+  0.9 % for the default; ψ50 and plant conductance sit on the model's difference). Over
+  the month it is useless: thousands of W m-2 for an effect of 8, wrong signs (the numbers
+  at the arrows), the growth without bound that decision 124 describes. There its forward
+  and reverse mode also differ by a constant factor of 1.44 for every parameter (not
+  diagnosed; one exploding direction whose size depends on round-off would do that).
 
 ### Step 3. Threshold sweeps
 

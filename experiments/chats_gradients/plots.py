@@ -250,8 +250,10 @@ if want("baseline") and (RESULTS / "table.csv").exists():
         save(fig, "stabilized_vs_exact_day08.png")
 
     # the one-at-a-time experiment
-    for exp, title, name in [("baseline", "one-day windows (median of 31 days)", "oat_1day.png"),
-                             ("month", "the 31 days of May", "oat_month.png")]:  # fmt: skip
+    for exp, exp_x, title, name in [
+        ("baseline", "exact_water_stress", "one-day windows (median of 31 days)", "oat_1day.png"),
+        ("month", "month_exact", "the 31 days of May", "oat_month.png"),
+    ]:
         d = t[t.experiment == exp].drop_duplicates(["first_chunk", "input", "output"], keep="last")
         d = d[~d.input.isin(zero)]
         if d.empty:
@@ -261,14 +263,37 @@ if want("baseline") and (RESULTS / "table.csv").exists():
         fig, axes = plt.subplots(1, 4, figsize=(13, 5.2), sharey=True)
         m = d.groupby(["input", "output"])[["actual", "linear"]].median().reset_index()
         order_p = m[m.output == outs[0]].set_index("input").actual.abs().sort_values().index
+        # the same with the exact water-stress derivative (a setting; forward values the same)
+        dx = t[t.experiment == exp_x].drop_duplicates(["first_chunk", "input", "output"], keep="last")  # fmt: skip
+        dx = dx.assign(exact=dx.ad_forward * (dx.x_max - dx.x_min))
+        mx = dx.groupby(["input", "output"]).exact.median().reset_index()
+        if len(dx):
+            say(f"one at a time, {exp}: exact derivative from {dx.first_chunk.nunique()} window(s)")
         for ax, q in zip(axes, outs):
             mm = m[m.output == q].set_index("input").loc[order_p]
             yy = np.arange(len(mm))
             ax.hlines(yy, mm.actual, mm.linear, color=GREY, lw=1.2)
-            ax.scatter(mm.linear, yy, s=34, color=C[1], label="derivative × range", zorder=3,
+            ax.scatter(mm.linear, yy, s=34, color=C[1], label="default derivative × range", zorder=3,
                        edgecolors=SURFACE, linewidths=1)  # fmt: skip
             ax.scatter(mm.actual, yy, s=34, color=C[0], label="model at max − at min", zorder=3,
                        edgecolors=SURFACE, linewidths=1)  # fmt: skip
+            lim = 1.15 * max(mm.actual.abs().max(), mm.linear.abs().max())
+            if len(mx):
+                ex_ = mx[mx.output == q].set_index("input").exact.reindex(order_p)
+                inside = ex_.abs() <= lim
+                ax.scatter(ex_[inside], yy[inside.values], s=30, color=C[2], marker="D", zorder=4,
+                           label="exact derivative × range", edgecolors=SURFACE, linewidths=1)  # fmt: skip
+                for y_, v in zip(yy[~inside.values], ex_[~inside]):  # off the axis: its value
+                    if np.isfinite(v):
+                        ax.annotate(f"{v:.3g}", (np.sign(v) * lim, y_), color=C[2], fontsize=7,
+                                    ha="right" if v > 0 else "left", va="center",
+                                    xytext=(-3 if v > 0 else 3, 0), textcoords="offset points",
+                                    arrowprops={"arrowstyle": "-|>", "color": C[2], "lw": 0.8})  # fmt: skip
+                relx = (ex_ - mm.actual).abs() / mm.actual.abs().max()
+                say(f"   exact derivative × range, {q}: off by at most {relx.max():.1%} of the",
+                    f"largest effect ({relx.idxmax()}); median {relx.median():.2%};",
+                    f"default: median {((mm.linear - mm.actual).abs() / mm.actual.abs().max()).median():.2%}")  # fmt: skip
+            ax.set_xlim(-lim, lim)
             ax.axvline(0, color=GREY, lw=0.8)
             unit = UNITS.get(q.replace("mean:", ""), "")
             ax.set(title=q.replace("mean:", "mean ").replace("_", " "), xlabel=unit or "loss")
@@ -278,7 +303,7 @@ if want("baseline") and (RESULTS / "table.csv").exists():
                 say(f"one at a time, {exp}, {q}: largest effect {mm.actual.abs().max():.3g}",
                     f"({mm.actual.abs().idxmax()}); derivative × range off by at most",
                     f"{rel.max():.1%} of that ({rel.idxmax()})")  # fmt: skip
-        axes[0].legend(loc="upper center", bbox_to_anchor=(0.5, -0.09), ncol=2, fontsize=8)
+        axes[0].legend(loc="upper center", bbox_to_anchor=(0.5, -0.09), ncol=3, fontsize=8)
         fig.suptitle(f"One at a time: each parameter from −10 % to +10 %, {title}", x=0.01,
                      ha="left", fontweight="bold")  # fmt: skip
         save(fig, name)
