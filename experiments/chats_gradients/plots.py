@@ -756,5 +756,174 @@ if want("time"):
             say(f"  {k.replace('_', ' ')}: largest relative difference from the default",
                 f"{np.abs(z[k] - z['default']).max() / np.abs(z['default']).max():.1e}")  # fmt: skip
 
+# ============================================== the default against the exact derivative
+EXD, BAS = RESULTS / "exact_water_stress", RESULTS / "baseline"
+DEF_C, EX_C, REF_C = C[1], C[0], GREY  # default, exact, the reference (model or FD)
+if want("compare") and len(glob.glob(str(EXD / "may2007_*_01.npz"))) >= 31:
+    say("\n== The default (stabilized) against the exact water-stress derivative")
+    days = range(31)
+    zb = [np.load(BAS / f"may2007_{k:02d}_01.npz", allow_pickle=True) for k in days]
+    ze = [np.load(EXD / f"may2007_{k:02d}_01.npz", allow_pickle=True) for k in days]
+    names = list(zb[0]["names"])
+    psi_min = np.array([z["label_top_leaf_water_potential"].min() for z in zb])
+
+    # 1. one day without stress and one with: every step
+    fig, axes = plt.subplots(3, 2, figsize=(11, 7.4), sharex=True,
+                             gridspec_kw={"height_ratios": [0.7, 1, 1]})  # fmt: skip
+    for col, k in enumerate([2, 8]):
+        hrs = (np.arange(zb[k]["ad_step"].shape[2]) + 1) / 2
+        psi = zb[k]["label_top_leaf_water_potential"]
+        ax = axes[0, col]
+        ax.plot(hrs, psi, color=INK2, lw=1.5)
+        ax.axhline(-1.6, color=C[7], lw=1, ls="--")
+        ax.text(0.3, -1.57, "ψ50", color=C[7], fontsize=8, va="bottom")
+        ax.set_ylim(-2.05, 0.05)
+        ax.set_title(f"{k + 1} May: " + ("no water stress" if col == 0 else "water stress in the afternoon"))  # fmt: skip
+        for row, (p, m, lab) in enumerate([("vcmax25", 0, "d latent heat / d Vcmax"),
+                                           ("psi50_gs", 0, "d latent heat / d ψ50")], 1):  # fmt: skip
+            i, ax = names.index(p), axes[row, col]
+            fdv = best_fd(ze[k]["ad_step"][i], ze[k]["fd_step"][:, i])
+            ax.plot(
+                hrs, fdv[m], color=REF_C, lw=4.5, label="finite difference (the model's own slope)"
+            )
+            ax.plot(hrs, ze[k]["ad_step"][i, m], color=EX_C, lw=1.3, label="exact derivative")
+            ax.plot(hrs, zb[k]["ad_step"][i, m], color=DEF_C, lw=1.8, label="default derivative")
+            ax.axvspan(hrs[psi < -1.43].min() if (psi < -1.43).any() else 0,
+                       hrs[psi < -1.43].max() if (psi < -1.43).any() else 0, color="#f3e9e2", lw=0, zorder=0)  # fmt: skip
+            ax.set_title(lab, fontweight="normal")
+    axes[0, 0].set_ylabel("top-leaf water\npotential (MPa)")
+    axes[1, 0].legend(fontsize=8, loc="upper left")
+    for ax in axes[2]:
+        ax.set_xlabel("hours into the day (UTC; local noon near 20 h)")
+    fig.suptitle("Step by step: both derivatives are right without stress; under stress the exact one "
+                 "is the model's slope, and erratic", x=0.01, ha="left", fontweight="bold")  # fmt: skip
+    save(fig, "compare_1_two_days.png")
+
+    # 2. by regime: share of derivatives within 1 % of finite differences
+    order = ["night", "sunrise ±1 h", "day, no stress", "day, water stress", "sunset ±1 h", "wet canopy"]  # fmt: skip
+    share = {}
+    for key, zs in [("default", zb), ("exact", ze)]:
+        acc = {r: [] for r in order}
+        for k in days:
+            keep = zb[k]["active"] & (np.abs(zb[k]["ad_step"]).max((1, 2)) > 0)
+            ad = zs[k]["ad_step"][keep]
+            bf = best_fd(ad, zs[k]["fd_step"][:, keep])
+            err = np.abs(bf - ad) / (np.abs(ad).max(axis=2, keepdims=True) + 1e-300)
+            reg = regimes(zb[k])
+            for r in order:
+                if (reg == r).any():
+                    acc[r].append((err[:, :, reg == r] < 1e-2).ravel())
+        share[key] = np.array([np.concatenate(acc[r]).mean() for r in order])
+    fig, ax = plt.subplots(figsize=(7.6, 3.6))
+    y = np.arange(len(order))[::-1]
+    ax.barh(y + 0.19, share["exact"], height=0.34, color=EX_C, label="exact derivative")
+    ax.barh(y - 0.19, share["default"], height=0.34, color=DEF_C, label="default derivative")
+    for yy, a, b_ in zip(y, share["exact"], share["default"]):
+        ax.text(a + 0.01, yy + 0.19, f"{a:.0%}", va="center", fontsize=8, color=INK2)
+        ax.text(b_ + 0.01, yy - 0.19, f"{b_:.0%}", va="center", fontsize=8, color=INK2)
+    ax.set_yticks(y, order)
+    ax.set(xlim=(0, 1.12), xlabel="share of step derivatives within 1 % of finite differences (31 days)",
+           title="Is it the model's own slope? By regime of the time step")  # fmt: skip
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=2, fontsize=8)
+    ax.grid(axis="y", visible=False)
+    save(fig, "compare_2_regimes.png")
+    say("within 1 % of FD by regime:", {r: (round(a, 3), round(b_, 3)) for r, a, b_ in zip(order, share["exact"], share["default"])}, "(exact, default)")  # fmt: skip
+
+    # 3. one-day windows: does derivative x range predict the model's change over the range?
+    t = pd.read_csv(RESULTS / "table.csv")
+    pars = ["iota", "vcmax25", "psi50_gs", "plant_conductance", "leaf_reflectance[1]", "root_resistivity"]  # fmt: skip
+    q = "mean:latent_heat_flux"
+    tabs = {}
+    for key, exp in [("default", "baseline"), ("exact", "exact_water_stress")]:
+        d = t[(t.experiment == exp) & (t.chunks == 1) & (t.output == q) & t.input.isin(pars)]
+        d = d.drop_duplicates(["first_chunk", "input"], keep="last")
+        d = d.assign(pred=d.ad_forward * (d.x_max - d.x_min), actual=d.y_at_max - d.y_at_min)
+        tabs[key] = (d.pivot(index="input", columns="first_chunk", values="pred").loc[pars],
+                     d.pivot(index="input", columns="first_chunk", values="actual").loc[pars])  # fmt: skip
+    fig, axes = plt.subplots(len(pars) + 1, 1, figsize=(10.5, 10.5), sharex=True,
+                             gridspec_kw={"height_ratios": [0.8] + [1] * len(pars)})  # fmt: skip
+    dd = np.arange(1, 32)
+    axes[0].bar(dd, psi_min, color=np.where(psi_min < -1.6, C[7], GREY), width=0.7)
+    axes[0].axhline(-1.6, color=C[7], lw=1, ls="--")
+    axes[0].set(ylabel="lowest top-leaf\npotential (MPa)", ylim=(-2.1, -1.0),
+                title="How stressed each day is (red: below ψ50)")  # fmt: skip
+    for ax, p in zip(axes[1:], pars):
+        actual = tabs["default"][1].loc[p].values
+        ax.plot(
+            dd, actual, color=REF_C, lw=5, label="model at max − at min", solid_capstyle="round"
+        )
+        lim = 2.2 * np.abs(actual).max()
+        ex_ = tabs["exact"][0].loc[p].values
+        off = np.abs(ex_) > lim
+        ax.plot(dd, np.clip(ex_, -lim, lim), color=EX_C, lw=1.1)
+        ax.plot(dd[~off], ex_[~off], color=EX_C, lw=0, marker="D", ms=3.5, label="exact derivative × range")  # fmt: skip
+        ax.plot(dd[off & (ex_ > 0)], np.full((off & (ex_ > 0)).sum(), 0.93 * lim), color=EX_C, lw=0,
+                marker="^", ms=7, label="exact, off the axis" if p == pars[-1] else None)  # fmt: skip
+        ax.plot(dd[off & (ex_ < 0)], np.full((off & (ex_ < 0)).sum(), -0.93 * lim), color=EX_C, lw=0, marker="v", ms=7)  # fmt: skip
+        ax.plot(dd, tabs["default"][0].loc[p].values, color=DEF_C, lw=1.3, marker="o", ms=3.5, label="default derivative × range")  # fmt: skip
+        ax.set_ylim(-lim, lim)
+        ax.axhline(0, color=GREY, lw=0.7)
+        ax.set_title(p, fontweight="normal")
+        ax.set_ylabel("W m$^{-2}$")
+        for key in ("exact", "default"):
+            e = np.abs(tabs[key][0].loc[p].values - actual) / np.abs(actual).max()
+            say(f"  one-day windows, {p}, {key}: derivative × range off by median {np.median(e):.1%},",
+                f"worst day {e.max():.0%} of the largest effect; right sign on {(np.sign(tabs[key][0].loc[p].values) == np.sign(actual)).sum()} of 31 days")  # fmt: skip
+    axes[-1].legend(fontsize=8, ncol=4, loc="upper center", bbox_to_anchor=(0.5, -0.38))
+    axes[-1].set_xlabel("day of May 2007 (one-day windows)")
+    fig.suptitle("One day at a time: does the derivative predict the change of mean latent heat over ±10 %?",
+                 x=0.01, ha="left", fontweight="bold", y=0.925)  # fmt: skip
+    save(fig, "compare_3_daily_prediction.png")
+
+    # 4. the month: the derivative of the running mean as the window grows
+    fm, fx = RESULTS / "month" / "may2007_00_31.npz", RESULTS / "month_exact" / "may2007_00_31.npz"
+    if fm.exists() and fx.exists():
+        zm, zx = np.load(fm, allow_pickle=True), np.load(fx, allow_pickle=True)
+        nm = list(zm["names"])
+        rng_ = zm["hi"] - zm["lo"]
+        nst = zm["y0"].shape[1]
+        tt = (np.arange(nst) + 1) / 48
+        run = lambda a: np.cumsum(a) / np.arange(1, nst + 1)  # noqa: E731  mean from the start
+        fig, axes = plt.subplots(2, 3, figsize=(13, 6.4), sharex=True)
+        for col, p in enumerate(["vcmax25", "iota", "psi50_gs"]):
+            i = nm.index(p)
+            ax = axes[0, col]
+            ax.plot(
+                tt, np.maximum(np.abs(zx["ad_step"][i, 0]), 1e-6), color=EX_C, lw=0.9, label="exact"
+            )
+            ax.plot(
+                tt,
+                np.maximum(np.abs(zm["ad_step"][i, 0]), 1e-6),
+                color=DEF_C,
+                lw=0.9,
+                label="default",
+            )
+            ax.set(yscale="log", title=f"|d latent heat / d {p}| at every step")
+            ax.set_ylim(bottom=1e-4 * np.abs(zm["ad_step"][i, 0]).max())
+            ax = axes[1, col]
+            actual = run(zm["hi_step"][i, 0] - zm["lo_step"][i, 0])
+            lim = 3 * np.abs(actual[48:]).max()
+            ax.plot(tt, actual, color=REF_C, lw=5, label="model at max − at min")
+            ax.plot(tt, np.clip(run(zx["ad_step"][i, 0]) * rng_[i], -lim, lim), color=EX_C, lw=1.4, label="exact derivative × range")  # fmt: skip
+            ax.plot(tt, run(zm["ad_step"][i, 0]) * rng_[i], color=DEF_C, lw=1.6, label="default derivative × range")  # fmt: skip
+            ax.set_ylim(-lim, lim)
+            ax.axhline(0, color=GREY, lw=0.7)
+            ax.set(title=f"effect of ±10 % of {p}",
+                   xlabel="days from 1 May")  # fmt: skip
+            ax.title.set_fontweight("normal")
+            ex_run = run(zx["ad_step"][i, 0]) * rng_[i]
+            bad = np.flatnonzero(np.abs(ex_run - actual) > np.abs(actual[-1]))
+            say(f"  month, {p}: the exact derivative × range of the running mean leaves the model's",
+                f"change by more than the month's effect from day {tt[bad[bad > 96][0]]:.1f}" if (bad > 96).any() else "never")  # fmt: skip
+        axes[0, 0].legend(fontsize=8)
+        axes[1, 0].legend(fontsize=8, loc="lower left")
+        axes[0, 0].set_ylabel("W m$^{-2}$ per unit")
+        axes[1, 0].set_ylabel(
+            "mean latent heat since 1 May, W m$^{-2}$\n(exact: clipped at the axis)"
+        )
+        fig.suptitle("Longer windows: the exact derivative grows from one stressed day to the next; "
+                     "the default stays with the model", x=0.01, ha="left", fontweight="bold")  # fmt: skip
+        save(fig, "compare_4_month.png")
+
 (RESULTS / "summary.txt").write_text("\n".join(_lines) + "\n") if ONLY is None else None
 sys.exit(0)

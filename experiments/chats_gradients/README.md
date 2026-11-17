@@ -170,6 +170,33 @@ the 31-day Hessian 3 hours.
   and reverse mode also differ by a constant factor of 1.44 for every parameter (not
   diagnosed; one exploding direction whose size depends on round-off would do that).
 
+### The default against the exact derivative (four figures)
+
+Every day of May and the month were run a second time with
+`numerics.water_stress_derivative: exact` (forward values are the same).
+
+- `figures/compare_1_two_days.png`: every step of a day without stress (3 May) and of one
+  with (9 May). Without stress the two derivatives and finite differences are one line.
+  Under stress the exact one is the model's slope, with spikes of 10 times the level and
+  changes of sign; the default runs through them.
+- `figures/compare_2_regimes.png`: share of step derivatives within 1 % of finite
+  differences. Exact: 99-100 % in every regime. Default: 97-100 %, but 40 % under stress.
+- `figures/compare_3_daily_prediction.png`: for each one-day window, derivative × range
+  against the model's change of mean latent heat over ±10 %. On the four unstressed days
+  both predict it. On stressed days the default stays close (worst day 20-37 % of the
+  largest effect, right sign on 31 of 31 days for the six parameters shown); the exact one
+  is as good on most days and far off on some (13, 21, 22, 30 May: off the axis; 21 May:
+  1e7 W m-2; wrong sign on 2 to 9 days of 31).
+- `figures/compare_4_month.png`: from 1 May onwards. The exact derivative at a step grows
+  from one stressed day to the next (up to 1e6 times the default's on 21-22 May); the
+  derivative of the running mean follows the model until the first stressed days, steps
+  away on 13 May and is lost from 21 May. The default follows the model's change through
+  the month (ψ50: 30 % too large at the end).
+
+So: exact is the right choice where there is no water stress and for checking the code
+against finite differences; the default is the usable one for windows that contain
+stressed afternoons, which in May is nearly all of them.
+
 ### Step 3. Threshold sweeps
 
 `figures/threshold_<sweep>_d00.png` (1 May) and `_d20.png` (21 May): the outputs on top,
