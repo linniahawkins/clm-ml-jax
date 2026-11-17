@@ -12,24 +12,18 @@ can fail in four ways, each needing its own test:
    local slope is not the trend across the parameter's range.
 
 Steps 1 to 5 of the plan below were run on 2026-11-17 with the model as it is (no change
-to `src/`). Steps 6 and 7 (remedies) were not run, on the maintainer's instruction.
+to `src/`). Of steps 6 and 7 (remedies), only the twin calibration of step 7 was run, at
+the maintainer's request (2026-11-17).
 
-## Resume here (state on 2026-11-17, 09:15 MST)
+## Resume here (state on 2026-11-17, afternoon)
 
 - **Done and committed:** steps 1-5, the default-against-exact comparison (every day of May
   and the month run again with `water_stress_derivative: exact`), 45 figures in `figures/`,
   the results below.
-- **Running when this was written: the twin calibration (step 7, asked for by the
-  maintainer)**, job 8214770, eight runs of `s7_calibrate.py` (default against exact
-  gradient × 5 strong parameters / all 23 × two twins; Adam, 80 iterations of about 93 s;
-  observations are a month of daily means). It writes
-  `$SCRATCH/clm-ml-jax/chats_gradients/calibration/<params>_<gradient>_s<seed>.npz` after
-  every iteration; log `logs/calib/`. **To finish:** `python plots.py --only calibration`
-  draws `figures/calibration_progress.png` and `calibration_parameters.png` and prints the
-  numbers; look at them, write the result here (a section "Step 7"), commit the two
-  figures. At iteration 56 of 80: with the default gradient the loss of the 5-parameter
-  twins had fallen from 7e-4 to 1e-5; with the exact gradient it stood at 6e-3 to 2e-2,
-  above where it started (interim, not checked further).
+- **Done: the twin calibration (step 7)**, job 8214770 (eight runs of `s7_calibrate.py`,
+  all 80 iterations, finished 09:52): results in "Step 7" below and result 8, figures
+  `calibration_progress.png` and `calibration_parameters.png`; the runs' files are
+  `$SCRATCH/clm-ml-jax/chats_gradients/calibration/<params>_<gradient>_s<seed>.npz`.
 - **Not run:** step 6 (the remedies that are settings: `wetted_fraction`,
   `obukhov_derivative`) and the soft-threshold prototype of step 7.
 - **Open questions left by the results** (none diagnosed): O84 (round-off growth under
@@ -99,6 +93,14 @@ to `src/`). Steps 6 and 7 (remedies) were not run, on the maintainer's instructi
    optics; the sloppiest are stem transmittance and the root parameters (root radius and
    density are one direction). Differencing AD gradients gives an asymmetric Hessian
    with negative eigenvalues: the gradient is itself not smooth at the 0.1-1 % scale.
+
+8. **A twin calibration works with the default gradient and fails with the exact one.**
+   Fitting a month of daily means (twins with parameters moved by up to ±5 %), the default
+   gradient lowers the loss 30-500 times and recovers the five strong parameters to
+   0.4-0.7 % on average; with all 23 parameters the loss falls as far but the parameters
+   barely get closer to the truth (the daily means do not constrain the weak ones). With
+   the exact gradient the loss ends higher than it started or barely lower: its gradient
+   reaches 1e4 to 1e39 on single iterations (step 7).
 
 In the four failure classes: (1) none found; (2) at the wind minimum, the stable limit and
 dry leaves (the last one misleading); (3) not in the default gradient, yes in the exact
@@ -288,6 +290,55 @@ every step (above), which a non-converged solver would show.
 - Spread over windows (`figures/windows_spread.png`): result 6 above.
 - Checkpoints: step and sub-step checkpoints on or off change the gradient by less than 3e-10.
 
+### Step 7. A twin calibration
+
+The question: does a calibration that uses the gradient reach the right answer, with the
+default (stabilized) and with the exact water-stress derivative? `s7_calibrate.py`: the
+"observations" are the 31 daily means of May of latent heat, sensible heat and GPP (the
+loss outputs) from a run whose parameters are moved by up to ±5 % (a random draw, two
+draws = two twins); the calibration starts at the defaults and takes 80 Adam steps (first
+step 3 % of the range, cosine decay to a tenth) inside the ±10 % ranges, with either the 5
+strong parameters (ι, Vcmax25, ψ50, plant conductance, near-infrared leaf reflectance) or
+all 23. Eight runs, about 93 s per iteration (the month's gradient), 2.2 hours each.
+
+| Parameters | Gradient | Twin | Loss, start → end | Mean distance from the truth (% of the value) | Largest gradient norm |
+|---|---|---|---|---|---|
+| 5 strong | default | 0 | 7.3e-4 → 1.0e-5 | 0.96 → 0.65 | 0.03 |
+| 5 strong | default | 1 | 2.1e-2 → 4.3e-5 | 3.38 → 0.44 | 0.2 |
+| 5 strong | exact | 0 | 7.3e-4 → 6.1e-3 | 0.96 → 2.45 | 5e10 |
+| 5 strong | exact | 1 | 2.1e-2 → 8.5e-3 | 3.38 → 2.52 | 2e17 |
+| all 23 | default | 0 | 3.5e-4 → 1.3e-5 | 2.21 → 1.99 | 0.04 |
+| all 23 | default | 1 | 6.2e-3 → 1.5e-4 | 3.17 → 2.63 | 0.05 |
+| all 23 | exact | 0 | 3.5e-4 → 2.0e-2 | 2.21 → 3.28 | 2e4 |
+| all 23 | exact | 1 | 6.2e-3 → 6.5e-3 | 3.17 → 3.15 | 1e39 |
+
+(`figures/calibration_progress.png`: loss and distance from the truth by iteration;
+`figures/calibration_parameters.png`: the path of each strong parameter.)
+
+- **Default gradient, 5 parameters:** the loss falls 70-500 times; ι, Vcmax25, ψ50 and
+  the near-infrared reflectance end on their true values; plant conductance gets the
+  direction right but stops short (twin 0: -1 % instead of -3 %; twin 1: +2.9 % instead
+  of +3.6 %), so it trades off against the others in the daily means. The loss is
+  still falling slowly at iteration 80.
+- **Default gradient, 23 parameters:** the loss falls as far (to about 1e-5 and 1e-4), but
+  the mean distance from the truth hardly changes (2.2 → 2.0 %, 3.2 → 2.6 %): the twin
+  can be matched with other combinations of the weak parameters, as the Hessian's 1e13
+  condition number said (result 7). In twin 1, 11 of 23 parameters got closer by half
+  or more, 4 moved away (`plant_capacitance`, `root_resistivity`, `clumping_index`,
+  `stem_transmittance[1]`); in twin 0 only 4 got closer by half.
+- **Exact gradient:** every strong parameter moves about 2 % in the first few iterations,
+  in some direction regardless of its truth, and then stops (the flat blue lines). Its
+  gradient norm reaches 5e10 to 1e39 on single iterations. Probably (not checked) Adam's
+  scaling by the running size of the gradient: the first steps follow the signs of an
+  erratic gradient, and after a spike the scale is so large that the steps vanish. The
+  loss ends above its start in two runs out of four.
+- In short: the stabilized derivative is the one a calibration can use; the exact one,
+  correct at a point, is unusable over a month with water stress (results 2 and 3). The
+  month of daily means constrains about the five strong parameters, not 23.
+- **Not run:** a calibration with more days or half-hourly observations, other optimizers
+  or settings (a gradient clip would hide, not cure, the exact gradient's spikes), the
+  soft-threshold prototype.
+
 ## Issues met, and what was done
 
 - **Account UCLB0069 has no CPU hours** (`qsub: Invalid account for CPU usage`). The jobs
@@ -320,5 +371,5 @@ every step (above), which a non-converged solver would show.
 | 4 | Parameters: one at a time, dense sweeps, Hessian | done |
 | 5 | Time: horizon, one-step Jacobian, spread over windows, checkpoints | done |
 | 6 | Remedies that are already settings (`wetted_fraction`, `water_stress_derivative`, `obukhov_derivative`): cost in bias against gain in gradient quality | not run (maintainer) |
-| 7 | A twin calibration (daily means of the month; default against exact gradient) | running 2026-11-17, see "Resume here" |
+| 7 | A twin calibration (daily means of the month; default against exact gradient) | done 2026-11-17 ("Step 7", result 8) |
 | 7 | A soft threshold as a prototype; full-horizon against windowed gradients | not run |
