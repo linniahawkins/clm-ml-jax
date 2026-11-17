@@ -1072,6 +1072,23 @@ divided by its variance over the window; the range of `leaf_emissivity` stops at
 not changed and no remedy is tried (maintainer, same day): steps 6 and 7 of the plan wait.
 Source: maintainer, 2026-11-17; `experiments/chats_gradients/README.md`.
 
+**127. Gradient experiments at CHATS, step 8: wider ranges, how far the derivative holds**
+2026-11-17 · gradient experiments (O82) · maintainer · in force (extends 126) · Departure from Fortran: n/a
+Step 8 asks how far from the default the derivative predicts the model's response. It uses
+two kinds of range: a ladder of relative changes (±1, 3, 10, 25, 50 % of each value) for
+the one-at-a-time test of every parameter, and physical ranges (the CLM-ml PFT tables and
+the CHATS values; `s8_locality.py`, `PHYSICAL`) for dense sweeps of ι, Vcmax25, ψ50,
+plant conductance, near-infrared leaf reflectance and `shape_gs`, and for 2-D grids of
+ι × ψ50, ψ50 × plant conductance and Vcmax25 × ι. Every range is capped where the value
+becomes physically implausible: reflectance + transmittance of a band below 0.99, the
+leaf angle index within the model's own limits (−0.4, 0.6), emissivity 0.999, clumping 1.
+Derivatives are the default (stabilized) water-stress derivative only. A twin calibration
+from far truths (8d) is decided after 8a-8c.
+Reason: ±10 % stayed inside the range where the derivative predicts the response; a
+calibration starts further away. `plant_capacitance` is left out of the sweeps
+(maintainer); the exact derivative is already shown unusable over the month (126, step 7).
+Source: maintainer, 2026-11-17; `experiments/chats_gradients/README.md` (step 8).
+
 ## G. Regression and testing policy
 
 **66. Bit for bit for refactors, noise twin for round-off changes**

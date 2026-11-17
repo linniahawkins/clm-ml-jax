@@ -118,6 +118,7 @@ not the useful one, and the default trades exactness for a usable trend.
 | `s4_parameters.py` | step 4: parameter sweeps across the range; the Hessian. |
 | `s5_time.py` | step 5: horizon sweep, one-step Jacobian, checkpoints, round-off twins. |
 | `s7_calibrate.py` | step 7: a twin calibration against a month of daily means (Adam; default or exact gradient). |
+| `s8_locality.py` | step 8: how far the derivative holds (one-at-a-time ladder, sweeps over physical ranges with regime variables, 2-D grids). |
 | `launch.py`, `run.pbs` | run a file of commands on one node, several at a time. |
 | `plots.py` | every figure in `figures/` and the numbers quoted here (`summary.txt` in the results directory). |
 | `figures/` | the figures (committed). |
@@ -395,3 +396,53 @@ all 23. Eight runs, about 93 s per iteration (the month's gradient), 2.2 hours e
 | 6 | Remedies that are already settings (`wetted_fraction`, `water_stress_derivative`, `obukhov_derivative`): cost in bias against gain in gradient quality | not run (maintainer) |
 | 7 | A twin calibration (daily means of the month; default against exact gradient) | done 2026-11-17 ("Step 7", result 8) |
 | 7 | A soft threshold as a prototype; full-horizon against windowed gradients | not run |
+| 8 | How far the derivative holds: wider ranges (decision 127; "Step 8" below) | planned 2026-11-17 |
+
+## Step 8. The gradient is local: how far does it hold? (plan, 2026-11-17)
+
+Up to ±10 % the derivative × change matches the one-at-a-time runs for most parameters,
+and the twin truths of step 7 were within ±5 %. A calibration starts further away. Step 8
+asks how far from the default the derivative still predicts the response, and why it stops.
+Expected causes, each with its own signature:
+
+1. **curvature**: a smooth, bending response (ψ50 is already 24 % off at ±10 % over the
+   month; saturating responses such as GPP against Vcmax);
+2. **another process takes control**: the parameter moves the canopy into conditions it
+   is not in at the default (whether afternoons are water-stressed at all, leaves at the
+   minimum water potential, the stable limit); the derivative cannot see a process that is
+   not active where it is taken;
+3. **parameters working together**: ι, ψ50 and plant conductance all control water use;
+   changing two may not equal the sum of each;
+4. **physical limits**: ranges are capped where values become implausible (below).
+
+Choices (maintainer, 2026-11-17; decision 127): two kinds of range, a ladder of relative
+changes and physical ranges; the default (stabilized) derivative only; `plant_capacitance`
+left out of the sweeps; caps at the physical limits; 8d decided after 8a-8c.
+
+| | What | Range | Result (`$SCRATCH/.../locality/`) |
+|---|---|---|---|
+| 8a | each of the 23 parameters on its own at ±1, 3, 10, 25, 50 %, against derivative × change: where (model change) / (derivative × change) leaves 0.9-1.1 is the parameter's trust radius; every day of May and the month | ladder | `oat_<days>d_<first>.npz` |
+| 8b | dense sweeps of ι, Vcmax25, ψ50, plant conductance, near-infrared leaf reflectance, `shape_gs`, with the regime variables at every step of every point (top and mid leaf water potential, fraction at the minimum water potential, soil water stress, canopy conductance, wet canopy, β): which cause is behind each failure. The month (101 points) and 3 and 9 May (201 points) | physical | `sweep_<param>_<days>d_<first>.npz` |
+| 8c | 2-D grids (21 × 21) of ι × ψ50, ψ50 × plant conductance, Vcmax25 × ι: the model against the sum of the two one-at-a-time changes, the gradient (a plane) and gradient plus second derivatives (a curved surface); is the loss one bowl? The month and 9 May | physical | `grid_<a>__<b>_<days>d_<first>.npz` |
+| 8d | twin calibrations with truths 20-40 % away, several starts, against a coarse grid search | physical | to decide after 8a-8c |
+
+Physical ranges (`s8_locality.py`, `PHYSICAL`; proposed, to confirm with the maintainer):
+
+| Parameter | Default (CHATS) | Range | Source |
+|---|---|---|---|
+| Vcmax25 | 125 | 40-150 | CLM-ml PFT tables 39-101; CHATS measured |
+| ι | 375 | 250-1500 | PFT tables 500-1500 |
+| ψ50 | -1.6 | -3.0 to -1.0 | CLM-ml default -2.3 |
+| plant conductance | 7 | 2-14 | CLM-ml default 4 |
+| leaf reflectance, near-infrared | 0.42 | 0.28-0.55 | PFT tables 0.28-0.46 (with transmittance 0.43: sum ≤ 0.98) |
+| `shape_gs` | 40 | 20-60 | none (40 for every PFT): ±50 % |
+
+Caps (`limits` in the script): reflectance + transmittance of a band below 0.99 (the
+partner at its default); leaf angle index within -0.4 to 0.6, the model's own clip (beyond
+it the derivative is zero by construction); emissivity 0.999 (O83); clumping 1.
+The second derivatives of 8c are central differences of forward-mode derivatives with a
+step of 1 % of the range (the gradient is not smooth at 0.1 % scales, result 7).
+
+    JAX_PLATFORMS=cpu python s8_locality.py oat --days 31
+    JAX_PLATFORMS=cpu python s8_locality.py sweep --param psi50_gs --days 31 --points 101
+    JAX_PLATFORMS=cpu python s8_locality.py grid --pair iota,psi50_gs --days 31 --points 21

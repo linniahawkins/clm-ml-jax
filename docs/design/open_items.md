@@ -744,8 +744,9 @@ The model as it is now: [`model_overview.md`](model_overview.md).
   trend for the parameters that matter. Added the same day: every day and the month with
   the exact derivative (four `compare_*` figures: exact is right without stress, useless
   over windows with stressed days), and a twin calibration against daily means
-  (`s7_calibrate.py`), running when this was written. Step 6 (remedies) not run. **Resume:**
-  the README's "Resume here".
+  (`s7_calibrate.py`), running when this was written. Step 6 (remedies) not run. Step 8
+  (how far the derivative holds, wider ranges; decision 127) planned the same day.
+  **Resume:** the README's "Resume here".
 - **Source:** maintainer, 2026-11-17 (note "Diagnosing gradient failure in a JAX land model").
 
 ### O83. `leaf_emissivity` = 1 makes every output NaN
