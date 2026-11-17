@@ -71,6 +71,7 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O83 | `leaf_emissivity` = 1 makes every output NaN (not diagnosed) | science issue (robustness) | after 8 | M |
 | O84 | Under water stress the forward model amplifies round-off (1e-12 to 6e-3 W m-2 on 22 May 2007 at CHATS) | science issue (numerics) | after 8 | M |
 | O85 | Dry leaves: the derivative with respect to intercepted water is zero at exactly zero water | robustness (gradients) | after 8 | M |
+| O86 | A run with monthly output files stops with "need at least one array to stack" when a restart is written at a month's end | bug (output) | now | M |
 | O78 | XLA aborts while writing the compilation cache when a second gradient test file compiles in one process | robustness (upstream JAX?) | after 8 | I |
 | O79 | ~~NaN parameter gradients where leaf water potential is positive (dew): `(psi_l/psi50)^shape_gs`~~ (closed: decision 121) | science issue (differentiability) | closed | M |
 | O77 | ~~Two-stream `avmu` wrong for PFTs with a negative leaf angle index (grasses, crops)~~ (closed: decision 120) | science issue (bug) | closed | M |
@@ -773,6 +774,24 @@ The model as it is now: [`model_overview.md`](model_overview.md).
   itself is behind the largest single-step growth is not diagnosed.
 - **Until then:** nothing changed. Related: O81 (the consistent forward form).
 - **Source:** O82 step 5, 2026-11-17.
+
+### O86. Output files per month and a restart at the month's end: the run stops
+- **Kind:** bug (output) · **Target:** now (stops the 1-year global runs) · **Decides:** M
+- **What:** `outputs.StreamFileWriter.state()` (called when a restart is written) writes the
+  records held so far and empties the list, but keeps the file's label. If those records
+  were the last of their month, the next record has a new label and `add()` calls
+  `_flush()` with no records: `records_to_arrays` fails in `np.stack` ("need at least one
+  array to stack"). Seen 2026-11-17 in two 1-year global runs (`grid_1deg_2000`, noleap,
+  10-day chunks, `restart_every: 1 months`, daily stream, `file_per: month`): both stopped
+  after the chunk starting 2000-03-02, 45 minutes in (the restart written at 2 March held
+  the days to 28 February; 1 March came with the next chunk). A run continued from that
+  restart stops the same way (`restore` gives the same state).
+- **Fix proposed (not made):** in `add()`, flush on a new label only if there are records
+  (`if self._label is not None and label != self._label and self._records`), with a test
+  of a restart at a period's end.
+- **Until then:** `file_per: year` (or `run`) for the stream avoids it in a run within one
+  year.
+- **Source:** the maintainer's runs in `$SCRATCH/grad_tests`, diagnosed 2026-11-17.
 
 ### O85. Dry leaves: zero derivative with respect to intercepted water
 - **Kind:** robustness (gradients) · **Target:** after 8 · **Decides:** M
