@@ -1018,6 +1018,50 @@ if want("scatter") and len(glob.glob(str(EXD / "may2007_*_01.npz"))) >= 31:
              va="bottom")  # fmt: skip
     save(fig, "exact_vs_fd_scatter.png")
 
+# ============ the same for two days, the four parameters in one panel: unstressed against stressed
+if want("scatter_days") and len(glob.glob(str(EXD / "may2007_*_01.npz"))) >= 31:
+    say("\n== The exact derivative against finite differences on 3 May (no stress) and 9 May")
+    H = 1e-6
+    days = [(3, "3 May: no water stress"), (9, "9 May: water stress in the afternoon")]
+    pars = [("iota", "ι"), ("vcmax25", "Vcmax25"), ("psi50_gs", "ψ50"),
+            ("plant_conductance", "plant conductance")]  # fmt: skip
+    rows = ["latent_heat_flux", "sensible_heat_flux", "gpp", "canopy_top_air_temperature"]
+    fig, axes = plt.subplots(len(rows), len(days), figsize=(8.6, 14))
+    for c_, (d, dlab) in enumerate(days):
+        z = np.load(EXD / f"may2007_{d - 1:02d}_01.npz", allow_pickle=True)
+        names, outs = list(z["names"]), list(z["vars"])
+        j = list(z["fd_steps"]).index(H)
+        for r_, v in enumerate(rows):
+            m, ax = outs.index(v), axes[r_, c_]
+            lim = 0.0
+            for n_, (p, plab) in enumerate(pars):
+                i = names.index(p)
+                width = z["hi"][i] - z["lo"][i]  # the ±10 % range: derivative × range
+                ad, fd = z["ad_step"][i, m] * width, z["fd_step"][j, i, m] * width
+                ax.scatter(fd, ad, s=16, color=C[n_], alpha=0.75, lw=0, label=plab)
+                lim = max(lim, np.abs(ad).max(), np.abs(fd).max())
+                say(f"  {d} May {SHORT[v]:>16} / {p:<18} largest |exact - FD| "
+                    f"{np.abs(ad - fd).max():.1e} of {np.abs(ad).max():.1e}")  # fmt: skip
+            lim *= 1.08
+            ax.plot([-lim, lim], [-lim, lim], color=GREY, lw=1, zorder=0)
+            ax.set(xlim=(-lim, lim), ylim=(-lim, lim), aspect="equal")
+            if r_ == 0:
+                ax.set_title(dlab)
+            if c_ == 0:
+                ax.set_ylabel(f"{SHORT[v]} ({UNITS[v]})\nexact derivative × range")
+            if r_ == len(rows) - 1:
+                ax.set_xlabel(f"finite difference × range (step {H:g})")
+    axes[0, 0].legend(fontsize=8, loc="upper left", title="parameter", title_fontsize=8,
+                      markerscale=1.5)  # fmt: skip
+    fig.suptitle("The exact derivative against finite differences: every 30-min step of one day",
+                 x=0.01, ha="left", fontweight="bold")  # fmt: skip
+    fig.text(0.01, -0.01, "Both axes: the derivative of the step's output times the parameter's "
+             "±10 % range (the linearized\nchange across the range). Finite differences: central, "
+             f"relative step {H:g}. One-day windows from midnight UTC.\nSetting "
+             "water_stress_derivative: exact.", fontsize=7.5, color=INK2, va="top")  # fmt: skip
+    fig.tight_layout(rect=(0, 0, 1, 0.985))
+    save(fig, "exact_vs_fd_two_days.png")
+
 # ================================================================== step 7: calibration
 cal = sorted(glob.glob(str(RESULTS / "calibration" / "*.npz")))
 if want("calibration") and cal:

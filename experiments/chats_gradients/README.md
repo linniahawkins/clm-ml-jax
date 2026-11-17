@@ -238,6 +238,12 @@ Every day of May and the month were run a second time with
   seven steps and measures against the day's largest derivative, which on those days is
   huge: it overstates the exact derivative's agreement under stress, 99 %; the scatter's
   numbers are the fair ones.)
+- `figures/exact_vs_fd_two_days.png`: the same scatter for one day without stress (3 May;
+  1 May has eight stressed steps, 2 May rain) and one with (9 May), the four parameters in
+  one panel. With the step 1e-6 every point is on the line on both days (largest
+  difference 3e-5 of 3.5 in canopy-top air temperature against ψ50 on 9 May); on 9 May the
+  derivatives are 10-20 times those of 3 May, and ψ50 and plant conductance, near zero
+  without stress, are as large as ι and Vcmax25.
 - `figures/compare_3_daily_prediction.png`: for each one-day window, derivative × range
   against the model's change of mean latent heat over ±10 %. On the four unstressed days
   both predict it. On stressed days the default stays close (worst day 20-37 % of the
