@@ -67,6 +67,8 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 | O76 | Gradients: speed, then quality and accuracy (branch `gpu_grad`) | performance / robustness (gradients) | after 8 | M |
 | O80 | A detector of unreliable gradients (idea, not built) | robustness (gradients) | after 8 (idea) | M |
 | O81 | The consistent forward forms of the water stress and the Obukhov length as settings (prototypes, not built) | science / gradients | after 8 (idea) | M |
+| O82 | Gradient experiments at CHATS: when the gradients can be trusted and when they are useful (`experiments/chats_gradients/`) | robustness (gradients) | after 8 | M |
+| O83 | `leaf_emissivity` = 1 makes every output NaN (not diagnosed) | science issue (robustness) | after 8 | M |
 | O78 | XLA aborts while writing the compilation cache when a second gradient test file compiles in one process | robustness (upstream JAX?) | after 8 | I |
 | O79 | ~~NaN parameter gradients where leaf water potential is positive (dew): `(psi_l/psi50)^shape_gs`~~ (closed: decision 121) | science issue (differentiability) | closed | M |
 | O77 | ~~Two-stream `avmu` wrong for PFTs with a negative leaf angle index (grasses, crops)~~ (closed: decision 120) | science issue (bug) | closed | M |
@@ -720,6 +722,31 @@ The model as it is now: [`model_overview.md`](model_overview.md).
 - **Source:** `gradient_progress.md` round 17; maintainer, 2026-11-16.
 
 ## 4. Housekeeping and repository organization (8a)
+
+
+### O82. Gradient experiments at CHATS
+- **Kind:** robustness (gradients) · **Target:** after 8 · **Decides:** M
+- **What:** a set of experiments at CHATS7 (May 2007; April and May for the long runs)
+  on the four ways a gradient can fail: wrong, right but uninformative (thresholds),
+  ill-conditioned over long runs, right at a point but misleading across a parameter's
+  range. Plan, choices (decision 126) and status: `experiments/chats_gradients/README.md`
+  (branch `chats_demos`); one harness (`harness.py`) writes one table in scratch.
+- **Status (2026-11-17):** step 1 done (the harness and the two experiment folders,
+  smoke-tested on one day). Next: step 2, the baseline over all of May.
+- **Source:** maintainer, 2026-11-17 (note "Diagnosing gradient failure in a JAX land model").
+
+### O83. `leaf_emissivity` = 1 makes every output NaN
+- **Kind:** science issue (robustness) · **Target:** after 8 · **Decides:** M
+- **What:** with the leaf emissivity of the CHATS7 patch set to exactly 1 (default 0.98),
+  every output of the day is NaN; 0.999999 runs. Found by the one-at-a-time experiment of
+  O82, whose range (+10 %) is capped at the physical limit 1. Not diagnosed. Where to
+  look first: `processes/longwave.py`, where the leaves scatter `1 - leaf_emissivity` of
+  the intercepted longwave (a division by that fraction would explain it; whether Fortran
+  does the same is to be checked). A forward-model matter: no change without the
+  maintainer's decision.
+- **Until then:** the experiments of O82 flag the NaN in their table; keep the emissivity
+  below 1.
+- **Source:** O82 step 1, 2026-11-17 (`experiments/chats_gradients/README.md`).
 
 ### O34. `.gitignore` ignores `docs/`
 - **Closed 2026-11-01** (Phase 8a group C; see "Recently closed").

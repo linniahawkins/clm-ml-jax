@@ -71,6 +71,11 @@ Guidance for Claude (and other contributors) working in this repository.
   the sub-step is `numerics.checkpoint_substeps`, which follows the device (decision 125:
   on a GPU a fifth of the memory at no cost in time, on the CPU 6× slower). Log and
   "Resume here": `docs/design/gradient_progress.md`.
+- **Gradient experiments at CHATS (O82, decision 126):** branch `chats_demos`, folder
+  `experiments/chats_gradients/` (its README is the plan and the status; `harness.py`
+  writes one table to `$SCRATCH/clm-ml-jax/chats_gradients/`; experiment folders `may2007`
+  and, for long runs, `aprmay2007`). Synthetic-twin loss, parameter ranges ±10 %, one at a
+  time instead of an emulator. Found on the way: `leaf_emissivity` = 1 gives NaN (O83).
 - **Testing:** the tiers under "Rules for changes" (Phase 9 adds the docs build; phase9_scope §5).
 - **Where the work is:** NCAR Derecho (CPU login node; GPUs through PBS, account UCLB0069,
   develop queue `gpudev`). Phase 6 history: `docs/design/phase6_progress.md`.

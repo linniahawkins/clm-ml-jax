@@ -1053,6 +1053,24 @@ Not measured: CPU gradients of many patches (thousands), where memory may ask fo
 Source: maintainer, 2026-11-16; `gradient_progress.md` rounds 15 and 16
 (`$SCRATCH/clm-ml-jax/probe_ckpt/results_mem.jsonl`).
 
+**126. Gradient experiments at CHATS: a synthetic twin, ranges of ±10 %, one at a time instead of an emulator**
+2026-11-17 · gradient experiments (O82) · maintainer · in force · Departure from Fortran: n/a
+The experiments of O82 use a synthetic-twin loss (the observations are the model run with
+other parameters, so the answer is known); every parameter's range is ±10 % of its default;
+the comparison with emulators of a perturbed-parameter ensemble is replaced by a
+one-at-a-time experiment (each parameter at the minimum and the maximum of its range,
+against derivative × range); May 2007, with April added for the long-run tests only; all of
+it in one folder, `experiments/chats_gradients/` (two experiment folders and the harness),
+results in scratch.
+Reason: a known answer separates gradient problems from model error; no emulator exists
+for this model; the folder keeps the work reproducible (the earlier probe scripts were kept
+out of the repository as measurement tools).
+Implementation choices (not science): the twin's parameters are a fixed random draw within
+±5 %; the loss is the mean squared misfit of latent heat, sensible heat and GPP, each
+divided by its variance over the window; the range of `leaf_emissivity` and
+`clumping_index` is capped at 1.
+Source: maintainer, 2026-11-17; `experiments/chats_gradients/README.md`.
+
 ## G. Regression and testing policy
 
 **66. Bit for bit for refactors, noise twin for round-off changes**
