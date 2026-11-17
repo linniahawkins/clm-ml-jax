@@ -925,5 +925,72 @@ if want("compare") and len(glob.glob(str(EXD / "may2007_*_01.npz"))) >= 31:
                      "the default stays with the model", x=0.01, ha="left", fontweight="bold")  # fmt: skip
         save(fig, "compare_4_month.png")
 
+# ================================================================== step 7: calibration
+cal = sorted(glob.glob(str(RESULTS / "calibration" / "*.npz")))
+if want("calibration") and cal:
+    say("\n== Step 7: twin calibration against daily means (Adam, from the defaults)")
+    runs = {}
+    for f in cal:
+        pset, grad_, seed = Path(f).stem.split("_")
+        runs[(pset, grad_, int(seed[1:]))] = np.load(f, allow_pickle=True)
+    col = {"default": DEF_C, "exact": EX_C}
+    psets = [p for p in ("strong", "all") if any(k[0] == p for k in runs)]
+    titles = {"strong": "5 strong parameters", "all": "all 23 parameters"}
+    fig, axes = plt.subplots(
+        2, len(psets), figsize=(5.6 * len(psets), 6.6), sharex=True, squeeze=False
+    )
+    for j, pset in enumerate(psets):
+        for (p_, g_, sd), z in sorted(runs.items()):
+            if p_ != pset:
+                continue
+            err = np.abs(z["u"] - z["u_true"]) * 20  # in % of the parameter's value
+            kw = {"color": col[g_], "ls": "-" if sd == 0 else "--", "lw": 1.6,
+                  "label": f"{g_} derivative" if sd == 0 else None}  # fmt: skip
+            axes[0, j].plot(z["loss"], **kw)
+            axes[1, j].plot(err.mean(axis=1), **kw)
+            best = int(np.argmin(z["loss"]))
+            say(f"  {pset:6s} {g_:7s} twin {sd}: {len(z['loss']) - 1} iterations; loss {z['loss'][0]:.2e} ->",
+                f"{z['loss'][-1]:.2e} (lowest {z['loss'][best]:.2e} at {best}); mean parameter error",
+                f"{err[0].mean():.2f} % -> {err[-1].mean():.2f} % of the value; largest gradient norm {np.nanmax(np.linalg.norm(z['grad'], axis=1)):.1e}")  # fmt: skip
+        axes[0, j].set(yscale="log", title=titles[pset] + ": the loss")
+        axes[1, j].set(title="mean distance of the parameters from the truth", xlabel="iteration")
+        axes[1, j].title.set_fontweight("normal")
+        axes[1, j].set_ylim(bottom=0)
+    axes[0, 0].set_ylabel("loss (misfit of daily means)")
+    axes[1, 0].set_ylabel("% of the parameter's value")
+    axes[0, 0].legend(fontsize=8)
+    fig.text(0.01, 0.005, "solid and dashed: two twins (two draws of the true parameters)", fontsize=8, color=INK2)  # fmt: skip
+    fig.suptitle("Twin calibration on a month of daily means: the default against the exact derivative",
+                 x=0.01, ha="left", fontweight="bold")  # fmt: skip
+    save(fig, "calibration_progress.png")
+
+    # where each strong parameter went
+    keys = [k for k in sorted(runs) if k[0] == "strong"]
+    if keys:
+        names_ = [str(n) for n in runs[keys[0]]["names"]]
+        seeds = sorted({k[2] for k in keys})
+        fig, axes = plt.subplots(len(seeds), len(names_), figsize=(2.7 * len(names_), 2.7 * len(seeds)),
+                                 sharex=True, squeeze=False)  # fmt: skip
+        for r, sd in enumerate(seeds):
+            for i, nme in enumerate(names_):
+                ax = axes[r, i]
+                for g_ in ("exact", "default"):
+                    if ("strong", g_, sd) in runs:
+                        z = runs[("strong", g_, sd)]
+                        ax.plot(z["u"][:, i] * 20, color=col[g_], lw=1.5, label=f"{g_} derivative")
+                        ax.axhline(z["u_true"][i] * 20, color=INK2, lw=1, ls="--")
+                ax.axhline(0, color=GREY, lw=0.7)
+                ax.set_ylim(-10.5, 10.5)
+                if r == 0:
+                    ax.set_title(nme)
+                if i == 0:
+                    ax.set_ylabel(f"twin {sd}\n% from the default")
+                if r == len(seeds) - 1:
+                    ax.set_xlabel("iteration")
+        axes[0, 0].legend(fontsize=7.5, loc="lower left")
+        fig.suptitle("The path of each parameter (dashed: the true value; the axis is the allowed range)",
+                     x=0.01, ha="left", fontweight="bold")  # fmt: skip
+        save(fig, "calibration_parameters.png")
+
 (RESULTS / "summary.txt").write_text("\n".join(_lines) + "\n") if ONLY is None else None
 sys.exit(0)

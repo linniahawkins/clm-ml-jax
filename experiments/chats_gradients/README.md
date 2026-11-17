@@ -14,6 +14,44 @@ can fail in four ways, each needing its own test:
 Steps 1 to 5 of the plan below were run on 2026-11-17 with the model as it is (no change
 to `src/`). Steps 6 and 7 (remedies) were not run, on the maintainer's instruction.
 
+## Resume here (state on 2026-11-17, 09:15 MST)
+
+- **Done and committed:** steps 1-5, the default-against-exact comparison (every day of May
+  and the month run again with `water_stress_derivative: exact`), 47 figures in `figures/`,
+  the results below.
+- **Running when this was written: the twin calibration (step 7, asked for by the
+  maintainer)**, job 8214770, eight runs of `s7_calibrate.py` (default against exact
+  gradient × 5 strong parameters / all 23 × two twins; Adam, 80 iterations of about 93 s;
+  observations are a month of daily means). It writes
+  `$SCRATCH/clm-ml-jax/chats_gradients/calibration/<params>_<gradient>_s<seed>.npz` after
+  every iteration; log `logs/calib/`. **To finish:** `python plots.py --only calibration`
+  draws `figures/calibration_progress.png` and `calibration_parameters.png` and prints the
+  numbers; look at them, write the result here (a section "Step 7"), commit the two
+  figures. At iteration 56 of 80: with the default gradient the loss of the 5-parameter
+  twins had fallen from 7e-4 to 1e-5; with the exact gradient it stood at 6e-3 to 2e-2,
+  above where it started (interim, not checked further).
+- **Not run:** step 6 (the remedies that are settings: `wetted_fraction`,
+  `obukhov_derivative`) and the soft-threshold prototype of step 7.
+- **Open questions left by the results** (none diagnosed): O84 (round-off growth under
+  water stress: a discrete defect or the scheme?), O85 (zero derivative at dry leaves),
+  O83 (`leaf_emissivity` = 1), forward against reverse mode differing by a factor 1.44 in
+  the month's exact gradient, and the default gradient's wrong trend for
+  `plant_capacitance`.
+- **Ideas discussed with the maintainer, not run:** the exact gradient drawn across the
+  31-day sweeps (23 month-long sweeps, about 1.5 hours); the Hessian with the misfit on
+  daily and on monthly means, to see how many parameter directions each constrains.
+- **Elsewhere, same day:** the maintainer's four 1-year global runs with other Vcmax
+  (`$SCRATCH/grad_tests`, cases `vcmax_default`, `vcmax_x1.2`, `vcmax_x1.01`,
+  `vcmax_x0.99`) stopped at 2 March on an output-writer bug (O86), fixed on branch
+  `bug_fix` (from `main`, commit be91435, pushed, no pull request); the checkout the runs
+  use (`/glade/work/linnia/clm-ml-jax`, branch `grad_tests`) was fast-forwarded to it and
+  the cases resubmitted from 1 January (default and x1.2: jobs 8215089, 8215090; x1.01 and
+  x0.99 by a background task once their old jobs ended: check `qstat -u linnia` and each
+  case's `run.log`). Each failed run's log is `run_failed_20261117.log` in its folder.
+- **How to run anything here:** "How to run" below; jobs go through `run.pbs` (a GPU node
+  of the develop queue used for its CPUs: the account has no CPU hours; `NPAR=32` and
+  `CORES=n` give 32/n commands at a time).
+
 ## Results in short
 
 1. **The machinery is right.** Over the 31 days of May: no NaN in any derivative (parameters,
@@ -77,6 +115,7 @@ not the useful one, and the default trades exactness for a usable trend.
 | `s3_thresholds.py` | step 3: threshold sweeps. |
 | `s4_parameters.py` | step 4: parameter sweeps across the range; the Hessian. |
 | `s5_time.py` | step 5: horizon sweep, one-step Jacobian, checkpoints, round-off twins. |
+| `s7_calibrate.py` | step 7: a twin calibration against a month of daily means (Adam; default or exact gradient). |
 | `launch.py`, `run.pbs` | run a file of commands on one node, several at a time. |
 | `plots.py` | every figure in `figures/` and the numbers quoted here (`summary.txt` in the results directory). |
 | `figures/` | the figures (committed). |
@@ -281,4 +320,5 @@ every step (above), which a non-converged solver would show.
 | 4 | Parameters: one at a time, dense sweeps, Hessian | done |
 | 5 | Time: horizon, one-step Jacobian, spread over windows, checkpoints | done |
 | 6 | Remedies that are already settings (`wetted_fraction`, `water_stress_derivative`, `obukhov_derivative`): cost in bias against gain in gradient quality | not run (maintainer) |
-| 7 | A soft threshold as a prototype; a twin calibration with full-horizon against windowed gradients | not run (maintainer) |
+| 7 | A twin calibration (daily means of the month; default against exact gradient) | running 2026-11-17, see "Resume here" |
+| 7 | A soft threshold as a prototype; full-horizon against windowed gradients | not run |

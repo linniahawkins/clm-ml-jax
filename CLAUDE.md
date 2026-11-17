@@ -81,6 +81,9 @@ Guidance for Claude (and other contributors) working in this repository.
   amplifies round-off (O84); remedies (steps 6-7) not run, to discuss first. Jobs: the
   account has no CPU hours, so `run.pbs` asks for a GPU node and uses its CPUs. Found on
   the way: `leaf_emissivity` = 1 gives NaN (O83); zero derivative at dry leaves (O85).
+  **Resume:** the README's "Resume here" (a twin calibration, `s7_calibrate.py`, was
+  running 2026-11-17). An output-writer bug met in the maintainer's global runs (O86) is
+  fixed on branch `bug_fix` (from `main`, not merged).
 - **Testing:** the tiers under "Rules for changes" (Phase 9 adds the docs build; phase9_scope §5).
 - **Where the work is:** NCAR Derecho (CPU login node; GPUs through PBS, account UCLB0069,
   develop queue `gpudev`). Phase 6 history: `docs/design/phase6_progress.md`.
