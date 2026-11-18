@@ -252,7 +252,12 @@ if want("baseline") and (RESULTS / "table.csv").exists():
     # the one-at-a-time experiment
     for exp, exp_x, title, name in [
         ("baseline", "exact_water_stress", "one-day windows (median of 31 days)", "oat_1day.png"),
-        ("month", "month_exact", "the 31 days of May", "oat_month.png"),
+        (
+            "month",
+            None,
+            "the 31 days of May",
+            "oat_month.png",
+        ),  # default derivative only (maintainer)
     ]:
         d = t[t.experiment == exp].drop_duplicates(["first_chunk", "input", "output"], keep="last")
         d = d[~d.input.isin(zero)]
