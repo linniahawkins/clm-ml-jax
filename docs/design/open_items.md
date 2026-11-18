@@ -747,7 +747,8 @@ The model as it is now: [`model_overview.md`](model_overview.md).
   (`s7_calibrate.py`), running when this was written. Step 6 (remedies) not run. Step 8
   (how far the derivative holds, wider ranges; decision 127): 8a-8c run the same day, the
   derivative holds to about ±10 % for the strong parameters and bends where water stress
-  turns on or off; one basin per parameter; a ψ50-conductance valley; 8d to decide.
+  turns on or off; one basin per parameter; a ψ50-conductance valley. 8d (calibration from
+  truths 40 % away, five strong parameters) planned, not run: the README's "8d plan".
   **Resume:** the README's "Resume here".
 - **Source:** maintainer, 2026-11-17 (note "Diagnosing gradient failure in a JAX land model").
 

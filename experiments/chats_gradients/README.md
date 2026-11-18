@@ -22,7 +22,8 @@ the maintainer's request (2026-11-17).
   the results below.
 - **Done: step 8a-8c** (how far the derivative holds; decision 127), jobs 8219793 and
   8219911: results in "Step 8" and result 9, figures `locality_*.png`, data in
-  `locality/`. **Next:** the maintainer decides on 8d (a calibration from far truths).
+  `locality/`. **Next: 8d**, a twin calibration from truths 40 % away, planned and not
+  run: "8d plan" below (one choice to make first, the ranges).
 - **Done: the twin calibration (step 7)**, job 8214770 (eight runs of `s7_calibrate.py`,
   all 80 iterations, finished 09:52): results in "Step 7" below and result 8, figures
   `calibration_progress.png` and `calibration_parameters.png`; the runs' files are
@@ -417,7 +418,7 @@ all 23. Eight runs, about 93 s per iteration (the month's gradient), 2.2 hours e
 | 6 | Remedies that are already settings (`wetted_fraction`, `water_stress_derivative`, `obukhov_derivative`): cost in bias against gain in gradient quality | not run (maintainer) |
 | 7 | A twin calibration (daily means of the month; default against exact gradient) | done 2026-11-17 ("Step 7", result 8) |
 | 7 | A soft threshold as a prototype; full-horizon against windowed gradients | not run |
-| 8 | How far the derivative holds: wider ranges (decision 127; "Step 8" below) | 8a-8c done 2026-11-17; 8d to decide |
+| 8 | How far the derivative holds: wider ranges (decision 127; "Step 8" below) | 8a-8c done 2026-11-17; 8d planned, not run ("8d plan") |
 
 ## Step 8. The gradient is local: how far does it hold? (plan, 2026-11-17)
 
@@ -554,3 +555,63 @@ each point and, for the strong parameters, finds one basin with a gradient that 
 right way. Two things can still stop it: a window without stress gives ψ50 and plant
 conductance a zero gradient (uninformative, class 2), and the ψ50-conductance valley lets
 it stop anywhere along it. 8d would test both.
+
+### 8d plan: a calibration from truths 40 % away (maintainer, 2026-11-17; not run)
+
+The question: from the defaults, does the gradient calibration reach truths far outside the
+range where the derivative holds (8a: about ±10 %)? Choices (maintainer): the five strong
+parameters only (ι, Vcmax25, ψ50, plant conductance, near-infrared leaf reflectance),
+truths 40 % away on both sides, the default (stabilized) derivative, no grid search.
+
+**Twins.** As in step 7 (`s7_calibrate.py`): the observations are May's 31 daily means
+of latent heat, sensible heat and GPP from a run with the five parameters moved; the other
+18 stay at their defaults, so the truth can be reached exactly and the loss can reach zero.
+
+| Twin | ι | Vcmax25 | ψ50 | plant conductance | NIR reflectance |
+|---|---|---|---|---|---|
+| plus (every parameter +40 % of its value) | 525 | 175 | -0.96 | 9.8 | 0.588 |
+| minus (every parameter -40 %) | 225 | 75 | -2.24 | 4.2 | 0.252 |
+| physical range (step 8) | 250-1500 | 40-150 | -2 to -1 | 2-14 | 0.28-0.55 |
+
+(+ is towards larger values: for ψ50 towards zero, a more vulnerable plant.) Both twins
+lie along the ψ50-conductance valley of 8c (a more vulnerable plant with a larger
+conductance, or the reverse), the hardest case for telling the two apart. Two optional
+twins across the valley (ψ50 +40 % with conductance -40 %, and the reverse; the other three
+as in "plus") would show whether the valley or the distance is what stops the calibration.
+
+**To decide first: the ranges.** Five of the ten truths are outside the physical ranges:
+ι -40 % (225 < 250), Vcmax25 +40 % (175 > 150), ψ50 both sides (-0.96 and -2.24; the range
+stops at -2 by the maintainer's choice), and NIR reflectance +40 % (0.588 + transmittance
+0.43 > 0.99: not physical, so impossible as it stands). Two ways:
+
+- **A (recommended): truths at 40 % or at the edge of the physical range, whichever is
+  nearer; the calibration bounded by the physical ranges.** Distances then: ι +40 / -33 %,
+  Vcmax25 +20 / -40 %, ψ50 +37.5 / -25 %, conductance ±40 %, NIR reflectance +31 / -33 %.
+  Step 8 showed one basin per parameter inside these ranges; outside them nothing was
+  looked at.
+- **B: truths at 40 % everywhere it is physical (NIR reflectance + side capped at 0.55);
+  bounds widened to ±50 % (reflectance + transmittance below 0.99).** The full distance,
+  but ψ50 goes below -2, which the maintainer left out of step 8, and Vcmax25 to 175.
+
+**Settings.** Start at the defaults; Adam as in step 7, in units of each parameter's range
+(the first step 3 % of the range, cosine decay to a tenth). The ranges are 3-6 times wider
+than in step 7, so each step is larger in absolute terms: keep 0.03, and 150 iterations
+instead of 80 (step 7's loss was still falling at 80). About 93 s an iteration: about 4 hours
+a run; the two twins (four with the optional ones) at once on one node, `CORES=8`.
+
+**Code changes (small, in this folder only).**
+- `s7_calibrate.py`: options `--twin plus|minus|across1|across2` (the truth: each parameter
+  times 1 ± 0.4, then clipped as chosen above) and `--bounds physical|wide` (the Adam box:
+  `PHYSICAL` from `s8_locality.py`, or ±50 % with the caps of `s8_locality.limits`); the
+  output file named `far_<twin>_<bounds>.npz`; `--iters 150`. Keep the ±5 % twins of step 7
+  as the default, so step 7 can be rerun unchanged.
+- `plots.py`: the calibration figures fix the axis at ±10 % (`* 20`, `ylim ±10.5`); a
+  section `far` with the axis in % of the default and the bounds drawn.
+- A task file `tasks/s8d.txt`, one line per twin:
+  `python s7_calibrate.py --twin plus --bounds physical --iters 150`.
+
+**What to report.** Loss and distance from the truth for each parameter by iteration;
+whether each parameter reaches its truth, stops short or goes the wrong way; where along
+and across the ψ50-conductance valley it ends; the share of stressed daytime steps at the
+truth and at the end (`s8_locality.labelled` can give it). Compare with step 7 (±5 %
+truths: the strong parameters to 0.4-0.7 %, plant conductance short).

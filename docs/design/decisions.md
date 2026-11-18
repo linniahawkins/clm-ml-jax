@@ -1083,7 +1083,9 @@ plant conductance, near-infrared leaf reflectance and `shape_gs`, and for 2-D gr
 becomes physically implausible: reflectance + transmittance of a band below 0.99, the
 leaf angle index within the model's own limits (−0.4, 0.6), emissivity 0.999, clumping 1.
 Derivatives are the default (stabilized) water-stress derivative only. A twin calibration
-from far truths (8d) is decided after 8a-8c.
+from far truths (8d) is decided after 8a-8c: planned 2026-11-17 (maintainer) for the five
+strong parameters, truths 40 % away on both sides, no grid search; not run (the ranges to
+use are still to decide: README "8d plan").
 Reason: ±10 % stayed inside the range where the derivative predicts the response; a
 calibration starts further away. `plant_capacitance` is left out of the sweeps
 (maintainer); the exact derivative is already shown unusable over the month (126, step 7).
