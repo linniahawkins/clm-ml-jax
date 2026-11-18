@@ -745,7 +745,9 @@ The model as it is now: [`model_overview.md`](model_overview.md).
   the exact derivative (four `compare_*` figures: exact is right without stress, useless
   over windows with stressed days), and a twin calibration against daily means
   (`s7_calibrate.py`), running when this was written. Step 6 (remedies) not run. Step 8
-  (how far the derivative holds, wider ranges; decision 127) planned the same day.
+  (how far the derivative holds, wider ranges; decision 127): 8a-8c run the same day, the
+  derivative holds to about ±10 % for the strong parameters and bends where water stress
+  turns on or off; one basin per parameter; a ψ50-conductance valley; 8d to decide.
   **Resume:** the README's "Resume here".
 - **Source:** maintainer, 2026-11-17 (note "Diagnosing gradient failure in a JAX land model").
 

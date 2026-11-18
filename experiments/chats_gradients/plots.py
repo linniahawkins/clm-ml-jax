@@ -3,7 +3,7 @@ The figures and summary numbers of the gradient experiments at CHATS, from the a
 other scripts leave in the results directory. Each section is skipped if its results are
 not there yet.
 
-    python plots.py [--out figures] [--only baseline,thresholds,parameters,time]
+    python plots.py [--out figures] [--only baseline,thresholds,parameters,time,locality]
 
 Figures go to ``figures/`` next to this file; the numbers quoted in RESULTS.md are printed
 (and saved as ``summary.txt`` in the results directory).
@@ -1128,6 +1128,196 @@ if want("calibration") and cal:
         fig.suptitle("The path of each parameter (dashed: the true value; the axis is the allowed range)",
                      x=0.01, ha="left", fontweight="bold")  # fmt: skip
         save(fig, "calibration_parameters.png")
+
+# ================================================== step 8: how far the derivative holds
+LOC = RESULTS / "locality"
+SWEPT = ["iota", "vcmax25", "psi50_gs", "plant_conductance", "leaf_reflectance[1]", "shape_gs"]
+PRETTY = {"iota": "ι", "vcmax25": "Vcmax25", "psi50_gs": "ψ50", "plant_conductance": "plant conductance",
+          "leaf_reflectance[1]": "leaf reflectance, NIR", "shape_gs": "shape_gs",
+          "clumping_index": "clumping index"}  # fmt: skip
+
+
+def stress_share(z, values=None):
+    """Share of daytime steps whose top leaves have a water-stress factor below 0.99, from
+    a sweep or grid file's regime variables (the point's own ψ50 and shape)."""
+    labels, lab = list(z["labels"]), z["lab"]
+    names, x0 = list(z["names"]), z["x0"]
+    zen = lab[..., labels.index("solar_zenith_angle"), :]
+    psi = lab[..., labels.index("top_leaf_water_potential"), :]
+    psi50 = np.full(lab.shape[:-2], x0[names.index("psi50_gs")])
+    shape = np.full(lab.shape[:-2], x0[names.index("shape_gs")])
+    if values is not None:
+        for p, v in values.items():
+            if p == "psi50_gs":
+                psi50 = v
+            if p == "shape_gs":
+                shape = v
+    day = zen < zen.max() - 1e-3
+    f = 1 / (1 + np.clip(psi / psi50[..., None], 0, None) ** shape[..., None])
+    return ((f < 0.99) & day).sum(-1) / day.sum(-1)
+
+
+def one_sided(z, m):
+    """(model change) / (derivative × change) on each side of the default, (side, step,
+    parameter), and the model change."""
+    x0 = z["x0"][z["idx"]]
+    d = z["q"][..., m] - z["q0"][m]
+    pred = z["dq"][None, None, :, m] * (z["x"] - x0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return d / np.where(pred == 0, np.nan, pred), d
+
+
+if want("locality") and (LOC / "oat_31d_00.npz").exists():
+    say("\n== Step 8: how far the derivative holds")
+    mon = np.load(LOC / "oat_31d_00.npz")
+    days = [np.load(f) for f in sorted(glob.glob(str(LOC / "oat_1d_*.npz")))]
+    idx, lad = mon["idx"], mon["ladder"]
+    names = [str(n) for n in mon["names"][idx]]
+    steps = np.concatenate([-lad[::-1], lad]) * 100
+    for m, v in [(1, "latent heat"), (3, "GPP")]:
+        r, d = one_sided(mon, m)
+        say(f"month, mean {v}: (model change)/(derivative × change) at -50 -25 -10 -3 -1 | +1 +3 +10 +25 +50 %")
+        for j, n in enumerate(names):
+            if np.nanmax(np.abs(d[:, -1, j])) < (0.5 if m == 1 else 0.05):
+                continue
+            say(f"  {n:22s}", " ".join(f"{x:5.2f}" for x in r[0, ::-1, j]), "|",
+                " ".join(f"{x:5.2f}" for x in r[1, :, j]),
+                f"| change at -50/+50 %: {d[0, -1, j]:6.1f} {d[1, -1, j]:6.1f}")  # fmt: skip
+
+    # 1. the ladder: one-sided ratio against the size of the change
+    show = SWEPT + ["clumping_index"]
+    fig, axes = plt.subplots(2, 4, figsize=(13, 6.2), sharex=True)
+    for ax, p in zip(axes.flat, show):
+        j = names.index(p)
+        for m, col, lab_ in [(1, C[0], "latent heat"), (3, C[1], "GPP")]:
+            r, _ = one_sided(mon, m)
+            ax.plot(steps, np.concatenate([r[0, ::-1, j], r[1, :, j]]), color=col, marker="o",
+                    ms=4, label=f"{lab_}, month")  # fmt: skip
+        rd = np.array([one_sided(z, 1)[0][:, :, j] for z in days])  # (day, side, step)
+        rd = np.concatenate([rd[:, 0, ::-1], rd[:, 1]], axis=1)
+        lo_, mid, hi_ = np.nanpercentile(rd, [25, 50, 75], axis=0)
+        ax.fill_between(steps, lo_, hi_, color=C[0], alpha=0.15, lw=0, label="latent heat, days (IQR)")
+        ax.axhspan(0.9, 1.1, color=GREY, alpha=0.25, lw=0)
+        ax.axhline(1, color=INK2, lw=0.8)
+        ax.axvline(0, color=GREY, lw=0.7)
+        ax.set_yscale("log")
+        ax.set_ylim(0.2, 8 if p != "clumping_index" else 150)
+        ticks = [0.25, 0.5, 1, 2, 4] if p != "clumping_index" else [0.5, 1, 3, 10, 30, 100]
+        ax.set_yticks(ticks, [f"{t:g}" for t in ticks])
+        ax.minorticks_off()
+        ax.set_title(PRETTY[p])
+        ax.set_xticks([-50, -25, -10, 0, 10, 25, 50])
+    axes.flat[-1].axis("off")
+    for ax in axes[-1]:
+        ax.set_xlabel("change of the parameter (% of its value)")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("model change / (derivative × change)")
+    h, lb = axes.flat[0].get_legend_handles_labels()
+    axes.flat[-1].legend(h, lb, loc="center")
+    fig.suptitle("How far the derivative at the default holds (1 = exact; grey band ±10 %). "
+                 "Each side measured from the default", x=0.01, ha="left", fontweight="bold")  # fmt: skip
+    fig.tight_layout()
+    save(fig, "locality_ladder.png")
+
+if want("locality") and len(glob.glob(str(LOC / "sweep_*.npz"))) >= 18:
+    # 2. the sweeps: response, tangent, regime, loss
+    fig, axes = plt.subplots(4, 6, figsize=(17, 11), sharex="col")
+    for c_, p in enumerate(SWEPT):
+        zs = {t: np.load(LOC / f"sweep_{p}_{t}.npz") for t in ("31d_00", "1d_02", "1d_08")}
+        z = zs["31d_00"]
+        i, v = int(z["i"]), z["values"]
+        x0, xt = z["x0"][i], z["x_true"][i]
+        for r_, (t, title) in enumerate([("31d_00", "May"), ("1d_02", "3 May (no stress)")]):
+            ax, zz = axes[r_, c_], zs[t]
+            k = int(np.argmin(np.abs(zz["values"] - x0)))
+            lh, vv = zz["q"][:, 1], zz["values"]
+            ax.plot(vv, lh, color=C[0], label="model")
+            ax.plot(vv, lh[k] + zz["dq"][k, 1] * (vv - vv[k]), color=C[1], lw=1.4, ls="--",
+                    label="derivative at the default")  # fmt: skip
+            ax.plot([x0], [lh[k]], "o", color=INK, ms=5)
+            if c_ == 0:
+                ax.set_ylabel(f"{title}\nmean latent heat (W m$^{{-2}}$)")
+            lo_, hi_ = lh.min(), lh.max()
+            pad = 0.15 * (hi_ - lo_ + 1)
+            ax.set_ylim(lo_ - pad, hi_ + pad)
+        ax = axes[2, c_]
+        for t, col, lab_ in [("31d_00", C[0], "May"), ("1d_02", C[2], "3 May"), ("1d_08", C[3], "9 May")]:
+            zz = zs[t]
+            ax.plot(zz["values"], stress_share(zz, {p: zz["values"]}), color=col, label=lab_)
+        ax.axvline(x0, color=INK2, lw=0.8)
+        ax.set_ylim(-0.03, 1.03)
+        if c_ == 0:
+            ax.set_ylabel("share of daytime steps\nwith water stress")
+        ax = axes[3, c_]
+        loss = z["q"][:, 0]
+        ax.plot(v, loss, color=C[0])
+        ax.set_yscale("log")
+        ax.axvline(x0, color=INK2, lw=0.8)
+        ax.axvline(xt, color=INK2, lw=1, ls=":")
+        imin = int(np.argmin(loss))
+        towards = np.mean(np.sign(-z["dq"][:, 0]) == np.sign(v[imin] - v))
+        ax.set_title(f"gradient points to the minimum: {100 * towards:.0f} %", fontsize=8,
+                     fontweight="normal", color=INK2)  # fmt: skip
+        ax.set_xlabel(PRETTY[p])
+        if c_ == 0:
+            ax.set_ylabel("May loss (twin)\nsolid: default, dotted: truth")
+        axes[0, c_].set_title(PRETTY[p])
+        say(f"sweep {p}: May loss minimum at {v[imin]:.3g} (truth {xt:.3g}); gradient towards it "
+            f"{100 * towards:.0f} % of the range; stressed share {stress_share(z, {p: v})[[0, -1]]}")  # fmt: skip
+    axes[0, 0].legend(fontsize=7.5, loc="lower left")
+    axes[2, 0].legend(fontsize=7.5)
+    fig.suptitle("Across the physical range: the model (blue) against the derivative at the default "
+                 "(dashed), the share of stressed daytime steps, and the loss (dotted: the twin's truth)",
+                 x=0.01, ha="left", fontweight="bold")  # fmt: skip
+    fig.tight_layout()
+    save(fig, "locality_sweeps.png")
+
+if want("locality") and len(glob.glob(str(LOC / "grid_*_31d_00.npz"))) >= 3:
+    # 3. the grids: model, three predictions, loss
+    pairs = ["iota__psi50_gs", "psi50_gs__plant_conductance", "vcmax25__iota"]
+    fig, axes = plt.subplots(5, 3, figsize=(12, 17))
+    for c_, pr in enumerate(pairs):
+        z = np.load(LOC / f"grid_{pr}_31d_00.npz")
+        va, vb, q, x0 = z["va"], z["vb"], z["q"], z["x0"]
+        ia, ib = int(z["ia"]), int(z["ib"])
+        pa, pb = [str(s) for s in z["pair"]]
+        A, B = np.meshgrid(va - x0[ia], vb - x0[ib], indexing="ij")
+        m, q0 = 1, z["q0"][1]
+        g, H = z["grad"][:, m], z["hess"][:, :, m]
+        H = 0.5 * (H + H.T)
+        lin = q0 + g[0] * A + g[1] * B
+        quad = lin + 0.5 * (H[0, 0] * A**2 + 2 * H[0, 1] * A * B + H[1, 1] * B**2)
+        fa = np.array([np.interp(x0[ib], vb, q[i, :, m]) for i in range(len(va))])
+        fb = np.array([np.interp(x0[ia], va, q[:, j, m]) for j in range(len(vb))])
+        add = fa[:, None] + fb[None, :] - q0
+        y = q[:, :, m]
+        panels = [("model: mean latent heat (W m$^{-2}$)", y, "Blues", None),
+                  ("model − sum of one-at-a-time changes", y - add, "RdBu_r", 60),
+                  ("model − derivative (plane)", y - lin, "RdBu_r", 60),
+                  ("model − derivative + second derivatives", y - quad, "RdBu_r", 60),
+                  ("May loss (log10)", np.log10(q[:, :, 0]), "Blues_r", None)]  # fmt: skip
+        for r_, (title, val, cmap, lim) in enumerate(panels):
+            ax = axes[r_, c_]
+            kw = dict(vmin=-lim, vmax=lim) if lim else {}
+            im = ax.pcolormesh(vb, va, val, cmap=cmap, shading="nearest", **kw)
+            if r_ == 0:
+                ax.contour(vb, va, val, colors=SURFACE, linewidths=0.6, levels=8)
+            ax.plot(x0[ib], x0[ia], "o", color=INK, ms=5)
+            ax.plot(z["x_true"][ib], z["x_true"][ia], "x", color=INK, ms=6)
+            ax.set_xlabel(PRETTY[pb])
+            ax.set_ylabel(PRETTY[pa])
+            ax.grid(False)
+            fig.colorbar(im, ax=ax, shrink=0.85)
+            if r_ > 0 and r_ < 4:
+                rms = np.sqrt(np.mean(val**2))
+                ax.set_title(f"{title}\nrms {rms:.1f}, largest {np.abs(val).max():.0f} W m$^{{-2}}$", fontsize=8.5)
+                say(f"grid {pr}: {title}: rms {rms:.1f}, largest {np.abs(val).max():.0f} W m-2")
+            else:
+                ax.set_title(title, fontsize=8.5)
+    fig.suptitle("Two parameters at once, May (dot: default; ×: the twin's truth). Rows 2-4: what each "
+                 "prediction misses", x=0.01, ha="left", fontweight="bold")  # fmt: skip
+    fig.tight_layout(rect=(0, 0, 1, 0.985))
+    save(fig, "locality_grids.png")
 
 (RESULTS / "summary.txt").write_text("\n".join(_lines) + "\n") if ONLY is None else None
 sys.exit(0)

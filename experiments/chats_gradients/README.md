@@ -20,6 +20,9 @@ the maintainer's request (2026-11-17).
 - **Done and committed:** steps 1-5, the default-against-exact comparison (every day of May
   and the month run again with `water_stress_derivative: exact`), 45 figures in `figures/`,
   the results below.
+- **Done: step 8a-8c** (how far the derivative holds; decision 127), jobs 8219793 and
+  8219911: results in "Step 8" and result 9, figures `locality_*.png`, data in
+  `locality/`. **Next:** the maintainer decides on 8d (a calibration from far truths).
 - **Done: the twin calibration (step 7)**, job 8214770 (eight runs of `s7_calibrate.py`,
   all 80 iterations, finished 09:52): results in "Step 7" below and result 8, figures
   `calibration_progress.png` and `calibration_parameters.png`; the runs' files are
@@ -102,10 +105,28 @@ the maintainer's request (2026-11-17).
    the exact gradient the loss ends higher than it started or barely lower: its gradient
    reaches 1e4 to 1e39 on single iterations (step 7).
 
+9. **The derivative is local: it holds to about ±10 % for the strong parameters, and it
+   fails mostly where water stress turns on or off** (step 8). Measured on each side of the
+   default, (model change) / (derivative × change) for May's latent heat moves from its
+   ±1 % value by 15-45 % at ±10 % and by a factor of 2-3 at ±50 % for Vcmax25, ψ50 and
+   plant conductance; ι and the near-infrared leaf optics stay within about 50 % up to ±50 %. The bends
+   are where the share of stressed afternoons changes: on an unstressed day (3 May) the
+   derivative with respect to ψ50 and plant conductance is exactly zero, while ψ50 above
+   -1.4 MPa or a conductance below 5 makes 70-80 % of the daytime steps stressed and
+   lowers latent heat by 3 and 14 W m-2. Over the physical ranges each strong parameter's
+   May loss has one basin and the gradient points to its minimum on 93-99 % of the range.
+   Two parameters at once: the sum of the one-at-a-time changes misses by 2-7 W m-2 (rms),
+   the derivative's plane by 16-21, and adding the second derivatives at the default makes
+   it worse for the ι pairs (32-33). ψ50 and plant conductance form a long curved valley
+   in the loss (from ψ50 -2, conductance 5 to ψ50 -1.2, conductance 13): May's daily
+   means do not tell them apart.
+
 In the four failure classes: (1) none found; (2) at the wind minimum, the stable limit and
 dry leaves (the last one misleading); (3) not in the default gradient, yes in the exact
 one under water stress; (4) the main finding: under water stress the local derivative is
-not the useful one, and the default trades exactness for a usable trend.
+not the useful one, and the default trades exactness for a usable trend; and across the
+physical ranges (step 8) the derivative at the default does not predict large changes, but
+the gradient at each point still points the right way.
 
 ## What is here
 
@@ -396,7 +417,7 @@ all 23. Eight runs, about 93 s per iteration (the month's gradient), 2.2 hours e
 | 6 | Remedies that are already settings (`wetted_fraction`, `water_stress_derivative`, `obukhov_derivative`): cost in bias against gain in gradient quality | not run (maintainer) |
 | 7 | A twin calibration (daily means of the month; default against exact gradient) | done 2026-11-17 ("Step 7", result 8) |
 | 7 | A soft threshold as a prototype; full-horizon against windowed gradients | not run |
-| 8 | How far the derivative holds: wider ranges (decision 127; "Step 8" below) | planned 2026-11-17 |
+| 8 | How far the derivative holds: wider ranges (decision 127; "Step 8" below) | 8a-8c done 2026-11-17; 8d to decide |
 
 ## Step 8. The gradient is local: how far does it hold? (plan, 2026-11-17)
 
@@ -446,3 +467,90 @@ step of 1 % of the range (the gradient is not smooth at 0.1 % scales, result 7).
     JAX_PLATFORMS=cpu python s8_locality.py oat --days 31
     JAX_PLATFORMS=cpu python s8_locality.py sweep --param psi50_gs --days 31 --points 101
     JAX_PLATFORMS=cpu python s8_locality.py grid --pair iota,psi50_gs --days 31 --points 21
+
+Task files: `tasks/s8a.txt` (32 commands, about an hour on one node) and `tasks/s8bc.txt`
+(24 commands; the month-long grids take 82 minutes each).
+
+### Step 8 results (2026-11-17)
+
+**8a, one at a time on the ladder** (`figures/locality_ladder.png`; numbers in
+`summary.txt`). Each side is measured from the default on its own: a change from the
+minimum to the maximum cancels most of the curvature and overstates how far the derivative
+holds. The ratio at ±1 % is not 1 for every parameter: on stressed days the default
+(stabilized) derivative differs from the model already there (result 2), so how far the
+derivative holds is read from how the ratio changes with the size of the change.
+
+| May, mean latent heat | -50 % | -10 % | -1 % | +1 % | +10 % | +50 % | change at -50 / +50 % (W m-2) |
+|---|---|---|---|---|---|---|---|
+| ι | 1.42 | 1.18 | 1.18 | 1.01 | 1.08 | 0.95 | +25 / -17 |
+| Vcmax25 | 2.64 | 1.47 | 1.04 | 1.37 | 1.14 | 0.58 | -26 / +6 |
+| ψ50 (+: less negative) | 0.35 | 0.64 | 0.79 | 0.63 | 0.91 | 2.78 | +7 / -59 |
+| plant conductance | 2.25 | 0.96 | 0.67 | 1.02 | 0.72 | 0.45 | -26 / +5 |
+| leaf reflectance, NIR | 0.94 | 1.21 | 1.18 | 1.10 | 1.28 | 1.54 | +3 / -4 |
+| `shape_gs` | 6.42 | 4.54 | 1.73 | 4.05 | 3.86 | 2.43 | -5 / +2 |
+| clumping index (only -) | 91.8 | 19.4 | 3.78 | | | | -15 |
+
+- Vcmax25 and plant conductance saturate: steep below the default, flat above it (ratio
+  above 1 below, below 1 above). ψ50 is the mirror: a ψ50 closer to zero brings stress
+  and the response accelerates (59 W m-2 at +50 %).
+- GPP holds better for Vcmax25 (within 8 % to ±10 %, the photosynthesis response itself).
+- `shape_gs`: the derivative is 2-6 times too small at every size, the stabilized
+  derivative's offset of step 4, not locality.
+- Clumping (its default 1 is also its cap, so only smaller values): over the month the
+  default derivative of latent heat is 0.34 W m-2 per unit, finite differences 4.3-4.8
+  (step 2's table), so the derivative is 13 times too small at the default (stabilized
+  derivative, as `plant_capacitance` in step 4), and the response then bends (92 at -50 %).
+  On single days the ratio is 1-5. Not diagnosed; clumping enters only the radiation and
+  nitrogen profiles, with no switch at 1.
+
+**8b, sweeps across the physical ranges** (`figures/locality_sweeps.png`: the model and
+the derivative's line through the default, May and 3 May; the share of daytime steps whose
+top leaves have a stress factor below 0.99, with each point's own ψ50 and shape; May's loss).
+
+- **A process the default does not have (cause 2).** On 3 May (no stress at the default)
+  the derivative with respect to ψ50 and plant conductance is exactly zero; ψ50 above
+  -1.4 MPa or a conductance below 5 brings stress to 70-80 % of the daytime steps and
+  lowers mean latent heat by 3 and 14 W m-2. Over May, ι above 1100-1300 removes all
+  stress and Vcmax25 below 50-55 too (less photosynthesis, less water use): the
+  latent-heat curves bend there.
+- **Smooth curvature (cause 1).** On 3 May without any stress Vcmax25 and ι still bend
+  (Vcmax25 at 40 is 19 W m-2 below the derivative's line; ι at 1500 is 47 W m-2 above).
+- **The local derivative is right along the sweep.** The default derivative at each
+  point against the slope of the curve: median 0.99-1.00 for ι and Vcmax25 and 1.00 for
+  every parameter on 3 May; 0.8-1.2 for the water parameters over May (stress); 0.24 for
+  `shape_gs`.
+- **One basin.** May's loss has one minimum per parameter across its physical range, and
+  the gradient points to it on 93-99 % of the range. (The minimum is near the twin's
+  truth, not on it, because the other parameters stay at their defaults: ι 362 against
+  366, Vcmax25 128/127, ψ50 -1.64/-1.56, conductance 7.28/7.30, NIR reflectance
+  0.431/0.40, `shape_gs` 43.6/40.2.)
+
+**8c, two parameters at once** (`figures/locality_grids.png`, May; 9 May in the data).
+What each prediction of mean latent heat misses over the grid (rms, largest, W m-2):
+
+| Pair | sum of one-at-a-time | derivative (plane) | plus second derivatives |
+|---|---|---|---|
+| ι × ψ50 | 7.4, 27 | 21.3, 53 | 33.1, 85 |
+| ψ50 × plant conductance | 5.6, 20 | 16.3, 58 | 8.2, 24 |
+| Vcmax25 × ι | 2.2, 12 | 18.3, 44 | 31.8, 81 |
+
+- The parameters mostly add: the interaction is largest where both push towards or away
+  from stress (high ι with ψ50 near -1; ψ50 near -1 with high conductance).
+- Second derivatives at the default help where the response is a gentle bend (ψ50 ×
+  conductance) and hurt where a parameter spans a factor of 6 (ι 250-1500): a parabola
+  through the default overshoots.
+- The loss: one basin for ι × ψ50 and Vcmax25 × ι. ψ50 × conductance is a long curved
+  valley: along it the loss is 2-5e-4 (1.45 at the corners), and at the grid's
+  resolution it has six shallow local minima. May's daily means cannot separate a
+  vulnerable plant with a large conductance from a resistant one with a small one, as in
+  step 7, where plant conductance stopped short of its truth.
+- The second derivatives are not symmetric by up to 2 % of their size (9 May: 2 %; the
+  month: 0.6 %), the stabilized derivative again.
+
+**What it means for calibration.** The derivative at the default cannot be used to
+predict the response to large changes (a linear sensitivity analysis, or a single
+Gauss-Newton step over the whole range); an iterative calibration re-evaluates it at
+each point and, for the strong parameters, finds one basin with a gradient that points the
+right way. Two things can still stop it: a window without stress gives ψ50 and plant
+conductance a zero gradient (uninformative, class 2), and the ψ50-conductance valley lets
+it stop anywhere along it. 8d would test both.
