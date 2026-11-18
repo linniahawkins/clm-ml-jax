@@ -474,8 +474,8 @@ Task files: `tasks/s8a.txt` (32 commands, about an hour on one node) and `tasks/
 
 ### Step 8 results (2026-11-17)
 
-**8a, one at a time on the ladder** (`figures/locality_ladder.png`; numbers in
-`summary.txt`). Each side is measured from the default on its own: a change from the
+**8a, one at a time on the ladder** (`figures/locality_ladder.png`: the model's change of
+May's mean latent heat against derivative × change; the ratios below are in `summary.txt`). Each side is measured from the default on its own: a change from the
 minimum to the maximum cancels most of the curvature and overstates how far the derivative
 holds. The ratio at ±1 % is not 1 for every parameter: on stressed days the default
 (stabilized) derivative differs from the model already there (result 2), so how far the

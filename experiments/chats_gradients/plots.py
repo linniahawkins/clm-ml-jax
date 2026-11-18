@@ -947,7 +947,7 @@ if want("scatter") and len(glob.glob(str(EXD / "may2007_*_01.npz"))) >= 31:
     def sym_ticks(typ, lim):
         """0 and ±powers of ten every three decades from the typical size up to the limit."""
         e = np.arange(np.ceil(np.log10(typ)), np.log10(lim) + 1e-9, 3)
-        return np.concatenate([-(10.0 ** e[::-1]), [0.0], 10.0 ** e])
+        return np.concatenate([-(10.0 ** e[::-1]), [0.0], 10.0**e])
 
     def tick_label(x):
         return "0" if x == 0 else f"{'-' if x < 0 else ''}1e{int(round(np.log10(abs(x))))}"
@@ -1173,10 +1173,11 @@ if want("locality") and (LOC / "oat_31d_00.npz").exists():
     days = [np.load(f) for f in sorted(glob.glob(str(LOC / "oat_1d_*.npz")))]
     idx, lad = mon["idx"], mon["ladder"]
     names = [str(n) for n in mon["names"][idx]]
-    steps = np.concatenate([-lad[::-1], lad]) * 100
     for m, v in [(1, "latent heat"), (3, "GPP")]:
         r, d = one_sided(mon, m)
-        say(f"month, mean {v}: (model change)/(derivative × change) at -50 -25 -10 -3 -1 | +1 +3 +10 +25 +50 %")
+        say(
+            f"month, mean {v}: (model change)/(derivative × change) at -50 -25 -10 -3 -1 | +1 +3 +10 +25 +50 %"
+        )
         for j, n in enumerate(names):
             if np.nanmax(np.abs(d[:, -1, j])) < (0.5 if m == 1 else 0.05):
                 continue
@@ -1184,38 +1185,34 @@ if want("locality") and (LOC / "oat_31d_00.npz").exists():
                 " ".join(f"{x:5.2f}" for x in r[1, :, j]),
                 f"| change at -50/+50 %: {d[0, -1, j]:6.1f} {d[1, -1, j]:6.1f}")  # fmt: skip
 
-    # 1. the ladder: one-sided ratio against the size of the change
+    # 1. the ladder: the change of May's latent heat, the model against the derivative
     show = SWEPT + ["clumping_index"]
     fig, axes = plt.subplots(2, 4, figsize=(13, 6.2), sharex=True)
     for ax, p in zip(axes.flat, show):
         j = names.index(p)
-        for m, col, lab_ in [(1, C[0], "latent heat"), (3, C[1], "GPP")]:
-            r, _ = one_sided(mon, m)
-            ax.plot(steps, np.concatenate([r[0, ::-1, j], r[1, :, j]]), color=col, marker="o",
-                    ms=4, label=f"{lab_}, month")  # fmt: skip
-        rd = np.array([one_sided(z, 1)[0][:, :, j] for z in days])  # (day, side, step)
-        rd = np.concatenate([rd[:, 0, ::-1], rd[:, 1]], axis=1)
-        lo_, mid, hi_ = np.nanpercentile(rd, [25, 50, 75], axis=0)
-        ax.fill_between(steps, lo_, hi_, color=C[0], alpha=0.15, lw=0, label="latent heat, days (IQR)")
-        ax.axhspan(0.9, 1.1, color=GREY, alpha=0.25, lw=0)
-        ax.axhline(1, color=INK2, lw=0.8)
+        _, d = one_sided(mon, 1)  # model change (side, step, parameter)
+        dx = mon["x"][:, :, j] - mon["x0"][mon["idx"][j]]
+        moved = np.abs(dx) > 0  # clumping: only smaller values (its default is its cap)
+        keep = np.concatenate([moved[0, ::-1], [True], moved[1]])
+        md = np.concatenate([d[0, ::-1, j], [0], d[1, :, j]])
+        pr = mon["dq"][j, 1] * np.concatenate([dx[0, ::-1], [0], dx[1]])
+        # the change actually made (a cap can shorten the last steps), in % of the default
+        xp = 100 * np.concatenate([dx[0, ::-1], [0], dx[1]]) / abs(mon["x0"][mon["idx"][j]])
+        ax.plot(xp[keep], md[keep], color=C[0], marker="o", ms=4, label="model")
+        ax.plot(xp[keep], pr[keep], color=C[1], ls="--", lw=1.4, label="derivative × change")
+        ax.axhline(0, color=GREY, lw=0.7)
         ax.axvline(0, color=GREY, lw=0.7)
-        ax.set_yscale("log")
-        ax.set_ylim(0.2, 8 if p != "clumping_index" else 150)
-        ticks = [0.25, 0.5, 1, 2, 4] if p != "clumping_index" else [0.5, 1, 3, 10, 30, 100]
-        ax.set_yticks(ticks, [f"{t:g}" for t in ticks])
-        ax.minorticks_off()
         ax.set_title(PRETTY[p])
         ax.set_xticks([-50, -25, -10, 0, 10, 25, 50])
     axes.flat[-1].axis("off")
     for ax in axes[-1]:
         ax.set_xlabel("change of the parameter (% of its value)")
     for ax in axes[:, 0]:
-        ax.set_ylabel("model change / (derivative × change)")
+        ax.set_ylabel("change of May's mean\nlatent heat (W m$^{-2}$)")
     h, lb = axes.flat[0].get_legend_handles_labels()
     axes.flat[-1].legend(h, lb, loc="center")
-    fig.suptitle("How far the derivative at the default holds (1 = exact; grey band ±10 %). "
-                 "Each side measured from the default", x=0.01, ha="left", fontweight="bold")  # fmt: skip
+    fig.suptitle("How far the derivative at the default holds: the model's change of May's latent heat "
+                 "against derivative × change", x=0.01, ha="left", fontweight="bold")  # fmt: skip
     fig.tight_layout()
     save(fig, "locality_ladder.png")
 
@@ -1241,7 +1238,11 @@ if want("locality") and len(glob.glob(str(LOC / "sweep_*.npz"))) >= 18:
             pad = 0.15 * (hi_ - lo_ + 1)
             ax.set_ylim(lo_ - pad, hi_ + pad)
         ax = axes[2, c_]
-        for t, col, lab_ in [("31d_00", C[0], "May"), ("1d_02", C[2], "3 May"), ("1d_08", C[3], "9 May")]:
+        for t, col, lab_ in [
+            ("31d_00", C[0], "May"),
+            ("1d_02", C[2], "3 May"),
+            ("1d_08", C[3], "9 May"),
+        ]:
             zz = zs[t]
             ax.plot(zz["values"], stress_share(zz, {p: zz["values"]}), color=col, label=lab_)
         ax.axvline(x0, color=INK2, lw=0.8)
@@ -1310,7 +1311,10 @@ if want("locality") and len(glob.glob(str(LOC / "grid_*_31d_00.npz"))) >= 3:
             fig.colorbar(im, ax=ax, shrink=0.85)
             if r_ > 0 and r_ < 4:
                 rms = np.sqrt(np.mean(val**2))
-                ax.set_title(f"{title}\nrms {rms:.1f}, largest {np.abs(val).max():.0f} W m$^{{-2}}$", fontsize=8.5)
+                ax.set_title(
+                    f"{title}\nrms {rms:.1f}, largest {np.abs(val).max():.0f} W m$^{{-2}}$",
+                    fontsize=8.5,
+                )
                 say(f"grid {pr}: {title}: rms {rms:.1f}, largest {np.abs(val).max():.0f} W m-2")
             else:
                 ax.set_title(title, fontsize=8.5)
