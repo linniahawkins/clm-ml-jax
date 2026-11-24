@@ -324,8 +324,8 @@ making them public; no science line was changed.
 
 - **Built on CTSM's own unit-test framework** (`src/README.unit_testing`, `src/unit_test_shr`,
   `src/unit_test_stubs`; CIME's `run_tests.py`, CMake), not against a case's compiled code:
-  that build has stand-ins for the coupler and file I/O, so nothing of ESMF, PIO or MPI is
-  linked, and it already compiles `SoilHydrologyMod`, both runoff modules and the soil and
+  that build has stand-ins for MPI, history and file I/O (the ESMF library is linked, as
+  CTSM's tests do), and it already compiles `SoilHydrologyMod`, both runoff modules and the soil and
   water state types. `SoilWaterMovementMod`, `SurfaceWaterMod` and the Clapp-Hornberger
   retention curve are added to its source lists (in a copy of the build files; the
   `ctsm5.4.004` checkout is not changed). Bounds checks and floating-point traps are on, as
@@ -349,6 +349,20 @@ making them public; no science line was changed.
 - **In the repository:** the driver programs, the harness's set-up module, the visibility
   patch, the build script and `generate_golden.py` (small, so that the data can be remade);
   the golden JSON. The CTSM build stays outside.
+
+**Feasibility probe (2026-11-24, done; files in scratch,
+`/glade/derecho/scratch/linnia/phase10_harness_probe`):** CTSM's 57 unit tests build and pass
+on Derecho (Intel, debug flags, pFUnit 4.8 from the CESM tools; about 2 minutes on 8 cores
+through `qcmd`). With five source files added to the test build's list (`TridiagonalMod`,
+`SoilWaterMovementMod`, `SoilWaterPlantSinkMod`, `SurfaceWaterMod`, the Clapp-Hornberger
+curve), a 6-line stand-in for `controlMod` (the namelist file's name) and one visibility
+change (`params_inst`, for `e_ice`), a test sets up one column with the 20-level structure
+and calls `soil_hk`/`soil_suction`, `ThetaBasedWaterTable` and `SoilWater` (the namelist of
+3.1 read by CLM's own `init_soilwater_movement`). The solver closes the water balance to
+6e-14 mm, in 1 sub-step for a mild case and 35 for 72 mm/h onto wet layers over dry soil. Only
+the fields a routine uses need allocating (6 of the soil state, 6 of the soil hydrology, the
+soil temperature); the water state and fluxes come from CTSM's factory. The private routines
+and `SurfaceWaterMod`'s calls are not yet tried.
 
 **Routines:** `soil_hk`, `soil_suction`; `compute_hydraulic_properties`;
 `compute_moisture_fluxes_and_derivs`; the matrix and right-hand side; a whole
