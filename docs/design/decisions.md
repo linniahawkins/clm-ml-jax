@@ -212,6 +212,34 @@ CLM. One pinned version keeps the translation, the golden data and the compariso
 consistent.
 Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
 
+**132. The first version of predicted soil water is unfrozen and snow-free**
+2026-11-24 · Phase 10 (scoping) · maintainer · in force · Departure from CLM: yes (temporary)
+All soil water is liquid (ice 0, as with prescribed soil water) and there is no snowpack.
+Ice is an argument of every translated routine, so frozen soil later changes values, not
+function signatures. Freeze/thaw (part of CLM's soil temperature routine, which CLM-ml
+replaces), the perched water table and its drainage, and snow are a later phase.
+Reason: the soil water movement can be translated and tested on its own; freeze/thaw means
+changing CLM-ml's soil temperature solution, a separate science change. O9 and O10 stay open.
+Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
+
+**133. Ponded surface water is a store for hydrology only**
+2026-11-24 · Phase 10 (scoping) · maintainer · in force · Departure from CLM: yes
+CLM's surface water (`h2osfc`, its covered fraction, runoff and drainage into the soil) is
+translated as a water store. It does not enter the ground's energy balance: the multilayer
+canopy keeps one ground temperature and one ground evaporation flux, where CLM gives the
+ponded fraction its own temperature and evaporation.
+Reason: CLM's default hydrology with water conserved, and no change to the canopy model.
+Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
+
+**134. Predicted soil water is evaluated at US-MMS, not at CHATS**
+2026-11-24 · Phase 10 (scoping) · maintainer · in force · Departure from Fortran: n/a
+The coupled evaluation (soil moisture and fluxes against measurements) is made at US-MMS
+(Morgan-Monroe State Forest, rain-fed deciduous broadleaf forest), in periods without frozen
+soil or snow (132). CHATS stays the test of prescribed soil water.
+Reason: the CHATS orchard is irrigated; a soil water balance without irrigation would dry
+below the observations for a reason that is not a model error.
+Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 132.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 135.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:

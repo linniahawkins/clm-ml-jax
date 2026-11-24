@@ -39,7 +39,10 @@ Sources read for this assessment:
 5. **The main differentiability problem is CLM's adaptive sub-stepping**, a loop whose
    number of passes depends on the data. legoLAND's answer (a loop with a fixed number of
    passes in which finished columns are frozen) applies directly. Section 5.
-6. **Decided (131): a translation of CLM, reference `ctsm5.4.004`.** Eleven choices remain
+6. **Decided:** a translation of CLM, reference `ctsm5.4.004` (131); a first version that
+   is unfrozen and snow-free (132); CLM's ponded surface water as a store for hydrology only
+   (133); evaluation at US-MMS, a rain-fed forest, because the CHATS orchard is irrigated
+   (134). Eight smaller choices remain (section 8), each with a recommendation.
    yours (section 8). The most consequential: that the first version is unfrozen and snow-free; how ponded surface water
    is treated; and where to evaluate, because I believe the CHATS orchard is irrigated, which
    a predicted soil water without irrigation cannot reproduce.
@@ -354,15 +357,20 @@ is missing from the list, the harness of 6.1 is the fallback for that routine.
 
 ### 6.4 Coupled evaluation (science, not pass/fail)
 
-- CHATS, May 2007: predicted against prescribed soil water, and the effect on latent heat,
-  sensible heat, GPP and leaf water potential. **Caution:** I believe the orchard is
-  irrigated, and the prescribed water carries an observation-based correction factor
-  (`CHATS_soil_moisture_correction`). A predicted soil water without irrigation would then
-  dry below what was observed, for a reason that is not a model error. Please confirm; see
-  decision 8 and 12.
-- A rain-fed forest tower with measured soil moisture (the sites of the 2021 paper;
-  `origin/add-us-umb-site` has US-UMB): predicted soil water against measurements and against
-  CLM's own, over a season with rain and dry-down.
+- **US-MMS** (Morgan-Monroe State Forest, Indiana; rain-fed deciduous broadleaf forest;
+  decision 134), a warm season with rain and dry-downs: predicted soil water against the
+  tower's measured soil moisture and against CLM's own at the same point; latent heat,
+  sensible heat and GPP against the tower and against a run with prescribed soil water.
+  Winters there have frozen soil and snow, outside the first version (132): evaluation runs
+  start after the last frost and snow and end before the first.
+  Needed, none of it in the repository yet: the tower forcing; a single-point CLM run
+  (`ctsm5.4.004`) for leaf and stem area, the initial soil state, and the replay data of 6.3;
+  the tower's description (heights, soil texture, bedrock depth, `FMAX`, `SLOPE`); the
+  measured soil moisture and fluxes.
+- **CHATS is not used to evaluate predicted soil water:** the orchard is irrigated
+  (maintainer, 2026-11-24), which a soil water balance without irrigation cannot reproduce.
+  CHATS stays the test of the prescribed mode (bit for bit, and against Fortran) and can serve
+  the replay test (6.3), where CLM's own fluxes drive the hydrology.
 - A run of a year or more: water balance closed over the run (precipitation =
   evapotranspiration + runoff + storage change), no drift, statistics of the sub-step count.
 - Grid: a few days of the 1° globe for robustness across soils (unfrozen, snow-free patches
@@ -411,15 +419,11 @@ My recommendation first in each.
 
 1. ~~Reference CTSM version.~~ **Decided 2026-11-24 (decision 131): a translation of CLM,
    reference `ctsm5.4.004`.**
-2. **First version unfrozen and snow-free** (ice stays 0, as today; O9, O10 stay open), with
-   ice already an argument of every routine. Freeze/thaw, the perched water table and snow are
-   a later phase. Alternative: include freeze/thaw now, which means translating part of CLM's
-   soil temperature routine into CLM-ml's own.
-3. **Ponded surface water.** (a) Keep CLM's pond as a water store that affects hydrology
-   only, the ground's energy balance unchanged (recommended: CLM's default hydrology, water
-   conserved, no change to the canopy model); (b) no pond (`h2osfcflag = 0`: infiltration
-   excess runs off at once); (c) the pond with its own evaporation and temperature, a change
-   to CLM-ml's ground energy balance.
+2. ~~First version unfrozen and snow-free.~~ **Decided 2026-11-24 (decision 132):** yes; ice
+   stays 0 and is already an argument of every routine. Freeze/thaw, the perched water table
+   and snow are a later phase (O9, O10 stay open).
+3. ~~Ponded surface water.~~ **Decided 2026-11-24 (decision 133):** CLM's pond as a water
+   store that affects hydrology only; the ground's energy balance is unchanged.
 4. **Snowfall reaching the ground** (grid runs; discarded today). Until there is a snowpack:
    (a) added to the soil input as liquid water at once (recommended: conserves water; the
    timing of melt is wrong); (b) discarded as today; (c) predicted mode refuses patches with
@@ -432,16 +436,17 @@ My recommendation first in each.
 7. **Soil evaporation and dew** from the canopy model's single ground flux: evaporation
    removed from the infiltration input, dew added to the top level, as CLM does with its
    liquid terms (recommended).
-8. **Irrigation.** Not translated (recommended for this phase). If CHATS is irrigated and you
-   want predicted soil water there, a prescribed irrigation input (a forcing variable added
-   to the water reaching the ground) is a small addition; CLM's irrigation scheme is not.
+8. **Irrigation.** Not translated (recommended). With evaluation moved to a rain-fed tower
+   (134) nothing needs it now; a prescribed irrigation input would be a small later addition
+   if predicted soil water is wanted at CHATS.
 9. **Tower inputs for runoff** (`FMAX`, `SLOPE`): keys in `domain.yaml` per tower, which
    `clm-ml new` fills from the compset (recommended), with the values taken from the CLM
    surface dataset at the tower's gridcell.
 10. **Form of the sub-step loop**: decided after the timing test of 10.6 (5.1).
 11. **Where the hydrology parameters live**: a new section of `params.yaml` that is not per
     PFT (recommended), read from the CLM parameter file by `clm-ml params`.
-12. **Evaluation sites** beyond CHATS (6.4), and whether measured soil moisture is available
+12. ~~Evaluation sites.~~ **Decided 2026-11-24 (decision 134):** US-MMS; not CHATS, which is
+    irrigated.
     for them.
 
 ## 9. Risks
