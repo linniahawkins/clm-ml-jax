@@ -1,10 +1,128 @@
 # Phase 10 scope: predicted soil water
 
-Status: **10.1 and 10.1b done (US-MMS set up; CLM's soil and CO₂ as options); decisions
-131-139; next: 10.2, the Fortran test harness, beginning with a feasibility
-probe on CTSM's unit-test framework** (2026-11-24, branch `phase10/soil_water`). This
-document is deleted when the phase closes; what is decided moves to `decisions.md`, what
-stays open to `open_items.md` (this is open item O64).
+Status (2026-11-24, branch `phase10/soil_water`): **10.1 and 10.1b done; the harness
+feasibility probe of 10.2 done; nothing of the soil water physics translated yet. Next: build
+the harness in the repository and the retention curve as a warm-up, then stop for the
+maintainer.** Start with "Resume here" below. This document is deleted when the phase closes;
+what is decided moves to `decisions.md`, what stays open to `open_items.md` (open item O64).
+
+## Resume here
+
+### What Phase 10 is
+
+A translation of CLM's soil water (CTSM `ctsm5.4.004`) into this model, so that soil water is
+predicted instead of prescribed. It is a **code translation** (decision 136): the measure of
+success is that the JAX routines match CLM's Fortran to round-off when given the same
+inputs. No comparison with observations in this phase. CLM-ML coupled to the new soil water
+will not match CLM's soil moisture, because the canopies differ; that is expected.
+
+### Decisions in force (`decisions.md`)
+
+| | |
+|---|---|
+| 131 | translate CLM itself, version `ctsm5.4.004` (`/glade/work/linnia/ctsm5.4.004`) |
+| 132 | first version unfrozen and snow-free (ice is an argument, held at 0) |
+| 133 | ponded surface water is a water store only (not in the ground's energy balance) |
+| 134, 135 | US-MMS is the site of the coupled runs: 1-hour step, May-September 2012 |
+| 136 | a code translation: agreement with CLM's Fortran, no observations |
+| 137 | towers can take CLM's soil texture per level and CLM's CO₂; CLM-ml's property formulas (thermal included) are kept |
+| 138 | the translated routines are written in CLM-ml's style (pure functions by process in `processes/`), not mirrored from CLM's modules |
+| 139 | golden data from idealized sweeps of CLM's Fortran in a test harness, as CLM-ml was translated; no site tracing |
+
+### What exists
+
+In the repository (all committed and pushed):
+
+- `experiments/us_mms_2012/`: US-MMS with prescribed soil water, CLM's soil and CO₂; its
+  README records the tower, the inputs and the CLM runs. Inputs in
+  `data/input_files/tower-forcing/US-MMS/` and `data/input_files/ctsm5_4/`.
+- Code of 10.1b: `setup.soil.texture_profile` (CTSM's mapping of surface-data layers to soil
+  levels), `domain.yaml` `texture: {given_as: layers}`, `run.yaml` `forcing.co2`. Defaults
+  unchanged; CHATS bit for bit.
+- No soil water physics, no harness, no golden data for soil water yet.
+
+Outside the repository (Derecho):
+
+- `/glade/work/linnia/cases/US-MMS_ctsm54_SP.spinup` and `.transient`: the CLM cases (runs
+  and archives on scratch; the transient's hourly history kept in
+  `/glade/work/linnia/phase10_us_mms/clm_runs/`).
+- `/glade/work/linnia/phase10_us_mms/us_mms_2012/` and `us_mms_2012_clmsoil/`: two CLM-ML
+  baseline runs (the first with the top-level texture and 383 ppm, the second with CLM's
+  soil and CO₂; the second is not analysed yet).
+- `/glade/work/linnia/phase10_us_mms/harness_probe/`: the probe's files and a README with
+  the commands to rebuild it (its build was in scratch,
+  `/glade/derecho/scratch/linnia/phase10_harness_probe`, which may be purged).
+
+### What the probe established (details in 6.1)
+
+CLM's soil water Fortran runs for one idealized column inside **CTSM's own unit-test
+framework**: 57 of CTSM's tests plus a probe test build and pass on Derecho in about 2
+minutes. The retention curve, `ThetaBasedWaterTable` and the whole Richards solver
+(`SoilWater`) were called; the solver conserves water to 6e-14 mm and takes 1 to 35
+sub-steps depending on the case. Not yet tried: calling the private routines directly, and
+calling the runoff, pond and drainage routines (they compile).
+
+### Next steps, in order
+
+1. **Build the harness in the repository**, `tests/fortran_validation/ctsm_harness/`
+   (section 6.1), from the probe:
+   - a script that makes the scratch copy of CTSM's `src/`, applies the changes (source
+     lists, the `controlMod` stand-in, the visibility patch) and **checks by `diff` that
+     nothing but visibility differs from `ctsm5.4.004`**, then builds with CIME's
+     `run_tests.py` through `qcmd` (account P93300041);
+   - a set-up module for the one column (the 20-level structure, allocation of the fields
+     the routines read, the namelist of 3.1, the parameters of `ctsm60_params.c251211.nc`);
+   - driver tests that read cases from a file and write `name=value` outputs with 17
+     significant digits; `generate_golden.py` that writes the cases, runs the drivers and
+     writes the golden JSON in the layout of the existing files.
+2. **Warm-up, the retention curve:** a few hundred random cases plus edge values of
+   `soil_hk` and `soil_suction`; the JAX functions in `processes/soil_water.py`; adapters in
+   `tests/fortran_validation/test_golden_jax.py` (rtol 1e-9). Then the usual tiers (fast
+   tests after each edit; bit for bit and noise twin before the commit).
+3. **Stop: show the maintainer the harness and the first golden tests** before the solver.
+4. **10.3, the Richards solver end to end:** golden sweeps of a whole `SoilWater` call
+   (including the number of sub-steps), the translation (hydraulic properties, fluxes, the
+   adaptive solver as a fixed-count loop, section 5.1), one-step-ahead sequences (6.3), a
+   first timing and gradient check. **Stop: report agreement and cost.**
+5. 10.4 runoff, pond, water table and drainage (each with its sweeps just before its
+   translation); 10.5 sequences of the whole hydrology; 10.6 into the model (state, step,
+   set-up inputs, parameters, restart, outputs, balance check); 10.7 gradients and timing;
+   10.8 coupled runs at US-MMS and close of the phase (section 7).
+
+### Open choices (the maintainer's; each has a recommendation)
+
+- The scenario list of the sweeps (6.1, "Idealized sweeps") was proposed, not yet confirmed.
+- Frozen cases in the sweeps now (recommended: yes, a few; the JAX routines keep ice as an
+  argument) or liquid only.
+- Sweeps at both 1800 s and 3600 s steps (recommended: both).
+- Section 8, items 4-11: snowfall reaching the ground, root uptake from CLM-ml's
+  `soil_et_loss`, CLM-ml's conductivity for the plants, evaporation and dew from the single
+  ground flux, no irrigation, `FMAX` and `SLOPE` as tower inputs, the form of the sub-step
+  loop, where the hydrology parameters live. None is needed before step 4.
+- Grid runs still take the top level's soil texture (O88).
+
+### Practical notes
+
+- Python: `/glade/work/linnia/conda-envs/clm-ml-jax/bin/python` (and `clm-ml`, `black`,
+  `ruff` there); set `JAX_PLATFORMS=cpu`. Sphinx is not installed in that environment: the
+  documentation build runs in CI only.
+- Jobs: CPU on P93300041 (UCLB0069 has no CPU hours), GPU on UCLB0069. CLM-ML at US-MMS takes
+  3 minutes on one CPU; a CLM year at US-MMS about 35 seconds.
+- CTSM unit tests, from the scratch copy's `src/`:
+  `qcmd -A P93300041 -q develop -l walltime=01:00:00 -l select=1:ncpus=8:mem=20GB --
+  ../cime/scripts/fortran_unit_testing/run_tests.py --build-dir <scratch>/build --make-j 8`;
+  the tests' printed output is in
+  `<build>/__command_line_test__/__command_line_test__/Testing/Temporary/LastTest.log`.
+- The `ctsm5.4.004` checkout is never modified; harness builds work on a copy of `src/`.
+- Found in `ctsm5.4.004`: the PLUMBER2 user mods' forcing-stream settings are ignored (the
+  stream is named `PLUMBER2.US-MMS`); `QCHARGE` is not a history field in this
+  configuration; `unittestFilterBuilderMod::filter_from_range` gave a wrong count in the
+  probe (a one-column filter is set by hand).
+- Sections 1-5 below are the assessment of CLM's code and of differentiability; 6 the
+  testing; 7 the order of work; 8 the choices; 9 the risks. Section 7.1 is the record of
+  the US-MMS set-up (done).
+
+---
 
 Sources read for this assessment:
 

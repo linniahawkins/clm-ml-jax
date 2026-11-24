@@ -46,15 +46,13 @@ Guidance for Claude (and other contributors) working in this repository.
   documentation site for colleagues (decision 129; Sphinx in `docs/`, GitHub Pages from
   `main`). No release or version tag yet. Open work: `docs/design/open_items.md`.
 - **Phase 10, predicted soil water** (branch `phase10/soil_water`, started 2026-11-24; O64):
-  scoped in `docs/design/soil_water_plan.md`, no code yet. A translation of CLM's soil water
-  (reference `ctsm5.4.004`, decision 131), first unfrozen and snow-free (132), the pond for
-  hydrology only (133), evaluated at US-MMS because CHATS is irrigated (134); US-MMS with a
-  1-hour step over May-September 2012 (135). **10.1 done** (`experiments/us_mms_2012/`, CLM
-  cases in `/glade/work/linnia/cases/`). Phase 10 is a code translation: agreement with CLM's
-  Fortran, no observations (136). 10.1b done (CLM's CO₂ and per-level soil texture at
-  US-MMS, 137); translated soil water in CLM-ml's style (138); golden data from idealized sweeps of CTSM's
-  Fortran in a test harness, not a site run (139). Next: 10.2, a feasibility probe of the harness on
-  CTSM's own unit-test framework, then the Richards solver end to end first. CPU jobs on P93300041.
+  a code translation of CLM's soil water (`ctsm5.4.004`), judged by agreement with CLM's
+  Fortran on idealized sweeps, not by observations (decisions 131-139). Done: US-MMS set up
+  (`experiments/us_mms_2012/`), CLM's soil texture per level and CO₂ as tower options, and a
+  feasibility probe of the Fortran test harness on CTSM's unit-test framework. No soil water
+  physics yet. **Resume from "Resume here" at the top of `docs/design/soil_water_plan.md`:**
+  next is the harness in `tests/fortran_validation/ctsm_harness/` and the retention curve as
+  a warm-up, then stop for the maintainer. CPU jobs on P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.
