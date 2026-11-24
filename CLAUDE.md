@@ -49,9 +49,10 @@ Guidance for Claude (and other contributors) working in this repository.
   scoped in `docs/design/soil_water_plan.md`, no code yet. A translation of CLM's soil water
   (reference `ctsm5.4.004`, decision 131), first unfrozen and snow-free (132), the pond for
   hydrology only (133), evaluated at US-MMS because CHATS is irrigated (134); US-MMS with a
-  1-hour step over May-September 2012 (135). **10.1 done except the measurements**
-  (`experiments/us_mms_2012/`, CLM cases in `/glade/work/linnia/cases/`): next is the 10.1
-  discussion (plan 7.1 "Where 10.1 stands"; O87, O88), then 10.2. CPU jobs on P93300041.
+  1-hour step over May-September 2012 (135). **10.1 done** (`experiments/us_mms_2012/`, CLM
+  cases in `/glade/work/linnia/cases/`). Phase 10 is a code translation: agreement with CLM's
+  Fortran, no observations (136). Next: 10.1b (CLM's CO₂ and per-level soil as options at
+  US-MMS; O87, O88), then 10.2. CPU jobs on P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.
