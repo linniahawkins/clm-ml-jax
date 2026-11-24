@@ -53,8 +53,8 @@ Guidance for Claude (and other contributors) working in this repository.
   cases in `/glade/work/linnia/cases/`). Phase 10 is a code translation: agreement with CLM's
   Fortran, no observations (136). 10.1b done (CLM's CO₂ and per-level soil texture at
   US-MMS, 137); translated soil water in CLM-ml's style (138); golden data from idealized sweeps of CTSM's
-  Fortran in a test harness, not a site run (139). Next: 10.2 (settle the sweeps with the
-  maintainer, then build the harness). CPU jobs on P93300041.
+  Fortran in a test harness, not a site run (139). Next: 10.2, a feasibility probe of the harness on
+  CTSM's own unit-test framework, then the Richards solver end to end first. CPU jobs on P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.
