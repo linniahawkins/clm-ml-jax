@@ -263,7 +263,7 @@ measurements in this phase (science applications come after it), so the US-MMS
 measurements are not needed. Decision 134 is narrowed: US-MMS is the site of the CLM runs,
 the replay test and the coupled runs, not of an evaluation. Where a CLM-ML run is set beside
 the CLM run (US-MMS), its inputs are CLM's wherever the model allows: the same CO₂ and the
-same soil at every level (137).
+same soil at every level (plan step 10.1b).
 Reason: the maintainer's priority is a faithful translation; science follows.
 Source: maintainer, 2026-11-24 ("this is not a science application just a code translation.
 The priority is to make the jax match the fortran nearly bit-for-bit ... Use identical CO2 and
