@@ -429,6 +429,13 @@ This needs you (or me on Derecho with your go-ahead) to build and run the traced
 
 ### 6.4 Coupled evaluation (science, not pass/fail)
 
+**Narrowed by decision 136:** this phase is a code translation; there is no evaluation
+against measurements. What stays: the coupled CLM-ML runs at US-MMS beside the CLM run, with
+CLM's CO₂ and soil (10.1b), the long run's water balance and the grid robustness run. The
+multi-layer canopy's fluxes differ from CLM's by design, so the coupled runs are compared
+with CLM for understanding, not for agreement; agreement is the business of 6.1 and 6.3.
+
+
 - **US-MMS** (Morgan-Monroe State Forest, Indiana; rain-fed deciduous broadleaf forest;
   decision 134), a warm season with rain and dry-downs: predicted soil water against the
   tower's measured soil moisture and against CLM's own at the same point; latent heat,
@@ -473,13 +480,14 @@ where marked.
 |---|---|---|
 | 10.0 | This scope; the maintainer's decisions (section 8) | done: decisions 131-134 |
 | 10.1 | **US-MMS set up** (7.1): the CLM single-point case, the tower as an experiment folder running with prescribed soil water, the measurements | a US-MMS run with prescribed soil water; **discussion** of the period chosen |
+| 10.1b | CLM-ML beside CLM at US-MMS with CLM's inputs (decision 136): CO₂ from CLM's CO₂ file, as DATM (O87); soil properties at every level as `ctsm5.4.004` `SoilStateInitTimeConst` (O88), both as options with today's behaviour the default | CHATS bit for bit; the US-MMS soil properties equal CLM's (WATSAT, SUCSAT, BSW, HKSAT) |
 | 10.2 | Reference data (6.1, 6.3): the traced copies of the hydrology files in the US-MMS case (logging only, checked against `ctsm5.4.004` and against the untraced run), drivers for the small public pieces, the golden JSON and the replay data | golden data committed (small); **discussion** if the run's states leave cases uncovered |
 | 10.3 | `soil_water.py`: retention curve, hydraulic properties, fluxes, the adaptive solver; not yet in the step | golden tests, property tests 6.2 |
 | 10.4 | `surface_runoff.py`, `drainage.py` | golden tests; conservation of the assembled hydrology |
 | 10.5 | The replay test against CLM (hydrology alone), US-MMS and CHATS | **discussion** of the agreement reached |
 | 10.6 | Into the model: state, step, setup inputs, parameters, restart, outputs, balance check, `upgrade` | prescribed mode bit for bit; predicted mode end-to-end test (one day) |
 | 10.7 | Gradients and timing | gradient tier; **discussion** if slower than ~1.5× |
-| 10.8 | Evaluation runs at US-MMS (6.4), documentation, close of the phase | all of `tests/regression`, slow tests, docs build |
+| 10.8 | Coupled runs at US-MMS beside CLM (6.4; no evaluation against measurements, decision 136), documentation, close of the phase | all of `tests/regression`, slow tests, docs build |
 
 ### 7.1 First step: US-MMS (10.1, on Derecho)
 
@@ -529,9 +537,8 @@ case runs with a 1-hour step.**
    in the experiment folder's README); only what a test needs is committed.
 
 Settled: a 1-hour model step and May to September 2012 (decision 135). Area profiles: the PFT
-values, as CLM-ml v2's `TowerDataMod` has for US-MMS. Still open: the measured soil moisture
-(not in the PLUMBER2 files; the AmeriFlux BASE record of US-MMS, which needs the maintainer's
-AmeriFlux login); the soil texture (O88) and the CO₂ (O87).
+values, as CLM-ml v2's `TowerDataMod` has for US-MMS. No measurements are needed (decision
+136). CO₂ and soil: CLM's (decision 136; step 10.1b, O87, O88).
 
 **Where 10.1 stands** (2026-11-24):
 

@@ -45,8 +45,8 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O14 | Very short canopies (down to 5 mm) not filtered | science issue | after 8 | M |
 | O15 | Wet needleleaf canopies: large latent heat with CLM6's `dleaf` | science issue | after 8 | M |
 | O16 | CO₂ profile reset covers the wrong levels (no effect today) | science issue (latent) | after 8 | M |
-| O87 | Tower runs use a fixed CO₂ of 383 ppm | science issue | Phase 10 (10.1 discussion) | M |
-| O88 | One soil texture per tower; CLM's soil varies with depth (US-MMS) | science issue | Phase 10 (10.1 discussion) | M |
+| O87 | Tower runs use a fixed CO₂ of 383 ppm | science issue | Phase 10 (10.1b; decided: CLM's CO₂, decision 136) | I |
+| O88 | One soil texture per tower; CLM's soil varies with depth (US-MMS) | science issue | Phase 10 (10.1b; decided: CLM's soil, decision 136) | I |
 | **2. Other maintainer decisions pending** |||||
 | O17 | ~~Repository organization: where the real configuration files live~~ (closed: decisions 89, 90) | maintainer decision | closed | M |
 | O18 | Norman and well-mixed code in git history only (D8 said "kept") | maintainer decision | after 8 (maintainer 2026-11-01) | M |
@@ -284,6 +284,9 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   about 3 % less CO₂ than CLM's.
 - **Now:** as Fortran. A per-tower CO₂ (a `domain.yaml` value, or a CO₂ file as the grid
   runs have) would be a small configuration change.
+- **Decided (2026-11-24, decision 136):** at US-MMS CLM-ML uses CLM's CO₂: the DATM CO₂ file
+  (one global value a year, linear in time, times the surface pressure; about 393 ppm in
+  mid-2012), as an option of tower runs; 383 ppm stays the default (CHATS, Fortran).
 - **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
 
 ### O88. One soil texture per tower; CLM's soil varies with depth (US-MMS)
@@ -299,6 +302,14 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   clay, 37.9 kg m⁻³), as grid runs do (`grid.py`: the top level of `PCT_SAND`, `PCT_CLAY`,
   `ORGANIC`). The alternatives are CLM-ml v2's "clay", or a texture per level for towers and
   grids (a change of the soil set-up, which has one texture per column).
+- **Measured (2026-11-24):** CLM-ML's properties from the top level equal CLM's at the top
+  level only; below it porosity differs by up to 19 %, saturated suction by 34 %, `b` by 16 %
+  and saturated conductivity by 27 %: CLM maps each level to the surface dataset's layer at
+  its depth (sand, clay and organic matter), keeps organic matter below 0.5 m, and applies
+  the parameter file's `om_frac_sf`, `watsat_sf`, `bsw_sf`, `sucsat_sf` and `organic_max`.
+- **Decided (2026-11-24, decision 136):** at US-MMS CLM-ML uses CLM's soil: the properties
+  of every level as `ctsm5.4.004` `SoilStateInitTimeConst` computes them from the surface
+  dataset, as an option; CLM-ml v2's single texture stays the default (CHATS, Fortran).
 - **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
 
 ## 2. Other maintainer decisions pending

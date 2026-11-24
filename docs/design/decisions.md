@@ -254,6 +254,21 @@ water where it matters most (water stress, the decline of latent heat).
 Source: maintainer, 2026-11-24 ("1 hour steps is fine any year is fine");
 `docs/design/soil_water_plan.md` section 7.1.
 
+**136. Phase 10 is a code translation: the measure is agreement with CLM's Fortran, not with observations**
+2026-11-24 · Phase 10 · maintainer · in force · Departure from Fortran: n/a
+Predicted soil water is accepted when the JAX routines match CTSM `ctsm5.4.004` nearly bit
+for bit: the routine-level golden data and the replay test (the hydrology driven with CLM's
+own inputs) at round-off, not at a tolerance chosen to pass. There is no evaluation against
+measurements in this phase (science applications come after it), so the US-MMS
+measurements are not needed. Decision 134 is narrowed: US-MMS is the site of the CLM runs,
+the replay test and the coupled runs, not of an evaluation. Where a CLM-ML run is set beside
+the CLM run (US-MMS), its inputs are CLM's wherever the model allows: the same CO₂ and the
+same soil at every level (137).
+Reason: the maintainer's priority is a faithful translation; science follows.
+Source: maintainer, 2026-11-24 ("this is not a science application just a code translation.
+The priority is to make the jax match the fortran nearly bit-for-bit ... Use identical CO2 and
+soil texture if possible to ensure accuracy").
+
 ## B. Configuration and user interface
 
 **7. Names and platform**
