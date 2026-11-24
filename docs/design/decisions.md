@@ -304,6 +304,25 @@ Reason: the maintainer values CLM-ml's modularity; one style across the model.
 Source: maintainer, 2026-11-24 ("when we rewrite clm soil water routines we should use the
 styling and modularity to match clm-ml").
 
+**139. The golden data come from idealized sweeps of CLM's Fortran, not from a site run**
+2026-11-24 · Phase 10 · maintainer · in force · Departure from Fortran: n/a (testing)
+As CLM-ml was translated: a Fortran test harness built against `ctsm5.4.004`'s compiled code
+sets up one CLM soil column and runs each soil water routine on idealized inputs that sweep
+every case (dry to saturated, sand to clay and organic soils, shallow to deep bedrock, water
+tables at every depth, ponding, `FMAX` and slope from zero to large, infiltration pulses that
+force sub-step halving); the outputs are golden JSON, and the JAX functions must reproduce
+them (rtol 1e-9). Private routines are reached through a copy of their module in which only
+`private` becomes `public`, checked by a `diff`. Multi-step sequences of the whole hydrology,
+driven by the same idealized inputs in the harness and in JAX, test the routines together
+over time. Tracing CLM at US-MMS (the plan's earlier method) is dropped: one site visits only
+its own states (US-MMS has no saturated-area runoff, no shallow bedrock, no sand), and
+CLM-ML coupled to the translated hydrology is never expected to reproduce CLM's soil water,
+since the canopies differ. The US-MMS runs serve the coupled runs (plan 6.4).
+Reason: coverage of every case; the method that worked for CLM-ml.
+Source: maintainer, 2026-11-24 ("for these we shouldn't have to stick to the single site,
+you should be able to take the fortran and exercise it in idealized sweeps across all
+scenarios and make sure the jax matches").
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

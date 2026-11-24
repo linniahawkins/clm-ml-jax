@@ -1,7 +1,8 @@
 # Phase 10 scope: predicted soil water
 
-Status: **scoped; decisions 131-134 taken; nothing implemented; next: 10.1, US-MMS set up on
-Derecho (section 7.1)** (2026-11-24, branch `phase10/soil_water`). This
+Status: **10.1 and 10.1b done (US-MMS set up; CLM's soil and CO₂ as options); decisions
+131-139; next: 10.2, the Fortran test harness, after the sweeps are settled with the
+maintainer** (2026-11-24, branch `phase10/soil_water`). This
 document is deleted when the phase closes; what is decided moves to `decisions.md`, what
 stays open to `open_items.md` (this is open item O64).
 
@@ -15,8 +16,7 @@ Sources read for this assessment:
   `soil_hydraulics.py`, `multilayer_land.py`);
 - the earlier translation, `AyaLahlou/clm-ml-dev` (branches `main`, `differentiable-physics`,
   `eager_python`), and its fork of the Fortran, `AyaLahlou/CLM-ml_v2.CHATS` (`tests/`,
-  `golden_IO/`, branch `claude/instrument-fortran-logging-SMZx4`), where this repository's
-  golden data come from (section 6.1).
+  `golden_IO/`), where this repository's golden data come from (section 6.1).
 
 ---
 
@@ -36,11 +36,11 @@ Sources read for this assessment:
    need. Section 3 lists, routine by routine, what is used, what is dead, and what is used
    by CLM but not applicable here.
 4. **Testing is possible without a CLM-ml reference**, in three independent ways:
-   (a) routine-level golden data recorded from CLM's own Fortran; (b) a *replay* test, where
-   the JAX hydrology is driven with CLM's own fluxes from a single-point CLM run and must
-   reproduce CLM's soil water step by step; (c) tests of properties that need no reference
-   (water conservation, equilibrium, convergence against an independent integrator).
-   Section 6.
+   (a) routine-level golden data from CLM's own Fortran run on idealized inputs that sweep
+   every case, as CLM-ml was translated; (b) multi-step sequences of the whole hydrology,
+   CLM's Fortran and the JAX code driven by the same idealized inputs; (c) tests of
+   properties that need no reference (water conservation, equilibrium, convergence against
+   an independent integrator). Section 6.
 5. **The main differentiability problem is CLM's adaptive sub-stepping**, a loop whose
    number of passes depends on the data. legoLAND's answer (a loop with a fixed number of
    passes in which finished columns are frozen) applies directly. Section 5.
@@ -48,12 +48,11 @@ Sources read for this assessment:
    is unfrozen and snow-free (132); CLM's ponded surface water as a store for hydrology only
    (133); evaluation at US-MMS, a rain-fed forest, because the CHATS orchard is irrigated
    (134). Nine smaller choices remain (section 8), each with a recommendation.
-7. **The earlier translation (`clm-ml-dev`) has no CLM soil water to reuse, but its way of
-   recording golden data does apply.** Its `SoilWaterMovementMod.py` translates CLM-ml v2's
-   stub, as this repository does. What carries over is the method: one of its two methods,
-   logging every input and output of a routine during a normal Fortran run, fits CTSM much
-   better than the stand-alone harness first planned here. The golden data and the replay
-   data then come from one traced US-MMS CLM run, in full double precision (6.1, 6.3).
+7. **The earlier translation (`clm-ml-dev`) has no CLM soil water to reuse; its method is
+   the model.** Its `SoilWaterMovementMod.py` translates CLM-ml v2's stub, as this
+   repository does. Its golden tests ran each Fortran routine on hand-chosen inputs through
+   small driver programs; the same is done here with a harness built against CTSM 5.4's
+   compiled code (6.1, decision 139).
 
 ---
 
@@ -178,7 +177,7 @@ what `ctsm5.4.070` does instead (not translated):
 | `baseflow_scalar` | namelist; 0.001 with the zero-flux lower boundary | parameter file |
 | Snow fraction and pond overlap | `frac_sno`, `frac_sno_eff` | renamed, overlap split differently (not relevant until snow) |
 
-The traced CLM run for the golden data (6.1) and the replay test (6.3) uses `ctsm5.4.004`
+The Fortran test harness (6.1, 6.3) is built from `ctsm5.4.004`
 (`/glade/work/linnia/ctsm5.4.004`).
 
 ---
@@ -307,76 +306,62 @@ comparison with four independent lines of evidence.
 
 ### 6.1 Routine level, against CLM's Fortran (golden data)
 
-**How this repository's golden data were made.** The 160+ golden tests in
-`tests/fortran_validation` come from the earlier translation (`AyaLahlou/clm-ml-dev`) and its
-fork of the Fortran (`AyaLahlou/CLM-ml_v2.CHATS`, `tests/` and `golden_IO/`). Two methods were
-built there:
+The golden tests are made as CLM-ml's were (decision 139): the Fortran routine is run on
+idealized inputs chosen to cover every case, its outputs are recorded, and the JAX function
+must reproduce them (rtol 1e-9, as the 160+ existing golden tests). They are not taken from a
+site run: one site visits only its own states (US-MMS has no saturated-area runoff, no
+shallow bedrock, no sand).
 
-1. **Driver programs** (used for the committed data). One small Fortran program per routine,
-   linked against the object files of the whole model, built normally. It reads its inputs as a
-   namelist on standard input and prints `name=value` lines (`ES24.16`). A Python script
-   (`generate_golden.py`) runs each driver on a list of hand-chosen cases and writes
-   `{inputs, outputs}` JSON. The drivers were compiled with bounds checks and floating-point
-   traps. Routines that could not be called alone (private ones, or ones needing the model's
-   full data structures) were reached by adding public helper routines to the Fortran.
-2. **Call tracing** (a branch, not used for the committed data). Each routine's inputs and
-   outputs were logged during a normal run, by lines added behind a compile flag
-   (`#ifdef IO_TRACE`, a 257-line `io_logger.F90`), for the first two calls of each routine.
+**How CLM-ml's golden data were made** (the earlier translation, `AyaLahlou/clm-ml-dev`, and
+its fork of the Fortran, `AyaLahlou/CLM-ml_v2.CHATS`, `tests/` and `golden_IO/`): one small
+Fortran program per routine, linked against the object files of the normally built model,
+reads its inputs as a namelist on standard input and prints `name=value` lines (`ES24.16`);
+a Python script (`generate_golden.py`) runs each program on a list of hand-chosen cases and
+writes `{inputs, outputs}` JSON. Routines that could not be called alone were reached by
+making them public; no science line was changed.
 
-**What changes for CLM's hydrology.** CLM-ml v2 is a small stand-alone program, so a driver
-could build its inputs by hand. CTSM is different in two ways:
+**The same for CTSM 5.4: a Fortran test harness.**
 
-- The routines take CLM's data structures (`bounds`, filters, `col`, `soilstate_inst`,
-  `waterstatebulk_inst`, `waterfluxbulk_inst`, `soilhydrology_inst`, ...), which exist only
-  after CLM's initialization.
-- Most of the solver is private to its module: `soilwater_moisture_form`,
-  `compute_hydraulic_properties`, `compute_moisture_fluxes_and_derivs`, the matrix and
-  right-hand side, `QflxH2osfcSurf`, `QflxH2osfcDrain` and `BulkDiag_FracH2oSfc`. The runoff
-  routines are methods of objects.
-
-The harness first planned here (CLM's files compiled against hand-written stand-ins for its
-data structures) would rebuild much of that initialization by hand. Instead, call tracing
-becomes the main method:
-
-- **Tracing in the US-MMS CLM case (main source).** Copies of the hydrology files go in the
-  case's `SourceMods/src.clm`, with only logging added, behind `IO_TRACE`. Two checks keep
-  CLM's science unchanged: a `diff` against `ctsm5.4.004` may show logging lines only, and the
-  traced run's history must equal the untraced run's bit for bit. The copies write each
-  routine's inputs and outputs in full double precision. Private routines are traced from
-  inside their own module, so their visibility does not change. The case is the one set up in
-  10.1, so no separate build system is needed.
-- **What gets recorded.** "The first two calls" is not enough. Each routine gets conditions
-  that select its calls: a rain step, a step where the solver halves its sub-step, a water
-  table within the column, a dry top level, water passed upward from a saturated level. A cap
-  per condition keeps the files small. A second, short run with a DEBUG build (bounds checks,
-  floating-point traps, as the CLM-ml drivers had) checks the same paths. The golden data come
-  from the normal optimized build, so they match the replay run (6.3).
-- **Driver programs for the small public pieces**, for cases the run never visits: the
-  Clapp-Hornberger curve (`soil_hk` and `soil_suction`, through the retention-curve object),
-  `ComputeFsatTopmodel`, `ComputeQinmaxHksat`, and the interpolation in
-  `ThetaBasedWaterTable`. They are linked against the case's object files, as the CLM-ml
-  drivers were linked against the model's. CLM's source is not changed to make a private
-  routine callable; tracing covers those.
+- **Built against CTSM's own compiled code.** The driver programs link against the object
+  files of a `ctsm5.4.004` build (the US-MMS case's, or a dedicated build of the same
+  source), with the compiler and flags of that build; a second build with CLM's debug
+  options (bounds checks, floating-point traps, as CLM-ml's drivers had) runs the same cases
+  once as a check.
+- **A minimal CLM column set up by the harness.** The routines take CLM's data structures
+  (`bounds`, filters, `col`, `soilstate_inst`, `waterstatebulk_inst`, `waterfluxbulk_inst`,
+  `soilhydrology_inst`, the runoff objects): the harness allocates them for one column with
+  CLM's own `Init` routines, fills the fields the routine reads from the namelist, and sets
+  the layer structure (`clm_varpar`, `initVertical` for the 20-level structure) and the
+  parameters (the values of `ctsm60_params.c251211.nc` and the namelist defaults of 3.1)
+  directly. This is the main work of the harness.
+- **Private routines** (`soilwater_moisture_form`, `compute_hydraulic_properties`,
+  `compute_moisture_fluxes_and_derivs`, the matrix and right-hand side, `QflxH2osfcSurf`,
+  `QflxH2osfcDrain`, `BulkDiag_FracH2oSfc`) are reached as CLM-ml's were: the harness
+  compiles a copy of the module in which only `private` becomes `public`; a `diff` against
+  `ctsm5.4.004`, run by the build, must show nothing else.
 - **Same JSON layout as the existing golden files** (`generated_utc`, the routine,
-  `cases: [{inputs, outputs}]`). The new files go in `tests/fortran_validation/golden_IO/`,
-  and `test_golden_jax.py` gets adapters as for the canopy routines, with rtol 1e-9. Arrays
-  keep CLM's 1-based level index in the JSON, with `nbedrock`; the adapter converts them, as
-  the existing `tridiag` adapter does.
+  `cases: [{inputs, outputs}]`), in `tests/fortran_validation/golden_IO/`; adapters in
+  `test_golden_jax.py` as for the canopy routines. Arrays keep CLM's 1-based level index in
+  the JSON, with `nbedrock`; the adapter converts them, as the `tridiag` adapter does.
+- **In the repository:** the driver programs, the harness's set-up module, the visibility
+  patch, the build script and `generate_golden.py` (small, so that the data can be remade);
+  the golden JSON. The CTSM build stays outside.
 
-Routines: `soil_hk`, `soil_suction`; `compute_hydraulic_properties`;
+**Routines:** `soil_hk`, `soil_suction`; `compute_hydraulic_properties`;
 `compute_moisture_fluxes_and_derivs`; the matrix and right-hand side; a whole
 `soilwater_moisture_form` call including the number of sub-steps; `ComputeFsatTopmodel`;
 `ComputeQinmaxHksat`; `SetQflxInputs`; the pond routines; `ThetaBasedWaterTable`;
-`SubsurfaceLateralFlow`. Cases: dry, moist, a saturated level, a strong infiltration pulse
-into dry soil (forces sub-step halving), shallow bedrock, strong root uptake from a dry level,
-water table at several depths. Cases that US-MMS does not reach (shallow bedrock, sand)
-come from drivers for the public pieces, or from a traced run of a second site, a choice made
-in 10.2.
+`SubsurfaceLateralFlow`; `RenewCondensation`; `SetSoilWaterFractions`.
 
-Risk: one run's states may not cover every case. The drivers fill the gaps for the public
-pieces; a private routine that a run never reaches in a given case is tested through the
-whole solver (`SoilWater`) in the replay test.
-
+**Idealized sweeps** (the list is settled with the maintainer before the harness is built):
+soil water from the dry floor to saturation, uniform and layered; textures from sand to clay
+and organic soils (the properties from texture as CLM computes them, decision 137);
+bedrock from the shallowest allowed depth to below the column; root uptake small to large,
+from wet and from dry levels; infiltration from none to pulses that force sub-step halving;
+water tables at many depths, including within the top levels and below the column; ponded
+water from none to above the runoff threshold; `FMAX` from 0 to its largest values; slope
+from flat to steep; levels at and above saturation (water passed upward). Edge values
+(exactly saturated, exactly at a threshold) are included on purpose.
 ### 6.2 Properties that need no reference
 
 - **Water conservation every step**, to round-off: change of (soil water + pond) =
@@ -395,65 +380,45 @@ whole solver (`SoilWater`) in the replay test.
   never reached in a set of extreme cases.
 - `soil.water: prescribed` passes the bit-for-bit and noise-twin tests unchanged.
 
-### 6.3 The replay test: the whole hydrology against CLM, step by step
+### 6.3 Multi-step sequences: the whole hydrology against CLM over time
 
-The traced single-point CLM run (6.1, `ctsm5.4.004`, satellite phenology) also records, at
-every model step, the hydrology as a whole, at the call of `HydrologyNoDrainage` and
-`HydrologyDrainage`:
+The routine tests check each piece; the sequence tests check that they work together over
+many steps, with the state carried from one step to the next (sub-step counts that vary,
+a water table that moves between levels, a pond that fills and drains). A harness program
+(6.1) runs CLM's hydrology for one column, step after step, in the order of
+`HydrologyNoDrainage` and `HydrologyDrainage` for the routines of the first version, driven by
+idealized inputs given as a time series: water reaching the ground, soil evaporation and
+dew, root uptake of each level, soil temperature. It writes the state and the fluxes after
+every step.
 
-- in: the fluxes that drive the soil (water reaching the ground, soil evaporation and dew,
-  root uptake of each level, soil temperature) and the state before the step;
-- out: everything the hydrology produces (liquid water and ice of each level, water table,
-  pond and its fraction, saturated fraction, infiltration, surface runoff, drainage, number
-  of sub-steps, water balance error).
+Sequences: a rain pulse on dry soil, a long dry-down with strong root uptake, rewetting to
+saturation with ponding and runoff, a water table rising into the column and falling out of
+it, shallow bedrock, sand and clay; a few hundred steps each at the 1-hour and 30-minute
+steps. The JAX hydrology driven by the same inputs must follow CLM step by step; the target
+is round-off. Small sequences are committed as golden data; any difference can be traced to
+a step and a routine.
 
-All of it is in full double precision and taken at the call itself, so the test is not
-limited by history-file precision, nor by fields that history files average or leave out. A
-restart file at the start gives the exact initial state. History output (double precision,
-`hist_ndens = 1`) is still written for the evaluation (6.4) and as a cross-check of the
-trace.
+This replaces the earlier replay of a traced site run (decision 139). The canopy model's
+fluxes differ from CLM's by design, so CLM-ML coupled to the translated hydrology is never
+expected to reproduce CLM's soil water; agreement is tested only here and in 6.1, where
+both are given the same inputs.
 
-The test feeds CLM's driving fluxes to the JAX hydrology (without the canopy) and compares
-its soil water with CLM's at every step. Since the inputs are CLM's own, the translated
-hydrology has to follow CLM closely for the whole run, through rain events and dry-downs;
-any difference is a translation difference and can be traced to a step and a routine. The
-target tolerance is set when the first run exists; with every input in double precision,
-states agreeing to about 1e-9 relative are plausible. The step is CLM's (1 hour at US-MMS,
-7.1).
+### 6.4 Coupled runs (science, not pass/fail)
 
-A few days are committed as a regression reference. Cases to cover between them: a rain
-event on dry soil, a water table within the column, shallow bedrock, sand and clay.
-Unfrozen, snow-free periods only in the first version.
+Decision 136: this phase is a code translation; there is no evaluation against
+measurements. The coupled runs check that the model runs and conserves water in realistic
+conditions, and show how the multi-layer canopy changes soil water; they are compared with
+CLM for understanding, not for agreement (agreement is 6.1 and 6.3).
 
-This needs you (or me on Derecho with your go-ahead) to build and run the traced CLM case.
-
-### 6.4 Coupled evaluation (science, not pass/fail)
-
-**Narrowed by decision 136:** this phase is a code translation; there is no evaluation
-against measurements. What stays: the coupled CLM-ML runs at US-MMS beside the CLM run, with
-CLM's CO₂ and soil (10.1b), the long run's water balance and the grid robustness run. The
-multi-layer canopy's fluxes differ from CLM's by design, so the coupled runs are compared
-with CLM for understanding, not for agreement; agreement is the business of 6.1 and 6.3.
-
-
-- **US-MMS** (Morgan-Monroe State Forest, Indiana; rain-fed deciduous broadleaf forest;
-  decision 134), a warm season with rain and dry-downs: predicted soil water against the
-  tower's measured soil moisture and against CLM's own at the same point; latent heat,
-  sensible heat and GPP against the tower and against a run with prescribed soil water.
-  Winters there have frozen soil and snow, outside the first version (132): evaluation runs
-  start after the last frost and snow and end before the first.
-  Needed, none of it in the repository yet: the tower forcing; a single-point CLM run
-  (`ctsm5.4.004`) for leaf and stem area, the initial soil state, and the replay data of 6.3;
-  the tower's description (heights, soil texture, bedrock depth, `FMAX`, `SLOPE`); the
-  measured soil moisture and fluxes.
-- **CHATS is not used to evaluate predicted soil water:** the orchard is irrigated
-  (maintainer, 2026-11-24), which a soil water balance without irrigation cannot reproduce.
-  CHATS stays the test of the prescribed mode (bit for bit, and against Fortran) and can serve
-  the replay test (6.3), where CLM's own fluxes drive the hydrology.
+- **US-MMS, May-September 2012** (`experiments/us_mms_2012`, decision 135), with CLM's CO₂
+  and soil (decision 137): predicted against prescribed soil water, and beside CLM's own
+  soil water and fluxes; the 2012 drought and rewetting.
 - A run of a year or more: water balance closed over the run (precipitation =
   evapotranspiration + runoff + storage change), no drift, statistics of the sub-step count.
 - Grid: a few days of the 1° globe for robustness across soils (unfrozen, snow-free patches
   only make sense scientifically; the rest runs but is not evaluated).
+- CHATS stays the test of prescribed soil water (bit for bit, and against Fortran CLM-ml); it
+  is irrigated, so predicted soil water is not run there.
 
 ### 6.5 Gradients
 
@@ -481,10 +446,10 @@ where marked.
 | 10.0 | This scope; the maintainer's decisions (section 8) | done: decisions 131-134 |
 | 10.1 | **US-MMS set up** (7.1): the CLM single-point case, the tower as an experiment folder running with prescribed soil water, the measurements | a US-MMS run with prescribed soil water; **discussion** of the period chosen |
 | 10.1b | CLM-ML beside CLM at US-MMS with CLM's inputs (decision 136): CO₂ from CLM's CO₂ file, as DATM (O87); soil properties at every level as `ctsm5.4.004` `SoilStateInitTimeConst` (O88), both as options with today's behaviour the default | done (decision 137): CHATS bit for bit; US-MMS CO₂ and soil properties equal CLM's to single precision |
-| 10.2 | Reference data (6.1, 6.3): the traced copies of the hydrology files in the US-MMS case (logging only, checked against `ctsm5.4.004` and against the untraced run), drivers for the small public pieces, the golden JSON and the replay data | golden data committed (small); **discussion** if the run's states leave cases uncovered |
+| 10.2 | The Fortran test harness (6.1): driver programs against CTSM 5.4's compiled code, a minimal CLM column, private routines made public in a checked copy; the idealized sweeps and sequences (6.1, 6.3), settled with the maintainer first; the golden JSON | golden data committed (small) |
 | 10.3 | `soil_water.py`: retention curve, hydraulic properties, fluxes, the adaptive solver; not yet in the step | golden tests, property tests 6.2 |
 | 10.4 | `surface_runoff.py`, `drainage.py` | golden tests; conservation of the assembled hydrology |
-| 10.5 | The replay test against CLM (hydrology alone), US-MMS and CHATS | **discussion** of the agreement reached |
+| 10.5 | The multi-step sequences against CLM (6.3) | **discussion** of the agreement reached |
 | 10.6 | Into the model: state, step, setup inputs, parameters, restart, outputs, balance check, `upgrade` | prescribed mode bit for bit; predicted mode end-to-end test (one day) |
 | 10.7 | Gradients and timing | gradient tier; **discussion** if slower than ~1.5× |
 | 10.8 | Coupled runs at US-MMS beside CLM (6.4; no evaluation against measurements, decision 136), documentation, close of the phase | all of `tests/regression`, slow tests, docs build |
@@ -492,7 +457,7 @@ where marked.
 ### 7.1 First step: US-MMS (10.1, on Derecho)
 
 Nothing for US-MMS is in the repository; only CHATS is set up. This step comes first because
-everything after the routine tests depends on it (the replay test, the end-to-end test of the
+everything after the routine tests depends on it (the coupled runs, the end-to-end test of the
 predicted mode, the evaluation), and because it needs CLM runs, which are on Derecho.
 
 What CTSM `ctsm5.4.004` already knows about the tower
@@ -510,18 +475,14 @@ case runs with a 1-hour step.**
    chooses the year.
 3. **The model step.** With hourly forcing, CLM's hydrology step is 3600 s; CLM-ML's default
    is 1800 s. Two possibilities, to decide when the forcing is in hand: run CLM-ML with a
-   1-hour model step at this tower (`numerics.step_seconds`), so that the replay and the
-   coupled runs share CLM's step; or use 30-min forcing if the tower's own record has it.
-   The replay test must use CLM's step whatever the choice, and the bound on the number of
-   sub-step trials (5.1) is larger for 3600 s.
+   1-hour model step at this tower (`numerics.step_seconds`), so that the coupled runs
+   share CLM's step; or use 30-min forcing if the tower's own record has it. The bound on the
+   number of sub-step trials (5.1) is larger for 3600 s.
 4. **History output for CLM-ML as it is now** (prescribed mode): `ELAI`, `ESAI`, `H2OSOI`,
    `TSOI` at every step, as the CHATS file.
 5. **History output for the evaluation**, every step, double precision (`hist_ndens = 1`),
    with a restart file at the start of the period: the soil water, water table, runoff and
-   drainage fields, checked against the history field list of the case. The replay data
-   themselves come from the traced run of 10.2 (6.1, 6.3), not from history files; the case
-   is set up so that the traced copies can be added to its `SourceMods` later without
-   rebuilding anything else.
+   drainage fields, checked against the history field list of the case.
 6. **The tower as an experiment folder**, `experiments/us_mms_2012/` (not a built-in
    compset: built-in towers are CHATS7 only, decision 13): location, forcing height, canopy height, soil texture, organic
    matter, colour and bedrock depth from the case's surface dataset; `FMAX` and `SLOPE` noted
@@ -558,7 +519,7 @@ values, as CLM-ml v2's `TowerDataMod` has for US-MMS. No measurements are needed
   from the CESM input data server into `phase10_us_mms/inputdata/` and named in
   `user_nl_datm_streams`.
 - The site: `FMAX` is 0, so CLM's saturated fraction is always 0 here (the saturation-excess
-  runoff of 3.2 row 2 is not exercised at US-MMS: its golden data come from drivers, 6.1);
+  runoff of 3.2 row 2 is not exercised at US-MMS; the golden tests sweep it, 6.1);
   bedrock at 20.3 m lies below the 8.5 m soil column (no shallow bedrock); slope 0.51°.
 - Forcing for CLM-ML: `data/input_files/tower-forcing/US-MMS/` (May-September 2012, made by
   `convert_plumber2.py` in that folder).
@@ -614,22 +575,16 @@ My recommendation first in each.
     PFT (recommended), read from the CLM parameter file by `clm-ml params`.
 12. ~~Evaluation sites.~~ **Decided 2026-11-24 (decision 134):** US-MMS; not CHATS, which is
     irrigated.
-13. **How the golden and replay data are recorded** (6.1): (a) tracing of the hydrology
-    routines in the US-MMS CLM case (copies in `SourceMods` with logging only, checked by
-    `diff` and by a bit-for-bit history comparison) plus driver programs for the small
-    public pieces (recommended: the method of the earlier translation, without stand-ins for
-    CLM's data structures, and with the replay data in full double precision); (b) the
-    stand-alone harness of the first version of this plan (CLM's files compiled against
-    hand-written stand-ins); (c) history files only (no routine-level data; the replay test
-    limited by what history files hold).
+13. ~~How the golden data are recorded.~~ **Decided 2026-11-24 (decision 139):** a Fortran
+    harness against CTSM 5.4's compiled code, idealized sweeps and sequences, as CLM-ml was
+    translated; no site tracing.
 
 ## 9. Risks
 
-- Recording the golden data (6.1) is the least certain part of the effort, less so than
-  with the stand-alone harness first planned: tracing needs no stand-ins for CLM's data
-  structures, but one run's states may not reach every case, and the traced copies must be
-  kept to logging only.
-- Agreement in the replay test may stop above round-off (for example LAPACK's `dgtsv`
+- The harness (6.1) is the least certain part of the effort: setting up CLM's data
+  structures for one column outside CLM (initialization order, parameters read from files,
+  module variables) may take longer than translating a routine.
+- Agreement in the sequence tests may stop above round-off (for example LAPACK's `dgtsv`
   against this repository's `tridiag`); the tolerance is fixed only after the first run.
 - Predicted soil water makes the model's known biases interact: daytime latent heat is biased
   high (~70 W m⁻²), which would dry the soil too fast. This is a result to report, not to

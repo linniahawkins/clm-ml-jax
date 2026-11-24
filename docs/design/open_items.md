@@ -1028,8 +1028,8 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
   Revised the same day after a review of the earlier translation (`AyaLahlou/clm-ml-dev`):
   golden and replay data recorded by tracing the hydrology routines in the US-MMS CLM case
   (plan 6.1, 6.3; choice 13 of section 8 open).
-- **Next:** the 10.1 discussion (plan 7.1, "Where 10.1 stands"; O87, O88), the US-MMS
-  measurements, then 10.2.
+- **Next:** 10.2, the Fortran test harness and idealized sweeps (decision 139), after the
+  sweeps are settled with the maintainer.
 
 ---
 

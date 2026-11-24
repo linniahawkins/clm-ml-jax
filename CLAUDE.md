@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 139.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 140.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:
@@ -52,8 +52,9 @@ Guidance for Claude (and other contributors) working in this repository.
   1-hour step over May-September 2012 (135). **10.1 done** (`experiments/us_mms_2012/`, CLM
   cases in `/glade/work/linnia/cases/`). Phase 10 is a code translation: agreement with CLM's
   Fortran, no observations (136). 10.1b done (CLM's CO₂ and per-level soil texture at
-  US-MMS, 137); translated soil water in CLM-ml's style (138). Next: 10.2. CPU jobs on
-  P93300041.
+  US-MMS, 137); translated soil water in CLM-ml's style (138); golden data from idealized sweeps of CTSM's
+  Fortran in a test harness, not a site run (139). Next: 10.2 (settle the sweeps with the
+  maintainer, then build the harness). CPU jobs on P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.
