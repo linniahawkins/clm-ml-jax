@@ -443,7 +443,7 @@ My recommendation first in each.
 11. **Where the hydrology parameters live**: a new section of `params.yaml` that is not per
     PFT (recommended), read from the CLM parameter file by `clm-ml params`.
 12. ~~Evaluation sites.~~ **Decided 2026-11-24 (decision 134):** US-MMS; not CHATS, which is
-    irrigated.**
+    irrigated.
 
 ## 9. Risks
 
