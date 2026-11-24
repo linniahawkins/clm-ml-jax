@@ -980,7 +980,8 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 **Source:** CLAUDE.md; plan decision 14.
 - **Now (2026-11-24):** being scoped as Phase 10 on branch `phase10/soil_water`:
   `docs/design/soil_water_plan.md` (what CLM does and what is needed of it, differentiability,
-  tests without a CLM-ml reference, twelve decisions for the maintainer). Nothing implemented.
+  tests without a CLM-ml reference). Decisions 131-134 taken; nothing implemented.
+- **Next:** 10.1, US-MMS set up on Derecho (section 7.1 of the plan).
 
 ---
 

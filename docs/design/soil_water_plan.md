@@ -1,6 +1,7 @@
 # Phase 10 scope: predicted soil water
 
-Status: **scoping, nothing implemented** (2026-11-24, branch `phase10/soil_water`). This
+Status: **scoped; decisions 131-134 taken; nothing implemented; next: 10.1, US-MMS set up on
+Derecho (section 7.1)** (2026-11-24, branch `phase10/soil_water`). This
 document is deleted when the phase closes; what is decided moves to `decisions.md`, what
 stays open to `open_items.md` (this is open item O64).
 
@@ -396,14 +397,62 @@ where marked.
 
 | | Content | Ends with |
 |---|---|---|
-| 10.0 | This scope; your decisions (section 8) | **discussion** |
-| 10.1 | Reference data: the Fortran harness and its golden JSON; the CLM single-point run for the replay test | data committed (small) |
-| 10.2 | `soil_water.py`: retention curve, hydraulic properties, fluxes, the adaptive solver; not yet in the step | golden tests, property tests 6.2 |
-| 10.3 | `surface_runoff.py`, `drainage.py` | golden tests; conservation of the assembled hydrology |
-| 10.4 | The replay test against CLM (hydrology alone) | **discussion** of the agreement reached |
-| 10.5 | Into the model: state, step, setup inputs, parameters, restart, outputs, balance check, `upgrade` | prescribed mode bit for bit; predicted mode end-to-end test (one day) |
-| 10.6 | Gradients and timing | gradient tier; **discussion** if slower than ~1.5× |
-| 10.7 | Evaluation runs (6.4), documentation, close of the phase | all of `tests/regression`, slow tests, docs build |
+| 10.0 | This scope; the maintainer's decisions (section 8) | done: decisions 131-134 |
+| 10.1 | **US-MMS set up** (7.1): the CLM single-point case, the tower as an experiment folder running with prescribed soil water, the replay data, the measurements | a US-MMS run with prescribed soil water; **discussion** of the period chosen |
+| 10.2 | Reference data for the routines: the Fortran harness and its golden JSON | data committed (small) |
+| 10.3 | `soil_water.py`: retention curve, hydraulic properties, fluxes, the adaptive solver; not yet in the step | golden tests, property tests 6.2 |
+| 10.4 | `surface_runoff.py`, `drainage.py` | golden tests; conservation of the assembled hydrology |
+| 10.5 | The replay test against CLM (hydrology alone), US-MMS and CHATS | **discussion** of the agreement reached |
+| 10.6 | Into the model: state, step, setup inputs, parameters, restart, outputs, balance check, `upgrade` | prescribed mode bit for bit; predicted mode end-to-end test (one day) |
+| 10.7 | Gradients and timing | gradient tier; **discussion** if slower than ~1.5× |
+| 10.8 | Evaluation runs at US-MMS (6.4), documentation, close of the phase | all of `tests/regression`, slow tests, docs build |
+
+### 7.1 First step: US-MMS (10.1, on Derecho)
+
+Nothing for US-MMS is in the repository; only CHATS is set up. This step comes first because
+everything after the routine tests depends on it (the replay test, the end-to-end test of the
+predicted mode, the evaluation), and because it needs CLM runs, which are on Derecho.
+
+What CTSM `ctsm5.4.004` already knows about the tower
+(`tools/site_and_regional/PLUMBER2_sites.csv`): latitude 39.3232, longitude −86.4131, PFT 7
+(broadleaf deciduous temperate tree) on 100 %, canopy top 27.0 m and bottom 15.52 m, forcing
+years 1999-2014, and **24 coupling steps per day: the PLUMBER2 forcing is hourly, so that CLM
+case runs with a 1-hour step.**
+
+1. **The CLM case.** A single-point case at US-MMS with `ctsm5.4.004`, satellite phenology,
+   through CTSM's tower tooling in `tools/site_and_regional` (`run_tower`,
+   `plumber2_usermods`, `plumber2_surf_wrapper`); the exact commands are to be worked out in
+   the checkout. Spun up, then run over the chosen period.
+2. **The period.** One warm season without frozen soil or snow (decision 132), with rain and
+   at least one clear dry-down, in a year with measured soil moisture. The maintainer
+   chooses the year.
+3. **The model step.** With hourly forcing, CLM's hydrology step is 3600 s; CLM-ML's default
+   is 1800 s. Two possibilities, to decide when the forcing is in hand: run CLM-ML with a
+   1-hour model step at this tower (`numerics.step_seconds`), so that the replay and the
+   coupled runs share CLM's step; or use 30-min forcing if the tower's own record has it.
+   The replay test must use CLM's step whatever the choice, and the bound on the number of
+   sub-step trials (5.1) is larger for 3600 s.
+4. **History output for CLM-ML as it is now** (prescribed mode): `ELAI`, `ESAI`, `H2OSOI`,
+   `TSOI` at every step, as the CHATS file.
+5. **History output for the replay test** (6.3), every step, double precision, with a restart
+   file at the start: the driving fluxes and the hydrology's results listed in 6.3. The field
+   names are checked against the history field list of the case.
+6. **The tower as an experiment folder**: a compset `us_mms` (`compsets/towers/`,
+   `compsets/experiments/`): location, forcing height, canopy height, soil texture, organic
+   matter, colour and bedrock depth from the case's surface dataset; `FMAX` and `SLOPE` noted
+   for later (decision 9 of section 8); PFT 7 with default parameters (the CHATS parameter
+   set is the orchard's, not this forest's); the leaf and stem area profile parameters are a
+   choice to bring to the maintainer (the 2021 paper's values for this tower, if available).
+7. **The forcing** converted to the tower-forcing format of `data/input_files/tower-forcing`.
+8. **A run of CLM-ML with prescribed soil water** over the period: it must pass the
+   conservation checks, and its fluxes are the baseline that the predicted mode is later
+   compared with.
+9. **The measurements**: soil moisture (depths and units noted), latent and sensible heat,
+   GPP, for the period. Large files stay outside the repository (a path on Derecho recorded
+   in the experiment folder's README); only what a test needs is committed.
+
+Open questions for this step: the year; 1-hour or 30-min step; where the measured soil
+moisture comes from (the PLUMBER2 files or the AmeriFlux record); the area profile parameters.
 
 Code-only and science changes stay in separate commits. No change to the existing science is
 planned: with `prescribed` everything is as today.
@@ -439,7 +488,7 @@ My recommendation first in each.
 9. **Tower inputs for runoff** (`FMAX`, `SLOPE`): keys in `domain.yaml` per tower, which
    `clm-ml new` fills from the compset (recommended), with the values taken from the CLM
    surface dataset at the tower's gridcell.
-10. **Form of the sub-step loop**: decided after the timing test of 10.6 (5.1).
+10. **Form of the sub-step loop**: decided after the timing test of 10.7 (5.1).
 11. **Where the hydrology parameters live**: a new section of `params.yaml` that is not per
     PFT (recommended), read from the CLM parameter file by `clm-ml params`.
 12. ~~Evaluation sites.~~ **Decided 2026-11-24 (decision 134):** US-MMS; not CHATS, which is

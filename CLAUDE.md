@@ -45,6 +45,12 @@ Guidance for Claude (and other contributors) working in this repository.
   `phase9/docs`): a clean-up of comments and documents (decision 128) and a small
   documentation site for colleagues (decision 129; Sphinx in `docs/`, GitHub Pages from
   `main`). No release or version tag yet. Open work: `docs/design/open_items.md`.
+- **Phase 10, predicted soil water** (branch `phase10/soil_water`, started 2026-11-24; O64):
+  scoped in `docs/design/soil_water_plan.md`, no code yet. A translation of CLM's soil water
+  (reference `ctsm5.4.004`, decision 131), first unfrozen and snow-free (132), the pond for
+  hydrology only (133), evaluated at US-MMS because CHATS is irrigated (134). **Resume at
+  10.1: set up US-MMS on Derecho (section 7.1 of the plan).** Sections 7 and 8 list the order
+  of work and the choices still open.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.
