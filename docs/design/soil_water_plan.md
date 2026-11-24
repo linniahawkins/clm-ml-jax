@@ -43,9 +43,6 @@ Sources read for this assessment:
    is unfrozen and snow-free (132); CLM's ponded surface water as a store for hydrology only
    (133); evaluation at US-MMS, a rain-fed forest, because the CHATS orchard is irrigated
    (134). Eight smaller choices remain (section 8), each with a recommendation.
-   yours (section 8). The most consequential: that the first version is unfrozen and snow-free; how ponded surface water
-   is treated; and where to evaluate, because I believe the CHATS orchard is irrigated, which
-   a predicted soil water without irrigation cannot reproduce.
 
 ---
 
@@ -446,8 +443,7 @@ My recommendation first in each.
 11. **Where the hydrology parameters live**: a new section of `params.yaml` that is not per
     PFT (recommended), read from the CLM parameter file by `clm-ml params`.
 12. ~~Evaluation sites.~~ **Decided 2026-11-24 (decision 134):** US-MMS; not CHATS, which is
-    irrigated.
-    for them.
+    irrigated.**
 
 ## 9. Risks
 
