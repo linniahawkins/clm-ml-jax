@@ -195,6 +195,23 @@ Python 3.10, so CI's 3.10 job installed JAX 0.6.2 and failed two tests; the old 
 (`jax>=0.4.30`) let any install pick a JAX the model is not tested with.
 Source: maintainer, 2026-11-24 (CI of pull request 6).
 
+**131. Predicted soil water is a translation of CLM, with `ctsm5.4.004` as the reference**
+2026-11-24 · Phase 10 (scoping) · maintainer · in force · Departure from Fortran: n/a (CLM-ml v2 has no soil water movement)
+The soil water equations are translated from CLM's own routines (the default CLM5/CLM6 path:
+the adaptive moisture-form Richards solver, TOPMODEL saturated fraction, infiltration excess,
+surface water, the theta-based water table and subsurface lateral flow), not taken from
+another JAX land model. The reference source is the tag `ctsm5.4.004`
+(`/glade/work/linnia/ctsm5.4.004`): golden data and the CLM run of the replay test are made
+with that version. In it, `soilwater_moisture_form` has no over-saturation correction after
+the solve, drainage of the surface water is `min(frac_h2osfc*qinmax, h2osfc/dtime)`, and
+`baseflow_scalar` is a namelist value (0.001 with the zero-flux lower boundary); later tags
+changed all three.
+Reason: where a modelling choice comes up the model copies CLM; legoLAND's soil is a different
+scheme (mixed-form Picard iteration, van Genuchten, free drainage) and would not reproduce
+CLM. One pinned version keeps the translation, the golden data and the comparison run
+consistent.
+Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

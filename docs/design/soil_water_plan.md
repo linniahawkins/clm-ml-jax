@@ -7,8 +7,8 @@ stays open to `open_items.md` (this is open item O64).
 Sources read for this assessment:
 
 - this repository at `a77c4f6`;
-- CTSM from GitHub, `ctsm5.4.070` (the default branch on 2026-11-24), compared with
-  `ctsm5.4.004` (the version named in CLAUDE.md) for the files below;
+- CTSM from GitHub: **`ctsm5.4.004`, the reference (decision 131)**, and `ctsm5.4.070` (the
+  default branch on 2026-11-24) to see what changed since;
 - CLM-ml v2 Fortran (`gbonan/CLM-ml_v2.CHATS`);
 - legoLAND (`climate-federation/legoESM`, `packages/land/legoesm/land/`: `richards.py`,
   `soil_hydraulics.py`, `multilayer_land.py`).
@@ -39,8 +39,8 @@ Sources read for this assessment:
 5. **The main differentiability problem is CLM's adaptive sub-stepping**, a loop whose
    number of passes depends on the data. legoLAND's answer (a loop with a fixed number of
    passes in which finished columns are frozen) applies directly. Section 5.
-6. **Twelve choices are yours** (section 8). The most consequential: which CTSM version is
-   the reference; that the first version is unfrozen and snow-free; how ponded surface water
+6. **Decided (131): a translation of CLM, reference `ctsm5.4.004`.** Eleven choices remain
+   yours (section 8). The most consequential: that the first version is unfrozen and snow-free; how ponded surface water
    is treated; and where to evaluate, because I believe the CHATS orchard is irrigated, which
    a predicted soil water without irrigation cannot reproduce.
 
@@ -112,7 +112,7 @@ In CLM's calling order (`HydrologyNoDrainageMod`, then `HydrologyDrainageMod`).
 | 3 | `SetQflxInputs` (SoilHydrologyMod) | water offered to the soil: input minus saturation runoff minus soil evaporation, split between soil and pond | T |
 | 4 | `InfiltrationExcessRunoff`, `ComputeQinmaxHksat` (InfiltrationExcessRunoffMod) | maximum infiltration rate (smallest saturated conductivity of the top three levels, reduced by ice); the excess | T |
 | 5 | `RouteInfiltrationExcess` (SoilHydrologyMod) | the excess goes to the pond | T |
-| 6 | `UpdateFracH2oSfc`/`BulkDiag_FracH2oSfc`, `UpdateH2osfc`, `QflxH2osfcSurf`, `QflxH2osfcDrain` (SurfaceWaterMod) | ponded water: its covered fraction (from microtopography), its runoff and its drainage into the soil | T (decision 3) |
+| 6 | `UpdateFracH2oSfc`/`BulkDiag_FracH2oSfc`, `UpdateH2osfc`, `QflxH2osfcSurf`, `QflxH2osfcDrain` (SurfaceWaterMod) | ponded water: its covered fraction (from microtopography), its runoff and its drainage into the soil (at most the maximum infiltration rate over the ponded fraction) | T (decision 3) |
 | 7 | `Infiltration`, `TotalSurfaceRunoff` (SoilHydrologyMod) | sums | T |
 | 8 | `Compute_EffecRootFrac_And_VertTranSink*` (SoilWaterPlantSinkMod) | root uptake per level | N: replaced by CLM-ml's own (3.3) |
 | 9 | `SoilWater` → `soilwater_moisture_form` with `compute_hydraulic_properties`, `compute_moisture_fluxes_and_derivs`, `compute_RHS_moisture_form`, `compute_LHS_moisture_form`, `IceImpedance`; `soil_hk`, `soil_suction` (SoilWaterMovementMod, SoilWaterRetentionCurveClappHornberg1978Mod) | the Richards equation: vertical movement of water between levels, with root uptake as a sink | T: the core |
@@ -155,20 +155,20 @@ the `clmOrig` tridiagonal solver, the head and water-table boundary conditions, 
   the previous step. Hydrology runs once per 30-min model step (CLM's own step), with its own
   adaptive sub-steps; it does not enter the 5-min canopy sub-steps.
 
-### 3.4 CTSM versions differ in these files
+### 3.4 The reference is `ctsm5.4.004` (decision 131)
 
-Between `ctsm5.4.004` and `ctsm5.4.070` the files above changed in ways that change results:
+Later tags changed these files in ways that change results. What `ctsm5.4.004` does, and
+what `ctsm5.4.070` does instead (not translated):
 
-- `soilwater_moisture_form`: water above saturation is now passed to the level above after
-  the solve (absent in 5.4.004);
-- `QflxH2osfcDrain`: pond drainage is now a Darcy flux into the top level, limited by the
-  maximum infiltration rate (5.4.004: the limit only);
-- `baseflow_scalar` moved from the namelist (0.01) to the parameter file;
-- the snow-fraction variables were renamed and the overlap of snow and pond is split
-  differently (not relevant until snow).
+| | `ctsm5.4.004` (translated) | `ctsm5.4.070` |
+|---|---|---|
+| After the Richards solve | nothing: water above saturation stays until `SubsurfaceLateralFlow` passes it upward | water above the effective porosity passed to the level above at once |
+| Pond drainage (`QflxH2osfcDrain`) | `min(frac_h2osfc·qinmax, h2osfc/dtime)` | a Darcy flux into the top level, with those two limits |
+| `baseflow_scalar` | namelist; 0.001 with the zero-flux lower boundary | parameter file |
+| Snow fraction and pond overlap | `frac_sno`, `frac_sno_eff` | renamed, overlap split differently (not relevant until snow) |
 
-The reference version must be pinned, and the CLM run for the replay test (6.3) must be made
-with that same version (decision 1).
+The CLM run for the replay test (6.3) and the harness (6.1) use `ctsm5.4.004`
+(`/glade/work/linnia/ctsm5.4.004`).
 
 ---
 
@@ -205,8 +205,8 @@ infiltration, pond), `drainage.py` (water table, baseflow). Pure functions of on
 | initial soil water | – | the history record at the start, or a restart | as today for TSOI, or a restart |
 
 **Parameters**, all differentiable: `e_ice`, `fff`, `pc`, `mu`, `aq_sp_yield_min`,
-`n_baseflow`, `baseflow_scalar`, `perched_baseflow_scalar` (later), `slopebeta`, `slopemax`,
-from the CLM parameter file. They are not PFT parameters, so `params.yaml` needs a section
+`n_baseflow`, `perched_baseflow_scalar` (later), `slopebeta`, `slopemax`, from the CLM
+parameter file, and `baseflow_scalar` (a namelist value in `ctsm5.4.004`: 0.001). They are not PFT parameters, so `params.yaml` needs a section
 that is not per PFT (decision 11), and `clm-ml params` must read them.
 
 **Around the physics:** restart fields; output variables (soil water per level, water table,
@@ -409,11 +409,8 @@ planned: with `prescribed` everything is as today.
 
 My recommendation first in each.
 
-1. **Reference CTSM version.** Pin one tag for the translation and the replay run. Either
-   `ctsm5.4.004` (what CLAUDE.md names, on Derecho) or a current tag (5.4.070 has the
-   over-saturation fix and the Darcy pond drainage, 3.4). Recommendation: the version you
-   will run for the replay test and compare science against; if you have no preference, the
-   current tag.
+1. ~~Reference CTSM version.~~ **Decided 2026-11-24 (decision 131): a translation of CLM,
+   reference `ctsm5.4.004`.**
 2. **First version unfrozen and snow-free** (ice stays 0, as today; O9, O10 stay open), with
    ice already an argument of every routine. Freeze/thaw, the perched water table and snow are
    a later phase. Alternative: include freeze/thaw now, which means translating part of CLM's
