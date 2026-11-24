@@ -240,6 +240,20 @@ Reason: the CHATS orchard is irrigated; a soil water balance without irrigation 
 below the observations for a reason that is not a model error.
 Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
 
+**135. US-MMS runs with a 1-hour model step, over May to September 2012**
+2026-11-24 · Phase 10 (10.1) · maintainer (step), implementation (year) · in force · Departure from Fortran: n/a
+At US-MMS, CLM-ML runs with `numerics.step_seconds: 3600`, the interval of the tower's
+PLUMBER2 forcing and the step of the CLM run, so that the replay test and the coupled runs
+share CLM's step. The evaluation period is 1 May to 30 September 2012. The maintainer left
+the year open; 2012 was chosen from the forcing: the 2012 Midwest drought gave 2 mm of rain
+in June and 20 mm in July (a 43-day spell below 1 mm per day, the longest of 1999-2014 by far),
+followed by a wet August and September, so the period holds a strong dry-down and a
+rewetting. The season is free of frozen soil and snow (decision 132).
+Reason: the step avoids interpolating hourly forcing; a drought year tests predicted soil
+water where it matters most (water stress, the decline of latent heat).
+Source: maintainer, 2026-11-24 ("1 hour steps is fine any year is fine");
+`docs/design/soil_water_plan.md` section 7.1.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

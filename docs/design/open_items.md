@@ -45,6 +45,8 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O14 | Very short canopies (down to 5 mm) not filtered | science issue | after 8 | M |
 | O15 | Wet needleleaf canopies: large latent heat with CLM6's `dleaf` | science issue | after 8 | M |
 | O16 | CO₂ profile reset covers the wrong levels (no effect today) | science issue (latent) | after 8 | M |
+| O87 | Tower runs use a fixed CO₂ of 383 ppm | science issue | Phase 10 (10.1 discussion) | M |
+| O88 | One soil texture per tower; CLM's soil varies with depth (US-MMS) | science issue | Phase 10 (10.1 discussion) | M |
 | **2. Other maintainer decisions pending** |||||
 | O17 | ~~Repository organization: where the real configuration files live~~ (closed: decisions 89, 90) | maintainer decision | closed | M |
 | O18 | Norman and well-mixed code in git history only (D8 said "kept") | maintainer decision | after 8 (maintainer 2026-11-01) | M |
@@ -273,6 +275,31 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 - **Now:** kept through Phase 7 (0-based: layers 0…ncan−2, the top layer not reset;
   `src/clm_ml/processes/canopy.py:843`); fix with any change that makes `cair` vary.
 - **Source:** `numerics_and_regression.md` §4.5.
+
+### O87. Tower runs use a fixed CO₂ of 383 ppm
+- **Kind:** science issue · **Target:** Phase 10 (10.1 discussion) · **Decides:** M
+- **What:** `io/tower.py::TowerMetCO2` returns 383 ppm for every tower and year (as CLM-ml
+  v2's `TowerMetCO2`, written for CHATS 2007). At US-MMS in 2012 the CLM run (DATM CO₂ time
+  series) has about 394 ppm, so CLM-ML's photosynthesis and stomatal conductance there see
+  about 3 % less CO₂ than CLM's.
+- **Now:** as Fortran. A per-tower CO₂ (a `domain.yaml` value, or a CO₂ file as the grid
+  runs have) would be a small configuration change.
+- **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
+
+### O88. One soil texture per tower; CLM's soil varies with depth (US-MMS)
+- **Kind:** science issue · **Target:** Phase 10 (10.1 discussion) · **Decides:** M
+- **What:** a tower has one sand and clay percentage and one organic matter density for all
+  levels (CLM-ml v2's `TowerDataMod`). CLM's surface dataset at US-MMS has 31 % sand and 19 %
+  clay at the top, 40 % and 24 % at depth, and organic matter from 38 to 3 kg m⁻³. The
+  prescribed soil water comes from that CLM run, so CLM-ML reads CLM's water with other
+  hydraulic properties below the top levels; with predicted soil water the two models would
+  also move water through different soils. CLM-ml v2's own table gives US-MMS the class
+  "clay".
+- **Now:** the `us_mms` tower compset uses the surface dataset's top level (31 % sand, 19 %
+  clay, 37.9 kg m⁻³), as grid runs do (`grid.py`: the top level of `PCT_SAND`, `PCT_CLAY`,
+  `ORGANIC`). The alternatives are CLM-ml v2's "clay", or a texture per level for towers and
+  grids (a change of the soil set-up, which has one texture per column).
+- **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
 
 ## 2. Other maintainer decisions pending
 
@@ -984,7 +1011,8 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
   Revised the same day after a review of the earlier translation (`AyaLahlou/clm-ml-dev`):
   golden and replay data recorded by tracing the hydrology routines in the US-MMS CLM case
   (plan 6.1, 6.3; choice 13 of section 8 open).
-- **Next:** 10.1, US-MMS set up on Derecho (section 7.1 of the plan).
+- **Next:** the 10.1 discussion (plan 7.1, "Where 10.1 stands"; O87, O88), the US-MMS
+  measurements, then 10.2.
 
 ---
 

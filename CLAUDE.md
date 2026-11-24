@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 135.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 136.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:
@@ -48,9 +48,10 @@ Guidance for Claude (and other contributors) working in this repository.
 - **Phase 10, predicted soil water** (branch `phase10/soil_water`, started 2026-11-24; O64):
   scoped in `docs/design/soil_water_plan.md`, no code yet. A translation of CLM's soil water
   (reference `ctsm5.4.004`, decision 131), first unfrozen and snow-free (132), the pond for
-  hydrology only (133), evaluated at US-MMS because CHATS is irrigated (134). **Resume at
-  10.1: set up US-MMS on Derecho (section 7.1 of the plan).** Sections 7 and 8 list the order
-  of work and the choices still open.
+  hydrology only (133), evaluated at US-MMS because CHATS is irrigated (134); US-MMS with a
+  1-hour step over May-September 2012 (135). **10.1 done except the measurements**
+  (`experiments/us_mms_2012/`, CLM cases in `/glade/work/linnia/cases/`): next is the 10.1
+  discussion (plan 7.1 "Where 10.1 stands"; O87, O88), then 10.2. CPU jobs on P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.

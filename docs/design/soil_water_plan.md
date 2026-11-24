@@ -514,8 +514,8 @@ case runs with a 1-hour step.**
    themselves come from the traced run of 10.2 (6.1, 6.3), not from history files; the case
    is set up so that the traced copies can be added to its `SourceMods` later without
    rebuilding anything else.
-6. **The tower as an experiment folder**: a compset `us_mms` (`compsets/towers/`,
-   `compsets/experiments/`): location, forcing height, canopy height, soil texture, organic
+6. **The tower as an experiment folder**, `experiments/us_mms_2012/` (not a built-in
+   compset: built-in towers are CHATS7 only, decision 13): location, forcing height, canopy height, soil texture, organic
    matter, colour and bedrock depth from the case's surface dataset; `FMAX` and `SLOPE` noted
    for later (decision 9 of section 8); PFT 7 with default parameters (the CHATS parameter
    set is the orchard's, not this forest's); the leaf and stem area profile parameters are a
@@ -528,8 +528,45 @@ case runs with a 1-hour step.**
    GPP, for the period. Large files stay outside the repository (a path on Derecho recorded
    in the experiment folder's README); only what a test needs is committed.
 
-Open questions for this step: the year; 1-hour or 30-min step; where the measured soil
-moisture comes from (the PLUMBER2 files or the AmeriFlux record); the area profile parameters.
+Settled: a 1-hour model step and May to September 2012 (decision 135). Area profiles: the PFT
+values, as CLM-ml v2's `TowerDataMod` has for US-MMS. Still open: the measured soil moisture
+(not in the PLUMBER2 files; the AmeriFlux BASE record of US-MMS, which needs the maintainer's
+AmeriFlux login); the soil texture (O88) and the CO₂ (O87).
+
+**Where 10.1 stands** (2026-11-24):
+
+- Everything outside the repository is in `/glade/work/linnia/phase10_us_mms/` (inputs) and
+  `/glade/work/linnia/cases/` (CLM cases; their runs and archives on scratch).
+- CLM cases, `ctsm5.4.004`, compset `I1PtClm60SpRs` / `HIST_DATM%1PT_CLM60%SP_...`, resolution
+  `CLM_USRDAT`, user mods `PLUMBER2/US-MMS`, CPU account P93300041:
+  `US-MMS_ctsm54_SP.spinup` (cold start, 48 years cycling the 1999-2014 forcing) and
+  `US-MMS_ctsm54_SP.transient` (1999-2014 from the spin-up; history `h2`: hourly, double
+  precision, the CLM-ML inputs `ELAI`, `ESAI`, `H2OSOI`, `TSOI` and the soil water fields).
+  The default physics are the ones of 3.1 (moisture-form solver, zero-flux lower boundary,
+  `baseflow_scalar` 0.001, bedrock, hydraulic stress), checked in the case's `lnd_in`.
+- Found on the way: in `ctsm5.4.004` the forcing stream is named `PLUMBER2.US-MMS`, while the
+  PLUMBER2 user mods set `taxmode`, `dtlimit` and `datavars` for `CLM_USRDAT.PLUMBER2`,
+  which no longer exists, so those lines are ignored; the cases set them for
+  `PLUMBER2.US-MMS`. The forcing file is not in Derecho's shared input data; it is downloaded
+  from the CESM input data server into `phase10_us_mms/inputdata/` and named in
+  `user_nl_datm_streams`.
+- The site: `FMAX` is 0, so CLM's saturated fraction is always 0 here (the saturation-excess
+  runoff of 3.2 row 2 is not exercised at US-MMS: its golden data come from drivers, 6.1);
+  bedrock at 20.3 m lies below the 8.5 m soil column (no shallow bedrock); slope 0.51°.
+- Forcing for CLM-ML: `data/input_files/tower-forcing/US-MMS/` (May-September 2012, made by
+  `convert_plumber2.py` in that folder).
+- The experiment folder `experiments/us_mms_2012/` (its README records the tower, the inputs
+  and the CLM runs) and the CLM history it reads, `data/input_files/ctsm5_4/US-MMS/`.
+- The baseline (prescribed soil water) runs: 3672 hourly steps in 3 minutes on one CPU, no
+  conservation warning, no NaN. Monthly means against CLM (latent heat, sensible heat in
+  W m⁻²; GPP in µmol m⁻² s⁻¹): May 102/101, 41/42, 10.3/9.4; June 109/96, 50/61, 10.3/8.0;
+  July 97/59, 47/80, 8.8/4.4; August 98/90, 33/39, 9.3/7.5; September 61/64, 31/27,
+  7.4/6.9. In the July drought CLM's latent heat falls by 40 %, CLM-ML's by 10 %: CLM-ML
+  feels the drought (soil water potential −0.46 MPa, midday leaf water potential −0.72 MPa,
+  the top leaves at their minimum water potential in 20 % of midday hours) but its
+  transpiration stays high. A science result for the discussion (with the known daytime
+  latent heat bias, O62), not a defect; with predicted soil water it would dry the soil
+  faster than CLM (risk in section 9).
 
 Code-only and science changes stay in separate commits. No change to the existing science is
 planned: with `prescribed` everything is as today.
