@@ -130,6 +130,26 @@ class SoilWaterSection(LandDataSection):
 
 
 @dataclasses.dataclass(frozen=True)
+class TowerCo2Section:
+    """Atmospheric CO2 of tower runs: a constant (CLM-ml v2's TowerMetCO2, 383 ppm), or a CO2
+    time series file read as CLM's data atmosphere does (global values linear in time at the
+    start of each step; partial pressure from the step's air pressure)."""
+
+    source: Literal["constant", "file"] = option(
+        "constant", "A constant value, or a CO2 time series file.", fortran="TowerMetCO2"
+    )
+    ppm: float = option(383.0, "Constant CO2 (ppm).", when={"source": "constant"})
+    file: Optional[str] = option(
+        None,
+        "CO2 time series file (CO2, time with units and calendar), e.g. CLM's datm co2tseries "
+        "file.",
+        path=True,
+        when={"source": "file"},
+        required=True,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class ForcingSection:
     """Meteorology and prescribed land data."""
 
@@ -146,6 +166,7 @@ class ForcingSection:
     soil_water: SoilWaterSection = option(
         SoilWaterSection(), "Volumetric soil water.", applies="towers"
     )
+    co2: TowerCo2Section = option(TowerCo2Section(), "Atmospheric CO2.", applies="towers")
 
 
 def parse_length(text: str, key: str):

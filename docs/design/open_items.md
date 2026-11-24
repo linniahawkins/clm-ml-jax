@@ -45,8 +45,8 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O14 | Very short canopies (down to 5 mm) not filtered | science issue | after 8 | M |
 | O15 | Wet needleleaf canopies: large latent heat with CLM6's `dleaf` | science issue | after 8 | M |
 | O16 | CO₂ profile reset covers the wrong levels (no effect today) | science issue (latent) | after 8 | M |
-| O87 | Tower runs use a fixed CO₂ of 383 ppm | science issue | Phase 10 (10.1b; decided: CLM's CO₂, decision 136) | I |
-| O88 | One soil texture per tower; CLM's soil varies with depth (US-MMS) | science issue | Phase 10 (10.1b; decided: CLM's soil, decision 136) | I |
+| O87 | ~~Tower runs use a fixed CO₂ of 383 ppm~~ (closed 2026-11-24: `forcing.co2`, decision 137) | science issue | closed | M |
+| O88 | One soil texture per column; CLM's soil varies with depth (towers: closed by decision 137; grids: open) | science issue | grids: after Phase 10 | M |
 | **2. Other maintainer decisions pending** |||||
 | O17 | ~~Repository organization: where the real configuration files live~~ (closed: decisions 89, 90) | maintainer decision | closed | M |
 | O18 | Norman and well-mixed code in git history only (D8 said "kept") | maintainer decision | after 8 (maintainer 2026-11-01) | M |
@@ -287,6 +287,8 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 - **Decided (2026-11-24, decision 136):** at US-MMS CLM-ML uses CLM's CO₂: the DATM CO₂ file
   (one global value a year, linear in time, times the surface pressure; about 393 ppm in
   mid-2012), as an option of tower runs; 383 ppm stays the default (CHATS, Fortran).
+- **Closed (2026-11-24):** `run.yaml` `forcing.co2` (decision 137); at US-MMS CLM's monthly
+  `PCO2` to single precision.
 - **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
 
 ### O88. One soil texture per tower; CLM's soil varies with depth (US-MMS)
@@ -310,6 +312,10 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 - **Decided (2026-11-24, decision 136):** at US-MMS CLM-ML uses CLM's soil: the properties
   of every level as `ctsm5.4.004` `SoilStateInitTimeConst` computes them from the surface
   dataset, as an option; CLM-ml v2's single texture stays the default (CHATS, Fortran).
+- **Done for towers (2026-11-24, decision 137):** `texture: {given_as: layers}`; US-MMS
+  equals CLM at every level. **Still open for grids:** grid runs take the surface dataset's
+  top level (`grid.py`); the same mapping could serve them (a change of global results, the
+  maintainer's decision).
 - **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
 
 ## 2. Other maintainer decisions pending

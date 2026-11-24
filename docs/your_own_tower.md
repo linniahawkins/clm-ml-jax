@@ -39,6 +39,22 @@ towers:
       canopy_layers: from_model_yaml
 ```
 
+**Soil by layers.** Instead of one texture for the whole column, a tower can take the sand,
+clay and organic matter of each layer of a CLM surface dataset (`PCT_SAND`, `PCT_CLAY`,
+`ORGANIC`, top to bottom); each soil level then gets the layer at its depth, as CTSM maps
+them, and organic matter counts at every depth (with one value it counts in the top 0.5 m
+only). Use it to give the model the same soil as a CLM run at the tower
+([`experiments/us_mms_2012`](repo:experiments/us_mms_2012) does):
+
+```yaml
+    soil:
+      texture:
+        given_as: layers
+        sand_percent_layers: [31.0, 31.0, 31.0, 31.0, 31.0, 32.0, 37.0, 38.0, 40.0, 40.0]
+        clay_percent_layers: [19.0, 19.0, 19.0, 19.0, 25.0, 27.0, 25.0, 24.0, 24.0, 24.0]
+      organic_matter: [37.9, 37.9, 37.9, 37.9, 14.6, 8.5, 5.0, 4.1, 3.2, 3.2]
+```
+
 A tower can have several patches (for example trees and grass), each with its own PFT,
 canopy and soil column; the tower's output then has one entry per patch, and a gridcell value
 weighted by area. Several towers can run together in one experiment: list them all.
@@ -95,6 +111,10 @@ temperature). Alternatively, give daily or monthly files (`vegetation: {source: 
 ...}` with `LAI` and `SAI`; `soil_water: {source: file, files: ...}` with `H2OSOI`), which
 are interpolated between the middles of their intervals. The initial state can also come from
 a restart file of an earlier run (`initial_conditions: {source: restart, ...}`).
+
+**CO₂** is 383 ppm by default (CLM-ml v2's value for CHATS 2007). Give another constant
+(`co2: {source: constant, ppm: 400}`) or CLM's CO₂ time series file (`co2: {source: file, file:
+fco2_datm_....nc}`), read as CLM's data atmosphere reads it: global values, linear in time.
 
 **The model step.** The model runs at 30 minutes by default, split into six 5-minute
 sub-steps. If your forcing is hourly, set `interval_seconds: 3600`; the model step

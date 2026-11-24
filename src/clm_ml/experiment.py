@@ -387,15 +387,25 @@ class Experiment:
             p = 0
             for name, tower in self.domain_file.towers.items():
                 soil, tex = tower.soil, tower.soil.texture
-                texture = (
-                    f"{tex.sand_percent:g} % sand, {tex.clay_percent:g} % clay (percentages)"
-                    if tex.given_as == "percentages" else f"{tex.texture_class} (class)"
-                )  # fmt: skip
+                if tex.given_as == "layers":
+                    sand, clay = tex.sand_percent_layers, tex.clay_percent_layers
+                    texture = (
+                        f"{len(sand)} surface-data layers, {sand[0]:g}-{sand[-1]:g} % sand, "
+                        f"{clay[0]:g}-{clay[-1]:g} % clay (top-bottom)"
+                    )
+                    organic = (f"{soil.organic_matter[0]:g}-{soil.organic_matter[-1]:g} kg m-3 "
+                               "(top-bottom)")  # fmt: skip
+                else:
+                    texture = (
+                        f"{tex.sand_percent:g} % sand, {tex.clay_percent:g} % clay (percentages)"
+                        if tex.given_as == "percentages" else f"{tex.texture_class} (class)"
+                    )  # fmt: skip
+                    organic = f"{soil.organic_matter:g} kg m-3"
                 bedrock = "none" if soil.bedrock_depth is None else f"{soil.bedrock_depth:g} m"
                 lines.append(
                     f"  tower {name}: {tower.latitude:g} N, {tower.longitude:g} E, forcing height "
                     f"{tower.measurement_height:g} m; soil {texture}, organic matter "
-                    f"{soil.organic_matter:g} kg m-3, colour {soil.color_class}, bedrock {bedrock}"
+                    f"{organic}, colour {soil.color_class}, bedrock {bedrock}"
                 )
                 for patch in tower.patches:
                     if patch.weight < self.domain_file.min_patch_weight:

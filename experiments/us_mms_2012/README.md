@@ -19,13 +19,16 @@ of Derecho).
   Heights, roots and profiles as CLM-ml v2's `TowerDataMod`.
 - Soil from the CTSM 5.4 PLUMBER2 surface dataset
   (`surfdata_1x1_PLUMBER2_US-MMS_hist_2000_16pfts_c251023.nc`), the soil of the CLM run whose
-  soil water is prescribed: the top level's 31 % sand, 19 % clay and 37.9 kg m⁻³ organic
-  matter, as grid runs take the top level; colour class 12; bedrock at 20.34 m (below the
-  soil column). The dataset's texture changes with depth (40 % sand and 24 % clay at depth);
-  CLM-ml v2's table gives the class "clay", colour 15 and bedrock at 50 m. Open item O88.
+  soil water is prescribed: sand, clay and organic matter of its 10 layers
+  (`texture: {given_as: layers}`, decision 137), mapped to the soil levels as CTSM does, so
+  that porosity, saturated suction, `b` and saturated conductivity equal CLM's at every
+  level; colour class 12; bedrock at 20.34 m (below the soil column). CLM-ml v2's table
+  gives the class "clay", colour 15 and bedrock at 50 m instead.
 - For predicted soil water, from the same dataset: `FMAX` 0 (no saturated fraction), slope
   0.51°.
-- CO₂: towers use 383 ppm; CLM has about 394 ppm in 2012 (open item O87).
+- CO₂: CLM's (`run.yaml` `forcing.co2`, the DATM file
+  `data/input_files/ctsm5_4/fco2_datm_globalSSP3-7.0_simyr_1750-2501_CMIP6_c201101.nc`,
+  linear in time: 392.8-393.6 ppm over the period), equal to CLM's monthly `PCO2`.
 - `model.yaml`: a 1-hour step (`numerics.step_seconds: 3600`) and `canopy_layers.max_layers:
   100` (96 layers of 0.5 m up to 48 m; Fortran's `nlevmlcan` is 100). `params.yaml`: CLM6.
 

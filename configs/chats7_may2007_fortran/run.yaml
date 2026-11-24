@@ -84,6 +84,16 @@ forcing:
       # Fortran: nlev_soil_adjust; default: 3.
       levels: 3
 
+  # Atmospheric CO2.
+  co2:
+    # A constant value, or a CO2 time series file.
+    # choices: constant | file; Fortran: TowerMetCO2; default: constant.
+    source: constant
+
+    # Constant CO2 (ppm).
+    # used with source: constant; default: 383.0.
+    ppm: 383.0
+
 initial_conditions:
   # The state before the first step.
 

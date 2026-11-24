@@ -201,7 +201,7 @@ that frozen soil later changes values, not function signatures.
 mode that can be compared with CLM-ml v2 Fortran. The choice is static (it selects a code
 path), in `model.yaml`.
 
-**New modules** (by process, as the rest of `processes/`): `soil_water.py` (retention curve,
+**New modules** (by process, as the rest of `processes/`; CLM-ml's style and modularity, decision 138): `soil_water.py` (retention curve,
 hydraulic properties, the Richards solver), `surface_runoff.py` (saturated fraction,
 infiltration, pond), `drainage.py` (water table, baseflow). Pure functions of one column,
 0-based, every level slot computed with masks for the levels below bedrock.
@@ -480,7 +480,7 @@ where marked.
 |---|---|---|
 | 10.0 | This scope; the maintainer's decisions (section 8) | done: decisions 131-134 |
 | 10.1 | **US-MMS set up** (7.1): the CLM single-point case, the tower as an experiment folder running with prescribed soil water, the measurements | a US-MMS run with prescribed soil water; **discussion** of the period chosen |
-| 10.1b | CLM-ML beside CLM at US-MMS with CLM's inputs (decision 136): CO₂ from CLM's CO₂ file, as DATM (O87); soil properties at every level as `ctsm5.4.004` `SoilStateInitTimeConst` (O88), both as options with today's behaviour the default | CHATS bit for bit; the US-MMS soil properties equal CLM's (WATSAT, SUCSAT, BSW, HKSAT) |
+| 10.1b | CLM-ML beside CLM at US-MMS with CLM's inputs (decision 136): CO₂ from CLM's CO₂ file, as DATM (O87); soil properties at every level as `ctsm5.4.004` `SoilStateInitTimeConst` (O88), both as options with today's behaviour the default | done (decision 137): CHATS bit for bit; US-MMS CO₂ and soil properties equal CLM's to single precision |
 | 10.2 | Reference data (6.1, 6.3): the traced copies of the hydrology files in the US-MMS case (logging only, checked against `ctsm5.4.004` and against the untraced run), drivers for the small public pieces, the golden JSON and the replay data | golden data committed (small); **discussion** if the run's states leave cases uncovered |
 | 10.3 | `soil_water.py`: retention curve, hydraulic properties, fluxes, the adaptive solver; not yet in the step | golden tests, property tests 6.2 |
 | 10.4 | `surface_runoff.py`, `drainage.py` | golden tests; conservation of the assembled hydrology |

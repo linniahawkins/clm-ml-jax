@@ -82,12 +82,17 @@ def build_patches(domain, params, config, first: dict, acclimation_steps: float 
     nlevsoi, nlevgrnd = soil.NLEVSOI, soil.NLEVGRND
     z, dz, zi = soil.soil_layers()
     nbed_col = soil.bedrock_index(np.asarray(cols.bedrock_depth, dtype=float), zi, nlevsoi)
-    # a missing organic matter content (NaN) is passed on as -999
-    organic = np.where(np.isnan(cols.organic_matter), -999.0, cols.organic_matter)
-    props = soil.soil_properties(
-        np.asarray(cols.sand_percent, dtype=float), np.asarray(cols.clay_percent, dtype=float),
-        organic, list(cols.texture_class), z, nlevsoi,
-    )  # fmt: skip
+    if cols.sand_percent_layers is not None:  # a texture per level, from surface-data layers
+        sand, clay, organic = soil.texture_profile(
+            cols.sand_percent_layers, cols.clay_percent_layers, cols.organic_matter_layers, z,
+            nlevsoi,
+        )  # fmt: skip
+    else:
+        sand = np.asarray(cols.sand_percent, dtype=float)
+        clay = np.asarray(cols.clay_percent, dtype=float)
+        # a missing organic matter content (NaN) is passed on as -999
+        organic = np.where(np.isnan(cols.organic_matter), -999.0, cols.organic_matter)
+    props = soil.soil_properties(sand, clay, organic, list(cols.texture_class), z, nlevsoi)
     albsat, albdry = soil.soil_albedos(cols.color_class)
     beta = np.asarray(params.values["root_profile_beta"], dtype=float)[pft]
     nbed = nbed_col[ci]

@@ -269,6 +269,41 @@ Source: maintainer, 2026-11-24 ("this is not a science application just a code t
 The priority is to make the jax match the fortran nearly bit-for-bit ... Use identical CO2 and
 soil texture if possible to ensure accuracy").
 
+**137. CLM's soil and CO₂ beside a CLM run: texture per level by CTSM's mapping, CLM-ml's formulas**
+2026-11-24 · Phase 10 (10.1b) · maintainer · in force · Departure from Fortran: options (CLM-ml v2 stays the default)
+A tower's texture can be given by the layers of a CLM surface dataset (`texture: {given_as:
+layers, sand_percent_layers, clay_percent_layers}`, `organic_matter` one value per layer).
+Only CTSM's mapping of those layers to the soil levels is translated
+(`setup.soil.texture_profile`, from `SoilStateInitTimeConstMod.F90` of `ctsm5.4.004`: each
+level takes the layer whose interfaces bracket its node depth; below `nlevsoi` the bottom
+layer's texture and no organic matter; organic matter capped at `organic_max`). The hydraulic
+and thermal properties stay CLM-ml's formulas (`setup.soil.soil_properties`), with organic
+matter at every level when given by layers, as CTSM (with one value it stays in the top
+0.5 m, CLM-ml v2). With CTSM 5.4's default parameter file (scale factors 1, `organic_max`
+130, no squared organic fraction) this gives CLM's porosity, saturated suction, `b` and
+saturated conductivity at every level (US-MMS: equal to CLM's single-precision history).
+CO₂ of tower runs: `run.yaml` `forcing.co2`, 383 ppm by default (CLM-ml v2's
+`TowerMetCO2`), another constant, or a CO₂ time series file read as DATM's `co2tseries`
+(global values linear in time at the start of each step; partial pressure from the step's
+air pressure): at US-MMS CLM's monthly `PCO2` to single precision. Grid runs keep the top
+level's texture (O88).
+Reason: decision 136; the maintainer keeps CLM-ml's thermal properties and modular formulas
+and translates only the pieces of `SoilStateInitTimeConst` needed for vertical texture
+profiles.
+Source: maintainer, 2026-11-24 ("keep CLM-ml thermal properties ... translate the Soil
+StateInit pieces that are required to get vertical profiles of soil texture for clm-ml").
+
+**138. The translated CLM soil water follows CLM-ml's style and modularity**
+2026-11-24 · Phase 10 · maintainer · in force · Departure from Fortran: n/a (code structure)
+CLM's soil water routines are rewritten in this repository's form, not mirrored module by
+module: pure functions of one column by process in `processes/`, 0-based arrays, constants
+and parameters as inputs, the `Fortran reference:` line on each translated function; CLM's
+data types (`soilstate_inst`, filters, `bounds`) are not reproduced. The arithmetic is CLM's,
+operation by operation, so that the golden and replay tests agree to round-off (136).
+Reason: the maintainer values CLM-ml's modularity; one style across the model.
+Source: maintainer, 2026-11-24 ("when we rewrite clm soil water routines we should use the
+styling and modularity to match clm-ml").
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

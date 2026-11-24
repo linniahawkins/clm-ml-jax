@@ -115,11 +115,16 @@ class TowerForcingSource:
     calendar: str = "GREGORIAN"  # the model calendar (clm_ml.calendar)
     shortwave: str = "coszen"  # data interval -> model step: coszen | linear | constant
     precipitation: str = "constant"  # constant | linear
+    # CO2 from run.yaml forcing.co2 (a clm_ml.grid_forcing.Co2Stream: a file, or a constant
+    # other than the tower files' 383 ppm); None: the tower files' CO2 (TowerMetCO2)
+    co2: Optional[object] = None
 
     def chunk(self, first_step: int, n_steps: int) -> Forcing:
         forcing = self._chunk(first_step, n_steps)
         if self.vegetation_file or self.soil_water_file:
             forcing = _with_land_data(self, forcing, first_step, n_steps)
+        if self.co2 is not None:
+            forcing = _with_co2(self, forcing, first_step, n_steps)
         return forcing
 
     def _chunk(self, first_step: int, n_steps: int) -> Forcing:
@@ -190,6 +195,21 @@ def _interpolated_chunk(self: TowerForcingSource, first_step: int, n_steps: int)
     ]
     slices = [self.history_index(k) for k in run_steps]
     return _forcing(mets, slices, self.clm_history_file, self.soil_adjust_file, first_step)
+
+
+def _with_co2(self: TowerForcingSource, forcing: Forcing, first_step: int, n_steps: int):
+    """Replace the CO2 of a chunk with ``self.co2`` at the start of each step, and its
+    partial pressure with ``co2 / 1e6`` times the step's air pressure (as the tower files',
+    TowerMetMod)."""
+    run_steps = chunk_run_steps(self.n_steps, first_step, n_steps)
+    step = dt.timedelta(seconds=self.step_seconds)
+    co2 = np.array([[self.co2.at(self.run_start + k * step)] for k in run_steps], dtype=float)
+    tower = dataclasses.replace(
+        forcing.tower,
+        co2=co2,
+        co2_partial_pressure=(co2 / 1.0e6) * forcing.tower.air_pressure,
+    )
+    return dataclasses.replace(forcing, tower=tower)
 
 
 def _with_land_data(

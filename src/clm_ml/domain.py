@@ -55,10 +55,11 @@ TextureClass = Literal[
 @dataclasses.dataclass(frozen=True)
 class TextureSpec:
     """The soil texture: sand and clay percentages (hydraulic properties from CLM5's
-    formulas), or a USDA texture class (Clapp and Hornberger 1978 values)."""
+    formulas), a USDA texture class (Clapp and Hornberger 1978 values), or the sand and clay
+    of each layer of a CLM surface dataset (a texture per soil level, as CTSM maps them)."""
 
-    given_as: Literal["percentages", "class"] = option(
-        "percentages", "How the texture is given: percentages or class."
+    given_as: Literal["percentages", "class", "layers"] = option(
+        "percentages", "How the texture is given: percentages, class or layers."
     )
     sand_percent: Optional[float] = option(None, "Sand content (%).", required=True,
                                            when={"given_as": "percentages"})  # fmt: skip
@@ -67,6 +68,14 @@ class TextureSpec:
     texture_class: Optional[TextureClass] = option(
         None, "USDA texture class.", required=True, when={"given_as": "class"}
     )
+    sand_percent_layers: Optional[tuple[float, ...]] = option(
+        None, "Sand content (%) of each layer of a CLM surface dataset (PCT_SAND), top to "
+        "bottom.", required=True, when={"given_as": "layers"},
+    )  # fmt: skip
+    clay_percent_layers: Optional[tuple[float, ...]] = option(
+        None, "Clay content (%) of each layer of a CLM surface dataset (PCT_CLAY), top to "
+        "bottom.", required=True, when={"given_as": "layers"},
+    )  # fmt: skip
 
 
 @dataclasses.dataclass(frozen=True)
@@ -74,8 +83,11 @@ class SoilSpec:
     """The soil of the tower's column(s)."""
 
     texture: Optional[TextureSpec] = option(None, "The soil texture.", required=True)
-    organic_matter: Optional[float] = option(
-        None, "Soil organic matter density (kg m-3), in the top 0.5 m.", required=True
+    organic_matter: Union[float, tuple[float, ...], None] = option(
+        None,
+        "Soil organic matter density (kg m-3): one value, in the top 0.5 m; or, with "
+        "texture given_as layers, one value per layer (ORGANIC), at every level.",
+        required=True,
     )
     color_class: int = option(15, "CLM soil colour class, 1 (light) to 20 (dark): soil albedo.")
     bedrock_depth: Optional[float] = option(None, "Depth to bedrock (m); null: no bedrock.")
@@ -167,6 +179,21 @@ def check_towers(towers: dict[str, TowerSpec], source: str) -> None:
                 raise ConfigError(f"{where}.canopy_layers: within and above must be >= 1")
             if patch.root_biomass <= 0:
                 raise ConfigError(f"{where}.root_biomass: must be positive")
+        soil, where = tower.soil, f"{source}: towers.{name}.soil"
+        layered_organic = isinstance(soil.organic_matter, tuple)
+        if soil.texture.given_as == "layers":
+            n = len(soil.texture.sand_percent_layers)
+            lengths = (len(soil.texture.clay_percent_layers),
+                       len(soil.organic_matter) if layered_organic else -1)  # fmt: skip
+            if n < 1 or any(m != n for m in lengths):
+                raise ConfigError(
+                    f"{where}: texture given_as layers needs sand_percent_layers, "
+                    "clay_percent_layers and organic_matter with one value per layer each"
+                )
+        elif layered_organic:
+            raise ConfigError(
+                f"{where}.organic_matter: one value per layer only with texture given_as layers"
+            )
 
 
 def load_towers(path: Path) -> dict[str, TowerSpec]:
@@ -241,6 +268,11 @@ class SoilColumns:
     organic_matter: np.ndarray  # kg m-3
     color_class: np.ndarray  # (nc,) int
     bedrock_depth: np.ndarray  # (nc,) m
+    # the texture of each layer of a CLM surface dataset ((nc, n_layers), percent and
+    # kg m-3), mapped to the soil levels at setup; None: one texture per column (above)
+    sand_percent_layers: Optional[np.ndarray] = None
+    clay_percent_layers: Optional[np.ndarray] = None
+    organic_matter_layers: Optional[np.ndarray] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -303,6 +335,25 @@ class Domain:
                 return t.texture_class if t.given_as == "class" else None
             return getattr(t, which) if t.given_as == "percentages" else np.nan
 
+        layered = [s.texture.given_as == "layers" for s in c_rows]
+        if any(layered) and not all(layered):
+            raise ConfigError(
+                "domain.yaml: soil texture given_as layers for some towers only; give every "
+                "tower's texture by layers, or none"
+            )
+        if all(layered) and len({len(s.texture.sand_percent_layers) for s in c_rows}) > 1:
+            raise ConfigError("domain.yaml: towers' texture layers differ in number")
+
+        def organic(s):  # one value per column; NaN: given by layers
+            return np.nan if isinstance(s.organic_matter, tuple) else float(s.organic_matter)
+
+        def layers(which):
+            if not all(layered):
+                return None
+            if which == "organic_matter":
+                return np.array([s.organic_matter for s in c_rows], dtype=float)
+            return np.array([getattr(s.texture, which + "_layers") for s in c_rows], dtype=float)
+
         gridcells = Gridcells(
             names=tuple(names),
             latitude=np.array([t.latitude for t in g_rows]),
@@ -325,9 +376,12 @@ class Domain:
             texture_class=tuple(texture(s, "texture_class") for s in c_rows),
             sand_percent=np.array([texture(s, "sand_percent") for s in c_rows], dtype=float),
             clay_percent=np.array([texture(s, "clay_percent") for s in c_rows], dtype=float),
-            organic_matter=np.array([float(s.organic_matter) for s in c_rows]),
+            organic_matter=np.array([organic(s) for s in c_rows]),
             color_class=np.array([s.color_class for s in c_rows]),
             bedrock_depth=np.array([nan(s.bedrock_depth) for s in c_rows]),
+            sand_percent_layers=layers("sand_percent"),
+            clay_percent_layers=layers("clay_percent"),
+            organic_matter_layers=layers("organic_matter"),
         )
         domain = cls(gridcells, patches, columns, {n: available[n] for n in names})
 
