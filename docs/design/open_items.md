@@ -978,6 +978,9 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 
 ### O64. Soil moisture prescribed, not predicted
 **Source:** CLAUDE.md; plan decision 14.
+- **Now (2026-11-24):** being scoped as Phase 10 on branch `phase10/soil_water`:
+  `docs/design/soil_water_plan.md` (what CLM does and what is needed of it, differentiability,
+  tests without a CLM-ml reference, twelve decisions for the maintainer). Nothing implemented.
 
 ---
 
