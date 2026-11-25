@@ -584,6 +584,56 @@ every layer and identical throughfall (`tests/clm_ml/test_processes_canopy_water
 There is no Fortran golden case for `CanopyInterception`.
 Source: maintainer, 2026-11-25; open item O89.
 
+**147. Predicted soil water: gradients through the whole model, and its cost**
+2026-11-25 · Phase 10 (10.7) · implementation · in force · Departure from Fortran: n/a
+*Gradients.* The derivatives of a model chunk with predicted soil water are those of the
+forward values (with `numerics.water_stress_derivative: exact`), checked against central
+finite differences in the gradient tier (`tests/test_gradient_accuracy_soil_water.py`,
+three tests, about 3-5 min on a CPU):
+- a wet column in rain (CHATS, night of 2 May 2007, soil water raised to near saturation:
+  water table in the column, drainage, runoff, 6 to 18 Richards sub-steps through the
+  fixed-count loop): `fff`, `baseflow_scalar`, `n_baseflow`, `hksat`, `bsw`, `sucsat`,
+  the largest saturated fraction and the slope, on latent heat, runoff, drainage, water
+  table, infiltration and the water stored at the end. Measured in the probe: agreement
+  to 5e-5 relative or better, the accuracy of the finite difference itself.
+- a dry day: `hksat`, `bsw`, `sucsat`, porosity, the soil water at the start, `vcmax25`,
+  `psi50_gs`, `plant_conductance`, on latent heat, root uptake and ground evaporation.
+- two days in reverse mode (95 steps, rain on the second): mean latent heat and the soil
+  water at the end, within 2 % of a finite difference of 0.1 %.
+The model is piecewise smooth, and a finite difference that straddles a kink is not a
+derivative: at one step of the dry day the finite difference of latent heat with respect
+to the soil water at the start was 6.6 against the derivative's 8.2, and a fine sweep
+showed a kink of the canopy 4e-5 (relative) below the state, with slope 3.8 on one side
+and 8.21 on the other, the derivative's side. The tests therefore take two finite
+differences (steps 1e-5 and 2e-5) and compare no closer than these agree, and require
+more than 90 % of the values to agree to 1e-3. With the default derivative rules the
+derivatives through the water stress differ from the finite difference by a few percent,
+as with prescribed soil water (decision 124). The pond's parameters (`pc`, `mu`,
+`slopebeta`, `slopemax`) and `aq_sp_yield_min` do not act at CHATS (no pond); they are
+checked at routine level (`tests/clm_ml/test_processes_hydrology.py`), as are the hazard
+cases (dry top level, saturation, shallow bedrock, ice, halved sub-steps). The whole CPU
+gradient tier passes (22 tests).
+*Cost* (steady state, 8 to 47 steps of CHATS, `timing/results_model.jsonl`,
+`timing/results_vmap.jsonl`), prescribed -> predicted, per model step:
+
+| | forward | gradient |
+|---|---|---|
+| CPU, one patch | 10.4 -> 10.7 ms (1.03x) | 50.6 -> 51.3 ms (1.01x) |
+| A100, 4 096 patches | 132 -> 164 ms (1.24x) | 825 -> 983 ms (1.19x) |
+| A100, one patch | 42.9 -> 69.2 ms (1.61x) | 238 -> 362 ms (1.52x) |
+
+Compile times and memory are unchanged (GPU gradient program about 8 min cold; 8.6 GB for
+4 096 patches). On the GPU the hydrology adds about 30 ms per step whatever the number of
+patches: the 64 trials of the fixed-count loop, each with a tridiagonal solve of 20
+levels, are steps in sequence, which a GPU does slowly. So the relative cost falls as
+patches are added; one patch on a GPU, above the 1.5x at which a slowdown is discussed,
+is not a way the model is run (a tower is 4-5 times faster on a CPU). The fixed-count
+loop stays the only form of the loop (decision 145). If the GPU cost ever matters:
+writing out the tridiagonal solves on the GPU, as `numerics.solver_loops` does for the
+canopy's solvers (not built).
+`timing/time_vmap.py` takes `--set` overrides (as `time_model.py`).
+Source: plan 6.5, 6.6; probes of 2026-11-25.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**
