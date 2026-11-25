@@ -1,10 +1,11 @@
 # Phase 10 scope: predicted soil water
 
-Status (2026-11-24, branch `phase10/soil_water`): **10.1 to 10.4 done: every routine of the
-first version is translated and equals CLM's Fortran on idealized sweeps (the Richards
-solver sub-step for sub-step, decision 142; runoff, pond, water table and drainage to
-round-off, decision 143), and the assembled hydrology conserves water. Nothing is in the
-time step yet. Next: the multi-step sequences of the whole hydrology against CLM (10.5).** Start with "Resume
+Status (2026-11-24, branch `phase10/soil_water`): **10.1 to 10.5 done: every routine of the
+first version is translated and equals CLM's Fortran on idealized sweeps (decisions 142,
+143), and the assembled hydrology follows CLM's Fortran through 14 sequences of 160 steps,
+free running, to 3e-11 with the same sub-step counts (decision 144). Nothing is in the
+time step yet. Stopped for the maintainer's discussion of the agreement reached; next is
+putting the hydrology into the model (10.6), which needs the choices of section 8.** Start with "Resume
 here" below. This document is deleted when the phase closes;
 what is decided moves to `decisions.md`, what stays open to `open_items.md` (open item O64).
 
@@ -33,6 +34,7 @@ will not match CLM's soil moisture, because the canopies differ; that is expecte
 | 140 | the harness: extra tests in CTSM's unit-test framework, built from a checked copy of `src/` |
 | 141 | the sweeps: the proposed scenario list, some frozen cases, both 1800 s and 3600 s |
 | 142 | the Richards solver: one masked loop (ending, or a fixed count for gradients), LAPACK's pivoting solve, agreement judged against the solver's own round-off sensitivity |
+| 144 | the whole hydrology over time: 14 sequences of CLM's routines in CLM's order, compared one step ahead (1e-9) and free running (1e-8) |
 | 143 | runoff, pond, water table and drainage routine by routine; CLM's single-precision constants kept; perched water table, rising-water-table branch, hillslope and urban code not translated |
 
 ### What exists
@@ -76,6 +78,11 @@ In the repository (all committed and pushed):
   difference 1e-11, most values bit for bit). The assembled hydrology closes the water
   balance to 1e-12 mm, except in rare ill-conditioned solver steps (3e-9 mm; CLM's own Fortran reaches 3e-4 mm in the
   extreme sweep cases). A whole hydrology step costs 0.16-0.35 ms per column.
+- Sequences of the whole hydrology (10.5, decision 144): the harness driver
+  `test_hydrology_sequence.pf`, `golden_IO/test_Hydrology_sequence.json` (14 sequences of
+  160 steps), `tests/fortran_validation/test_golden_hydrology_sequences.py`. Result: CLM's
+  sub-step count in all 2 240 steps; largest difference 3e-11, one step ahead and free
+  running alike; most values bit for bit.
 - Nothing in the time step yet.
 
 Outside the repository (Derecho):
@@ -106,8 +113,10 @@ calling the runoff, pond and drainage routines (they compile).
 2. ~~Warm-up, the retention curve.~~ Done.
 3. ~~Show the maintainer the harness; settle the sweeps.~~ Done (decision 141).
 4. ~~10.3, the Richards solver end to end.~~ Done (decision 142).
-5. ~~10.4 runoff, pond, water table and drainage.~~ Done (decision 143). **Here now.**
-6. 10.5 sequences of the whole hydrology; 10.6 into the model (state, step,
+5. ~~10.4 runoff, pond, water table and drainage.~~ Done (decision 143).
+6. ~~10.5 sequences of the whole hydrology.~~ Done (decision 144). **Stopped here: the
+   maintainer's discussion of the agreement, and the choices 10.6 needs (below).**
+7. 10.6 into the model (state, step,
    set-up inputs, parameters, restart, outputs, balance check); 10.7 gradients and timing;
    10.8 coupled runs at US-MMS and close of the phase (section 7).
 
@@ -127,7 +136,9 @@ calling the runoff, pond and drainage routines (they compile).
 - Section 8, items 4-11: snowfall reaching the ground, root uptake from CLM-ml's
   `soil_et_loss`, CLM-ml's conductivity for the plants, evaporation and dew from the single
   ground flux, no irrigation, `FMAX` and `SLOPE` as tower inputs, the form of the sub-step
-  loop, where the hydrology parameters live. None is needed before step 4.
+  loop, where the hydrology parameters live. **Items 4-7, 9 and 11 are needed for 10.6**:
+  they decide what the step feeds the hydrology and where its inputs and parameters come
+  from.
 - Grid runs still take the top level's soil texture (O88).
 
 ### Practical notes

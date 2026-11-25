@@ -682,6 +682,93 @@ def lateral_flow_cases() -> list[dict]:
     return cases
 
 
+def _pond_threshold(micro_sigma: float, pc: float = 0.4) -> float:
+    """Pond threshold (mm) of a microtopography (m), as CLM's SoilHydrologyInitTimeConst."""
+    import math
+
+    d = 0.0
+    for _ in range(4):
+        fd = 0.5 * (1.0 + math.erf(d / (micro_sigma * math.sqrt(2.0)))) - pc
+        dfdd = math.exp(-(d**2) / (2.0 * micro_sigma**2)) / (micro_sigma * math.sqrt(2.0 * math.pi))
+        d = d - fd / dfdd
+    thresh = 0.5 * d * (1.0 + math.erf(d / (micro_sigma * math.sqrt(2.0)))) + micro_sigma / (
+        math.sqrt(2.0 * math.pi)
+    ) * math.exp(-(d**2) / (2.0 * micro_sigma**2))
+    return 1.0e3 * thresh
+
+
+def hydrology_sequence_cases() -> list[dict]:
+    """Sequences of the whole hydrology, the state carried from step to step, at both model
+    steps (160 steps each): a rain pulse on dry soil; a long dry-down with strong root
+    uptake, evaporation and dew at night; steady heavy rain on flat clay over shallow
+    bedrock until it is saturated, ponds and runs off, then drying; a water table that
+    rises into the column under steady rain and falls out of it by drainage on a slope;
+    sand over very shallow bedrock under storms; clay starting with a pond, under storms;
+    storms on a soil with ice in its top levels."""
+    rng = np.random.default_rng(SEED + 10)
+    nsteps = 160
+    k = np.arange(nsteps)
+    zero = np.zeros(nsteps)
+    loam = _soil_properties(40.0, 20.0, 0.0)
+    sand = _soil_properties(92.0, 3.0, 0.0)
+    clay = _soil_properties(10.0, 55.0, 0.0)
+    layered = _soil_properties(
+        np.where(Z < 0.5, 60.0, 15.0), np.where(Z < 0.5, 10.0, 45.0), np.where(Z < 0.1, 0.6, 0.0)
+    )
+    cases = []
+    for dtime in STEPS:
+        day = 0.5 * (1.0 - np.cos(2.0 * np.pi * k * dtime / 86400.0))  # 0 at night, 1 at noon
+        night_dew = np.where(day < 0.05, 5.0e-6, 0.0)
+        storms = np.where(rng.random(nsteps) < 0.12, _log_uniform(rng, 5.0e-4, 2.0e-2, nsteps), 0.0)
+        scenarios = [
+            # bedrock level, soil, saturation, ice share of the pores, pond (mm), slope
+            # (degrees), largest saturated fraction, rain, evaporation, dew, uptake, root depth
+            (NLEVSOI, loam, 0.15, 0.0, 0.0, 2.0, 0.4,
+             np.where((k >= 10) & (k < 20), 5.0e-3, 0.0), 2.0e-5 * day, zero, 2.0e-5 * day, 0.5),
+            (NLEVSOI, layered, 0.7, 0.0, 0.0, 1.0, 0.3,
+             zero, 4.0e-5 * day, night_dew, 2.5e-4 * day, 0.3),
+            (10, clay, 0.5, 0.0, 0.0, 0.3, 0.5,
+             np.where(k < 70, 4.0e-3, 0.0), 3.0e-5 * day, zero, 1.0e-5 * day, 0.5),
+            (NLEVSOI, loam, np.where(Z > 4.0, 1.0, 0.6), 0.0, 0.0, 10.0, 0.4,
+             np.where(k < 80, 3.0e-3, 0.0), 1.0e-5 * day, zero, 5.0e-5 * day, 1.0),
+            (6, sand, 0.1, 0.0, 0.0, 15.0, 0.2,
+             storms, 2.0e-5 * day, night_dew, 1.0e-4 * day, 0.1),
+            (NLEVSOI, clay, 0.8, 0.0, 30.0, 0.5, 0.6,
+             storms, 3.0e-5 * day, night_dew, 2.0e-5 * day, 0.5),
+            (NLEVSOI, loam, 0.4, np.where(Z < 0.3, 0.6, 0.0), 0.0, 2.0, 0.4,
+             storms, 1.0e-5 * day, zero, zero, 0.5),
+        ]  # fmt: skip
+        for (nbedrock, props, s, ice, pond, slope, wtfact,
+             rain, evap, dew, uptake, root_depth) in scenarios:  # fmt: skip
+            pores = props["watsat"] * DZ
+            liquid = np.broadcast_to(s, NLEVSOI) * (1.0 - ice) * pores * 1000.0
+            fraction = np.exp(-Z / root_depth)
+            micro_sigma = float(_micro_sigma(slope))
+            cases.append(
+                {
+                    "dtime": dtime,
+                    "nbedrock": nbedrock,
+                    "nsteps": nsteps,
+                    "wtfact": wtfact,
+                    "topo_slope": slope,
+                    "micro_sigma": micro_sigma,
+                    "h2osfc_thresh": _pond_threshold(micro_sigma),
+                    "h2osfc": pond,
+                    **{name: _levels(props[name]) for name in ("watsat", "hksat", "bsw", "sucsat")},
+                    "h2osoi_liq": _levels(np.where(np.arange(NLEVSOI) < nbedrock, liquid, 0.01)),
+                    "h2osoi_ice": _levels(ice * pores * DENICE),
+                    "root_fraction": _levels(fraction / fraction.sum()),
+                    "qflx_rain_plus_snomelt": [float(x) for x in rain],
+                    # the pond evaporates at the soil's rate, and takes the dew too
+                    "qflx_liqevap_from_top_layer": [float(x) for x in evap],
+                    "qflx_ev_h2osfc": [float(x) for x in evap - dew],
+                    "qflx_liqdew_to_top_layer": [float(x) for x in dew],
+                    "uptake": [float(x) for x in uptake],
+                }
+            )
+    return cases
+
+
 class Routine(NamedTuple):
     fortran: str  # Module.F90::Subroutine
     cases: Callable[[], list[dict]]
@@ -718,6 +805,12 @@ ROUTINES = {
         "SoilHydrologyMod.F90::RenewCondensation", renew_condensation_cases
     ),
     "lateral_flow": Routine("SoilHydrologyMod.F90::SubsurfaceLateralFlow", lateral_flow_cases),
+    "hydrology_sequence": Routine(
+        "clm_driver.F90, HydrologyNoDrainageMod.F90::HydrologyNoDrainage, "
+        "HydrologyDrainageMod.F90::HydrologyDrainage (the soil hydrology routines, in order)",
+        hydrology_sequence_cases,
+        "test_Hydrology_sequence.json",
+    ),
 }
 
 

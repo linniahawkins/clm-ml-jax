@@ -40,6 +40,7 @@ or has local changes in `src/`.
 | `fortran/ctsm_harness_test/test_column.pf` | checks of the column itself: the water table routine and the Richards solver run and conserve water |
 | `fortran/ctsm_harness_test/test_retention_curve.pf` | drivers of `soil_hk` and `soil_suction` |
 | `fortran/ctsm_harness_test/test_soil_water.pf` | drivers of the Richards solver (`SoilWater`): single calls, and sequences of calls with the water carried from step to step |
+| `fortran/ctsm_harness_test/test_hydrology_sequence.pf` | driver of the whole soil hydrology over many steps: CLM's routines in CLM's order, the state carried, forced by time series |
 | `fortran/ctsm_harness_test/test_surface_and_drainage.pf` | drivers of the surface chain (saturated-area runoff, infiltration limit, pond, infiltration), the pond fraction, the water table, dew and drainage; and a copy of CLM's statements for the microtopography and the pond threshold, which CLM computes inside initialization routines that cannot be called for one column |
 
 A **driver** reads `<work>/cases/<routine>.nml` (one namelist group `&case ... /` per case),
@@ -51,7 +52,8 @@ model step.
 Golden files of scalar cases are tested by `../test_golden_jax.py` (step 4 below). The
 solver's cases are arrays over the soil levels and are tested together, in one vectorized
 call, by `../test_golden_soil_water.py`; those of the surface, water table and drainage
-routines by `../test_golden_soil_hydrology.py`.
+routines by `../test_golden_soil_hydrology.py`, and the sequences of the whole hydrology by
+`../test_golden_hydrology_sequences.py`.
 
 ## Remaking the golden data
 

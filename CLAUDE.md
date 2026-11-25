@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 144.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 145.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:
@@ -47,15 +47,17 @@ Guidance for Claude (and other contributors) working in this repository.
   `main`). No release or version tag yet. Open work: `docs/design/open_items.md`.
 - **Phase 10, predicted soil water** (branch `phase10/soil_water`, started 2026-11-24; O64):
   a code translation of CLM's soil water (`ctsm5.4.004`), judged by agreement with CLM's
-  Fortran on idealized sweeps, not by observations (decisions 131-143). Done: US-MMS set up
+  Fortran on idealized sweeps, not by observations (decisions 131-144). Done: US-MMS set up
   (`experiments/us_mms_2012/`), CLM's soil texture per level and CO₂ as tower options, the
   Fortran test harness on CTSM's unit-test framework (`tests/fortran_validation/ctsm_harness/`,
   decision 140), and every routine of the first version, equal to CLM's Fortran: the
   Richards solver with CLM's adaptive sub-steps (`processes/soil_water.py`, decision 142),
   runoff and pond (`surface_runoff.py`), water table and drainage (`drainage.py`), and the
-  assembled step (`hydrology.py::soil_hydrology`; decision 143). Nothing in the time step
-  yet. **Resume from "Resume here" at the top of `docs/design/soil_water_plan.md`:** next
-  are the multi-step sequences of the whole hydrology against CLM (10.5). CPU jobs on
+  assembled step (`hydrology.py::soil_hydrology`; decision 143), which follows CLM's
+  Fortran through 14 sequences of 160 steps to 3e-11 (decision 144). Nothing in the time
+  step yet. **Resume from "Resume here" at the top of `docs/design/soil_water_plan.md`:**
+  stopped for the maintainer's discussion; next is putting the hydrology into the model
+  (10.6), which needs the maintainer's choices of the plan's section 8. CPU jobs on
   P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded

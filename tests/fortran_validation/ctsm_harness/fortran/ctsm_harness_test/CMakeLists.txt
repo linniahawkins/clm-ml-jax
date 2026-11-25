@@ -2,7 +2,8 @@ set (pfunit_sources
   test_column.pf
   test_retention_curve.pf
   test_soil_water.pf
-  test_surface_and_drainage.pf)
+  test_surface_and_drainage.pf
+  test_hydrology_sequence.pf)
 
 # Sources of the harness that are not tests. HarnessPathsMod.F90 is written by build.py.
 set (extra_sources

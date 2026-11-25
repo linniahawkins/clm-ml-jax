@@ -469,6 +469,37 @@ Reason: the Fortran is the reference, single-precision constants included (136);
 that the first version cannot reach would be untested code.
 Source: plan 3.2, 6.1; `tests/clm_ml/test_processes_hydrology.py`.
 
+**144. The whole hydrology over time: 14 sequences of CLM's routines, compared one step ahead and free running**
+2026-11-24 · Phase 10 (10.5) · implementation · in force · Departure from Fortran: n/a (testing)
+A harness driver (`test_hydrology_sequence.pf`) calls CLM's soil hydrology routines step
+after step in CLM's order (`UpdateFracH2oSfc` of `clm_driver`; `HydrologyNoDrainage` from
+`SetSoilWaterFractions` to `RenewCondensation`, `PerchedWaterTable` included;
+`SubsurfaceLateralFlow` of `HydrologyDrainage`), the state carried, driven by time series
+of the water reaching the ground, evaporation from soil and pond, dew and root uptake.
+Left out: the snow routines, CLM's root uptake routine (the uptake is given) and
+`PerchedLateralFlow` (no flow in unfrozen soil). Seven scenarios of 160 steps at each of
+1800 s and 3600 s (`golden_IO/test_Hydrology_sequence.json`, 1.4 MB): a rain pulse on dry
+soil; a dry-down with strong root uptake, evaporation and dew; heavy rain on flat clay over
+shallow bedrock until it ponds and runs off; a water table rising under rain and falling by
+drainage on a slope; sand over very shallow bedrock under storms; clay with a pond under
+storms; storms on soil with ice in its top levels.
+`tests/fortran_validation/test_golden_hydrology_sequences.py` compares
+`hydrology.soil_hydrology` with them in the two ways of plan 6.3:
+- *One step ahead* (the acceptance test): each of the 2 240 steps starts from the Fortran's
+  state of the step before. Required 1e-9; found: the solver's sub-step count equal in
+  every step (1 to 66), 92 % of the 60 480 compared values bit for bit, the largest
+  relative difference 3e-11 (a pond about to empty).
+- *Free running*: JAX carries its own state for the 160 steps. Required 1e-8 and equal
+  sub-step counts; found the same 3e-11, with 76 % of the values still bit for bit: no
+  accept-or-halve decision flipped and round-off did not grow. The water balance closes to
+  1.4e-12 mm in every step.
+The ill-conditioned columns of the solver's sweep (decision 142) do not occur in these
+scenarios, so no allowance for round-off sensitivity is needed here.
+Reason: the routine tests check each piece; these check that the pieces are assembled in
+CLM's order and work together over time (sub-step counts that vary, a water table moving
+between levels, a pond that fills and drains).
+Source: plan 6.3.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**
