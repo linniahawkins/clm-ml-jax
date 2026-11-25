@@ -45,28 +45,24 @@ Guidance for Claude (and other contributors) working in this repository.
   `phase9/docs`): a clean-up of comments and documents (decision 128) and a small
   documentation site for colleagues (decision 129; Sphinx in `docs/`, GitHub Pages from
   `main`). No release or version tag yet. Open work: `docs/design/open_items.md`.
-- **Phase 10, predicted soil water** (branch `phase10/soil_water`, started 2026-11-24; O64):
-  a code translation of CLM's soil water (`ctsm5.4.004`), judged by agreement with CLM's
-  Fortran on idealized sweeps, not by observations (decisions 131-148). Done: US-MMS set up
-  (`experiments/us_mms_2012/`), CLM's soil texture per level and CO₂ as tower options, the
-  Fortran test harness on CTSM's unit-test framework (`tests/fortran_validation/ctsm_harness/`,
-  decision 140), and every routine of the first version, equal to CLM's Fortran: the
-  Richards solver with CLM's adaptive sub-steps (`processes/soil_water.py`, decision 142),
-  runoff and pond (`surface_runoff.py`), water table and drainage (`drainage.py`), and the
-  assembled step (`hydrology.py::soil_hydrology`; decision 143), which follows CLM's
-  Fortran through 14 sequences of 160 steps to 3e-11 (decision 144). In the model as the
-  option `model.yaml` `soil.water: predicted` (10.6 done, decision 145; the default
-  `prescribed` is bit for bit unchanged; tower and grid runs go through rain with the
-  water balance closed). **Resume from "Resume here" at the top of
-  `docs/design/soil_water_plan.md`:** 10.7 is done (gradients through the whole model
-  match finite differences; cost 1.03× on a CPU tower, 1.24× for 4 096 patches on an
-  A100; decision 147) and the coupled runs of 10.8 are done (decision 148; results in
-  `experiments/us_mms_2012/README.md`). The phase is not closed: the maintainer decides
-  on O92 (a run stops at the first 31 December, prescribed soil water too), O91 (the May
-  2007 Fortran comparison fails in one column, as on `main`) and O93 (CLM-ML barely
-  responds to the 2012 drought). On the way the canopy's interception was corrected (it
-  counted unused layer slots: wrong throughfall in rain; decision 146). CPU jobs on
-  P93300041.
+- **Phase 10, predicted soil water** (closed 2026-11-25, branch `phase10/soil_water`, not
+  merged yet; O64): a code translation of CLM's soil water (`ctsm5.4.004`), judged by
+  agreement with CLM's Fortran on idealized sweeps, not by observations (decisions
+  131-149). The option `model.yaml` `soil.water: predicted` (the default `prescribed` is
+  bit for bit unchanged): the Richards solver with CLM's adaptive sub-steps
+  (`processes/soil_water.py`), runoff and pond (`surface_runoff.py`), water table and
+  drainage (`drainage.py`), assembled in `hydrology.py::soil_hydrology`, each equal to
+  CLM's Fortran (golden data from the harness on CTSM's unit-test framework,
+  `tests/fortran_validation/ctsm_harness/`). Unfrozen and snow-free. Gradients match
+  finite differences; cost 1.03× on a CPU tower, 1.24× for 4 096 patches on an A100.
+  Coupled runs at US-MMS beside CLM (five years) and on the 1° globe:
+  `experiments/us_mms_2012/README.md`, decision 148. Corrected on the way: canopy
+  interception counted unused layer slots (decision 146); a run stopped at the first 31
+  December (decision 149). The plan document is in git history
+  (`git show 0e8e907:docs/design/soil_water_plan.md`). Left open: O93 (CLM-ML barely
+  responds to the 2012 drought at US-MMS; under discussion), O91 (the May 2007 Fortran
+  comparison fails in one column, as on `main`), O90 (end-of-run restarts), and what the
+  predicted mode lacks (O64). CPU jobs on P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.

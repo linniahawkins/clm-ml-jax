@@ -888,6 +888,20 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 - **Next (the maintainer's):** comparison with the tower's measured fluxes and soil
   moisture, which this phase left out (decision 136); the plant hydraulic parameters of
   this forest (CLM6 defaults are used).
+- **Diagnosis (probes of 2026-11-25, no code change):** in July 2012 CLM's root zone
+  (0.05 to 0.7 m) is at −1.5 to −1.7 MPa, and so is CLM-ML's (the same water). CLM-ML's
+  leaves see a soil water potential of −0.53 MPa at midday: the potential is weighted by
+  what each level can supply (`plant_hydraulics.soil_resistance`, Bonan et al. 2014 eq.
+  A27), so the wet levels below 1 m dominate. The leaf water potential at the canopy top
+  is then −0.8 MPa on average and −1.27 at the lowest, and stomata close only near
+  ψ₅₀ = −2.3 MPa (exponent 40: almost a threshold). CLM's stress curve is gradual (ψ₅₀ =
+  −2.65 MPa, exponent 3.95) and its xylem loses conductance as it dries; CLM-ml's plant
+  conductance is constant.
+- **One parameter at a time does not give CLM's response** (May-September 2012, predicted
+  soil water; latent heat June → July, W m⁻²): CLM 96 → 59; default 109 → 92; ψ₅₀ −1.2:
+  85 → 57; plant conductance 2: 101 → 85; root resistivity 100: 87 → 70; exponent 4:
+  101 → 86. The changes that lower July lower the wet months as well (May: 89 and 87
+  against CLM's 101).
 - **Source:** Phase 10 steps 10.1 and 10.8; `experiments/us_mms_2012/README.md`.
 
 ## 4. Housekeeping and repository organization (8a)
@@ -1160,6 +1174,10 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
   the predicted mode does not have: frozen soil water and snow (O9, O10; snowfall enters
   the soil as liquid), irrigation, a spun-up start (O12), soil texture by level on grids
   (O88). At US-MMS it dries the soil more than CLM (O93).
+- **Phase 10 closed 2026-11-25.** The plan document (`soil_water_plan.md`: the assessment
+  of CLM's code, the order of work, the US-MMS set-up) was deleted at the close and is in
+  git history (`git show 0e8e907:docs/design/soil_water_plan.md`). This item stays as the
+  record of what predicted soil water lacks.
 
 ---
 

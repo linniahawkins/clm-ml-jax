@@ -100,7 +100,27 @@ The whole of 2012 (from 1 January, `.../us_mms_2012_year_predicted`): the balanc
 (1.6e-12 mm per step), drainage 379.8 mm against CLM's 380.0, transpiration 575.7 against
 495.8, the soil's liquid water at the end of the year 39 mm below CLM's. There is no snow
 or frozen soil water in CLM-ML (CLM has 5.5 mm of snowfall and up to 59 mm of soil ice
-that winter). A run cannot yet cross from 31 December to 1 January (open item O92).
+that winter).
+
+Five years, 2010 to 2014, in one run from CLM's soil water on 1 January 2010
+(`.../us_mms_2010_2014_predicted`, commit `0e8e907`, 27 minutes on a CPU; before that
+commit a run stopped at the first 31 December). The balance closes in every step (largest
+error 1.7e-12 mm); the solver takes 2.4 sub-steps on average, 28 at most. CLM-ML / CLM, mm
+per year:
+
+| | Transpiration | Ground evaporation | Drainage | Soil liquid water, 31 December |
+|---|---|---|---|---|
+| 2010 | 579 / 519 | 67 / 83 | 462 / 461 | 2791 / 2753 |
+| 2011 | 473 / 448 | 71 / 96 | 388 / 411 | 3049 / 3062 |
+| 2012 | 576 / 496 | 79 / 102 | 368 / 380 | 2770 / 2811 |
+| 2013 | 457 / 439 | 80 / 98 | 255 / 298 | 3049 / 3034 |
+| 2014 | 460 / 436 | 84 / 142 | 407 / 390 | 3062 / 3031 |
+
+The soil water does not drift from CLM's over the five years (within 41 mm of 2 750 to
+3 060 at each year's end): the soil refills every winter. A dry year carries over into the
+next year's drainage (2013: 255 against 298 mm, after CLM-ML's larger transpiration in
+2012). The water table stays between 6.5 and 8.5 m (CLM 6.4 to 7.9). CLM's winters have
+snow and up to 205 mm of soil ice, CLM-ML's none.
 
 Measurements (soil moisture, fluxes): not obtained; the phase compares with CLM only
 (decision 136).

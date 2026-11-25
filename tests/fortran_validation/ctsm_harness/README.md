@@ -78,3 +78,25 @@ unit tests together with the harness's.
 3. A case generator and an entry of `ROUTINES` in `generate_golden.py`.
 4. An adapter in `../test_golden_jax.py`, keyed `ctsm_harness:<routine>` (or, for cases with
    arrays, a test of its own like `../test_golden_soil_water.py`).
+
+## Practical notes
+
+- **Debugging on a login node, without a batch job:** `source <work>/build/.env_mach_specific.sh`,
+  then `make ctsm_harness` in `<work>/build/__command_line_test__/__command_line_test__` and
+  run `clm_biogeophys_test/ctsm_harness_test/ctsm_harness`. `gdb` fails on this build (an
+  internal error on Fortran types): trace with `write` statements.
+- **A test file added to the harness** is compiled but not run unless pFUnit's main program
+  is compiled again: `build.py` touches it before every build.
+- **The column is unfrozen and snow-free by construction** (`HarnessColumnMod`): the frost
+  table and the perched water table are as `PerchedWaterTable` leaves them above freezing.
+- **CLM constants written without `_r8` are single precision** (`sat_lev=0.9`, `1.0e-8`):
+  look for them in any routine translated later; the JAX code must use the same value.
+- **Very dry clay beside wet levels:** levels at the dry bound of the sweeps (relative
+  saturation 0.01) in clay have matric potentials of 1e20 mm and more; they make a
+  sub-step's matrix ill-conditioned and the result sensitive to the last digit.
+- **The golden tests' absolute guard (1e-15)** passes any value smaller than that, such as
+  the conductivity of very dry clay: compare such outputs in relative terms when judging
+  agreement.
+- **Found in `ctsm5.4.004`:** the PLUMBER2 user mods' forcing-stream settings are ignored
+  (the stream is named `PLUMBER2.US-MMS`); `QCHARGE` is not a history field in the
+  configuration used at US-MMS.

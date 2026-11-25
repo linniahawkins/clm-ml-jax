@@ -655,9 +655,13 @@ in `experiments/us_mms_2012/README.md`.
   mm against CLM's 380.0; no drift other than the canopy's larger transpiration (39 mm
   less water than CLM at the end of the year). Winter runs without snow or frozen soil
   water (decision 132).
-- *A run of several years was not possible*: a tower run stops at the first 31 December
-  with a temperature blow-up, with prescribed soil water too (open item O92, found here;
-  not corrected).
+- *A run of several years* was not possible at that commit: a tower run stopped at the
+  first 31 December with a temperature blow-up, with prescribed soil water too (O92).
+  After its correction (decision 149, commit `0e8e907`), 2010-2014 in one run (43 824
+  steps, 27 min on a CPU): largest balance error 1.7e-12 mm per step, 2.4 sub-steps on
+  average and 28 at most, no drift of the soil water from CLM's (within 41 mm at every
+  year's end; the soil refills each winter), drainage 255 to 462 mm per year against CLM's
+  298 to 461.
 - *The 1° globe, ten days of July 2000* on one A100 (72 575 patches; 549 s with
   compilation): every patch runs, none is excluded, largest balance error 1.9e-12 mm per
   step, at most 35 sub-steps (bound 64), ponds on 415 patches. The start is not in
@@ -683,6 +687,7 @@ water). Fortran CLM-ml has the formula but its runs do not cross a year.
 Results: every other step bit for bit (the regression reference is unchanged). US-MMS
 December 2010 to January 2011 runs with prescribed and with predicted soil water (it
 stopped before).
+US-MMS 2010-2014 runs in one piece (decision 148).
 Tests: `tests/clm_ml/test_step.py` (the step's middle through both dates),
 `tests/regression/test_new_year.py` (CHATS7 with its data dated from 31 December, beside
 the run at its own dates; it stops in the two-stream radiation check without the change).
