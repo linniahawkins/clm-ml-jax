@@ -549,9 +549,14 @@ Implementation:
 - *Regression reference* regenerated for the added fields only (17 new step fields); the
   100 fields it held are bit for bit those of the reference before.
 Status at this entry: one day at CHATS runs (the water balance closes to 3e-13 mm per
-step; the first step equals the prescribed run's to round-off). **Not finished:** rain
-exposes a defect of the canopy's interception with unused layer slots (O89), which the
-maintainer decides on; the user documentation of the option follows the correction.
+step; the first step equals the prescribed run's to round-off). Rain exposed a defect
+of the canopy's interception with unused layer slots (O89), corrected by decision 146.
+Completed 2026-11-25: two days at CHATS with 3 mm of rain keep the balance closed and
+resume bit for bit from a restart written during the run; a grid run (two 1° gridcells in
+Illinois, 11 patches of 6 PFTs, two days of July 2000 with rain) reads `FMAX` and `SLOPE`
+and closes every patch's balance to 1e-12 mm per step
+(`tests/regression/test_predicted_soil_water.py`); the option is documented for users
+(`docs/how_the_model_works.md`, `docs/your_own_tower.md`) and in `model_overview.md`.
 Reason: the maintainer's choices; a default that leaves every existing run unchanged.
 Source: maintainer, 2026-11-24 ("accept all recommendations ... use fixed count always for
 solver loop"); plan sections 4 and 8.

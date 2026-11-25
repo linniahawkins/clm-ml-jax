@@ -55,6 +55,26 @@ only). Use it to give the model the same soil as a CLM run at the tower
       organic_matter: [37.9, 37.9, 37.9, 37.9, 14.6, 8.5, 5.0, 4.1, 3.2, 3.2]
 ```
 
+**Predicted soil water.** With `model.yaml` `soil.water: predicted` the model moves the
+soil water itself, with CLM's soil hydrology, instead of reading it at every step. The
+runoff then needs two values of the CLM surface dataset at the tower's gridcell, which are
+`null` (not given) by default:
+
+```yaml
+    soil:
+      max_saturated_fraction: 0.38   # FMAX: the largest fraction of the surface that can be saturated, 0 to 1
+      slope: 0.5                     # SLOPE: topographic slope, degrees (at least 0.2 is used)
+```
+
+The run starts from the soil water the forcing gives at the first step (`H2OSOI`, as for a
+prescribed run) or from a restart; after that the soil water of the forcing is not used.
+The parameters of the hydrology are in the `hydrology` section of `params.yaml` (CLM's
+names and values; they are not per PFT). Output variables: `soil_water_content`,
+`soil_liquid_water`, `ground_water_input`, `infiltration`, `surface_runoff`, `drainage`,
+`root_water_uptake`, `ground_evaporation`, `saturated_fraction`, `water_table_depth`,
+`surface_water`, `surface_water_fraction`, `soil_water_substeps` and
+`soil_water_balance_error`. There is no snow, frozen soil water or irrigation.
+
 A tower can have several patches (for example trees and grass), each with its own PFT,
 canopy and soil column; the tower's output then has one entry per patch, and a gridcell value
 weighted by area. Several towers can run together in one experiment: list them all.
@@ -104,7 +124,8 @@ forcing, with dimensions `(time, lat, lon)` of size `(n, 1, 1)` and a `time` var
 
 The CHATS files in `data/input_files/tower-forcing/CHATS7/` are an example.
 
-**Leaf area, stem area and soil water** are prescribed. By default they come from a CLM
+**Leaf area, stem area and soil water** are prescribed (soil water can be predicted
+instead, see section 1; the file is then read for the first step only). By default they come from a CLM
 history file of a CLM run at the tower (one gridcell, at the forcing interval) with `ELAI`,
 `ESAI`, `H2OSOI` (20 soil levels, CLM5's layer structure) and `TSOI` (the initial soil
 temperature). Alternatively, give daily or monthly files (`vegetation: {source: file, files:

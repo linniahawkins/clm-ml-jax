@@ -1,13 +1,13 @@
 # Phase 10 scope: predicted soil water
 
-Status (2026-11-24, branch `phase10/soil_water`): **10.1 to 10.5 done (the routines and
-the assembled hydrology equal CLM's Fortran, decisions 142-144). 10.6 in progress: the
-hydrology is in the model as the option `soil.water: predicted` (decision 145), prescribed
-runs are bit for bit unchanged, and a day at CHATS runs with the water balance closed.
+Status (2026-11-25, branch `phase10/soil_water`): **10.1 to 10.6 done. The routines and
+the assembled hydrology equal CLM's Fortran (decisions 142-144), and the hydrology is in
+the model as the option `soil.water: predicted` (decision 145): prescribed runs are bit
+for bit unchanged; tower and grid runs with predicted soil water go through rain with
+the water balance closed and resume bit for bit from a restart; the option is documented.
 A defect found on the way in the canopy's interception (O89: a wrong throughfall in rain)
-is corrected (decision 146), and a two-day run through rain keeps the water balance closed
-and resumes bit for bit from a restart. Left of 10.6: a grid run with predicted soil
-water, the user documentation, all of `tests/regression`.** Start with "Resume
+is corrected (decision 146). Next, on the maintainer's go-ahead: 10.7 (gradients and
+timing).** Start with "Resume
 here" below. This document is deleted when the phase closes;
 what is decided moves to `decisions.md`, what stays open to `open_items.md` (open item O64).
 
@@ -86,13 +86,13 @@ In the repository (all committed and pushed):
   160 steps), `tests/fortran_validation/test_golden_hydrology_sequences.py`. Result: CLM's
   sub-step count in all 2 240 steps; largest difference 3e-11, one step ahead and free
   running alike; most values bit for bit.
-- In the model (10.6, decision 145; in progress): `model.yaml` `soil.water`, `SoilState`'s
+- In the model (10.6, decision 145): `model.yaml` `soil.water`, `SoilState`'s
   three water fields, `step.py` (the call of `soil_hydrology`), `PatchConstants.wtfact` and
   `topo_slope` (`domain.yaml` `soil.max_saturated_fraction`, `soil.slope`; grids `FMAX`,
   `SLOPE`), the `hydrology` section of `params.yaml`, restart format 7, 14 output
   variables, a 14th balance check, `driver.initial_soil_water`. Tests:
   `tests/regression/test_predicted_soil_water.py` (one day at CHATS; two days with rain, resumed from the restart
-  written after the first day). US-MMS's `domain.yaml` has its
+  written after the first day; a two-day grid run of 11 patches with rain). US-MMS's `domain.yaml` has its
   `FMAX` (0) and slope (0.51 degrees).
 
 Outside the repository (Derecho):
@@ -125,12 +125,8 @@ calling the runoff, pond and drainage routines (they compile).
 4. ~~10.3, the Richards solver end to end.~~ Done (decision 142).
 5. ~~10.4 runoff, pond, water table and drainage.~~ Done (decision 143).
 6. ~~10.5 sequences of the whole hydrology.~~ Done (decision 144).
-7. **10.6 into the model: in progress (decision 145).** O89 (the canopy's interception
-   with unused layer slots) is corrected (decision 146); the run through rain and the
-   restart test pass. Left of 10.6: a grid run with predicted soil water (a few steps),
-   the user documentation (`how_the_model_works.md`, `your_own_tower.md`,
-   `model_overview.md`), all of `tests/regression`.
-8. 10.7 gradients and timing; 10.8 coupled runs at US-MMS and close of the phase
+7. ~~10.6 into the model.~~ Done (decisions 145, 146).
+8. **Next: 10.7 gradients and timing** (GPU included); then 10.8 coupled runs at US-MMS and close of the phase
    (section 7).
 
 ### Open choices (the maintainer's)

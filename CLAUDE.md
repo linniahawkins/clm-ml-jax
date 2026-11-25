@@ -55,12 +55,13 @@ Guidance for Claude (and other contributors) working in this repository.
   runoff and pond (`surface_runoff.py`), water table and drainage (`drainage.py`), and the
   assembled step (`hydrology.py::soil_hydrology`; decision 143), which follows CLM's
   Fortran through 14 sequences of 160 steps to 3e-11 (decision 144). In the model as the
-  option `model.yaml` `soil.water: predicted` (10.6 in progress, decision 145; the default
-  `prescribed` is bit for bit unchanged). **Resume from "Resume here" at the top of
-  `docs/design/soil_water_plan.md`:** the canopy's interception counted unused layer
-  slots (wrong throughfall in rain; corrected, decision 146), and predicted soil water now
-  runs through rain; left of 10.6 are a grid run, the user documentation and all of
-  `tests/regression`. CPU jobs on P93300041.
+  option `model.yaml` `soil.water: predicted` (10.6 done, decision 145; the default
+  `prescribed` is bit for bit unchanged; tower and grid runs go through rain with the
+  water balance closed). **Resume from "Resume here" at the top of
+  `docs/design/soil_water_plan.md`:** next is 10.7 (gradients and timing), then 10.8
+  (coupled runs at US-MMS). On the way the canopy's interception was corrected (it
+  counted unused layer slots: wrong throughfall in rain; decision 146). CPU jobs on
+  P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.

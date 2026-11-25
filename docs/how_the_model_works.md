@@ -26,7 +26,8 @@ hydraulics (Medlyn and Ball–Berry are alternatives), an implicit flux–profil
 interception and soil heat diffusion.
 
 The model runs **offline**: meteorology (tower or gridded), leaf and stem area and soil
-water are prescribed. Each 30-minute model step is split into six 5-minute sub-steps advanced
+water are prescribed. As an option the soil water is predicted instead, with CLM's soil
+hydrology (section 5b). Each 30-minute model step is split into six 5-minute sub-steps advanced
 with 4th-order Runge–Kutta. Patches do not exchange anything with each other, so the same
 code runs one tower or the whole globe; gridcell output is the area-weighted sum of its
 patches.
@@ -91,6 +92,9 @@ src/clm_ml/
     flux_profile.py   the implicit solution for air T, vapour, leaf T, ground T
     canopy_water.py   interception, wetted fraction of the leaves, evaporation
     soil.py           soil water from the prescribed record, soil properties, soil temperature
+    soil_water.py surface_runoff.py drainage.py hydrology.py
+                      predicted soil water (CLM's soil hydrology): the Richards equation,
+                      runoff and ponded water, water table and drainage, the assembled step
     integrators.py    Euler and Runge-Kutta tableaus and the state update
     constants.py orbit.py math.py layers.py water_vapor.py leaf_heat_capacity.py
 
@@ -148,7 +152,9 @@ COMPILED       │   │   │   │   -> Runge-Kutta update of the canopy state
 COMPILED       │   │   │   └─ fluxes added to the step's sums
 COMPILED       │   │   ├─ averages over the sub-steps, canopy totals, energy checks
 COMPILED       │   │   ├─ sunlit/shaded leaves merged to the layer mean
-COMPILED       │   │   └─ soil temperature (heat diffusion)
+COMPILED       │   │   ├─ soil temperature (heat diffusion)
+COMPILED       │   │   └─ with predicted soil water: runoff, infiltration, the Richards
+COMPILED       │   │      equation, water table, drainage      processes/hydrology
 COMPILED       │   │   -> new State + Diagnostics
 COMPILED       │   ├─ every output stream accumulated into its record
 COMPILED       │   │  (memory grows with output records, not with steps)
@@ -168,9 +174,10 @@ What is carried from one step to the next (`state.State`, the restart file's con
 | `canopy.ground_temperature` | one value | K |
 | `canopy.acclimation_temperature`, `canopy.acclimation_steps` | one value | K, steps |
 | `soil.temperature` | 25 soil levels | K |
+| `soil.liquid_water`, `soil.surface_water`, `soil.water_table_depth` | 20 soil levels, one value, one value | kg m⁻², mm, m |
 
-Everything else a step computes is in `state.Diagnostics` (about 80 fields with the
-CLM-ml names), which the output variables (`outputs.VARIABLES`, 64 named variables) are
+Everything else a step computes is in `state.Diagnostics` (about 95 fields with the
+CLM-ml names), which the output variables (`outputs.VARIABLES`, 78 named variables) are
 computed from.
 
 **Layers and masks.** Every patch has the same number of layer slots (`max_layers`, 50
@@ -265,12 +272,26 @@ What differs is mostly how the code is written. The few science departures are l
 - **Configurable model step** with forcing interpolated to it, and **daily or monthly leaf
   area, stem area and soil water** files. The default (30-minute step, CLM history input) is
   the Fortran setup.
+- **Predicted soil water** (`model.yaml` `soil.water: predicted`; the default
+  `prescribed` is CLM-ml v2). The soil water is carried from step to step and moved by
+  CLM's soil hydrology (CTSM 5.4), translated routine by routine and checked against CLM's
+  Fortran: runoff from the saturated fraction of the surface, infiltration, ponded surface
+  water, the Richards equation with CLM's adaptive sub-steps, the water table, and
+  drainage. The canopy model gives it the rain reaching the ground (throughfall and
+  drip), the evaporation or dew at the ground and the transpiration, taken from each soil
+  level in the proportions of the plant hydraulics. It starts from the soil water a
+  prescribed run has at its first step, or from a restart. What it does not have: snow
+  and frozen soil water (snowfall enters the soil as liquid at once), irrigation, and
+  any exchange between soil columns. Its results are not CLM's soil moisture: the canopy
+  that dries the soil is a different one. It needs two more inputs per tower (see
+  [Your own tower](your_own_tower.md)); grids read them from the surface data.
 - **Not available** (refused with an error): Norman shortwave
   radiation, the well-mixed canopy air, profiles read from a dataset, and the Brent solver
   for stomatal conductance.
 
 The model limitations of CLM-ml v2 itself (too-warm near-ground air in strongly stable
-conditions, daytime latent heat biased high, prescribed soil moisture) are unchanged; see
+conditions, daytime latent heat biased high, prescribed soil moisture by default) are
+unchanged; see
 `open_items.md` §7.
 
 ---
@@ -356,9 +377,10 @@ What the model does not do, or does differently from what a user might expect:
 - **Model limitations of CLM-ml v2** (science questions, unchanged): near-ground air several
   degrees too warm in strongly stable conditions (first-order closure cannot represent
   non-local mixing in the canopy); daytime latent heat biased high at CHATS (about
-  70 W m⁻²); soil heat flux biased high; soil moisture prescribed, not predicted.
+  70 W m⁻²); soil heat flux biased high; soil moisture prescribed by default.
 - **No snow and no frozen soil water:** there is no snowpack on the ground, and all
-  prescribed soil water is liquid.
+  soil water is liquid. With predicted soil water, snowfall reaching the ground enters
+  the soil as liquid water at once.
 - **No bare ground:** every patch has a canopy; a patch with almost no leaves is a sparse
   canopy, not bare soil.
 - **Solvers** run a fixed number of iterations instead of Fortran's tolerances, and Fortran's

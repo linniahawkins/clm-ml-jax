@@ -10,6 +10,9 @@ Predicted soil water end to end (model.yaml ``soil.water: predicted``) at CHATS.
   day it gives the same results, bit for bit: the soil water, the pond and the water table
   are in the restart.
 - Without the tower's largest saturated fraction and slope the run refuses to start.
+- A grid run (two 1° gridcells in Illinois, 11 patches of 6 PFTs, two days of July 2000
+  with rain on the second) takes the largest saturated fraction and the slope from the
+  surface data and keeps the water balance of every patch closed.
 
 (CHATS is an irrigated orchard: the runs test the code, not the site's water.)
 """
@@ -130,3 +133,58 @@ def test_predicted_soil_water_needs_the_runoff_inputs(tmp_path):
     experiment = _experiment(tmp_path, "1 day", surface={"slope": 1.0})
     with pytest.raises(ConfigError, match="needs max_saturated_fraction.*CHATS7"):
         experiment.execute(quiet=True, write=False)
+
+
+def test_grid_run_with_predicted_soil_water(tmp_path):
+    sys.path.insert(0, str(ROOT))
+    from tests.experiment_tools import make_experiment
+    from tests.regression.test_grid_setup import HIST, SURFACE, TRENDY
+
+    if not (
+        Path(SURFACE).exists() and Path(TRENDY).exists() and Path(f"{HIST}.2000-07.nc").exists()
+    ):
+        pytest.skip("1° global input files (NCAR GLADE) not available")
+    from clm_ml.experiment import load_experiment
+
+    def run(d):
+        d["time"].update(start="2000-07-01T00:00", length="2 days", calendar="gregorian")
+        d["forcing"]["gridded"]["co2"] = {"source": "constant", "ppm": 383}
+        d["output"] = {
+            "directory": str(tmp_path / "out"),
+            "streams": [{"name": "step", "frequency": "step", "statistic": "instantaneous",
+                         "level": ["patch"], "variables": VARIABLES}],
+        }  # fmt: skip
+
+    def model(d):
+        d["numerics"].update(on_patch_error="stop", max_failed_patch_fraction=0.01)
+        d["soil"]["water"] = "predicted"
+
+    folder = make_experiment(
+        tmp_path / "grid", compset="grid_1deg_2000", run=run, model=model,
+        domain={"grid": {"surface_data": SURFACE, "land_mask": f"{HIST}.2000-01.nc",
+                         "region": {"lat": [39.5, 40.5], "lon": [-90.0, -88.0]}}},
+    )  # fmt: skip
+    experiment = load_experiment(folder)
+    columns = experiment.domain.columns
+    assert experiment.domain.n_patches == 11
+    assert np.all((columns.max_saturated_fraction > 0.3) & (columns.max_saturated_fraction < 0.5))
+    assert np.all((columns.slope > 0.1) & (columns.slope < 0.3))  # degrees: flat country
+
+    out = experiment.execute(write=False, quiet=True)["step"].data
+    for name in VARIABLES:
+        assert out[name].shape[:2] == (96, 11), name
+        assert np.all(np.isfinite(out[name])), name
+    assert np.max(np.abs(out["soil_water_balance_error"])) < 1e-9
+    stored = out["soil_liquid_water"].sum(axis=2) + out["surface_water"]
+    net = out["infiltration"] - out["root_water_uptake"] - out["drainage"]
+    np.testing.assert_allclose(np.diff(stored, axis=0), net[:-1] * 1800.0, rtol=0, atol=1e-9)
+
+    # rain on the second day: less reaches the ground under denser canopies, part of it
+    # runs off the saturated fraction, the rest infiltrates
+    rain = out["ground_water_input"].sum(axis=0) * 1800.0  # mm
+    runoff = out["surface_runoff"].sum(axis=0) * 1800.0
+    assert np.all((rain > 0.3) & (rain < 4.0)) and np.ptp(rain[:6]) > 0.1
+    assert np.all((runoff > 0.05 * rain) & (runoff < 0.15 * rain))
+    assert np.all((out["saturated_fraction"] > 0.05) & (out["saturated_fraction"] < 0.15))
+    assert np.all((out["water_table_depth"] > 4.0) & (out["water_table_depth"] < 8.0))
+    assert np.all(out["drainage"] > 0.0)
