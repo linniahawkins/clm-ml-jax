@@ -323,6 +323,29 @@ Source: maintainer, 2026-11-24 ("for these we shouldn't have to stick to the sin
 you should be able to take the fortran and exercise it in idealized sweeps across all
 scenarios and make sure the jax matches").
 
+**140. The CTSM harness: extra tests in CTSM's unit-test framework, built from a checked copy of `src/`**
+2026-11-24 · Phase 10 (10.2) · implementation · in force · Departure from Fortran: n/a (testing)
+The harness of decision 139 is `tests/fortran_validation/ctsm_harness/` (its README has the
+procedure). `build.py` copies `ctsm5.4.004`'s `src/` to scratch, adds five sources to the
+test build's lists, turns `private` into `public` on a list of lines of
+`SoilWaterMovementMod.F90`, adds the harness's files, and stops unless a file-by-file
+comparison with the checkout shows nothing else (it also stops if the checkout is not at
+the tag or has local changes). The changes are lists in `build.py`, not a patch file. A
+driver reads its cases from a namelist file and writes `name=value` outputs with 17
+significant digits; the work directory's path is compiled in (a module written by
+`build.py`), so nothing depends on the batch job's environment. `generate_golden.py` holds
+the case generators (300 random draws with a fixed seed plus edge values per routine),
+runs the build and writes the JSON, whose `executable` key is `ctsm_harness:<routine>`
+(the key the existing adapters are found by). The column's set-up is checked by two tests
+without golden data (the water table routine, and the Richards solver conserving water).
+Found while building it: assigning CLM's place-holder constructor to a retention-curve
+object (a type without data) overwrites the memory after the object with this compiler;
+the harness does not construct it. This, not `filter_from_range`, is the likely cause of
+the wrong filter count seen in the feasibility probe.
+Reason: lists that a script applies and then verifies independently are easier to read and
+to extend routine by routine than a patch; CTSM's framework already provides the column.
+Source: plan 6.1; the harness's README.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

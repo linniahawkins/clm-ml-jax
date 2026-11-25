@@ -1,0 +1,100 @@
+module test_retention_curve
+
+  ! Drivers of CLM's Clapp-Hornberger retention curve
+  ! (SoilWaterRetentionCurveClappHornberg1978Mod): hydraulic conductivity (soil_hk) and
+  ! matric potential (soil_suction), each with its derivative with respect to the relative
+  ! saturation, for the cases of cases/soil_hk.nml and cases/soil_suction.nml.
+
+  use funit
+  use shr_kind_mod, only : r8 => shr_kind_r8
+  use HarnessColumnMod, only : harness_column_type, harness_column_setup, &
+       harness_column_teardown, harness_nlevsoi
+  use HarnessIOMod, only : open_cases, open_output, begin_case, put
+
+  implicit none
+
+  integer, parameter :: level = 1   ! the soil level whose properties hold the case's values
+
+  @TestCase
+  type, extends(TestCase) :: TestRetentionCurve
+     type(harness_column_type) :: column
+   contains
+     procedure :: setUp
+     procedure :: tearDown
+  end type TestRetentionCurve
+
+contains
+
+  subroutine setUp(this)
+    class(TestRetentionCurve), intent(inout) :: this
+    call harness_column_setup(this%column, dtime=1800, nbedrock=harness_nlevsoi)
+  end subroutine setUp
+
+  subroutine tearDown(this)
+    class(TestRetentionCurve), intent(inout) :: this
+    call harness_column_teardown(this%column)
+  end subroutine tearDown
+
+  @Test
+  subroutine drive_soil_hk(this)
+    class(TestRetentionCurve), intent(inout) :: this
+    real(r8) :: s, imped, hksat, bsw
+    real(r8) :: hk, dhkds
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ s, imped, hksat, bsw
+
+    call open_cases('soil_hk', nin, found)
+    if (.not. found) return
+    call open_output('soil_hk', nout)
+    c = this%column%c
+    i = 0
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       this%column%soilstate_inst%hksat_col(c,level) = hksat
+       this%column%soilstate_inst%bsw_col(c,level) = bsw
+       call this%column%retention_curve%soil_hk(c, level, s, imped, &
+            this%column%soilstate_inst, hk, dhkds)
+       call begin_case(nout, i)
+       call put(nout, 'hk', hk)
+       call put(nout, 'dhkds', dhkds)
+    end do
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_soil_hk
+
+  @Test
+  subroutine drive_soil_suction(this)
+    class(TestRetentionCurve), intent(inout) :: this
+    real(r8) :: s, sucsat, bsw
+    real(r8) :: smp, dsmpds
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ s, sucsat, bsw
+
+    call open_cases('soil_suction', nin, found)
+    if (.not. found) return
+    call open_output('soil_suction', nout)
+    c = this%column%c
+    i = 0
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       this%column%soilstate_inst%sucsat_col(c,level) = sucsat
+       this%column%soilstate_inst%bsw_col(c,level) = bsw
+       call this%column%retention_curve%soil_suction(c, level, s, &
+            this%column%soilstate_inst, smp, dsmpds)
+       call begin_case(nout, i)
+       call put(nout, 'smp', smp)
+       call put(nout, 'dsmpds', dsmpds)
+    end do
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_soil_suction
+
+end module test_retention_curve

@@ -1,9 +1,9 @@
 # Phase 10 scope: predicted soil water
 
-Status (2026-11-24, branch `phase10/soil_water`): **10.1 and 10.1b done; the harness
-feasibility probe of 10.2 done; nothing of the soil water physics translated yet. Next: build
-the harness in the repository and the retention curve as a warm-up, then stop for the
-maintainer.** Start with "Resume here" below. This document is deleted when the phase closes;
+Status (2026-11-24, branch `phase10/soil_water`): **10.1, 10.1b and 10.2 done: the Fortran
+harness is in the repository and the retention curve (the warm-up) is translated and matches
+CLM's Fortran. Stopped for the maintainer before the solver (10.3).** Start with "Resume
+here" below. This document is deleted when the phase closes;
 what is decided moves to `decisions.md`, what stays open to `open_items.md` (open item O64).
 
 ## Resume here
@@ -39,7 +39,13 @@ In the repository (all committed and pushed):
 - Code of 10.1b: `setup.soil.texture_profile` (CTSM's mapping of surface-data layers to soil
   levels), `domain.yaml` `texture: {given_as: layers}`, `run.yaml` `forcing.co2`. Defaults
   unchanged; CHATS bit for bit.
-- No soil water physics, no harness, no golden data for soil water yet.
+- The harness, `tests/fortran_validation/ctsm_harness/` (decision 140; its README has the
+  procedure): `build.py`, `generate_golden.py`, the column set-up and the drivers.
+- The retention curve: `processes/soil_water.py` (`soil_hk`, `soil_suction`), golden data of
+  312 and 318 cases (300 random, the rest edge values), adapters in `test_golden_jax.py`,
+  unit tests of the derivatives in `tests/clm_ml/test_processes_soil_water.py`. JAX equals
+  the Fortran in every digit on all 630 cases (the test's tolerance is 1e-9).
+- Nothing else of the soil water physics yet; nothing in the time step.
 
 Outside the repository (Derecho):
 
@@ -49,9 +55,10 @@ Outside the repository (Derecho):
 - `/glade/work/linnia/phase10_us_mms/us_mms_2012/` and `us_mms_2012_clmsoil/`: two CLM-ML
   baseline runs (the first with the top-level texture and 383 ppm, the second with CLM's
   soil and CO₂; the second is not analysed yet).
-- `/glade/work/linnia/phase10_us_mms/harness_probe/`: the probe's files and a README with
-  the commands to rebuild it (its build was in scratch,
-  `/glade/derecho/scratch/linnia/phase10_harness_probe`, which may be purged).
+- `/glade/work/linnia/phase10_us_mms/harness_probe/`: the probe's files (superseded by the
+  harness in the repository).
+- `/glade/derecho/scratch/linnia/ctsm_harness/`: the harness's copy of CTSM's `src/` and
+  its build (scratch: remade by `build.py` if purged, a few minutes).
 
 ### What the probe established (details in 6.1)
 
@@ -64,22 +71,11 @@ calling the runoff, pond and drainage routines (they compile).
 
 ### Next steps, in order
 
-1. **Build the harness in the repository**, `tests/fortran_validation/ctsm_harness/`
-   (section 6.1), from the probe:
-   - a script that makes the scratch copy of CTSM's `src/`, applies the changes (source
-     lists, the `controlMod` stand-in, the visibility patch) and **checks by `diff` that
-     nothing but visibility differs from `ctsm5.4.004`**, then builds with CIME's
-     `run_tests.py` through `qcmd` (account P93300041);
-   - a set-up module for the one column (the 20-level structure, allocation of the fields
-     the routines read, the namelist of 3.1, the parameters of `ctsm60_params.c251211.nc`);
-   - driver tests that read cases from a file and write `name=value` outputs with 17
-     significant digits; `generate_golden.py` that writes the cases, runs the drivers and
-     writes the golden JSON in the layout of the existing files.
-2. **Warm-up, the retention curve:** a few hundred random cases plus edge values of
-   `soil_hk` and `soil_suction`; the JAX functions in `processes/soil_water.py`; adapters in
-   `tests/fortran_validation/test_golden_jax.py` (rtol 1e-9). Then the usual tiers (fast
-   tests after each edit; bit for bit and noise twin before the commit).
+1. ~~Build the harness in the repository.~~ Done (decision 140).
+2. ~~Warm-up, the retention curve.~~ Done.
 3. **Stop: show the maintainer the harness and the first golden tests** before the solver.
+   To settle then: the scenario list of the sweeps, frozen cases, and the step lengths
+   (the first three open choices below).
 4. **10.3, the Richards solver end to end:** golden sweeps of a whole `SoilWater` call
    (including the number of sub-steps), the translation (hydraulic properties, fluxes, the
    adaptive solver as a fixed-count loop, section 5.1), one-step-ahead sequences (6.3), a
@@ -114,10 +110,20 @@ calling the runoff, pond and drainage routines (they compile).
   the tests' printed output is in
   `<build>/__command_line_test__/__command_line_test__/Testing/Temporary/LastTest.log`.
 - The `ctsm5.4.004` checkout is never modified; harness builds work on a copy of `src/`.
+- The harness's test can be rebuilt and run on a login node without a batch job, for
+  debugging: `source <work>/build/.env_mach_specific.sh`, then `make ctsm_harness` in
+  `<work>/build/__command_line_test__/__command_line_test__` and run
+  `clm_biogeophys_test/ctsm_harness_test/ctsm_harness`. `gdb` fails on this build (an
+  internal error on Fortran types): trace with `write` statements.
+- The private solver routines are already made public by the harness's build (they
+  compile; not yet called). The golden test's absolute guard (1e-15) passes any value
+  smaller than that, such as the conductivity of very dry clay: compare such outputs in
+  relative terms when judging agreement.
 - Found in `ctsm5.4.004`: the PLUMBER2 user mods' forcing-stream settings are ignored (the
   stream is named `PLUMBER2.US-MMS`); `QCHARGE` is not a history field in this
   configuration; `unittestFilterBuilderMod::filter_from_range` gave a wrong count in the
-  probe (a one-column filter is set by hand).
+  probe (the likely cause was found later: the retention-curve constructor overwriting
+  memory, decision 140).
 - Sections 1-5 below are the assessment of CLM's code and of differentiability; 6 the
   testing; 7 the order of work; 8 the choices; 9 the risks. Section 7.1 is the record of
   the US-MMS set-up (done).

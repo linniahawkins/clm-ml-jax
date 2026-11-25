@@ -1030,8 +1030,10 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
   (plan 6.1, 6.3; choice 13 of section 8 open).
 - **Now (end of 2026-11-24):** 10.1, 10.1b and the harness feasibility probe done; no soil
   water physics yet.
-- **Next:** "Resume here" at the top of the plan: the harness in the repository and the
-  retention curve as a warm-up, then stop for the maintainer.
+- **Now (10.2, 2026-11-24):** the Fortran harness is in the repository (decision 140) and
+  the retention curve is translated and equals CLM's Fortran on 630 cases.
+- **Next:** "Resume here" at the top of the plan: the maintainer's look at the harness and
+  the sweep choices, then the Richards solver (10.3).
 
 ---
 

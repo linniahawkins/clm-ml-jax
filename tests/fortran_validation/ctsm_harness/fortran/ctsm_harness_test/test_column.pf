@@ -1,0 +1,92 @@
+module test_column
+
+  ! Checks of the harness's column itself (no golden data): CLM's water table routine and
+  ! Richards solver run on it, and the solver conserves water.
+
+  use funit
+  use shr_kind_mod, only : r8 => shr_kind_r8
+  use unittestSubgridMod, only : bounds
+  use clm_varcon, only : denh2o
+  use ColumnType, only : col
+  use SoilWaterMovementMod, only : SoilWater
+  use SoilHydrologyMod, only : ThetaBasedWaterTable
+  use HarnessColumnMod, only : harness_column_type, harness_column_setup, &
+       harness_column_teardown, harness_nlevsoi
+
+  implicit none
+
+  @TestCase
+  type, extends(TestCase) :: TestColumn
+     type(harness_column_type) :: column
+   contains
+     procedure :: setUp
+     procedure :: tearDown
+  end type TestColumn
+
+contains
+
+  subroutine setUp(this)
+    class(TestColumn), intent(inout) :: this
+    call harness_column_setup(this%column, dtime=1800, nbedrock=harness_nlevsoi)
+  end subroutine setUp
+
+  subroutine tearDown(this)
+    class(TestColumn), intent(inout) :: this
+    call harness_column_teardown(this%column)
+  end subroutine tearDown
+
+  @Test
+  subroutine water_table_lies_at_the_saturated_levels(this)
+    ! Levels 15-20 saturated under drier soil: the water table is interpolated between the
+    ! node depths of levels 14 and 15.
+    class(TestColumn), intent(inout) :: this
+    integer :: c, j
+
+    c = this%column%c
+    associate(wsb => this%column%water_inst%waterstatebulk_inst)
+    do j = 1, harness_nlevsoi
+       wsb%h2osoi_vol_col(c,j) = merge(0.45_r8, 0.25_r8, j >= 15)
+       wsb%h2osoi_liq_col(c,j) = wsb%h2osoi_vol_col(c,j)*col%dz(c,j)*denh2o
+       wsb%h2osoi_ice_col(c,j) = 0._r8
+    end do
+    call ThetaBasedWaterTable(bounds, this%column%num_hydrologyc, &
+         this%column%filter_hydrologyc, this%column%num_urbanc, this%column%filter_urbanc, &
+         this%column%soilhydrology_inst, this%column%soilstate_inst, wsb, &
+         this%column%water_inst%waterfluxbulk_inst)
+    end associate
+    @assertTrue(this%column%soilhydrology_inst%zwt_col(c) > col%z(c,14))
+    @assertTrue(this%column%soilhydrology_inst%zwt_col(c) < col%z(c,15))
+  end subroutine water_table_lies_at_the_saturated_levels
+
+  @Test
+  subroutine richards_solver_conserves_water(this)
+    ! 72 mm/h onto wet levels over dry soil, with root uptake: several sub-steps.
+    class(TestColumn), intent(inout) :: this
+    integer :: c, j
+    real(r8) :: before, after, infl, sink
+
+    c = this%column%c
+    associate(wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst)
+    do j = 1, harness_nlevsoi
+       wsb%h2osoi_liq_col(c,j) = merge(0.44_r8, 0.06_r8, j <= 4)*col%dz(c,j)*denh2o
+       wsb%h2osoi_ice_col(c,j) = 0._r8
+       wfb%qflx_rootsoi_col(c,j) = 0._r8
+    end do
+    wfb%qflx_rootsoi_col(c,3:8) = 1.e-5_r8
+    infl = 2.e-2_r8
+    wfb%qflx_infl_col(c) = infl
+    sink = sum(wfb%qflx_rootsoi_col(c,1:harness_nlevsoi))
+    before = sum(wsb%h2osoi_liq_col(c,1:harness_nlevsoi))
+    call SoilWater(bounds, this%column%num_hydrologyc, this%column%filter_hydrologyc, &
+         this%column%num_urbanc, this%column%filter_urbanc, this%column%soilhydrology_inst, &
+         this%column%soilstate_inst, wfb, wsb, this%column%temperature_inst, &
+         this%column%canopystate_inst, this%column%energyflux_inst, &
+         this%column%retention_curve)
+    after = sum(wsb%h2osoi_liq_col(c,1:harness_nlevsoi))
+    @assertEqual((infl - sink)*1800._r8, after - before, tolerance=1.e-9_r8)
+    @assertTrue(this%column%soilhydrology_inst%num_substeps_col(c) > 1._r8)
+    end associate
+  end subroutine richards_solver_conserves_water
+
+end module test_column
