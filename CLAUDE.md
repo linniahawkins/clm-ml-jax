@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 146.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 147.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:
@@ -47,7 +47,7 @@ Guidance for Claude (and other contributors) working in this repository.
   `main`). No release or version tag yet. Open work: `docs/design/open_items.md`.
 - **Phase 10, predicted soil water** (branch `phase10/soil_water`, started 2026-11-24; O64):
   a code translation of CLM's soil water (`ctsm5.4.004`), judged by agreement with CLM's
-  Fortran on idealized sweeps, not by observations (decisions 131-145). Done: US-MMS set up
+  Fortran on idealized sweeps, not by observations (decisions 131-146). Done: US-MMS set up
   (`experiments/us_mms_2012/`), CLM's soil texture per level and CO₂ as tower options, the
   Fortran test harness on CTSM's unit-test framework (`tests/fortran_validation/ctsm_harness/`,
   decision 140), and every routine of the first version, equal to CLM's Fortran: the
@@ -57,9 +57,10 @@ Guidance for Claude (and other contributors) working in this repository.
   Fortran through 14 sequences of 160 steps to 3e-11 (decision 144). In the model as the
   option `model.yaml` `soil.water: predicted` (10.6 in progress, decision 145; the default
   `prescribed` is bit for bit unchanged). **Resume from "Resume here" at the top of
-  `docs/design/soil_water_plan.md`:** stopped for the maintainer on open item O89 (the
-  canopy's interception counts unused layer slots: wrong throughfall in rain), which blocks
-  predicted soil water through rain. CPU jobs on P93300041.
+  `docs/design/soil_water_plan.md`:** the canopy's interception counted unused layer
+  slots (wrong throughfall in rain; corrected, decision 146), and predicted soil water now
+  runs through rain; left of 10.6 are a grid run, the user documentation and all of
+  `tests/regression`. CPU jobs on P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.

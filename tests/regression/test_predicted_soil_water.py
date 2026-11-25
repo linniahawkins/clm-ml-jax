@@ -5,11 +5,10 @@ Predicted soil water end to end (model.yaml ``soil.water: predicted``) at CHATS.
   step's fluxes are those of the regression reference (to round-off).
 - The soil water balance closes at every step, and the change of the stored water from one
   step to the next is the step's infiltration less root uptake and drainage.
-- A run resumed from a restart written after the first day gives the same results, bit for
-  bit, as the uninterrupted run: the soil water, the pond and the water table are in the
-  restart. (Expected to fail for now: it rains on the second day, and the canopy's
-  interception gives a wrong throughfall when the canopy has unused layer slots; the test
-  passes when that is corrected.)
+- A two-day run with rain on the second day (3 mm; the canopy has unused layer slots)
+  keeps the water balance closed, and resumed from the restart written after its first
+  day it gives the same results, bit for bit: the soil water, the pond and the water table
+  are in the restart.
 - Without the tower's largest saturated fraction and slope the run refuses to start.
 
 (CHATS is an irrigated orchard: the runs test the code, not the site's water.)
@@ -97,19 +96,32 @@ def test_predicted_soil_water_one_day(tmp_path):
     assert np.all((full["soil_water_substeps"] >= 1) & (full["soil_water_substeps"] <= 64))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="rain on the second day: canopy interception counts unused layer slots (O89)",
-)
-def test_resumed_from_a_restart_equals_the_uninterrupted_run(tmp_path):
-    full = _experiment(tmp_path / "full", "2 days").execute(quiet=True)["step"].data
-    first = _experiment(tmp_path / "first_day", "1 day")
-    first.execute(quiet=True)
-    resumed = _experiment(tmp_path / "resumed", "2 days", restart=first.restart_path)
-    second = resumed.execute(quiet=True)["step"].data
+def test_resumed_from_a_restart_equals_the_uninterrupted_run(tmp_path, monkeypatch):
+    from clm_ml import driver
+
+    # a restart after every chunk: the one after the first day is kept as ``.prev``
+    uninterrupted = _experiment(tmp_path / "full", "2 days")
+    with monkeypatch.context() as patch:
+        patch.setattr(driver, "restart_boundary", lambda start, end, every: True)
+        full = uninterrupted.execute(quiet=True)["step"].data
+    after_first_day = Path(str(uninterrupted.restart_path) + ".prev")
+    assert after_first_day.exists()
+
+    # rain reaches the ground on the second day, and the balance stays closed
+    assert np.all(full["ground_water_input"][:48] == 0.0)
+    rain = full["ground_water_input"][48:].sum() * 1800.0
+    assert 2.0 < rain < 4.0  # mm
     assert np.max(np.abs(full["soil_water_balance_error"])) < 1e-9
     for name in VARIABLES:
-        np.testing.assert_array_equal(second[name], full[name][-48:], err_msg=name)
+        assert np.all(np.isfinite(full[name])), name
+
+    # the resumed run completes the record of the first day's last step (still pending
+    # when the restart was written), then gives the second day
+    resumed = _experiment(tmp_path / "resumed", "2 days", restart=after_first_day)
+    second = resumed.execute(quiet=True)["step"].data
+    for name in VARIABLES:
+        assert second[name].shape[0] == 49
+        np.testing.assert_array_equal(second[name], full[name][-49:], err_msg=name)
 
 
 def test_predicted_soil_water_needs_the_runoff_inputs(tmp_path):

@@ -78,6 +78,7 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O78 | XLA aborts while writing the compilation cache when a second gradient test file compiles in one process | robustness (upstream JAX?) | after 8 | I |
 | O79 | ~~NaN parameter gradients where leaf water potential is positive (dew): `(psi_l/psi50)^shape_gs`~~ (closed: decision 121) | science issue (differentiability) | closed | M |
 | O77 | ~~Two-stream `avmu` wrong for PFTs with a negative leaf angle index (grasses, crops)~~ (closed: decision 120) | science issue (bug) | closed | M |
+| O90 | A run continued from the end-of-run restart of a shorter run differs from the uninterrupted run: the last step of a run repeats its own forcing as the next one (found in Phase 10.6) | behaviour to decide | after Phase 10 | M |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
@@ -805,6 +806,24 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 - **When:** if the accuracy of the rules (about 10 % on monthly means, a third of the
   daily means more than 5 % off where stability flips often) limits an experiment.
 - **Source:** `gradient_progress.md` round 17; maintainer, 2026-11-16.
+
+### O90. Continuing a run from its end-of-run restart does not reproduce the longer run
+- **Kind:** behaviour to decide · **Target:** after Phase 10 · **Decides:** M
+- **What:** the forcing within a step is interpolated between the step before, the step
+  and the step after. At the last step of a run there is no step after, so its own
+  forcing is repeated (`forcing.chunk_run_steps`; Fortran: `itim_next = min(itim+1, ntim)`).
+  The last step of a 1-day run therefore differs from step 48 of a 2-day run, and a run
+  continued from the 1-day run's end-of-run restart differs from the uninterrupted 2-day
+  run from there on. Restarts written during a run (at month or year boundaries) are not
+  affected: resuming from them is bit for bit (`tests/regression/test_restart.py`,
+  `test_predicted_soil_water.py`).
+- **Measured (2026-11-25, CHATS, prescribed soil water):** latent heat flux of step 48
+  191.06 W m⁻² in the 1-day run, 195.28 in the 2-day run; the continued run differs by up
+  to 4.3 W m⁻² on the second day. Predicted soil water gives the same differences.
+- **Options:** leave it (it is Fortran's rule, and a run meant to be continued can be
+  one run with restarts); or read the next forcing record at a run's last step when the
+  file has one, which changes the last step of every run (the regression reference too).
+- **Source:** Phase 10 step 10.6, the restart test of predicted soil water, 2026-11-25.
 
 ## 4. Housekeeping and repository organization (8a)
 
