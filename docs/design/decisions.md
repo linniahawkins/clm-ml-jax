@@ -668,6 +668,26 @@ in `experiments/us_mms_2012/README.md`.
   top layer (0.999896), as on `main` (0.999854): open item O91.
 Source: plan 6.4.
 
+**149. The middle of a step where the calendar day starts again**
+2026-11-25 · Phase 10 (10.8; O92) · maintainer · in force · Departure from Fortran: yes
+`step.interpolation_days` takes a step's middle (the time of its forcing record in the
+three-point interpolation) as the mean of the calendar days at its start and end, as
+CLM-ml v2. Where the end's calendar day is below the start's, the end is now the start
+plus a step. This happens at the step ending at 0Z 1 January (365.96 and 1.0: the middle
+was day 183.5, and the forcing was extrapolated by 4 380 hourly steps, air at 70 K), and
+at the first step of 31 December of a Gregorian leap year (CLM's calendar day falls from
+366.0 to 365.04 there: the middle was half a day early, the forcing extrapolated by 12
+steps; this one did not stop a run).
+Reason: no run could continue past a new year (tower or grid, prescribed or predicted soil
+water). Fortran CLM-ml has the formula but its runs do not cross a year.
+Results: every other step bit for bit (the regression reference is unchanged). US-MMS
+December 2010 to January 2011 runs with prescribed and with predicted soil water (it
+stopped before).
+Tests: `tests/clm_ml/test_step.py` (the step's middle through both dates),
+`tests/regression/test_new_year.py` (CHATS7 with its data dated from 31 December, beside
+the run at its own dates; it stops in the two-stream radiation check without the change).
+Source: maintainer, 2026-11-25; open item O92.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

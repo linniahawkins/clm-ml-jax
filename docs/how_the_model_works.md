@@ -285,6 +285,11 @@ What differs is mostly how the code is written. The few science departures are l
   any exchange between soil columns. Its results are not CLM's soil moisture: the canopy
   that dries the soil is a different one. It needs two more inputs per tower (see
   [Your own tower](your_own_tower.md)); grids read them from the surface data.
+- **Runs across a new year**: the time of a step's forcing record is the middle of the
+  step. Fortran takes it as the mean of the calendar days at the step's start and end,
+  which is half a year off in the step that ends at midnight of 1 January (the calendar
+  day starts again at 1); here that step's end is its start plus a step. Every other step
+  is unchanged. Fortran's runs do not cross a year.
 - **Not available** (refused with an error): Norman shortwave
   radiation, the well-mixed canopy air, profiles read from a dataset, and the Brent solver
   for stomatal conductance.

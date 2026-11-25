@@ -80,7 +80,7 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O77 | ~~Two-stream `avmu` wrong for PFTs with a negative leaf angle index (grasses, crops)~~ (closed: decision 120) | science issue (bug) | closed | M |
 | O90 | A run continued from the end-of-run restart of a shorter run differs from the uninterrupted run: the last step of a run repeats its own forcing as the next one (found in Phase 10.6) | behaviour to decide | after Phase 10 | M |
 | O91 | The comparison with Fortran over May 2007 fails in one column: leaf water potential of the top layer, correlation 0.999896 (as on `main`; found in Phase 10.8) | bug or known difference, not diagnosed | after Phase 10 | M |
-| O92 | A run stops at the first 31 December: the step that ends at midnight of 1 January takes its middle from the calendar days 365.96 and 1.0 (found in Phase 10.8) | bug | before any run across a new year | M |
+| O92 | ~~A run stops at the first 31 December: the step that ends at midnight of 1 January takes its middle from the calendar days 365.96 and 1.0 (found in Phase 10.8)~~ (closed 2026-11-25: decision 149) | bug | closed | M |
 | O93 | US-MMS 2012: CLM-ML's transpiration hardly falls in the drought (soil water stress stays 1) and dries the soil 54 mm more than CLM (found in Phase 10.8) | science question | after Phase 10 | M |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
@@ -848,6 +848,11 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 - **Source:** Phase 10 step 10.8, 2026-11-25.
 
 ### O92. A run stops at the first 31 December
+- **Closed 2026-11-25** (decision 149): where the calendar day at a step's end is below the
+  one at its start, the end is the start plus a step. This also corrects the first step of
+  31 December of a leap year (the Gregorian calendar day falls from 366.0 to 365.04; the
+  forcing of that one step was extrapolated by 12 steps), not seen when this was written.
+  The text below is the diagnosis as written.
 - **Kind:** bug · **Target:** before any run across a new year · **Decides:** M
 - **What:** the forcing within a step is interpolated in time around the step's middle,
   taken as the mean of the calendar days at the step's start and end

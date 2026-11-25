@@ -182,7 +182,13 @@ def interpolation_days(calday, calday_beg, options: StepOptions) -> tuple:
     days = options.step_seconds / 86400.0
     if options.substep.interpolation == "none":
         return 0.0, 0.0, 0.0
-    cur = 0.5 * (calday + calday_beg)
+    # The calendar day at the end of a step is below the day at its start where the calendar
+    # day starts again (a step ending at 0Z 1 January; after 0Z 31 December of a Gregorian
+    # leap year): the step's end is then its start plus a step.
+    # Differs from CLM-ml v2: its mean of the two calendar days puts such a step's middle
+    # half a year (or half a day) away from its sub-steps.
+    end = jnp.where(calday < calday_beg, calday_beg + days, calday)
+    cur = 0.5 * (end + calday_beg)
     return cur - days, cur, cur + days
 
 
