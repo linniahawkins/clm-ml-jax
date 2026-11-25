@@ -42,6 +42,14 @@ class SoilResistance(NamedTuple):
     psis: Array  # () weighted soil water potential, MPa
     rsoil: Array  # () soil hydraulic resistance, MPa s m2/mmol H2O
     soil_et_loss: Array  # (soil_level,) fraction of the transpiration from each level
+    #: (soil_level,) water each level gives to the roots without transpiration, mmol H2O/m2
+    #: ground/s (negative: the roots release water into the level); sums to 0. Zero with
+    #: the weighting ``"supply"``.
+    redistribution: Array
+
+
+#: How the soil levels are combined into the soil water potential the canopy sees
+SOIL_WEIGHTING = ("supply", "conductance")
 
 
 def soil_resistance(
@@ -56,6 +64,7 @@ def soil_resistance(
     root_radius,
     root_density,
     root_resistivity,
+    weighting: str = "supply",
 ) -> SoilResistance:
     """Soil-to-root and root-to-stem resistance of the soil levels above bedrock (soil level
     ``k`` is used if ``k < n_bedrock``), their sum as a whole-canopy resistance, and the soil
@@ -64,12 +73,27 @@ def soil_resistance(
     (mm), thickness ``dz`` (m), root fraction ``rootfr``, ice ``h2osoi_ice`` (frozen levels
     give no water).
 
+    ``weighting`` (one of :data:`SOIL_WEIGHTING`): ``"supply"`` is CLM-ml v2, the levels
+    weighted by the most each can supply (a level at the minimum leaf water potential
+    counts for nothing). ``"conductance"`` weights them by their soil-to-stem conductance
+    ``k`` (the inverse of the level's resistance): the soil water potential is the roots'
+    water potential when nothing is transpired, ``sum(k psi) / sum(k)``, as in CLM's plant
+    hydraulics; each level gives ``k / sum(k)`` of the transpiration plus the
+    ``redistribution`` ``k (psi - psis)``, by which the roots move water from wetter to
+    drier levels. Not in CLM-ml v2: the weighting ``"conductance"``. Differs from CLM in
+    the resistances (CLM-ml's, eqs. A23-A24, with the top level included) and in leaving
+    out the gravitational potential of the levels.
+
     Fortran reference: MLPlantHydraulicsMod.F90::SoilResistance (Bonan et al. 2014,
-    eqs. A23-A28).
+    eqs. A23-A28); with ``"conductance"`` PhotosynthesisMod.F90::getvegwp (the root water
+    potential) and SoilWaterPlantSinkMod.F90::Compute_EffecRootFrac_And_VertTranSink_HydStress
+    (the uptake of each level), CTSM 5.4.
     Reads: ``hk_l_col``, ``smp_l_col``, ``dz_col``, ``rootfr_patch``, ``h2osoi_ice_col``,
     ``nbedrock_col``, ``lai_canopy``, ``root_biomass_canopy``, the PFT's root parameters.
     Writes: ``psis_soil``, ``rsoil_soil``, ``soil_et_loss_soil``.
     """
+    if weighting not in SOIL_WEIGHTING:
+        raise ValueError(f"soil_resistance: weighting {weighting!r} not one of {SOIL_WEIGHTING}")
     active = jnp.arange(hk.shape[0]) < n_bedrock
     root_cross_sec_area = rpi * root_radius * root_radius
 
@@ -108,7 +132,46 @@ def soil_resistance(
     n_layers_safe = jnp.maximum(jnp.asarray(n_bedrock).astype(jnp.float64), 1.0)
     uniform = jnp.where(active, 1.0 / n_layers_safe, 0.0)
     soil_et_loss = jnp.where(totevap > 0.0, evap / totevap_safe, uniform)
-    return SoilResistance(psis=psis, rsoil=rsoil, soil_et_loss=soil_et_loss)
+    if weighting == "supply":
+        return SoilResistance(
+            psis=psis, rsoil=rsoil, soil_et_loss=soil_et_loss, redistribution=jnp.zeros_like(evap)
+        )
+
+    # Weighted by conductance: the roots' water potential without transpiration, the share
+    # of each level in the transpiration, and the water the roots move between the levels.
+    # With no conductance at all (every level frozen), as above with no uptake.
+    cond = jnp.where(active & ~(h2osoi_ice > 0.0), 1.0 / soilr_safe, 0.0)
+    total = jnp.sum(cond)
+    total_safe = jnp.maximum(total, 1.0e-30)
+    smp_used = jnp.where(active, smp_mpa, 0.0)
+    psis = jnp.where(total > 0.0, jnp.sum(smp_used * cond) / total_safe, MINLWP_SPA)
+    soil_et_loss = jnp.where(total > 0.0, cond / total_safe, uniform)
+    redistribution = cond * (smp_used - psis)
+    return SoilResistance(
+        psis=psis, rsoil=rsoil, soil_et_loss=soil_et_loss, redistribution=redistribution
+    )
+
+
+def root_water_uptake(soil_et_loss: Array, redistribution: Array, transpiration, redistribute):
+    """Water the roots take from each soil level (soil_level,), in the units of
+    ``transpiration`` and ``redistribution``: the level's fraction of the transpiration
+    plus the water the roots move between the levels (:func:`soil_resistance`), which is
+    ``k (psi - psi_root)`` with the roots' water potential under transpiration. A negative
+    value is water released into the level. With ``redistribute`` false no level receives
+    water: the levels that would are left out, and the others give the transpiration in
+    the proportions they had. The sum is the transpiration.
+
+    Fortran reference: SoilWaterPlantSinkMod.F90::
+    Compute_EffecRootFrac_And_VertTranSink_HydStress (CTSM 5.4). Not in CLM: the uptake
+    without redistribution.
+    """
+    shares = soil_et_loss * transpiration
+    uptake = shares + redistribution
+    if redistribute:
+        return uptake
+    giving = jnp.maximum(uptake, 0.0)
+    total = jnp.sum(giving)
+    return jnp.where(total > 0.0, giving * (transpiration / jnp.maximum(total, 1.0e-30)), shares)
 
 
 def leaf_water_potential(

@@ -72,8 +72,9 @@ def test_predicted_soil_water_one_day(tmp_path):
     for name in VARIABLES:
         assert np.all(np.isfinite(full[name])), name
 
-    # the first step is the prescribed run's: the same soil water (to round-off: the state
-    # holds it in kg m-2, the forcing gives it by volume) and so the same fluxes
+    # the first step has the prescribed run's soil water (to round-off: the state holds it
+    # in kg m-2, the forcing gives it by volume). Its fluxes are close, not equal: with
+    # predicted soil water the canopy sees the soil levels weighted by their conductance
     with np.load(REFERENCE) as reference:
         np.testing.assert_allclose(
             full["soil_water_content"][0, 0],
@@ -81,8 +82,9 @@ def test_predicted_soil_water_one_day(tmp_path):
             rtol=1e-14,
         )
         np.testing.assert_allclose(
-            full["latent_heat_flux"][0, 0], reference["diagnostics.lhflx_canopy"][0, 0], rtol=1e-9
+            full["latent_heat_flux"][0, 0], reference["diagnostics.lhflx_canopy"][0, 0], rtol=0.01
         )
+        assert full["latent_heat_flux"][0, 0] != reference["diagnostics.lhflx_canopy"][0, 0]
 
     # the water balance of every step, and of the stored water between steps (the soil
     # water written at a step is that of its beginning; no rain and no pond on this day)

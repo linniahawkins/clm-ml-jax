@@ -358,6 +358,16 @@ class SoilOptions:
         "soil.slope in domain.yaml (grids: FMAX and SLOPE of the surface data).",
         "Not in CLM-ml v2: CLM's soil hydrology (CTSM 5.4).",
     )
+    root_redistribution: bool = option(
+        True,
+        "With predicted soil water the canopy sees the soil levels weighted by their "
+        "soil-to-stem conductance (the roots' water potential, as in CLM's plant hydraulics; "
+        "with prescribed soil water: by what each level can supply, as CLM-ml v2). true: the "
+        "roots also move water from wetter to drier levels (hydraulic redistribution, as "
+        "CLM). false: no level receives water from the roots.",
+        "Not in CLM-ml v2.",
+        when={"water": "predicted"},
+    )
 
 
 @dataclasses.dataclass(frozen=True)

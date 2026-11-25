@@ -219,7 +219,8 @@ from the configuration).
       a fixed number of trials (`soil_water.soil_water_movement`), water table, dew,
       drainage (`drainage`)). Its inputs are the step means of the canopy: throughfall and
       drip of rain and snow, the ground's water-vapour flux (evaporation if positive, dew
-      if negative), and the transpiration times `soil_et_loss` of each level. Step 2 then
+      if negative), and `plant_hydraulics.root_water_uptake`: the transpiration times `soil_et_loss` of each
+      level plus the roots' redistribution between levels (`soil.root_redistribution`). Step 2 then
       takes the soil water from the state instead of the record, so the canopy of a step
       sees the water left by the step before (decisions.md 145).
    Returns `StepState(state, diagnostics)`.

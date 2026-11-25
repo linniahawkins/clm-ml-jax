@@ -378,6 +378,7 @@ def step_options(run):
             obliqr=float(obliqr),
             checkpoint_substeps=checkpoint_substeps(run.config.numerics.checkpoint_substeps),
             soil_water=run.config.soil.water,
+            root_redistribution=bool(run.config.soil.root_redistribution),
             richards_trials=(
                 max_richards_trials(run.step_seconds) if run.config.soil.water == "predicted" else 0
             ),

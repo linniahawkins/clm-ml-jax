@@ -40,7 +40,11 @@ from clm_ml.processes.constants import denh2o, mmh2o
 from clm_ml.processes.hydrology import soil_hydrology
 from clm_ml.processes.layers import keep
 from clm_ml.processes.leaf_heat_capacity import leaf_heat_capacity
-from clm_ml.processes.plant_hydraulics import plant_resistance, soil_resistance
+from clm_ml.processes.plant_hydraulics import (
+    plant_resistance,
+    root_water_uptake,
+    soil_resistance,
+)
 from clm_ml.processes.surface_runoff import microtopography, pond_threshold
 from clm_ml.state import CanopyState, Diagnostics, PatchLayers, SoilState, State, StepState
 
@@ -69,6 +73,9 @@ class StepOptions(NamedTuple):
     #: passes of the Richards solver's loop with predicted soil water: the largest number
     #: of trial sub-steps a model step can take (soil_water.max_richards_trials)
     richards_trials: int = 0
+    #: with predicted soil water, whether the roots move water from wetter to drier soil
+    #: levels (model.yaml soil.root_redistribution)
+    root_redistribution: bool = True
 
     @property
     def n_substeps(self) -> int:
@@ -335,6 +342,7 @@ def step(
     roots = soil_resistance(
         hk_l, smp_l, k.dz[:n_soil], k.rootfr, soil_level_ice(ice, n_soil), k.nbedrock, area.lai,
         k.root_biomass, params.root_radius, params.root_density, params.root_resistivity,
+        weighting="conductance" if predicted else "supply",
     )  # fmt: skip
     lsc = plant_resistance(dpai, roots.rsoil, params.plant_conductance)
     cpleaf = leaf_heat_capacity(dpai, params.sla_top)
@@ -419,8 +427,11 @@ def step(
     # Soil hydrology (predicted soil water): the step means of the canopy's fluxes move the
     # soil water. The ground's water vapour flux is evaporation from the soil and from the
     # pond alike when positive, dew on both when negative; snow reaching the ground enters
-    # as liquid water; the roots take the transpiration from the levels in the proportions
-    # of the plant hydraulics. Not in CLM-ml v2.
+    # as liquid water. Each level gives the roots its share of the transpiration plus the
+    # water the roots move between the levels (the start-of-step soil water potentials);
+    # without that redistribution no level receives water from the roots: the levels that
+    # would are left out and the others give the transpiration in the proportions they
+    # had. Not in CLM-ml v2.
     unset = _fill(zero)
     if predicted:
         hp = params.hydrology
@@ -428,10 +439,14 @@ def step(
         ground_evaporation = means.etsoi * mmh2o  # mol H2O m-2 s-1 -> mm s-1
         transpiration = totals.trveg * mmh2o
         ground_input = means.qflx_tflrain + means.qflx_tflsnow
+        root_uptake = root_water_uptake(
+            roots.soil_et_loss, roots.redistribution * (1.0e-3 * mmh2o), transpiration,
+            options.root_redistribution,
+        )  # fmt: skip
         hyd = soil_hydrology(
             liq[:n_soil], ice[:n_soil], state.soil.surface_water, state.soil.water_table_depth,
             ground_input, jnp.maximum(ground_evaporation, 0.0), ground_evaporation,
-            jnp.maximum(-ground_evaporation, 0.0), roots.soil_et_loss * transpiration,
+            jnp.maximum(-ground_evaporation, 0.0), root_uptake,
             k.watsat[:n_soil], k.hksat[:n_soil], k.sucsat[:n_soil], k.bsw[:n_soil],
             k.dz[:n_soil], k.z[:n_soil], jnp.concatenate([zero[None], k.zi[:n_soil]]),
             k.nbedrock, k.wtfact, micro_sigma, pond_threshold(micro_sigma, hp.pc),

@@ -696,6 +696,37 @@ Tests: `tests/clm_ml/test_step.py` (the step's middle through both dates),
 the run at its own dates; it stops in the two-stream radiation check without the change).
 Source: maintainer, 2026-11-25; open item O92.
 
+**150. With predicted soil water the canopy sees the soil by conductance; root redistribution is a switch**
+2026-11-25 · Phase 11 (O93) · maintainer · in force · Departure from Fortran: yes (predicted soil water only)
+With `soil.water: prescribed` the soil levels are combined as in CLM-ml v2 (Bonan et al.
+2014, eqs. A27-A28: weighted by what each level can still supply above −2 MPa), always.
+With `soil.water: predicted` they are weighted by their soil-to-stem conductance k
+(`plant_hydraulics.soil_resistance(weighting="conductance")`): the soil water potential
+is `sum(k psi) / sum(k)`, the roots' water potential without flow, as CLM's
+(`PhotosynthesisMod.F90::getvegwp`); each level gives `k / sum(k)` of the transpiration
+plus `k (psi - psis)`, which is CLM's uptake `k (psi - psi_root)`
+(`SoilWaterPlantSinkMod.F90`). `model.yaml` `soil.root_redistribution` (default true, as
+CLM): false leaves out the levels that would receive water and scales the others to the
+transpiration (`plant_hydraulics.root_water_uptake`; CLM has no such switch). The
+resistances stay CLM-ml's (eqs. A23-A25, the top level included, no gravitational term,
+no loss of conductance in drying xylem): not CLM's `k_soil_root`.
+Reason: at US-MMS in July 2012 the levels holding 71 % of the roots were at −1.7 to
+−2.0 MPa, and CLM-ml's weighting gave the canopy −0.53 MPa (the wet levels below 1 m): the
+stomata never closed (O93). The conductance weighting is also the potential that belongs
+to CLM-ml's own belowground resistance (levels as parallel resistors).
+Results (US-MMS, May-September 2012; latent heat June, July in W m⁻²; transpiration):
+CLM 96, 59, 382 mm; CLM-ml's weighting 109, 92, 447 mm; redistribution on 113, 81,
+430 mm; off 110, 70, 416 mm (a probe with the new potential and CLM-ml's uptake shares:
+104, 64, 405 mm). May, August and September change by less than 1 W m⁻² except August
+(97 to 91-92). Redistribution weakens the response: the roots bring water from below
+1 m into the root zone. The water balance closes as before (1.5e-12 mm per step).
+Prescribed runs are bit for bit unchanged.
+Tests: `tests/clm_ml/test_processes_canopy_water_hydraulics.py` (the weighting as
+parallel resistors, uniform soil, frozen levels, the switch, derivatives); the predicted
+soil water tests and their gradient tests pass unchanged except the statement that a
+predicted run's first step equals the prescribed run's (now within 1 %).
+Source: maintainer, 2026-11-25; open item O93.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

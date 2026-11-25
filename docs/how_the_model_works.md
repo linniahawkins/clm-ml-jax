@@ -278,8 +278,13 @@ What differs is mostly how the code is written. The few science departures are l
   Fortran: runoff from the saturated fraction of the surface, infiltration, ponded surface
   water, the Richards equation with CLM's adaptive sub-steps, the water table, and
   drainage. The canopy model gives it the rain reaching the ground (throughfall and
-  drip), the evaporation or dew at the ground and the transpiration, taken from each soil
-  level in the proportions of the plant hydraulics. It starts from the soil water a
+  drip), the evaporation or dew at the ground and the transpiration. With predicted
+  soil water the canopy sees the soil levels weighted by their soil-to-stem conductance
+  (the water potential of the roots, as in CLM's plant hydraulics), not by what each
+  level can still supply as in CLM-ml v2: dry levels with many roots then count, and the
+  stomata close in a drought. Each level gives its share of the transpiration, and the
+  roots also move water from wetter to drier levels (`soil.root_redistribution`, on by
+  default; off: no level receives water from the roots). It starts from the soil water a
   prescribed run has at its first step, or from a restart. What it does not have: snow
   and frozen soil water (snowfall enters the soil as liquid at once), irrigation, and
   any exchange between soil columns. Its results are not CLM's soil moisture: the canopy
