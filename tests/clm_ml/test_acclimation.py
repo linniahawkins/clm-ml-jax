@@ -14,7 +14,7 @@ def _state(mean, steps):
     """One patch's state (scalars per patch; profiles of 2 layers, unused here)."""
     z, leaf = jnp.zeros(2), jnp.zeros((2, 2))
     canopy = CanopyState(z, z, z, leaf, leaf, z, jnp.array(0.0), jnp.array(mean), jnp.array(steps))
-    return State(canopy=canopy, soil=SoilState(temperature=z))
+    return State(canopy=canopy, soil=SoilState(z, z, jnp.array(0.0), jnp.array(0.0)))
 
 
 def _run(days, mode="running_mean"):

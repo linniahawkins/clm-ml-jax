@@ -72,6 +72,7 @@ def _import_jax_modules():
         "clm_ml.state",
         "clm_ml.processes.constants",
         "clm_ml.processes.orbit",
+        "clm_ml.processes.soil_water",
     ]:
         mods[name] = importlib.import_module(name)
     return mods
@@ -389,6 +390,23 @@ def _adapt_shr_orb_decl(inp: dict) -> dict:
     }
 
 
+# CLM's soil water routines (CTSM ctsm5.4.004), golden data from the harness in ctsm_harness/.
+
+
+def _adapt_soil_hk(inp: dict) -> dict:
+    hk, dhkds = _get("clm_ml.processes.soil_water").soil_hk(
+        inp["s"], inp["imped"], inp["hksat"], inp["bsw"]
+    )
+    return {"hk": float(hk), "dhkds": float(dhkds)}
+
+
+def _adapt_soil_suction(inp: dict) -> dict:
+    smp, dsmpds = _get("clm_ml.processes.soil_water").soil_suction(
+        inp["s"], inp["sucsat"], inp["bsw"]
+    )
+    return {"smp": float(smp), "dsmpds": float(dsmpds)}
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher: maps executable name → adapter function
 # ---------------------------------------------------------------------------
@@ -420,6 +438,8 @@ ADAPTERS: dict[str, Callable[[dict], dict]] = {
     "test_MLCanopyNitrogenProfileMod_CanopyNitrogenProfile.exe": _adapt_canopy_nitrogen_profile,
     "test_shr_orb_mod_shr_orb_params.exe": _adapt_shr_orb_params,
     "test_shr_orb_mod_shr_orb_decl.exe": _adapt_shr_orb_decl,
+    "ctsm_harness:soil_hk": _adapt_soil_hk,
+    "ctsm_harness:soil_suction": _adapt_soil_suction,
 }
 
 

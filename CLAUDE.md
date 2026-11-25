@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 129.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 150.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:
@@ -45,6 +45,25 @@ Guidance for Claude (and other contributors) working in this repository.
   `phase9/docs`): a clean-up of comments and documents (decision 128) and a small
   documentation site for colleagues (decision 129; Sphinx in `docs/`, GitHub Pages from
   `main`). No release or version tag yet. Open work: `docs/design/open_items.md`.
+- **Phase 10, predicted soil water** (closed 2026-11-25, branch `phase10/soil_water`, not
+  merged yet; O64): a code translation of CLM's soil water (`ctsm5.4.004`), judged by
+  agreement with CLM's Fortran on idealized sweeps, not by observations (decisions
+  131-149). The option `model.yaml` `soil.water: predicted` (the default `prescribed` is
+  bit for bit unchanged): the Richards solver with CLM's adaptive sub-steps
+  (`processes/soil_water.py`), runoff and pond (`surface_runoff.py`), water table and
+  drainage (`drainage.py`), assembled in `hydrology.py::soil_hydrology`, each equal to
+  CLM's Fortran (golden data from the harness on CTSM's unit-test framework,
+  `tests/fortran_validation/ctsm_harness/`). Unfrozen and snow-free. Gradients match
+  finite differences; cost 1.03× on a CPU tower, 1.24× for 4 096 patches on an A100.
+  Coupled runs at US-MMS beside CLM (five years) and on the 1° globe:
+  decision 148 (the US-MMS experiment folder and its data are not in the repository:
+  commit `495442e` has them). Corrected on the way: canopy
+  interception counted unused layer slots (decision 146); a run stopped at the first 31
+  December (decision 149). The plan document is in git history
+  (`git show 0e8e907:docs/design/soil_water_plan.md`). Left open: O93 (CLM-ML barely
+  responds to the 2012 drought at US-MMS; under discussion), O91 (the May 2007 Fortran
+  comparison fails in one column, as on `main`), O90 (end-of-run restarts), and what the
+  predicted mode lacks (O64). CPU jobs on P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.
@@ -121,8 +140,10 @@ using Harman & Finnigan (2007, 2008).
   pressure, leaf temperature, leaf water potential, intercepted water and ground temperature;
   output averaged to the step. Wind minimum 0.5 m s⁻¹; within-layer aerodynamic resistance
   capped at 500 s m⁻¹. The model step is configurable (`numerics.step_seconds`).
-- **Soil.** Soil moisture is a **prescribed boundary condition**; soil temperature from a
-  heat-diffusion model specific to the multilayer canopy (CLM5 layer structure only).
+- **Soil.** Soil moisture is a **prescribed boundary condition** by default; soil
+  temperature from a heat-diffusion model specific to the multilayer canopy (CLM5 layer
+  structure only). Not in CLM-ml v2: `soil.water: predicted` moves the soil water with
+  CLM's soil hydrology (CTSM 5.4; unfrozen, snow-free).
 - **Acclimation temperature:** a 10-day running mean (differs from CLM-ml v2's whole-run
   mean, kept as an option for validation).
 
@@ -157,10 +178,12 @@ using Harman & Finnigan (2007, 2008).
 
 ```
 src/clm_ml/
-  processes/      the physics by process, pure functions on 0-based arrays (soil, atm_forcing,
-                  solar_radiation, longwave, turbulence, leaf_boundary_layer, photosynthesis,
-                  flux_profile, canopy_water, plant_hydraulics, nitrogen_profile, integrators,
-                  canopy (the sub-step), constants, orbit, math, layers)
+  processes/      the physics by process, pure functions on 0-based arrays (soil, soil_water,
+                  surface_runoff, drainage, hydrology,
+                  atm_forcing, solar_radiation, longwave, turbulence, leaf_boundary_layer,
+                  photosynthesis, flux_profile, canopy_water, plant_hydraulics,
+                  nitrogen_profile, integrators, canopy (the sub-step), constants, orbit,
+                  math, layers)
   step.py         one time step of one patch: State + StepInputs + PatchConstants -> StepState
   state.py        State (prognostic), Diagnostics (CLM-ml names, 0-based), PatchLayers
   setup/          every patch's constants and initial state (pure functions, no globals)

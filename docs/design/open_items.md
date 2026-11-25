@@ -45,6 +45,9 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O14 | Very short canopies (down to 5 mm) not filtered | science issue | after 8 | M |
 | O15 | Wet needleleaf canopies: large latent heat with CLM6's `dleaf` | science issue | after 8 | M |
 | O16 | CO₂ profile reset covers the wrong levels (no effect today) | science issue (latent) | after 8 | M |
+| O87 | ~~Tower runs use a fixed CO₂ of 383 ppm~~ (closed 2026-11-24: `forcing.co2`, decision 137) | science issue | closed | M |
+| O88 | One soil texture per column; CLM's soil varies with depth (towers: closed by decision 137; grids: open) | science issue | grids: after Phase 10 | M |
+| O89 | ~~Canopy interception counts unused layer slots: too little intercepted water per layer, wrong throughfall (found in Phase 10.6)~~ (closed 2026-11-25: decision 146) | science issue (bug) | closed | M |
 | **2. Other maintainer decisions pending** |||||
 | O17 | ~~Repository organization: where the real configuration files live~~ (closed: decisions 89, 90) | maintainer decision | closed | M |
 | O18 | Norman and well-mixed code in git history only (D8 said "kept") | maintainer decision | after 8 (maintainer 2026-11-01) | M |
@@ -75,6 +78,10 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O78 | XLA aborts while writing the compilation cache when a second gradient test file compiles in one process | robustness (upstream JAX?) | after 8 | I |
 | O79 | ~~NaN parameter gradients where leaf water potential is positive (dew): `(psi_l/psi50)^shape_gs`~~ (closed: decision 121) | science issue (differentiability) | closed | M |
 | O77 | ~~Two-stream `avmu` wrong for PFTs with a negative leaf angle index (grasses, crops)~~ (closed: decision 120) | science issue (bug) | closed | M |
+| O90 | A run continued from the end-of-run restart of a shorter run differs from the uninterrupted run: the last step of a run repeats its own forcing as the next one (found in Phase 10.6) | behaviour to decide | after Phase 10 | M |
+| O91 | The comparison with Fortran over May 2007 fails in one column: leaf water potential of the top layer, correlation 0.999896 (as on `main`; found in Phase 10.8) | bug or known difference, not diagnosed | after Phase 10 | M |
+| O92 | ~~A run stops at the first 31 December: the step that ends at midnight of 1 January takes its middle from the calendar days 365.96 and 1.0 (found in Phase 10.8)~~ (closed 2026-11-25: decision 149) | bug | closed | M |
+| O93 | US-MMS 2012: CLM-ML's transpiration hardly falls in the drought (soil water stress stays 1) and dries the soil 54 mm more than CLM (found in Phase 10.8) | science question | after Phase 10 | M |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
@@ -273,6 +280,85 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 - **Now:** kept through Phase 7 (0-based: layers 0…ncan−2, the top layer not reset;
   `src/clm_ml/processes/canopy.py:843`); fix with any change that makes `cair` vary.
 - **Source:** `numerics_and_regression.md` §4.5.
+
+### O87. Tower runs use a fixed CO₂ of 383 ppm
+- **Kind:** science issue · **Target:** Phase 10 (10.1 discussion) · **Decides:** M
+- **What:** `io/tower.py::TowerMetCO2` returns 383 ppm for every tower and year (as CLM-ml
+  v2's `TowerMetCO2`, written for CHATS 2007). At US-MMS in 2012 the CLM run (DATM CO₂ time
+  series) has about 394 ppm, so CLM-ML's photosynthesis and stomatal conductance there see
+  about 3 % less CO₂ than CLM's.
+- **Now:** as Fortran. A per-tower CO₂ (a `domain.yaml` value, or a CO₂ file as the grid
+  runs have) would be a small configuration change.
+- **Decided (2026-11-24, decision 136):** at US-MMS CLM-ML uses CLM's CO₂: the DATM CO₂ file
+  (one global value a year, linear in time, times the surface pressure; about 393 ppm in
+  mid-2012), as an option of tower runs; 383 ppm stays the default (CHATS, Fortran).
+- **Closed (2026-11-24):** `run.yaml` `forcing.co2` (decision 137); at US-MMS CLM's monthly
+  `PCO2` to single precision.
+- **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
+
+### O88. One soil texture per tower; CLM's soil varies with depth (US-MMS)
+- **Kind:** science issue · **Target:** Phase 10 (10.1 discussion) · **Decides:** M
+- **What:** a tower has one sand and clay percentage and one organic matter density for all
+  levels (CLM-ml v2's `TowerDataMod`). CLM's surface dataset at US-MMS has 31 % sand and 19 %
+  clay at the top, 40 % and 24 % at depth, and organic matter from 38 to 3 kg m⁻³. The
+  prescribed soil water comes from that CLM run, so CLM-ML reads CLM's water with other
+  hydraulic properties below the top levels; with predicted soil water the two models would
+  also move water through different soils. CLM-ml v2's own table gives US-MMS the class
+  "clay".
+- **Now:** the `us_mms` tower compset uses the surface dataset's top level (31 % sand, 19 %
+  clay, 37.9 kg m⁻³), as grid runs do (`grid.py`: the top level of `PCT_SAND`, `PCT_CLAY`,
+  `ORGANIC`). The alternatives are CLM-ml v2's "clay", or a texture per level for towers and
+  grids (a change of the soil set-up, which has one texture per column).
+- **Measured (2026-11-24):** CLM-ML's properties from the top level equal CLM's at the top
+  level only; below it porosity differs by up to 19 %, saturated suction by 34 %, `b` by 16 %
+  and saturated conductivity by 27 %: CLM maps each level to the surface dataset's layer at
+  its depth (sand, clay and organic matter), keeps organic matter below 0.5 m, and applies
+  the parameter file's `om_frac_sf`, `watsat_sf`, `bsw_sf`, `sucsat_sf` and `organic_max`.
+- **Decided (2026-11-24, decision 136):** at US-MMS CLM-ML uses CLM's soil: the properties
+  of every level as `ctsm5.4.004` `SoilStateInitTimeConst` computes them from the surface
+  dataset, as an option; CLM-ml v2's single texture stays the default (CHATS, Fortran).
+- **Done for towers (2026-11-24, decision 137):** `texture: {given_as: layers}`; US-MMS
+  equals CLM at every level. **Still open for grids:** grid runs take the surface dataset's
+  top level (`grid.py`); the same mapping could serve them (a change of global results, the
+  maintainer's decision).
+- **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
+
+### O89. Canopy interception counts unused layer slots
+- **Closed 2026-11-25** (decision 146): `interception` and `evaporation` take the mask of
+  the layers in use; the unused slots keep their value (not 0 as first proposed, so the
+  regression reference stays bit for bit). The text below is the diagnosis as written.
+- **Kind:** science issue (bug) · **Target:** Phase 10 (10.6) · **Decides:** M
+- **What:** `processes/canopy_water.py::interception` shares the intercepted rain equally
+  among the layers with plant area, which it finds as `dpai > 0`. The step passes the plant
+  area with the fill value (1e36) in the unused slots above the top layer
+  (`max_layers` > layers in use), so those slots count as layers with plant area. Fortran
+  (`MLCanopyWaterMod.F90::CanopyInterception`) loops over the layers in use only.
+- **Consequences:** (1) every leafy layer receives the intercepted water divided by (leafy
+  layers + unused slots) instead of by the leafy layers: 20/24 of Fortran's at CHATS (46
+  layers in use, `max_layers` 50), less the more slots are unused (grid runs: short canopies
+  under a large `max_layers`); the unused slots' share is lost. This affects every run with
+  rain and unused slots, prescribed soil water included: leaf wetness, evaporation of
+  intercepted water and the transpiration it suppresses. (2) The rain reaching the ground
+  (throughfall and drip, `qflx_tflrain`) includes the "drip" of the unused slots, whose
+  intercepted water holds values without meaning (1e109): 1e34 mm s⁻¹ at CHATS on 2 May
+  2007. Nothing used that flux before predicted soil water; with it the soil water balance
+  check stops the run at the first rain.
+- **Why the tests missed it:** the regression reference (50 steps from 1 May 2007) and the
+  padding tests have no rain; the comparison with Fortran over May 2007 has a tolerance of
+  2.5 % and little rain.
+- **Measured (2026-11-24, probe of `interception` alone, CHATS's plant area, rain 1.41e-4
+  mm s⁻¹, one 5-minute sub-step):** intercepted water of a leafy layer 2.099e-3 kg m⁻²
+  without unused slots, 1.749e-3 with 4, 5.67e-4 with 54; rain reaching the ground 1.08e-6
+  mm s⁻¹ without, 1.4e107 with 4 slots holding 1e109.
+- **Proposed correction (not made):** count and fill only the layers in use (pass the
+  layers-in-use mask to `interception`, as `wetted_fraction_implicit` already takes it),
+  and keep the unused slots' intercepted water at 0; a test with rain and unused slots
+  (results independent of `max_layers`), a Fortran golden case for `CanopyInterception`
+  if one can be made. Expected effect: the regression reference stays bit for bit (no
+  rain); results change on rainy steps of every run with unused slots, toward Fortran.
+- **Blocks:** predicted soil water through rain (the restart test of
+  `tests/regression/test_predicted_soil_water.py` is marked as expected to fail until then).
+- **Source:** Phase 10 step 10.6, 2026-11-24.
 
 ## 2. Other maintainer decisions pending
 
@@ -724,6 +810,101 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   daily means more than 5 % off where stability flips often) limits an experiment.
 - **Source:** `gradient_progress.md` round 17; maintainer, 2026-11-16.
 
+### O90. Continuing a run from its end-of-run restart does not reproduce the longer run
+- **Kind:** behaviour to decide · **Target:** after Phase 10 · **Decides:** M
+- **What:** the forcing within a step is interpolated between the step before, the step
+  and the step after. At the last step of a run there is no step after, so its own
+  forcing is repeated (`forcing.chunk_run_steps`; Fortran: `itim_next = min(itim+1, ntim)`).
+  The last step of a 1-day run therefore differs from step 48 of a 2-day run, and a run
+  continued from the 1-day run's end-of-run restart differs from the uninterrupted 2-day
+  run from there on. Restarts written during a run (at month or year boundaries) are not
+  affected: resuming from them is bit for bit (`tests/regression/test_restart.py`,
+  `test_predicted_soil_water.py`).
+- **Measured (2026-11-25, CHATS, prescribed soil water):** latent heat flux of step 48
+  191.06 W m⁻² in the 1-day run, 195.28 in the 2-day run; the continued run differs by up
+  to 4.3 W m⁻² on the second day. Predicted soil water gives the same differences.
+- **Options:** leave it (it is Fortran's rule, and a run meant to be continued can be
+  one run with restarts); or read the next forcing record at a run's last step when the
+  file has one, which changes the last step of every run (the regression reference too).
+- **Source:** Phase 10 step 10.6, the restart test of predicted soil water, 2026-11-25.
+
+### O91. The comparison with Fortran over May 2007 fails in one column
+- **Kind:** bug or known difference, not diagnosed · **Target:** after Phase 10 · **Decides:** M
+- **What:** `tests/test_fortran_python_comparison.py` (slow; `configs/chats7_may2007_fortran`)
+  fails `test_correlation[aux]`: the leaf water potential of the top layer (third data
+  column of `aux.out`, written with three decimals) correlates with Fortran's at 0.999896,
+  below the required 0.9999. Every column is within 2.5 %, and every other column passes.
+- **Not from Phase 10:** `main` (a77c4f6) gives 0.999854 for the same column, and fails a
+  second one (the latent heat of evaporating intercepted water, 0.9968), which the
+  correction of the interception (decision 146) brought above 0.99999. So the test has
+  failed since some earlier change; when it last passed was not looked for.
+- **Where:** 23 of 1 488 steps differ by more than 0.01 MPa, in the afternoons of 7, 13,
+  19 and 21-23 May (17 to 24 h UTC), by up to 0.17 MPa (-1.80 against Fortran's -1.64 on
+  23 May 20:00), with the top leaves near their minimum water potential. The mid-canopy
+  leaf water potential and all fluxes agree at those steps.
+- **Next:** find the change that introduced it (bisect the May 2007 run), then decide
+  whether it is a defect or a recorded departure (for example the wetted fraction or the
+  minimum plant area, which this configuration sets as Fortran).
+- **Source:** Phase 10 step 10.8, 2026-11-25.
+
+### O92. A run stops at the first 31 December
+- **Closed 2026-11-25** (decision 149): where the calendar day at a step's end is below the
+  one at its start, the end is the start plus a step. This also corrects the first step of
+  31 December of a leap year (the Gregorian calendar day falls from 366.0 to 365.04; the
+  forcing of that one step was extrapolated by 12 steps), not seen when this was written.
+  The text below is the diagnosis as written.
+- **Kind:** bug · **Target:** before any run across a new year · **Decides:** M
+- **What:** the forcing within a step is interpolated in time around the step's middle,
+  taken as the mean of the calendar days at the step's start and end
+  (`step.interpolation_days`: `0.5 * (calday + calday_beg)`). For the step from 31
+  December 23:00 to 1 January 00:00 these are 365.96 and 1.0, so the middle is day 183.5
+  and the sub-steps (days 365.96 to 366) lie 4 380 steps beyond it: the forcing is
+  extrapolated by 4 380 times its change to the next record (air temperature 289.4 K, next
+  record 0.05 K lower: 70 K). The run stops with "unhealthy model state" after that chunk.
+  Fortran CLM-ml has the same formula; its runs do not cross a new year.
+- **Who is affected:** any run that continues past 31 December with `interpolation:
+  three_point` (the default), tower or grid, prescribed or predicted soil water. A run
+  that ends at 1 January 00:00 is not affected (its last step repeats its own forcing as
+  the next record, so the extrapolated change is 0; O90).
+- **Measured (2026-11-25, US-MMS):** December 2010 to January 2011 stops after the
+  December chunk with air at 70.7 K and soil at -419 K, with prescribed and with
+  predicted soil water; December 2010 alone, and October to December 2010, run.
+- **Proposed correction (not made):** the step's middle as the day at its start plus half
+  a step (or the end's calendar day raised by the year's length when it is below the
+  start's). The second form leaves every other step bit for bit; a test of a run across
+  1 January.
+- **Source:** Phase 10 step 10.8 (the five-year run at US-MMS), 2026-11-25.
+
+### O93. CLM-ML's transpiration hardly responds to the 2012 drought at US-MMS
+- **Kind:** science question · **Target:** after Phase 10 · **Decides:** M
+- **What:** in July 2012 CLM's latent heat falls to 59 W m⁻² (from 96 in June); CLM-ML's
+  stays at 92, with CLM's soil water and with its own predicted soil water alike: the
+  soil water stress factor (`btran`) is 1 throughout, and the drought acts only through
+  the leaf water potential. With predicted soil water the trees take 447 mm from May to
+  September against CLM's 382, and the soil ends 54 mm drier than CLM's (0.215 against
+  0.264 m³ m⁻³ at 1 m). Related: the daytime latent heat bias (O62).
+- **Not a defect of the hydrology:** drainage, water table and pond equal CLM's
+  (decision 148).
+- **Next (the maintainer's):** comparison with the tower's measured fluxes and soil
+  moisture, which this phase left out (decision 136); the plant hydraulic parameters of
+  this forest (CLM6 defaults are used).
+- **Diagnosis (probes of 2026-11-25, no code change):** in July 2012 CLM's root zone
+  (0.05 to 0.7 m) is at −1.5 to −1.7 MPa, and so is CLM-ML's (the same water). CLM-ML's
+  leaves see a soil water potential of −0.53 MPa at midday: the potential is weighted by
+  what each level can supply (`plant_hydraulics.soil_resistance`, Bonan et al. 2014 eq.
+  A27), so the wet levels below 1 m dominate. The leaf water potential at the canopy top
+  is then −0.8 MPa on average and −1.27 at the lowest, and stomata close only near
+  ψ₅₀ = −2.3 MPa (exponent 40: almost a threshold). CLM's stress curve is gradual (ψ₅₀ =
+  −2.65 MPa, exponent 3.95) and its xylem loses conductance as it dries; CLM-ml's plant
+  conductance is constant.
+- **One parameter at a time does not give CLM's response** (May-September 2012, predicted
+  soil water; latent heat June → July, W m⁻²): CLM 96 → 59; default 109 → 92; ψ₅₀ −1.2:
+  85 → 57; plant conductance 2: 101 → 85; root resistivity 100: 87 → 70; exponent 4:
+  101 → 86. The changes that lower July lower the wet months as well (May: 89 and 87
+  against CLM's 101).
+- **Source:** Phase 10 steps 10.1 and 10.8; decision 148 (the US-MMS experiment folder is
+  not in the repository: `git show 495442e:experiments/us_mms_2012/README.md`).
+
 ## 4. Housekeeping and repository organization (8a)
 
 ### O34. `.gitignore` ignores `docs/`
@@ -978,6 +1159,26 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
 
 ### O64. Soil moisture prescribed, not predicted
 **Source:** CLAUDE.md; plan decision 14.
+- **Now (2026-11-24):** being scoped as Phase 10 on branch `phase10/soil_water`:
+  `docs/design/soil_water_plan.md` (what CLM does and what is needed of it, differentiability,
+  tests without a CLM-ml reference). Decisions 131-134 taken; nothing implemented.
+  Revised the same day after a review of the earlier translation (`AyaLahlou/clm-ml-dev`):
+  golden and replay data recorded by tracing the hydrology routines in the US-MMS CLM case
+  (plan 6.1, 6.3; choice 13 of section 8 open).
+- **Now (end of 2026-11-24):** 10.1, 10.1b and the harness feasibility probe done; no soil
+  water physics yet.
+- **Now (10.2, 2026-11-24):** the Fortran harness is in the repository (decision 140) and
+  the retention curve is translated and equals CLM's Fortran on 630 cases.
+- **Now (10.8, 2026-11-25):** soil water can be predicted (`model.yaml` `soil.water:
+  predicted`, decisions 142-148): CLM's soil hydrology, equal to CLM's Fortran routine by
+  routine, in tower and grid runs, differentiable. The default stays prescribed. What
+  the predicted mode does not have: frozen soil water and snow (O9, O10; snowfall enters
+  the soil as liquid), irrigation, a spun-up start (O12), soil texture by level on grids
+  (O88). At US-MMS it dries the soil more than CLM (O93).
+- **Phase 10 closed 2026-11-25.** The plan document (`soil_water_plan.md`: the assessment
+  of CLM's code, the order of work, the US-MMS set-up) was deleted at the close and is in
+  git history (`git show 0e8e907:docs/design/soil_water_plan.md`). This item stays as the
+  record of what predicted soil water lacks.
 
 ---
 

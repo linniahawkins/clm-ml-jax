@@ -11,7 +11,8 @@ Schema (format version :data:`FORMAT_VERSION`; netCDF4, groups):
   the last step run, ISO 8601, model calendar), ``calendar`` (``GREGORIAN`` | ``NOLEAP``),
   ``layout`` (the device layout ``[devices, gridcells per device, C3 slots, C4 slots]`` as
   JSON, or ``null``), ``writers`` (the output files in progress, JSON);
-- dimensions ``patch``, ``layer``, ``leaf`` (0 sunlit, 1 shaded) and ``soil_level``;
+- dimensions ``patch``, ``layer``, ``leaf`` (0 sunlit, 1 shaded), ``soil_level`` and
+  ``water_level`` (the hydrologically active soil levels);
 - group ``state``: the prognostic state (``clm_ml.state.State``) of every patch, one variable
   per field (``canopy_air_temperature`` (patch, layer) K, ...), with ``units`` and
   ``long_name``;
@@ -38,8 +39,9 @@ import numpy as np
 
 from clm_ml.io import netcdf
 
-#: The restart format this code writes and reads (1-5: pickles of earlier phases)
-FORMAT_VERSION = 6
+#: The restart format this code writes and reads (1-5: pickles of earlier phases; 6: without
+#: the soil water of the state)
+FORMAT_VERSION = 7
 
 #: State field -> (netCDF variable, dimensions after patch, units, long name)
 STATE_FIELDS = {
@@ -49,6 +51,8 @@ STATE_FIELDS = {
     ("canopy", "intercepted_water"): ("layer",), ("canopy", "ground_temperature"): (),
     ("canopy", "acclimation_temperature"): (), ("canopy", "acclimation_steps"): (),
     ("soil", "temperature"): ("soil_level",),
+    ("soil", "liquid_water"): ("water_level",), ("soil", "surface_water"): (),
+    ("soil", "water_table_depth"): (),
 }  # fmt: skip
 UNITS = {
     "air_temperature": ("K", "canopy air temperature"),
@@ -61,6 +65,9 @@ UNITS = {
     "acclimation_temperature": ("K", "acclimation temperature (running mean)"),
     "acclimation_steps": ("1", "steps averaged into the acclimation temperature"),
     "temperature": ("K", "soil temperature"),
+    "liquid_water": ("kg m-2", "soil liquid water"),
+    "surface_water": ("mm", "ponded surface water"),
+    "water_table_depth": ("m", "water table depth"),
 }
 
 
@@ -173,6 +180,7 @@ def write_restart(path: Path, content: dict, calendar: str = "GREGORIAN") -> Non
         ds.createDimension("layer", temp.shape[1])
         ds.createDimension("leaf", temp.shape[2])
         ds.createDimension("soil_level", np.asarray(state.soil.temperature).shape[1])
+        ds.createDimension("water_level", np.asarray(state.soil.liquid_water).shape[1])
         g = ds.createGroup("state")
         for (part, name), dims in STATE_FIELDS.items():
             var = g.createVariable(f"{part}_{name}", "f8", ("patch",) + dims)

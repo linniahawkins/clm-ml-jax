@@ -1,0 +1,180 @@
+module test_soil_water
+
+  ! Drivers of CLM's Richards solver (SoilWaterMovementMod::SoilWater, which calls
+  ! soilwater_moisture_form with the CLM6 default settings): the vertical movement of soil
+  ! water over one model step, with its adaptive sub-steps.
+  !
+  ! soil_water: one call per case of cases/soil_water.nml.
+  ! soil_water_sequence: for each case of cases/soil_water_sequence.nml, one call per model
+  ! step, the water carried from step to step, with the infiltration and the root uptake of
+  ! each step given as time series.
+
+  use funit
+  use shr_kind_mod, only : r8 => shr_kind_r8
+  use unittestSubgridMod, only : bounds
+  use unittestTimeManagerMod, only : unittest_timemgr_setup, unittest_timemgr_teardown
+  use ColumnType, only : col
+  use SoilWaterMovementMod, only : SoilWater
+  use HarnessColumnMod, only : harness_column_type, harness_column_setup, &
+       harness_column_teardown, harness_nlevsoi
+  use HarnessIOMod, only : open_cases, open_output, begin_case, begin_step, put
+
+  implicit none
+
+  integer, parameter :: max_steps = 400   ! longest sequence
+
+  @TestCase
+  type, extends(TestCase) :: TestSoilWater
+     type(harness_column_type) :: column
+     integer :: dtime                     ! the model step the column is set up with (s)
+   contains
+     procedure :: setUp
+     procedure :: tearDown
+     procedure :: set_column
+     procedure :: call_soil_water
+  end type TestSoilWater
+
+contains
+
+  subroutine setUp(this)
+    class(TestSoilWater), intent(inout) :: this
+    this%dtime = 1800
+    call harness_column_setup(this%column, dtime=this%dtime, nbedrock=harness_nlevsoi)
+  end subroutine setUp
+
+  subroutine tearDown(this)
+    class(TestSoilWater), intent(inout) :: this
+    call harness_column_teardown(this%column)
+  end subroutine tearDown
+
+  subroutine set_column(this, dtime, nbedrock, watsat, hksat, bsw, sucsat, icefrac)
+    ! The column of a case: the model step (the time manager is set up again when it changes), the
+    ! bedrock level, the soil properties and the ice fraction of every level.
+    class(TestSoilWater), intent(inout) :: this
+    integer, intent(in) :: dtime, nbedrock
+    real(r8), intent(in), dimension(harness_nlevsoi) :: watsat, hksat, bsw, sucsat, icefrac
+    integer :: c
+
+    if (dtime /= this%dtime) then
+       call unittest_timemgr_teardown()
+       call unittest_timemgr_setup(dtime=dtime)
+       this%dtime = dtime
+    end if
+    c = this%column%c
+    col%nbedrock(c) = nbedrock
+    this%column%soilstate_inst%watsat_col(c,1:harness_nlevsoi) = watsat
+    this%column%soilstate_inst%hksat_col(c,1:harness_nlevsoi) = hksat
+    this%column%soilstate_inst%bsw_col(c,1:harness_nlevsoi) = bsw
+    this%column%soilstate_inst%sucsat_col(c,1:harness_nlevsoi) = sucsat
+    this%column%soilhydrology_inst%icefrac_col(c,1:harness_nlevsoi) = icefrac
+  end subroutine set_column
+
+  subroutine call_soil_water(this, qflx_infl, qflx_rootsoi)
+    ! One model step of CLM's solver from the column's present water. The diagnostic fields
+    ! are zeroed first: CLM writes them only down to the bedrock level.
+    class(TestSoilWater), intent(inout) :: this
+    real(r8), intent(in) :: qflx_infl
+    real(r8), intent(in) :: qflx_rootsoi(harness_nlevsoi)
+    integer :: c
+
+    c = this%column%c
+    associate(wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst)
+    wfb%qflx_infl_col(c) = qflx_infl
+    wfb%qflx_rootsoi_col(c,1:harness_nlevsoi) = qflx_rootsoi
+    this%column%soilstate_inst%smp_l_col(c,:) = 0._r8
+    this%column%soilstate_inst%hk_l_col(c,:) = 0._r8
+    this%column%soilhydrology_inst%qin_col(c,:) = 0._r8
+    this%column%soilhydrology_inst%qout_col(c,:) = 0._r8
+    call SoilWater(bounds, this%column%num_hydrologyc, this%column%filter_hydrologyc, &
+         this%column%num_urbanc, this%column%filter_urbanc, this%column%soilhydrology_inst, &
+         this%column%soilstate_inst, wfb, wsb, this%column%temperature_inst, &
+         this%column%canopystate_inst, this%column%energyflux_inst, &
+         this%column%retention_curve)
+    end associate
+  end subroutine call_soil_water
+
+  @Test
+  subroutine drive_soil_water(this)
+    class(TestSoilWater), intent(inout) :: this
+    integer :: dtime, nbedrock
+    real(r8) :: qflx_infl
+    real(r8), dimension(harness_nlevsoi) :: watsat, hksat, bsw, sucsat, h2osoi_liq, icefrac, &
+         qflx_rootsoi
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ dtime, nbedrock, qflx_infl, watsat, hksat, bsw, sucsat, h2osoi_liq, &
+         icefrac, qflx_rootsoi
+
+    call open_cases('soil_water', nin, found)
+    if (.not. found) return
+    call open_output('soil_water', nout)
+    i = 0
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       call this%set_column(dtime, nbedrock, watsat, hksat, bsw, sucsat, icefrac)
+       c = this%column%c
+       associate(wsb => this%column%water_inst%waterstatebulk_inst)
+       wsb%h2osoi_liq_col(c,1:harness_nlevsoi) = h2osoi_liq
+       wsb%h2osoi_ice_col(c,1:harness_nlevsoi) = 0._r8
+       call this%call_soil_water(qflx_infl, qflx_rootsoi)
+       call begin_case(nout, i)
+       call put(nout, 'h2osoi_liq', wsb%h2osoi_liq_col(c,1:harness_nlevsoi))
+       end associate
+       call put(nout, 'num_substeps', nint(this%column%soilhydrology_inst%num_substeps_col(c)))
+       call put(nout, 'qcharge', this%column%soilhydrology_inst%qcharge_col(c))
+       call put(nout, 'smp_l', this%column%soilstate_inst%smp_l_col(c,1:harness_nlevsoi))
+       call put(nout, 'hk_l', this%column%soilstate_inst%hk_l_col(c,1:harness_nlevsoi))
+       call put(nout, 'qout', this%column%soilhydrology_inst%qout_col(c,1:harness_nlevsoi))
+    end do
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_soil_water
+
+  @Test
+  subroutine drive_soil_water_sequence(this)
+    ! Step k has the infiltration qflx_infl(k) and the root uptake uptake(k)*root_fraction
+    ! of each level.
+    class(TestSoilWater), intent(inout) :: this
+    integer :: dtime, nbedrock, nsteps
+    real(r8), dimension(harness_nlevsoi) :: watsat, hksat, bsw, sucsat, h2osoi_liq, icefrac, &
+         root_fraction
+    real(r8), dimension(max_steps) :: qflx_infl, uptake
+    integer :: nin, nout, ios, i, k, c
+    logical :: found
+    namelist /case/ dtime, nbedrock, nsteps, watsat, hksat, bsw, sucsat, h2osoi_liq, &
+         icefrac, root_fraction, qflx_infl, uptake
+
+    call open_cases('soil_water_sequence', nin, found)
+    if (.not. found) return
+    call open_output('soil_water_sequence', nout)
+    i = 0
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       @assertTrue(nsteps <= max_steps)
+       call this%set_column(dtime, nbedrock, watsat, hksat, bsw, sucsat, icefrac)
+       c = this%column%c
+       associate(wsb => this%column%water_inst%waterstatebulk_inst)
+       wsb%h2osoi_liq_col(c,1:harness_nlevsoi) = h2osoi_liq
+       wsb%h2osoi_ice_col(c,1:harness_nlevsoi) = 0._r8
+       call begin_case(nout, i)
+       do k = 1, nsteps
+          call this%call_soil_water(qflx_infl(k), uptake(k)*root_fraction)
+          call begin_step(nout, k)
+          call put(nout, 'h2osoi_liq', wsb%h2osoi_liq_col(c,1:harness_nlevsoi))
+          call put(nout, 'num_substeps', &
+               nint(this%column%soilhydrology_inst%num_substeps_col(c)))
+       end do
+       end associate
+    end do
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_soil_water_sequence
+
+end module test_soil_water

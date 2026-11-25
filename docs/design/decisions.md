@@ -195,6 +195,507 @@ Python 3.10, so CI's 3.10 job installed JAX 0.6.2 and failed two tests; the old 
 (`jax>=0.4.30`) let any install pick a JAX the model is not tested with.
 Source: maintainer, 2026-11-24 (CI of pull request 6).
 
+**131. Predicted soil water is a translation of CLM, with `ctsm5.4.004` as the reference**
+2026-11-24 · Phase 10 (scoping) · maintainer · in force · Departure from Fortran: n/a (CLM-ml v2 has no soil water movement)
+The soil water equations are translated from CLM's own routines (the default CLM5/CLM6 path:
+the adaptive moisture-form Richards solver, TOPMODEL saturated fraction, infiltration excess,
+surface water, the theta-based water table and subsurface lateral flow), not taken from
+another JAX land model. The reference source is the tag `ctsm5.4.004`
+(`/glade/work/linnia/ctsm5.4.004`): golden data and the CLM run of the replay test are made
+with that version. In it, `soilwater_moisture_form` has no over-saturation correction after
+the solve, drainage of the surface water is `min(frac_h2osfc*qinmax, h2osfc/dtime)`, and
+`baseflow_scalar` is a namelist value (0.001 with the zero-flux lower boundary); later tags
+changed all three.
+Reason: where a modelling choice comes up the model copies CLM; legoLAND's soil is a different
+scheme (mixed-form Picard iteration, van Genuchten, free drainage) and would not reproduce
+CLM. One pinned version keeps the translation, the golden data and the comparison run
+consistent.
+Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
+
+**132. The first version of predicted soil water is unfrozen and snow-free**
+2026-11-24 · Phase 10 (scoping) · maintainer · in force · Departure from CLM: yes (temporary)
+All soil water is liquid (ice 0, as with prescribed soil water) and there is no snowpack.
+Ice is an argument of every translated routine, so frozen soil later changes values, not
+function signatures. Freeze/thaw (part of CLM's soil temperature routine, which CLM-ml
+replaces), the perched water table and its drainage, and snow are a later phase.
+Reason: the soil water movement can be translated and tested on its own; freeze/thaw means
+changing CLM-ml's soil temperature solution, a separate science change. O9 and O10 stay open.
+Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
+
+**133. Ponded surface water is a store for hydrology only**
+2026-11-24 · Phase 10 (scoping) · maintainer · in force · Departure from CLM: yes
+CLM's surface water (`h2osfc`, its covered fraction, runoff and drainage into the soil) is
+translated as a water store. It does not enter the ground's energy balance: the multilayer
+canopy keeps one ground temperature and one ground evaporation flux, where CLM gives the
+ponded fraction its own temperature and evaporation.
+Reason: CLM's default hydrology with water conserved, and no change to the canopy model.
+Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
+
+**134. Predicted soil water is evaluated at US-MMS, not at CHATS**
+2026-11-24 · Phase 10 (scoping) · maintainer · in force · Departure from Fortran: n/a
+The coupled evaluation (soil moisture and fluxes against measurements) is made at US-MMS
+(Morgan-Monroe State Forest, rain-fed deciduous broadleaf forest), in periods without frozen
+soil or snow (132). CHATS stays the test of prescribed soil water.
+Reason: the CHATS orchard is irrigated; a soil water balance without irrigation would dry
+below the observations for a reason that is not a model error.
+Source: maintainer, 2026-11-24; `docs/design/soil_water_plan.md`.
+
+**135. US-MMS runs with a 1-hour model step, over May to September 2012**
+2026-11-24 · Phase 10 (10.1) · maintainer (step), implementation (year) · in force · Departure from Fortran: n/a
+At US-MMS, CLM-ML runs with `numerics.step_seconds: 3600`, the interval of the tower's
+PLUMBER2 forcing and the step of the CLM run, so that the replay test and the coupled runs
+share CLM's step. The evaluation period is 1 May to 30 September 2012. The maintainer left
+the year open; 2012 was chosen from the forcing: the 2012 Midwest drought gave 2 mm of rain
+in June and 20 mm in July (a 43-day spell below 1 mm per day, the longest of 1999-2014 by far),
+followed by a wet August and September, so the period holds a strong dry-down and a
+rewetting. The season is free of frozen soil and snow (decision 132).
+Reason: the step avoids interpolating hourly forcing; a drought year tests predicted soil
+water where it matters most (water stress, the decline of latent heat).
+Source: maintainer, 2026-11-24 ("1 hour steps is fine any year is fine");
+`docs/design/soil_water_plan.md` section 7.1.
+
+**136. Phase 10 is a code translation: the measure is agreement with CLM's Fortran, not with observations**
+2026-11-24 · Phase 10 · maintainer · in force · Departure from Fortran: n/a
+Predicted soil water is accepted when the JAX routines match CTSM `ctsm5.4.004` nearly bit
+for bit: the routine-level golden data and the replay test (the hydrology driven with CLM's
+own inputs) at round-off, not at a tolerance chosen to pass. There is no evaluation against
+measurements in this phase (science applications come after it), so the US-MMS
+measurements are not needed. Decision 134 is narrowed: US-MMS is the site of the CLM runs,
+the replay test and the coupled runs, not of an evaluation. Where a CLM-ML run is set beside
+the CLM run (US-MMS), its inputs are CLM's wherever the model allows: the same CO₂ and the
+same soil at every level (plan step 10.1b).
+Reason: the maintainer's priority is a faithful translation; science follows.
+Source: maintainer, 2026-11-24 ("this is not a science application just a code translation.
+The priority is to make the jax match the fortran nearly bit-for-bit ... Use identical CO2 and
+soil texture if possible to ensure accuracy").
+
+**137. CLM's soil and CO₂ beside a CLM run: texture per level by CTSM's mapping, CLM-ml's formulas**
+2026-11-24 · Phase 10 (10.1b) · maintainer · in force · Departure from Fortran: options (CLM-ml v2 stays the default)
+A tower's texture can be given by the layers of a CLM surface dataset (`texture: {given_as:
+layers, sand_percent_layers, clay_percent_layers}`, `organic_matter` one value per layer).
+Only CTSM's mapping of those layers to the soil levels is translated
+(`setup.soil.texture_profile`, from `SoilStateInitTimeConstMod.F90` of `ctsm5.4.004`: each
+level takes the layer whose interfaces bracket its node depth; below `nlevsoi` the bottom
+layer's texture and no organic matter; organic matter capped at `organic_max`). The hydraulic
+and thermal properties stay CLM-ml's formulas (`setup.soil.soil_properties`), with organic
+matter at every level when given by layers, as CTSM (with one value it stays in the top
+0.5 m, CLM-ml v2). With CTSM 5.4's default parameter file (scale factors 1, `organic_max`
+130, no squared organic fraction) this gives CLM's porosity, saturated suction, `b` and
+saturated conductivity at every level (US-MMS: equal to CLM's single-precision history).
+CO₂ of tower runs: `run.yaml` `forcing.co2`, 383 ppm by default (CLM-ml v2's
+`TowerMetCO2`), another constant, or a CO₂ time series file read as DATM's `co2tseries`
+(global values linear in time at the start of each step; partial pressure from the step's
+air pressure): at US-MMS CLM's monthly `PCO2` to single precision. Grid runs keep the top
+level's texture (O88).
+Reason: decision 136; the maintainer keeps CLM-ml's thermal properties and modular formulas
+and translates only the pieces of `SoilStateInitTimeConst` needed for vertical texture
+profiles.
+Source: maintainer, 2026-11-24 ("keep CLM-ml thermal properties ... translate the Soil
+StateInit pieces that are required to get vertical profiles of soil texture for clm-ml").
+
+**138. The translated CLM soil water follows CLM-ml's style and modularity**
+2026-11-24 · Phase 10 · maintainer · in force · Departure from Fortran: n/a (code structure)
+CLM's soil water routines are rewritten in this repository's form, not mirrored module by
+module: pure functions of one column by process in `processes/`, 0-based arrays, constants
+and parameters as inputs, the `Fortran reference:` line on each translated function; CLM's
+data types (`soilstate_inst`, filters, `bounds`) are not reproduced. The arithmetic is CLM's,
+operation by operation, so that the golden and replay tests agree to round-off (136).
+Reason: the maintainer values CLM-ml's modularity; one style across the model.
+Source: maintainer, 2026-11-24 ("when we rewrite clm soil water routines we should use the
+styling and modularity to match clm-ml").
+
+**139. The golden data come from idealized sweeps of CLM's Fortran, not from a site run**
+2026-11-24 · Phase 10 · maintainer · in force · Departure from Fortran: n/a (testing)
+As CLM-ml was translated: a Fortran test harness built against `ctsm5.4.004`'s compiled code
+sets up one CLM soil column and runs each soil water routine on idealized inputs that sweep
+every case (dry to saturated, sand to clay and organic soils, shallow to deep bedrock, water
+tables at every depth, ponding, `FMAX` and slope from zero to large, infiltration pulses that
+force sub-step halving); the outputs are golden JSON, and the JAX functions must reproduce
+them (rtol 1e-9). Private routines are reached through a copy of their module in which only
+`private` becomes `public`, checked by a `diff`. Multi-step sequences of the whole hydrology,
+driven by the same idealized inputs in the harness and in JAX, test the routines together
+over time. Tracing CLM at US-MMS (the plan's earlier method) is dropped: one site visits only
+its own states (US-MMS has no saturated-area runoff, no shallow bedrock, no sand), and
+CLM-ML coupled to the translated hydrology is never expected to reproduce CLM's soil water,
+since the canopies differ. The US-MMS runs serve the coupled runs (plan 6.4).
+Reason: coverage of every case; the method that worked for CLM-ml.
+Source: maintainer, 2026-11-24 ("for these we shouldn't have to stick to the single site,
+you should be able to take the fortran and exercise it in idealized sweeps across all
+scenarios and make sure the jax matches").
+
+**140. The CTSM harness: extra tests in CTSM's unit-test framework, built from a checked copy of `src/`**
+2026-11-24 · Phase 10 (10.2) · implementation · in force · Departure from Fortran: n/a (testing)
+The harness of decision 139 is `tests/fortran_validation/ctsm_harness/` (its README has the
+procedure). `build.py` copies `ctsm5.4.004`'s `src/` to scratch, adds five sources to the
+test build's lists, turns `private` into `public` on a list of lines of
+`SoilWaterMovementMod.F90`, adds the harness's files, and stops unless a file-by-file
+comparison with the checkout shows nothing else (it also stops if the checkout is not at
+the tag or has local changes). The changes are lists in `build.py`, not a patch file. A
+driver reads its cases from a namelist file and writes `name=value` outputs with 17
+significant digits; the work directory's path is compiled in (a module written by
+`build.py`), so nothing depends on the batch job's environment. `generate_golden.py` holds
+the case generators (300 random draws with a fixed seed plus edge values per routine),
+runs the build and writes the JSON, whose `executable` key is `ctsm_harness:<routine>`
+(the key the existing adapters are found by). The column's set-up is checked by two tests
+without golden data (the water table routine, and the Richards solver conserving water).
+Found while building it: assigning CLM's place-holder constructor to a retention-curve
+object (a type without data) overwrites the memory after the object with this compiler;
+the harness does not construct it. This, not `filter_from_range`, is the likely cause of
+the wrong filter count seen in the feasibility probe.
+Reason: lists that a script applies and then verifies independently are easier to read and
+to extend routine by routine than a patch; CTSM's framework already provides the column.
+Source: plan 6.1; the harness's README.
+
+**141. The sweeps of the soil water golden data: the proposed scenarios, frozen cases, both step lengths**
+2026-11-24 · Phase 10 (10.3) · maintainer · in force · Departure from Fortran: n/a (testing)
+The idealized sweeps of decision 139 use the scenario list of the plan (6.1): soil water from
+the dry bound to saturation and above, uniform and layered; soils from sand to clay and
+organic; bedrock from shallow to below the column; root uptake small to large, from wet and
+dry levels; infiltration from none (and negative) to pulses that force halved sub-steps;
+later, water tables, ponding, `FMAX` and slope. Some cases have ice in the pores (the JAX
+routines take the ice fraction as an argument, although the first version of the model runs
+unfrozen, decision 132), and every sweep is made at both model steps, 1800 s (CHATS) and
+3600 s (US-MMS).
+Reason: the frozen path and both step lengths are then tested against the Fortran from the
+start, at no cost to the model.
+Source: maintainer, 2026-11-24 ("scenario list is fine, 2) yes 3) yes both").
+
+**142. The Richards solver: CLM's adaptive sub-steps as one masked loop, LAPACK's pivoting solve, agreement judged against the solver's own round-off sensitivity**
+2026-11-24 · Phase 10 (10.3) · implementation · in force · Departure from Fortran: form only
+`processes/soil_water.py::soil_water_movement` translates
+`SoilWaterMovementMod.F90::soilwater_moisture_form` for CLM's default settings (flux at the
+surface, zero flux at the bottom, solved to the bedrock level), from `hydraulic_properties`,
+`moisture_fluxes` and `richards_system`. Not yet in the time step.
+- *The loop.* CLM's loop with exits is one loop whose passes are masked. With
+  `fixed_trials=None` it ends when the step is covered (`lax.while_loop`: forward only);
+  with an integer it makes that many passes, those after the end changing nothing
+  (`lax.scan`: reverse-mode gradients work). The two give the same values bit for bit.
+  `max_richards_trials(dtime, dtmin)` is the bound, `2·ceil(dtime/dtmin) − 1 +
+  ceil(log2(dtime/dtmin))`: 64 trials for 1800 s and 125 for 3600 s (an enumeration of every
+  accept/halve/double sequence gives 63 and 124). Which loop a run uses is chosen when the
+  solver enters the step (10.6).
+- *The linear solve.* CLM calls LAPACK `dgtsv` (elimination with row interchanges).
+  `math.py::tridiag_pivoting` is that algorithm as two scans; the existing `tridiag` has no
+  interchanges. Identity rows below the bedrock leave the rows above bit for bit unchanged.
+- *Levels below bedrock* are computed in every slot and masked; `nbedrock` is data.
+- *Agreement with the Fortran* (342 whole calls and 12 sequences of 120 steps, half at each
+  step length): the number of trial sub-steps is CLM's in every case (1 to 66). The water
+  agrees to better than 1e-12 of the column's largest value in 322 of 342 sweep cases and in
+  all 1440 sequence steps taken one step ahead (largest 3e-16); free running, the sequences
+  stay within 1e-6 with the same sub-step counts. In 5 sweep cases the water differs by 1e-9
+  to 4e-6: columns with a nearly dry clay level beside a saturated one, where matric
+  potentials differ by twenty orders of magnitude and the sub-step's matrix has a condition
+  number up to 1e15. There the JAX solver's own answer moves by the same amount when its
+  input water is changed by 1e-15 (twins), case by case, so the Fortran cannot be matched
+  more closely by any arithmetic but its own. The golden test
+  (`test_golden_soil_water.py`) therefore requires 1e-9, or up to 20 times the twins' own
+  difference, with at most 6 % of the cases above 1e-9; fluxes are compared relative to the
+  terms of Darcy's law (a flux between two nearly dry levels is a difference of huge
+  potentials).
+- *Found in CLM's solver* (kept, it is CLM's): at the shortest sub-step (60 s) a trial is
+  accepted whatever its error estimate; and saturated levels have no potential gradient (the
+  relative saturation is capped at 1), so water moves down through them at the saturated
+  conductivity and gathers above saturation at the bottom, until the drainage routines pass
+  it back up.
+- *Cost* (one column, Derecho login node CPU): 0.06-0.15 ms with the ending loop, 0.18 ms
+  (1800 s) and 0.3 ms (3600 s) with the fixed count, 1.3-3.1 ms for a reverse gradient;
+  beside about 9 ms for a model step at CHATS and 47 ms for its gradient. Gradients match
+  finite differences (soil properties, initial water, infiltration, root uptake, `e_ice`).
+Reason: forward values are the solver's own (CLM's algorithm and stopping rule); a fixed
+number of passes is what reverse-mode differentiation needs; the test's allowance follows
+the regression policy's noise twin rather than a wider tolerance for every case.
+Source: plan 5.1, 6.1-6.3; `tests/fortran_validation/test_golden_soil_water.py`;
+`tests/clm_ml/test_processes_soil_water.py`.
+
+**143. Runoff, pond, water table and drainage: translated routine by routine, with CLM's single-precision constants and without the branches a snow-free, unfrozen, non-hillslope column cannot reach**
+2026-11-24 · Phase 10 (10.4) · implementation · in force · Departure from Fortran: no
+The rest of CLM's soil hydrology, for the CLM6 defaults (TOPMODEL saturated fraction,
+infiltration limited by the saturated conductivity, surface water active, no aquifer):
+- `processes/surface_runoff.py`: `saturated_fraction`, `infiltration_capacity`,
+  `pond_fraction`, `pond_runoff`, `pond_drainage`, `surface_fluxes` (CLM's chain from
+  `SaturatedExcessRunoff` to `TotalSurfaceRunoff`), `renew_condensation`, and the constants
+  of a column's surface, `microtopography` and `pond_threshold`.
+- `processes/drainage.py`: `water_table_depth` (`ThetaBasedWaterTable`) and
+  `subsurface_drainage` (`SubsurfaceLateralFlow`: baseflow, its removal level by level with
+  the falling water table, water above saturation passed upward and to the pond, the
+  minimum water of every level).
+- `processes/soil_water.py::soil_water_fractions` (`SetSoilWaterFractions`).
+- `processes/hydrology.py::soil_hydrology`: one model step in CLM's order (pond fraction,
+  ice fractions, surface fluxes, Richards solver, water table, dew, drainage), with the
+  water balance error of the step. Not yet in the time step.
+Copied from CLM as they stand:
+- Two constants that CLM writes without a kind, so that they are single-precision values:
+  the saturation that defines the water table (`sat_lev=0.9`, in fact 0.89999998) and the
+  smallest pond runoff kept (`1.0e-8`, in fact 9.9999999e-9).
+- π is CLM's (`SHR_CONST_PI`); CLM-ml v2's `rpi = 3.141592654` (`processes/constants.py`)
+  is not used in these modules.
+- The level loops of the drainage routine run over all 20 soil levels, those below the
+  bedrock included: they are given the minimum water (0.01 mm) from the levels above.
+Not translated, with the reason:
+- The perched water table and the frost table (`PerchedWaterTable`, and their use in the
+  saturated fraction): for soil above freezing CLM's routine finds no perched table
+  (decision 132; later, with frozen soil).
+- The branch of the drainage routine for a rising water table: it needs water flowing in
+  from a neighbouring column, which only hillslope columns have.
+- Excess ice, urban columns, the VIC and hillslope options, flood water, snow.
+Golden data (decisions 139-141; 1 316 cases at both step lengths): the surface chain with
+the result of every routine (330), the pond fraction (212), the water table (316), dew
+(60), the drainage routine (332), and the surface constants (66). Every output equals the
+Fortran's to round-off (most values bit for bit; largest relative difference 1e-11, in the
+pond fraction of very shallow ponds, otherwise 3e-14), tested
+by `tests/fortran_validation/test_golden_soil_hydrology.py`, which also checks that the
+sweeps reach each branch.
+Two things about the golden data:
+- The microtopography and the pond threshold are computed by CLM inside two initialization
+  routines that read files and cannot be called for one column. The harness driver holds a
+  copy of those statements (marked as such); every other driver calls CLM's routine.
+- Two branches cannot be reached with realistic inputs and are covered by idealized ones
+  only: drainage larger than the levels above the bedrock can give in a step (it needs a
+  slope above about 80 degrees), and pond runoff limited by the pond's storage (it needs a
+  model step longer than about 3 hours; not covered).
+Water balance: the assembled hydrology closes the balance to round-off (1e-12 mm) on 200
+random columns over two days, except in rare steps where the Richards solver's matrix is
+ill-conditioned (a level dried to the minimum beside a wet one; decision 142): 3e-9 mm in
+one step of 19 200. CLM's own Fortran has the same property: in the solver's golden sweep
+its balance error exceeds 1e-9 mm in 19 of 342 cases and reaches 3e-4 mm in the most
+extreme (CLM warns at 1e-9 and stops at 1e-5). The unit test allows 1e-7 mm, and requires
+99.9 % of the steps below 1e-10.
+Cost of a whole hydrology step (one column, login-node CPU): 0.16 ms (1800 s) to 0.35 ms
+(3600 s) with the fixed-count solver loop, 1.5-3.6 ms for a reverse gradient: the Richards
+solver is nearly all of it. Gradients with respect to the seven hydrology parameters, the
+soil properties, the initial state, the rain, the slope and `FMAX` are finite in every
+branch and match finite differences.
+Reason: the Fortran is the reference, single-precision constants included (136); routines
+that the first version cannot reach would be untested code.
+Source: plan 3.2, 6.1; `tests/clm_ml/test_processes_hydrology.py`.
+
+**144. The whole hydrology over time: 14 sequences of CLM's routines, compared one step ahead and free running**
+2026-11-24 · Phase 10 (10.5) · implementation · in force · Departure from Fortran: n/a (testing)
+A harness driver (`test_hydrology_sequence.pf`) calls CLM's soil hydrology routines step
+after step in CLM's order (`UpdateFracH2oSfc` of `clm_driver`; `HydrologyNoDrainage` from
+`SetSoilWaterFractions` to `RenewCondensation`, `PerchedWaterTable` included;
+`SubsurfaceLateralFlow` of `HydrologyDrainage`), the state carried, driven by time series
+of the water reaching the ground, evaporation from soil and pond, dew and root uptake.
+Left out: the snow routines, CLM's root uptake routine (the uptake is given) and
+`PerchedLateralFlow` (no flow in unfrozen soil). Seven scenarios of 160 steps at each of
+1800 s and 3600 s (`golden_IO/test_Hydrology_sequence.json`, 1.4 MB): a rain pulse on dry
+soil; a dry-down with strong root uptake, evaporation and dew; heavy rain on flat clay over
+shallow bedrock until it ponds and runs off; a water table rising under rain and falling by
+drainage on a slope; sand over very shallow bedrock under storms; clay with a pond under
+storms; storms on soil with ice in its top levels.
+`tests/fortran_validation/test_golden_hydrology_sequences.py` compares
+`hydrology.soil_hydrology` with them in the two ways of plan 6.3:
+- *One step ahead* (the acceptance test): each of the 2 240 steps starts from the Fortran's
+  state of the step before. Required 1e-9; found: the solver's sub-step count equal in
+  every step (1 to 66), 92 % of the 60 480 compared values bit for bit, the largest
+  relative difference 3e-11 (a pond about to empty).
+- *Free running*: JAX carries its own state for the 160 steps. Required 1e-8 and equal
+  sub-step counts; found the same 3e-11, with 76 % of the values still bit for bit: no
+  accept-or-halve decision flipped and round-off did not grow. The water balance closes to
+  1.4e-12 mm in every step.
+The ill-conditioned columns of the solver's sweep (decision 142) do not occur in these
+scenarios, so no allowance for round-off sensitivity is needed here.
+Reason: the routine tests check each piece; these check that the pieces are assembled in
+CLM's order and work together over time (sub-step counts that vary, a water table moving
+between levels, a pond that fills and drains).
+Source: plan 6.3.
+
+**145. Predicted soil water in the model: an option, the state, the inputs and the choices of how the canopy feeds the hydrology**
+2026-11-24 · Phase 10 (10.6) · maintainer · in force · Departure from Fortran: yes (not in CLM-ml v2; optional)
+`model.yaml` `soil.water: prescribed | predicted` (static; default `prescribed`, which is
+unchanged: every field of the regression reference bit for bit). With `predicted`, the
+step calls `hydrology.soil_hydrology` after the soil temperature, and the canopy of a step
+sees the soil water left by the step before, as in CLM. The maintainer's choices (plan
+section 8, accepted as recommended on 2026-11-24):
+- *Solver loop:* the fixed count always (`StepOptions.richards_trials` =
+  `max_richards_trials(step)`): one program for forward runs and gradients.
+- *Ground evaporation and dew:* the canopy model's single ground water-vapour flux (step
+  mean) is taken from the soil outside the pond and from the pond at the same rate per
+  area when positive, and is dew on both when negative, so that all of it is accounted for.
+- *Root uptake:* the transpiration (step mean) times the fraction taken from each soil
+  level by CLM-ml's plant hydraulics (`soil_et_loss`); no CLM routine.
+- *Conductivity and matric potential for the plants:* CLM-ml v2's form, unchanged; CLM's
+  interface form only inside the Richards solver.
+- *Snowfall reaching the ground* enters the soil as liquid water at once (water is
+  conserved; the timing of melt is not represented; O10).
+- *Runoff inputs:* per tower `soil.max_saturated_fraction` (CLM `FMAX`) and `soil.slope`
+  (degrees, CLM `SLOPE`; at least 0.2 is used) in `domain.yaml`, null by default and
+  required with predicted soil water; grids read `FMAX` and `SLOPE` of the surface data.
+- *Parameters:* a section `hydrology` of `params.yaml` that is not per PFT (`e_ice`, `fff`,
+  `pc`, `mu`, `baseflow_scalar`, `n_baseflow`, `aq_sp_yield_min`, `slopebeta`, `slopemax`;
+  CLM's names and values), required in every params file (`clm-ml upgrade` adds it;
+  `clm-ml params FILE.nc` reads it from a CLM parameter file; `--set
+  params.hydrology.<name>=`). The compiled program takes it as a field of every PFT row of
+  the parameter table, so the derivative with respect to a hydrology parameter is the sum
+  over the rows.
+Implementation:
+- *State:* `SoilState` gains `liquid_water` (the 20 hydrologically active levels, kg m⁻²),
+  `surface_water` (mm) and `water_table_depth` (m); with prescribed soil water the first
+  holds the forcing's water of the last step and the others stay 0. Ice stays an argument
+  fixed at 0 (decision 132). Restart files hold the three fields (format version 7; files
+  of version 6 are refused, as older versions were).
+- *Initial soil water:* what a prescribed run uses at the first step (the CLM history
+  record or soil-water file, with its adjustment factor and the cap at porosity), no pond,
+  and the water table diagnosed from it; or a restart.
+- *Constants:* `PatchConstants.wtfact`, `topo_slope`; the microtopography and the pond
+  threshold are computed in the step from the parameters (they are differentiable).
+- *Check:* a 14th conservation check, the soil water balance of the step, with CLM's
+  stopping threshold (1e-5 mm).
+- *Outputs:* `soil_liquid_water`, `soil_water_content` (per soil level; also with
+  prescribed soil water), and with predicted soil water `ground_water_input`,
+  `ground_evaporation`, `root_water_uptake`, `infiltration`, `surface_runoff`, `drainage`,
+  `saturated_fraction`, `surface_water`, `surface_water_fraction`, `water_table_depth`,
+  `soil_water_substeps`, `soil_water_balance_error` (NaN with prescribed soil water).
+- *Regression reference* regenerated for the added fields only (17 new step fields); the
+  100 fields it held are bit for bit those of the reference before.
+Status at this entry: one day at CHATS runs (the water balance closes to 3e-13 mm per
+step; the first step equals the prescribed run's to round-off). Rain exposed a defect
+of the canopy's interception with unused layer slots (O89), corrected by decision 146.
+Completed 2026-11-25: two days at CHATS with 3 mm of rain keep the balance closed and
+resume bit for bit from a restart written during the run; a grid run (two 1° gridcells in
+Illinois, 11 patches of 6 PFTs, two days of July 2000 with rain) reads `FMAX` and `SLOPE`
+and closes every patch's balance to 1e-12 mm per step
+(`tests/regression/test_predicted_soil_water.py`); the option is documented for users
+(`docs/how_the_model_works.md`, `docs/your_own_tower.md`) and in `model_overview.md`.
+Reason: the maintainer's choices; a default that leaves every existing run unchanged.
+Source: maintainer, 2026-11-24 ("accept all recommendations ... use fixed count always for
+solver loop"); plan sections 4 and 8.
+
+**146. The canopy's interception and the evaporation of intercepted water count only the layers in use**
+2026-11-25 · correction (O89, found in Phase 10.6) · maintainer · in force · Departure from Fortran: no (restores Fortran's loop over the layers in use)
+`canopy_water.interception` and `canopy_water.evaporation` take the mask of the layers in
+use: a layer has plant area if it is in use and `dpai > 0`. The slots above the top layer,
+which hold the fill value (1e36), no longer count as layers with plant area, receive no
+intercepted water, do not drip, and keep their value.
+Reason: with unused slots (`max_layers` larger than the layers in use) the intercepted rain
+was divided by (leafy layers + unused slots), so every leafy layer received too little
+(20/24 at CHATS) and the rest was lost, and the rain reaching the ground included a "drip"
+of the unused slots without meaning (1e34 mm s⁻¹ at CHATS), which stopped predicted soil
+water at the first rain. Fortran (`MLCanopyWaterMod.F90::CanopyInterception`,
+`CanopyEvaporation`) loops over the layers in use.
+Effect: none without rain or without unused slots; the regression reference (no rain) is
+bit for bit unchanged and was not regenerated. On rainy steps of runs with unused slots
+the results change, prescribed soil water included: at CHATS (four days from 1 May 2007,
+rain on 2 May) the latent heat flux changes by up to 8.4 W m⁻² at a step and by +0.45
+W m⁻² in the mean of the rainy day (sensible heat −0.43), and by less than 0.001 W m⁻² in
+the daily means of the two days after.
+Tests: rain on the same canopy with 0, 4 and 54 unused slots gives identical water on
+every layer and identical throughfall (`tests/clm_ml/test_processes_canopy_water_hydraulics.py`).
+There is no Fortran golden case for `CanopyInterception`.
+Against Fortran's output (CHATS, May 2007, `tests/test_fortran_python_comparison.py`): the
+correlation of the latent heat of evaporating intercepted water with Fortran's rises from
+0.9968 (below the test's 0.9999; so it is on `main`) to above 0.99999.
+Source: maintainer, 2026-11-25; open item O89.
+
+**147. Predicted soil water: gradients through the whole model, and its cost**
+2026-11-25 · Phase 10 (10.7) · implementation · in force · Departure from Fortran: n/a
+*Gradients.* The derivatives of a model chunk with predicted soil water are those of the
+forward values (with `numerics.water_stress_derivative: exact`), checked against central
+finite differences in the gradient tier (`tests/test_gradient_accuracy_soil_water.py`,
+three tests, about 3-5 min on a CPU):
+- a wet column in rain (CHATS, night of 2 May 2007, soil water raised to near saturation:
+  water table in the column, drainage, runoff, 6 to 18 Richards sub-steps through the
+  fixed-count loop): `fff`, `baseflow_scalar`, `n_baseflow`, `hksat`, `bsw`, `sucsat`,
+  the largest saturated fraction and the slope, on latent heat, runoff, drainage, water
+  table, infiltration and the water stored at the end. Measured in the probe: agreement
+  to 5e-5 relative or better, the accuracy of the finite difference itself.
+- a dry day: `hksat`, `bsw`, `sucsat`, porosity, the soil water at the start, `vcmax25`,
+  `psi50_gs`, `plant_conductance`, on latent heat, root uptake and ground evaporation.
+- two days in reverse mode (95 steps, rain on the second): mean latent heat and the soil
+  water at the end, within 2 % of a finite difference of 0.1 %.
+The model is piecewise smooth, and a finite difference that straddles a kink is not a
+derivative: at one step of the dry day the finite difference of latent heat with respect
+to the soil water at the start was 6.6 against the derivative's 8.2, and a fine sweep
+showed a kink of the canopy 4e-5 (relative) below the state, with slope 3.8 on one side
+and 8.21 on the other, the derivative's side. The tests therefore take two finite
+differences (steps 1e-5 and 2e-5) and compare no closer than these agree, and require
+more than 90 % of the values to agree to 1e-3. With the default derivative rules the
+derivatives through the water stress differ from the finite difference by a few percent,
+as with prescribed soil water (decision 124). The pond's parameters (`pc`, `mu`,
+`slopebeta`, `slopemax`) and `aq_sp_yield_min` do not act at CHATS (no pond); they are
+checked at routine level (`tests/clm_ml/test_processes_hydrology.py`), as are the hazard
+cases (dry top level, saturation, shallow bedrock, ice, halved sub-steps). The whole CPU
+gradient tier passes (22 tests).
+*Cost* (steady state, 8 to 47 steps of CHATS, `timing/results_model.jsonl`,
+`timing/results_vmap.jsonl`), prescribed -> predicted, per model step:
+
+| | forward | gradient |
+|---|---|---|
+| CPU, one patch | 10.4 -> 10.7 ms (1.03x) | 50.6 -> 51.3 ms (1.01x) |
+| A100, 4 096 patches | 132 -> 164 ms (1.24x) | 825 -> 983 ms (1.19x) |
+| A100, one patch | 42.9 -> 69.2 ms (1.61x) | 238 -> 362 ms (1.52x) |
+
+Compile times and memory are unchanged (GPU gradient program about 8 min cold; 8.6 GB for
+4 096 patches). On the GPU the hydrology adds about 30 ms per step whatever the number of
+patches: the 64 trials of the fixed-count loop, each with a tridiagonal solve of 20
+levels, are steps in sequence, which a GPU does slowly. So the relative cost falls as
+patches are added; one patch on a GPU, above the 1.5x at which a slowdown is discussed,
+is not a way the model is run (a tower is 4-5 times faster on a CPU). The fixed-count
+loop stays the only form of the loop (decision 145). If the GPU cost ever matters:
+writing out the tridiagonal solves on the GPU, as `numerics.solver_loops` does for the
+canopy's solvers (not built).
+`timing/time_vmap.py` takes `--set` overrides (as `time_model.py`).
+Source: plan 6.5, 6.6; probes of 2026-11-25.
+
+**148. Predicted soil water in coupled runs: US-MMS beside CLM, a year, the 1° globe**
+2026-11-25 · Phase 10 (10.8) · implementation · in force · Departure from Fortran: n/a
+Runs with `soil.water: predicted` at commit `cfb2b56` (no evaluation against measurements,
+decision 136). Outputs outside the repository
+(`/glade/work/linnia/phase10_us_mms/`; scripts in `analysis_10_8/`); numbers and a figure
+in the experiment folder's README. The folder (`experiments/us_mms_2012/`, with its forcing
+and CLM history under `data/input_files/`) was taken out of the repository before the
+phase was merged (maintainer, 2026-11-25) and is in git history:
+`git show 495442e:experiments/us_mms_2012/README.md`.
+- *US-MMS, May-September 2012* (3 672 hourly steps, 3 min on a CPU), beside the prescribed
+  run and CLM (`ctsm5.4.004`): the water balance closes to 1.4e-12 mm per step; drainage
+  165.6 mm against CLM's 166.2, the same water table, the same pond after a storm (22.3
+  against 22.2 mm, the same 125 hours); 1 Richards sub-step in 55 % of the steps, 2.1 on
+  average, at most 28 (bound 125 at this step length). CLM-ML's fluxes change by less
+  than 0.5 W m⁻² in the monthly mean between prescribed and predicted soil water (its soil
+  water stress stays 1), and its transpiration (447 mm against CLM's 382) leaves the
+  soil 54 mm drier than CLM's at the end, between 0.5 and 2 m (open item O93).
+- *US-MMS, the whole of 2012* (8 784 steps): closes to 1.6e-12 mm per step; drainage 379.8
+  mm against CLM's 380.0; no drift other than the canopy's larger transpiration (39 mm
+  less water than CLM at the end of the year). Winter runs without snow or frozen soil
+  water (decision 132).
+- *A run of several years* was not possible at that commit: a tower run stopped at the
+  first 31 December with a temperature blow-up, with prescribed soil water too (O92).
+  After its correction (decision 149, commit `0e8e907`), 2010-2014 in one run (43 824
+  steps, 27 min on a CPU): largest balance error 1.7e-12 mm per step, 2.4 sub-steps on
+  average and 28 at most, no drift of the soil water from CLM's (within 41 mm at every
+  year's end; the soil refills each winter), drainage 255 to 462 mm per year against CLM's
+  298 to 461.
+- *The 1° globe, ten days of July 2000* on one A100 (72 575 patches; 549 s with
+  compilation): every patch runs, none is excluded, largest balance error 1.9e-12 mm per
+  step, at most 35 sub-steps (bound 64), ponds on 415 patches. The start is not in
+  balance where CLM's soil water is partly ice or the soil is organic (drainage up to 56
+  mm per day at first, column water changing by −387 to +275 mm in nine days): O12, O9.
+- *Against Fortran CLM-ml* (May 2007 at CHATS, prescribed soil water): every output column
+  within 2.5 %; one column below the correlation of 0.9999, the leaf water potential of the
+  top layer (0.999896), as on `main` (0.999854): open item O91.
+Source: plan 6.4.
+
+**149. The middle of a step where the calendar day starts again**
+2026-11-25 · Phase 10 (10.8; O92) · maintainer · in force · Departure from Fortran: yes
+`step.interpolation_days` takes a step's middle (the time of its forcing record in the
+three-point interpolation) as the mean of the calendar days at its start and end, as
+CLM-ml v2. Where the end's calendar day is below the start's, the end is now the start
+plus a step. This happens at the step ending at 0Z 1 January (365.96 and 1.0: the middle
+was day 183.5, and the forcing was extrapolated by 4 380 hourly steps, air at 70 K), and
+at the first step of 31 December of a Gregorian leap year (CLM's calendar day falls from
+366.0 to 365.04 there: the middle was half a day early, the forcing extrapolated by 12
+steps; this one did not stop a run).
+Reason: no run could continue past a new year (tower or grid, prescribed or predicted soil
+water). Fortran CLM-ml has the formula but its runs do not cross a year.
+Results: every other step bit for bit (the regression reference is unchanged). US-MMS
+December 2010 to January 2011 runs with prescribed and with predicted soil water (it
+stopped before).
+US-MMS 2010-2014 runs in one piece (decision 148).
+Tests: `tests/clm_ml/test_step.py` (the step's middle through both dates),
+`tests/regression/test_new_year.py` (CHATS7 with its data dated from 31 December, beside
+the run at its own dates; it stops in the two-stream radiation check without the change).
+Source: maintainer, 2026-11-25; open item O92.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

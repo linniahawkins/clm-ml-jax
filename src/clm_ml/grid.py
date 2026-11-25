@@ -31,7 +31,8 @@ What the loader takes from the surface data:
   atmosphere), with ``z0mr`` and ``displar`` the PFT's ``z0m_to_height_ratio`` and
   ``displacement_to_height_ratio`` in params.yaml (e.g. the built-in ``clm6``).
 - **Soil column** (one per patch, ``soil.columns: per_patch``): the top level of
-  ``PCT_SAND``, ``PCT_CLAY``, ``ORGANIC``; ``SOIL_COLOR``; ``zbedrock``. Organic matter
+  ``PCT_SAND``, ``PCT_CLAY``, ``ORGANIC``; ``SOIL_COLOR``; ``zbedrock``; for predicted soil
+  water ``FMAX`` (the largest saturated fraction) and ``SLOPE`` (degrees). Organic matter
   is capped at CLM-ml's ``organic_max`` (130 kg m-3): CLM caps the organic fraction at 1
   (``om_frac = min(organic / organic_max, 1)``), CLM-ml's setup formula has no cap (its
   towers never exceed it), and some peat soils of the surface data reach 318 kg m-3.
@@ -256,6 +257,13 @@ def load_grid_domain(
         color = np.ma.filled(ds.variables["SOIL_COLOR"][:], 0)[rows, cols].astype(int)
         zbed = np.ma.filled(ds.variables["zbedrock"][:], np.nan)[rows, cols].astype(float)
 
+        def surface(name):  # a (lat, lon) field that only predicted soil water needs
+            if name not in ds.variables:
+                return np.full(rows.size, np.nan)
+            return np.ma.filled(ds.variables[name][:], np.nan)[rows, cols].astype(float)
+
+        fmax, slope = surface("FMAX"), surface("SLOPE")
+
     cell_area = area[:, rows, cols]  # (16, ng)
     frac = cell_area / cell_area.sum(axis=0, keepdims=True)
     keep = frac > 0.0
@@ -319,6 +327,8 @@ def load_grid_domain(
         organic_matter=organic[g_of],
         color_class=color[g_of],
         bedrock_depth=zbed[g_of],
+        max_saturated_fraction=fmax[g_of],
+        slope=slope[g_of],
     )
     domain = Domain(gridcells, patches, columns, towers={})
     missing = params.missing_for(sorted(set(pft.tolist())))

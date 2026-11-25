@@ -792,9 +792,9 @@ def _fluxes(c: Substep, x: SubstepInputs, params, errors, tables, opt, c3: bool,
     )  # fmt: skip
     c = c._replace(gbh_leaf=gbh, gbv_leaf=gbv, gbc_leaf=gbc)
 
-    # Interception — Fortran CanopyInterception (every slot)
+    # Interception — Fortran CanopyInterception (layers in use)
     i = canopy_water.interception(
-        x.qflx_rain, x.qflx_snow, x.lai, x.sai, x.dpai, c.h2ocan_bef_profile, opt.dtime
+        x.qflx_rain, x.qflx_snow, x.lai, x.sai, x.dpai, c.h2ocan_bef_profile, opt.dtime, use
     )
 
     # Wetted fraction from the water left at the end of the sub-step (every slot; differs
@@ -1040,10 +1040,16 @@ def _stage(c: Substep, x: SubstepInputs, params, tables, opt: SubstepOptions, c3
         )
     )  # fmt: skip
 
-    # Intercepted water — Fortran CanopyEvaporation (every slot)
+    # Intercepted water — Fortran CanopyEvaporation (layers in use)
     c = c._replace(
         h2ocan_profile=canopy_water.evaporation(
-            i.h2ocan, x.dpai, c.fracsun_profile, c.evleaf_leaf, c.trleaf_leaf, opt.dtime
+            i.h2ocan,
+            x.dpai,
+            c.fracsun_profile,
+            c.evleaf_leaf,
+            c.trleaf_leaf,
+            opt.dtime,
+            lay.in_use,
         ),
         qflx_intr_canopy=i.qflx_intr,
         qflx_tflrain_canopy=i.qflx_tflrain,

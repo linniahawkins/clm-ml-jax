@@ -1,0 +1,602 @@
+{
+ "generated_utc": "2026-11-25T03:10:31.114249+00:00",
+ "executable": "ctsm_harness:pond_constants",
+ "routine": "initVerticalMod.F90::initVertical, SoilHydrologyInitTimeConstMod.F90::SoilHydrologyInitTimeConst (statements copied)",
+ "ctsm_tag": "ctsm5.4.004",
+ "cases": [
+  {
+   "inputs": {
+    "topo_slope": 8.393344813199167
+   },
+   "outputs": {
+    "micro_sigma": 0.0010787285549841358,
+    "h2osfc_thresh": 0.3074416210979392
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 1.2609257003800338
+   },
+   "outputs": {
+    "micro_sigma": 0.055721671420952426,
+    "h2osfc_thresh": 15.880882092897096
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 3.12152927717866
+   },
+   "outputs": {
+    "micro_sigma": 0.011130969749023646,
+    "h2osfc_thresh": 3.1723674767117642
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.20571387162670782
+   },
+   "outputs": {
+    "micro_sigma": 0.26193137327627714,
+    "h2osfc_thresh": 74.6514084978981
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 2.4077610500531668
+   },
+   "outputs": {
+    "micro_sigma": 0.018737665811578545,
+    "h2osfc_thresh": 5.340303940306707
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 2.783954095150617
+   },
+   "outputs": {
+    "micro_sigma": 0.014080985626231488,
+    "h2osfc_thresh": 4.0131328938901145
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 3.608926016310222
+   },
+   "outputs": {
+    "micro_sigma": 0.008164779905529962,
+    "h2osfc_thresh": 2.3269924194237412
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 9.760161276568464
+   },
+   "outputs": {
+    "micro_sigma": 0.0007277694328318564,
+    "h2osfc_thresh": 0.2074169754583387
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 19.601546593706217
+   },
+   "outputs": {
+    "micro_sigma": 0.00010861843276747355,
+    "h2osfc_thresh": 0.030956654384328118
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 36.32945230871756
+   },
+   "outputs": {
+    "micro_sigma": 1.8682586970564993e-05,
+    "h2osfc_thresh": 0.005324606267253404
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 34.13780596901204
+   },
+   "outputs": {
+    "micro_sigma": 2.2361344686779666e-05,
+    "h2osfc_thresh": 0.006373065799240322
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 6.121968068422455
+   },
+   "outputs": {
+    "micro_sigma": 0.0023902239174067243,
+    "h2osfc_thresh": 0.6812226417473458
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 13.49712096702674
+   },
+   "outputs": {
+    "micro_sigma": 0.0003050990224313692,
+    "h2osfc_thresh": 0.08695434789252993
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 1.7655141527779978
+   },
+   "outputs": {
+    "micro_sigma": 0.032839733963878404,
+    "h2osfc_thresh": 9.359445431968108
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 9.444444206030392
+   },
+   "outputs": {
+    "micro_sigma": 0.0007934678481081262,
+    "h2osfc_thresh": 0.22614126638655938
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 12.720605698347871
+   },
+   "outputs": {
+    "micro_sigma": 0.00035842169099308734,
+    "h2osfc_thresh": 0.10215150531284485
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 1.5534528846046456
+   },
+   "outputs": {
+    "micro_sigma": 0.04055317011141042,
+    "h2osfc_thresh": 11.55780321389181
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 11.087119040724822
+   },
+   "outputs": {
+    "micro_sigma": 0.0005189023857367678,
+    "h2osfc_thresh": 0.14788909584844181
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.3568609822895846
+   },
+   "outputs": {
+    "micro_sigma": 0.19857039401430251,
+    "h2osfc_thresh": 56.59329546413229
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 2.1026968991920048
+   },
+   "outputs": {
+    "micro_sigma": 0.024143888150132523,
+    "h2osfc_thresh": 6.881097267878691
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.2824022451020943
+   },
+   "outputs": {
+    "micro_sigma": 0.22687021764358822,
+    "h2osfc_thresh": 64.65884968829144
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 26.140200099867414
+   },
+   "outputs": {
+    "micro_sigma": 4.8097741503873484e-05,
+    "h2osfc_thresh": 0.013708033917131227
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 5.286434389457821
+   },
+   "outputs": {
+    "micro_sigma": 0.003410209808544624,
+    "h2osfc_thresh": 0.9719223867569455
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.8016257400238422
+   },
+   "outputs": {
+    "micro_sigma": 0.09938982394540942,
+    "h2osfc_thresh": 28.32646679577776
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.32267681656224595
+   },
+   "outputs": {
+    "micro_sigma": 0.21094093112557027,
+    "h2osfc_thresh": 60.11894421586699
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.5073804512926958
+   },
+   "outputs": {
+    "micro_sigma": 0.1542589834900562,
+    "h2osfc_thresh": 43.96437985624713
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 1.8561484566876625
+   },
+   "outputs": {
+    "micro_sigma": 0.030138591987799546,
+    "h2osfc_thresh": 8.589609995514321
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 11.742634936923654
+   },
+   "outputs": {
+    "micro_sigma": 0.0004448377687517137,
+    "h2osfc_thresh": 0.12678040654317183
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 25.47559648955544
+   },
+   "outputs": {
+    "micro_sigma": 5.1760893183749156e-05,
+    "h2osfc_thresh": 0.014752045671140265
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 4.163751772639115
+   },
+   "outputs": {
+    "micro_sigma": 0.005942320351577298,
+    "h2osfc_thresh": 1.6935832406875213
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 20.006882216723703
+   },
+   "outputs": {
+    "micro_sigma": 0.00010255261547071572,
+    "h2osfc_thresh": 0.029227874058283476
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 24.513257713292315
+   },
+   "outputs": {
+    "micro_sigma": 5.775468490135225e-05,
+    "h2osfc_thresh": 0.0164602984411899
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 1.6213224787777847
+   },
+   "outputs": {
+    "micro_sigma": 0.037843692145149335,
+    "h2osfc_thresh": 10.785591989457593
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 32.92389071199957
+   },
+   "outputs": {
+    "micro_sigma": 2.4821942848602745e-05,
+    "h2osfc_thresh": 0.00707434536048511
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 38.43371758856847
+   },
+   "outputs": {
+    "micro_sigma": 1.5872591853463255e-05,
+    "h2osfc_thresh": 0.004523747283695898
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.9335125204171881
+   },
+   "outputs": {
+    "micro_sigma": 0.08319231726228009,
+    "h2osfc_thresh": 23.710117585962674
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.5901029046398365
+   },
+   "outputs": {
+    "micro_sigma": 0.1354233558729501,
+    "h2osfc_thresh": 38.59615643966632
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 6.713797700937066
+   },
+   "outputs": {
+    "micro_sigma": 0.0019020280059070202,
+    "h2osfc_thresh": 0.5420850044322176
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.6286221076505764
+   },
+   "outputs": {
+    "micro_sigma": 0.12769479555512903,
+    "h2osfc_thresh": 36.39348821336814
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 40.62598137051323
+   },
+   "outputs": {
+    "micro_sigma": 1.3513681882056213e-05,
+    "h2osfc_thresh": 0.003851449232177146
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.8684371679953713
+   },
+   "outputs": {
+    "micro_sigma": 0.09070510856240312,
+    "h2osfc_thresh": 25.851290845545375
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 14.076992686639244
+   },
+   "outputs": {
+    "micro_sigma": 0.000271986596721653,
+    "h2osfc_thresh": 0.077517184306154
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.5888467642019652
+   },
+   "outputs": {
+    "micro_sigma": 0.13568576448456435,
+    "h2osfc_thresh": 38.670943862852624
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 2.9419564730697347
+   },
+   "outputs": {
+    "micro_sigma": 0.012584836404428415,
+    "h2osfc_thresh": 3.5867248415304376
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 38.021939730146556
+   },
+   "outputs": {
+    "micro_sigma": 1.63757438109174e-05,
+    "h2osfc_thresh": 0.004667147449329393
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 1.215416978104148
+   },
+   "outputs": {
+    "micro_sigma": 0.058731371782880695,
+    "h2osfc_thresh": 16.738657808590364
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 12.709710543930386
+   },
+   "outputs": {
+    "micro_sigma": 0.0003592551538669394,
+    "h2osfc_thresh": 0.10238904530923972
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 7.14139429462079
+   },
+   "outputs": {
+    "micro_sigma": 0.0016291360628394806,
+    "h2osfc_thresh": 0.4643097930747276
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 4.966250118671342
+   },
+   "outputs": {
+    "micro_sigma": 0.0039549035257262135,
+    "h2osfc_thresh": 1.1271621072950126
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 3.4715403851785456
+   },
+   "outputs": {
+    "micro_sigma": 0.008881699066892498,
+    "h2osfc_thresh": 2.5313170274514896
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 4.693749246508076
+   },
+   "outputs": {
+    "micro_sigma": 0.004513646809437517,
+    "h2osfc_thresh": 1.2864060061684555
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.5784149920579196
+   },
+   "outputs": {
+    "micro_sigma": 0.13789138679520138,
+    "h2osfc_thresh": 39.2995543650767
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 6.018896400197539
+   },
+   "outputs": {
+    "micro_sigma": 0.0024918316180727743,
+    "h2osfc_thresh": 0.710181211597445
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 17.180241684514932
+   },
+   "outputs": {
+    "micro_sigma": 0.000156982046849866,
+    "h2osfc_thresh": 0.0447404629680033
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 8.131468722450622
+   },
+   "outputs": {
+    "micro_sigma": 0.001170531047027674,
+    "h2osfc_thresh": 0.3336056702874139
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 14.882722221310102
+   },
+   "outputs": {
+    "micro_sigma": 0.0002334788032525732,
+    "h2osfc_thresh": 0.06654232098735306
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 1.4701707698622566
+   },
+   "outputs": {
+    "micro_sigma": 0.04424331396534982,
+    "h2osfc_thresh": 12.609507837170662
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 7.5651798290750785
+   },
+   "outputs": {
+    "micro_sigma": 0.0014078506692973495,
+    "h2osfc_thresh": 0.4012426388758767
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 52.85251578846538
+   },
+   "outputs": {
+    "micro_sigma": 6.277235139320711e-06,
+    "h2osfc_thresh": 0.0017890351917810216
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 4.276205399419753
+   },
+   "outputs": {
+    "micro_sigma": 0.005593516786147655,
+    "h2osfc_thresh": 1.5941729366727109
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 0.2
+   },
+   "outputs": {
+    "micro_sigma": 0.2648252830433779,
+    "h2osfc_thresh": 75.47618346653859
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 1.0
+   },
+   "outputs": {
+    "micro_sigma": 0.07634943616534463,
+    "h2osfc_thresh": 21.75987120775938
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 10.0
+   },
+   "outputs": {
+    "micro_sigma": 0.0006826296819142412,
+    "h2osfc_thresh": 0.19455197977990976
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 90.0
+   },
+   "outputs": {
+    "micro_sigma": 1.3115097786267347e-06,
+    "h2osfc_thresh": 0.00037378512932081633
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 100.0
+   },
+   "outputs": {
+    "micro_sigma": 9.603644446553862e-07,
+    "h2osfc_thresh": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "topo_slope": 120.0
+   },
+   "outputs": {
+    "micro_sigma": 5.595040858668203e-07,
+    "h2osfc_thresh": 0.0
+   }
+  }
+ ]
+}

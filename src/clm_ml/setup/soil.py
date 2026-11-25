@@ -19,6 +19,7 @@ NLEVSOI = 20
 NLEVGRND = 25
 
 ZMIN_BEDROCK = 0.4  # minimum depth to bedrock, m (clm_varcon)
+MIN_SLOPE = 0.2  # smallest topographic slope, degrees (CLM initVertical)
 
 
 def soil_layers() -> tuple:
@@ -79,6 +80,53 @@ def texture_index(texture: str) -> int:
     )
 
 
+def surface_data_layer_depths(n_layers: int) -> tuple:
+    """``(zsoifl, zisoifl)``: the node depths (``n_layers + 1``,) and interface depths
+    (``n_layers + 1``,; ``zisoifl[0] = 0``) of the layers of a CLM surface dataset's soil
+    texture, CLM's original 10-layer structure (m).
+
+    Fortran reference: SoilStateInitTimeConstMod.F90::SoilStateInitTimeConst (ctsm5.4.004)"""
+    zsoifl = 0.025 * (np.exp(0.5 * (np.arange(1, n_layers + 2) - 0.5)) - 1.0)
+    zisoifl = np.zeros(n_layers + 1)
+    for j in range(1, n_layers + 1):
+        zisoifl[j] = 0.5 * (zsoifl[j - 1] + zsoifl[j])
+    return zsoifl, zisoifl
+
+
+def texture_profile(sand_layers, clay_layers, organic_layers, z, nlevsoi: int):
+    """Sand and clay (percent) and organic matter (kg m-3) at every level ``(C, nlevgrnd)``
+    from the layers of a CLM surface dataset (``PCT_SAND``, ``PCT_CLAY``, ``ORGANIC``;
+    ``(C, n_layers)``, top to bottom); ``z`` (nlevgrnd,) node depths. A soil level takes the
+    surface-data layer whose interfaces bracket its node depth (the first level and levels
+    above the first interface the top layer, levels below the last interface the bottom
+    layer); levels below ``nlevsoi`` take the bottom layer's texture and no organic matter.
+    Organic matter is capped at ``organic_max`` (CLM: an organic fraction of at most 1).
+
+    Fortran reference: SoilStateInitTimeConstMod.F90::SoilStateInitTimeConst (ctsm5.4.004)
+    Not in CLM-ml v2: a texture and organic matter per level (one texture per column there)."""
+    organic_max = 130.0
+    sand_layers = np.atleast_2d(np.asarray(sand_layers, dtype=float))
+    clay_layers = np.atleast_2d(np.asarray(clay_layers, dtype=float))
+    organic_layers = np.minimum(np.atleast_2d(np.asarray(organic_layers, dtype=float)), organic_max)
+    n_cols, n_layers = sand_layers.shape
+    _, zisoifl = surface_data_layer_depths(n_layers)
+    n = len(z)
+    layer = np.empty(n, dtype=int)  # the 0-based surface-data layer of each level
+    for lev in range(1, n + 1):
+        zl = float(z[lev - 1])
+        if lev == 1 or lev > nlevsoi or zl <= zisoifl[1]:
+            layer[lev - 1] = 0 if lev <= nlevsoi else n_layers - 1
+        elif zl > zisoifl[n_layers]:
+            layer[lev - 1] = n_layers - 1
+        else:
+            for j in range(1, n_layers):
+                if zisoifl[j] < zl <= zisoifl[j + 1]:
+                    layer[lev - 1] = j
+    sand, clay, organic = sand_layers[:, layer], clay_layers[:, layer], organic_layers[:, layer]
+    organic[:, nlevsoi:] = 0.0
+    return sand, clay, organic
+
+
 def soil_properties(sand, clay, organic, texture, z, nlevsoi: int):
     """The hydraulic and thermal properties of each column, ``{name: (C, nlevgrnd)}``
     (``watsat``, ``sucsat`` mm, ``hksat`` mm/s, ``bsw``, ``tkmg``, ``tkdry``, ``csol``), from
@@ -86,23 +134,34 @@ def soil_properties(sand, clay, organic, texture, z, nlevsoi: int):
     (kg m-3); ``z`` (nlevgrnd,) node depths. A texture class's values are the row of its
     class in the tables (the class number is 1-based, the tables' rows 0-based).
 
+    ``sand``, ``clay`` and ``organic`` are one value per column ``(C,)`` (CLM-ml v2: one
+    texture, organic matter in the top 0.5 m), or one value per level ``(C, nlevgrnd)``
+    (:func:`texture_profile`: organic matter at every level, as CTSM).
+
     Fortran reference: SoilStateInitTimeConstMod.F90::SoilStateInitTimeConst."""
     csol_bedrock = 2.0e6  # clm_varcon
     organic_max, zsapric, pcalpha, pcbeta = 130.0, 0.5, 0.5, 0.139
     n = len(z)
     names = ("watsat", "sucsat", "hksat", "bsw", "tkmg", "tkdry", "csol")
+    per_level = np.ndim(sand) == 2
     out = {k: np.empty((len(sand), n)) for k in names}
     for c in range(len(sand)):
-        om_frac = float(organic[c]) / organic_max
-        if not (np.isnan(sand[c]) or np.isnan(clay[c])):
-            tex, cl, s = 0, float(clay[c]), float(sand[c])
+        if per_level:
+            tex = 0
         else:
-            tex = texture_index(texture[c])  # 1-based, as Fortran; the tables' row is tex - 1
-            cl = float(tables.CLAY_TEX[tex - 1]) * 100.0
-            s = float(tables.SAND_TEX[tex - 1]) * 100.0
+            om_frac = float(organic[c]) / organic_max
+            if not (np.isnan(sand[c]) or np.isnan(clay[c])):
+                tex, cl, s = 0, float(clay[c]), float(sand[c])
+            else:
+                tex = texture_index(texture[c])  # 1-based, as Fortran; tables' row is tex - 1
+                cl = float(tables.CLAY_TEX[tex - 1]) * 100.0
+                s = float(tables.SAND_TEX[tex - 1]) * 100.0
         for j in range(1, n + 1):
             zj = float(z[j - 1])
-            if zj > 0.5:
+            if per_level:
+                s, cl = float(sand[c, j - 1]), float(clay[c, j - 1])
+                om_frac = float(organic[c, j - 1]) / organic_max
+            elif zj > 0.5:
                 om_frac = 0.0
             if tex == 0:
                 watsat = 0.489 - 0.00126 * s

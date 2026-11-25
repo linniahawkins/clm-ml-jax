@@ -18,6 +18,7 @@ Measures, for one N per process (so peak device memory is per N):
 Appends one JSON line to ``timing/results_vmap.jsonl``.
 
     python timing/time_vmap.py --patches 1024 [--steps 8] [--grad] [--label ...]
+                               [--set model.soil.water=predicted ...]
 """
 
 from __future__ import annotations
@@ -44,6 +45,12 @@ def main() -> None:
     parser.add_argument(
         "--devices", type=int, default=1, help="split the patches over devices (shard_map)"
     )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        help="override, the file named first (model.soil.water=predicted, ...)",
+    )
     args = parser.parse_args()
 
     import jax
@@ -67,8 +74,8 @@ def main() -> None:
     )
     if args.devices > 1:
         extra.append(f"run.execution.devices={args.devices}")
-    model = Model.from_experiment(load_experiment(tmp, extra))
-    single = Model.from_experiment(load_experiment(tmp))
+    model = Model.from_experiment(load_experiment(tmp, args.set + extra))
+    single = Model.from_experiment(load_experiment(tmp, args.set))
     state, params, forcing = model.initial_state(), model.default_params(), model.forcing(first, n)
     stream = StreamSpec("s", "step", "mean", ("latent_heat_flux",))
     jax.block_until_ready((state, forcing))
@@ -81,6 +88,8 @@ def main() -> None:
         return forward(p).mean()
 
     result = {"label": args.label, "patches": npatch, "steps": n, "devices": args.devices}
+    if args.set:
+        result["overrides"] = args.set
     fns = [("forward", forward)] + ([("gradient", jax.grad(loss))] if args.grad else [])
     for name, fn in fns:
         times = []

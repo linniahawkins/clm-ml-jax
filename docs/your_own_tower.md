@@ -39,6 +39,41 @@ towers:
       canopy_layers: from_model_yaml
 ```
 
+**Soil by layers.** Instead of one texture for the whole column, a tower can take the sand,
+clay and organic matter of each layer of a CLM surface dataset (`PCT_SAND`, `PCT_CLAY`,
+`ORGANIC`, top to bottom); each soil level then gets the layer at its depth, as CTSM maps
+them, and organic matter counts at every depth (with one value it counts in the top 0.5 m
+only). Use it to give the model the same soil as a CLM run at the tower:
+
+```yaml
+    soil:
+      texture:
+        given_as: layers
+        sand_percent_layers: [31.0, 31.0, 31.0, 31.0, 31.0, 32.0, 37.0, 38.0, 40.0, 40.0]
+        clay_percent_layers: [19.0, 19.0, 19.0, 19.0, 25.0, 27.0, 25.0, 24.0, 24.0, 24.0]
+      organic_matter: [37.9, 37.9, 37.9, 37.9, 14.6, 8.5, 5.0, 4.1, 3.2, 3.2]
+```
+
+**Predicted soil water.** With `model.yaml` `soil.water: predicted` the model moves the
+soil water itself, with CLM's soil hydrology, instead of reading it at every step. The
+runoff then needs two values of the CLM surface dataset at the tower's gridcell, which are
+`null` (not given) by default:
+
+```yaml
+    soil:
+      max_saturated_fraction: 0.38   # FMAX: the largest fraction of the surface that can be saturated, 0 to 1
+      slope: 0.5                     # SLOPE: topographic slope, degrees (at least 0.2 is used)
+```
+
+The run starts from the soil water the forcing gives at the first step (`H2OSOI`, as for a
+prescribed run) or from a restart; after that the soil water of the forcing is not used.
+The parameters of the hydrology are in the `hydrology` section of `params.yaml` (CLM's
+names and values; they are not per PFT). Output variables: `soil_water_content`,
+`soil_liquid_water`, `ground_water_input`, `infiltration`, `surface_runoff`, `drainage`,
+`root_water_uptake`, `ground_evaporation`, `saturated_fraction`, `water_table_depth`,
+`surface_water`, `surface_water_fraction`, `soil_water_substeps` and
+`soil_water_balance_error`. There is no snow, frozen soil water or irrigation.
+
 A tower can have several patches (for example trees and grass), each with its own PFT,
 canopy and soil column; the tower's output then has one entry per patch, and a gridcell value
 weighted by area. Several towers can run together in one experiment: list them all.
@@ -88,13 +123,18 @@ forcing, with dimensions `(time, lat, lon)` of size `(n, 1, 1)` and a `time` var
 
 The CHATS files in `data/input_files/tower-forcing/CHATS7/` are an example.
 
-**Leaf area, stem area and soil water** are prescribed. By default they come from a CLM
+**Leaf area, stem area and soil water** are prescribed (soil water can be predicted
+instead, see section 1; the file is then read for the first step only). By default they come from a CLM
 history file of a CLM run at the tower (one gridcell, at the forcing interval) with `ELAI`,
 `ESAI`, `H2OSOI` (20 soil levels, CLM5's layer structure) and `TSOI` (the initial soil
 temperature). Alternatively, give daily or monthly files (`vegetation: {source: file, files:
 ...}` with `LAI` and `SAI`; `soil_water: {source: file, files: ...}` with `H2OSOI`), which
 are interpolated between the middles of their intervals. The initial state can also come from
 a restart file of an earlier run (`initial_conditions: {source: restart, ...}`).
+
+**CO₂** is 383 ppm by default (CLM-ml v2's value for CHATS 2007). Give another constant
+(`co2: {source: constant, ppm: 400}`) or CLM's CO₂ time series file (`co2: {source: file, file:
+fco2_datm_....nc}`), read as CLM's data atmosphere reads it: global values, linear in time.
 
 **The model step.** The model runs at 30 minutes by default, split into six 5-minute
 sub-steps. If your forcing is hourly, set `interval_seconds: 3600`; the model step

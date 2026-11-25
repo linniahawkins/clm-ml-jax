@@ -31,6 +31,7 @@ from clm_ml import calendar
 from clm_ml.checks import BALANCE_CHECKS, ModelError
 from clm_ml.io.restart import FORMAT_VERSION as RESTART_VERSION
 from clm_ml.io.restart import read_restart, write_restart  # noqa: F401  (netCDF restarts, 7.5)
+from clm_ml.io.yaml_schema import ConfigError
 
 jax.config.update("jax_enable_x64", True)
 
@@ -346,6 +347,7 @@ def step_options(run):
     """The time step's static choices (``clm_ml.step.StepOptions``) of a run."""
     from clm_ml.options import MLOptions, substep_options
     from clm_ml.processes.orbit import shr_orb_params
+    from clm_ml.processes.soil_water import max_richards_trials
     from clm_ml.setup.soil import NLEVGRND, NLEVSOI
     from clm_ml.step import StepOptions
 
@@ -375,6 +377,10 @@ def step_options(run):
             lambm0=float(lambm0),
             obliqr=float(obliqr),
             checkpoint_substeps=checkpoint_substeps(run.config.numerics.checkpoint_substeps),
+            soil_water=run.config.soil.water,
+            richards_trials=(
+                max_richards_trials(run.step_seconds) if run.config.soil.water == "predicted" else 0
+            ),
         ),
         opts,
         NLEVGRND,
@@ -415,7 +421,7 @@ def simulation(run) -> Simulation:
         lambda *x: jnp.stack([jnp.asarray(v) for v in x]),
         *[run.params.canopy_params(n) for n in pft_names],
     )
-    return Simulation(
+    sim = Simulation(
         start=run.start,
         step_seconds=int(run.step_seconds),
         n_steps=int(run.n_steps),
@@ -446,6 +452,60 @@ def simulation(run) -> Simulation:
         reader=parts["reader"],
         land_fn=parts["land_fn"],
     )
+    if options.soil_water == "predicted":
+        cols, ci = d.columns, np.asarray(d.patches.column_index, dtype=int)
+        for key, values in (("max_saturated_fraction", cols.max_saturated_fraction),
+                            ("slope", cols.slope)):  # fmt: skip
+            given = values is not None and np.isfinite(np.asarray(values, dtype=float)[ci])
+            if not np.all(given):
+                missing = sorted({sim.names[p] for p in np.flatnonzero(~np.asarray(given))})
+                raise ConfigError(
+                    f"predicted soil water (model.yaml soil.water) needs {key} "
+                    + ("(FMAX, SLOPE of the surface data) " if run.is_grid else "")
+                    + f"of every soil column; not given for {missing[:5]}"
+                    + ("" if run.is_grid else f" (domain.yaml towers.<name>.soil.{key})")
+                )
+        sim.state0 = initial_soil_water(sim)
+    return sim
+
+
+def initial_soil_water(sim: Simulation):
+    """``sim``'s initial state with the soil water of a run with predicted soil water: the
+    first step's prescribed soil water (the CLM history record or soil-water file at the
+    start, as a prescribed run would use it), no ponded water, and the water table of that
+    soil water."""
+    from clm_ml.processes.drainage import water_table_depth
+    from clm_ml.processes.soil import soil_water_from_history
+
+    n_soil = sim.options.n_soil
+    _, xp = sim.read(0, 1)
+    if sim.land_fn is not None:
+        xw, land = xp
+        land0 = sim.land_fn(jax.tree.map(lambda a: a[0], xw), land, jnp.asarray(sim.runner_gidx))
+    else:
+        land0 = jax.tree.map(lambda a: a[0], xp)
+    k = sim.constants
+
+    def one(h2osoi, factor, dz, z, zi, watsat, nbedrock):
+        water = soil_water_from_history(
+            h2osoi, factor, dz, watsat, nbedrock,
+            n_soil=n_soil, n_adjust=sim.options.n_soil_adjust,
+        )  # fmt: skip
+        liq = water.h2osoi_liq[:n_soil]
+        zwt = water_table_depth(
+            liq, jnp.zeros_like(liq), watsat[:n_soil], dz[:n_soil], z[:n_soil],
+            jnp.concatenate([jnp.zeros(1, zi.dtype), zi[:n_soil]]), nbedrock,
+        )  # fmt: skip
+        return liq, zwt
+
+    liq, zwt = jax.vmap(one)(
+        *(jnp.asarray(x) for x in (land0.h2osoi, land0.h2osoi_factor, k.dz, k.z, k.zi, k.watsat,
+                                   k.nbedrock))
+    )  # fmt: skip
+    soil = sim.state0.soil._replace(
+        liquid_water=np.asarray(liq, dtype=float), water_table_depth=np.asarray(zwt, dtype=float)
+    )
+    return sim.state0._replace(soil=soil)
 
 
 def _patch_names(run) -> list:

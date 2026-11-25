@@ -44,6 +44,11 @@ def gridcell_sources(run) -> list:
     step = run.step_seconds
     sources = []
     record_seconds = int(met.interval_seconds)
+    co2 = None  # the tower files' CO2 (TowerMetCO2, 383 ppm)
+    if f.co2.source == "file" or f.co2.ppm != 383.0:
+        from clm_ml.grid_forcing import Co2Stream
+
+        co2 = Co2Stream(f.co2, lambda path: run.path(path))
     for i, name in enumerate(g.names):
         if record_seconds % step:
             raise ValueError(
@@ -83,6 +88,7 @@ def gridcell_sources(run) -> list:
                 calendar=run.calkindflag,
                 shortwave=met.shortwave.strip(),
                 precipitation=met.precipitation.strip(),
+                co2=co2,
             )
         )
     return sources

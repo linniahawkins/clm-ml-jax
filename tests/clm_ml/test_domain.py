@@ -107,6 +107,17 @@ def test_towers_in_order_of_the_file(tmp_path):
             "texture.texture_class",
         ),
         (MIXED.replace("texture_class: loam", "texture_class: peat"), "peat"),
+        (
+            MIXED.replace("organic_matter: 20.0", "organic_matter: [20.0, 10.0]"),
+            "one value per layer only with texture given_as layers",
+        ),
+        (
+            MIXED.replace(
+                "given_as: class, texture_class: loam",
+                "given_as: layers, sand_percent_layers: [30, 40], clay_percent_layers: [20, 25]",
+            ),
+            "one value per layer each",
+        ),
     ],
 )
 def test_invalid_towers(tmp_path, text, message):
@@ -123,3 +134,18 @@ def test_no_towers():
 def test_chats7_compset_is_the_shipped_tower():
     data = yaml.safe_load((compsets_dir() / "towers" / "chats7.yaml").read_text())
     assert data["CHATS7"]["measurement_height"] == 23.0
+
+
+def test_texture_by_surface_data_layers(tmp_path):
+    """A texture given by surface-data layers reaches the soil columns as layers."""
+    layered = MIXED.replace(
+        "{given_as: class, texture_class: loam}, organic_matter: 20.0",
+        "{given_as: layers, sand_percent_layers: [30, 40], clay_percent_layers: [20, 25]}, "
+        "organic_matter: [20.0, 5.0]",
+    )
+    domain = Domain.from_towers(_towers(tmp_path, layered), params=PARAMS,
+                                config=EXPLICIT_LAYERS)  # fmt: skip
+    cols = domain.columns
+    np.testing.assert_array_equal(cols.sand_percent_layers, [[30.0, 40.0]] * 2)
+    np.testing.assert_array_equal(cols.organic_matter_layers, [[20.0, 5.0]] * 2)
+    assert np.isnan(cols.organic_matter).all()

@@ -80,11 +80,18 @@ def compare(name, a, b):
 # own class (the reference took the next class's)
 ISSUE21 = {{"constants.watsat", "constants.sucsat", "constants.bsw", "constants.hksat",
            "constants.tkmg", "constants.tkdry"}}
+# not in the reference (added with predicted soil water): the runoff inputs, not given for
+# these towers, and the soil water of the state, which a prescribed run sets up empty
+NEW = {{"constants.wtfact": 0.0, "constants.topo_slope": 0.2, "state.soil.liquid_water": 0.0,
+       "state.soil.surface_water": 0.0, "state.soil.water_table_depth": 0.0}}
 g3 = np.asarray(gi) == 2
 for name, tree in (("constants", new.constants), ("state", new.state)):
     for path, b in jax.tree_util.tree_leaves_with_path(tree):
         key = name + jax.tree_util.keystr(path)
-        if key in ISSUE21:
+        if key in NEW:
+            if key in ref.files or not np.all(np.asarray(b) == NEW[key]):
+                bad += 1; print("NEW FIELD NOT AS SET UP", key)
+        elif key in ISSUE21:
             compare(key, ref[key][~g3], np.asarray(b)[~g3])  # every other column unchanged
             if np.array_equal(ref[key][g3], np.asarray(b)[g3]):
                 bad += 1; print("G3 TEXTURE VALUES EQUAL THE REFERENCE", key)

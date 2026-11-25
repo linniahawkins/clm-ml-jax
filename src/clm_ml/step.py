@@ -32,12 +32,16 @@ from clm_ml.checks import (  # the conservation checks' indices
     CANOPY_ENERGY_1,
     PLANT_AREA,
     SOIL_TEMPERATURE,
+    SOIL_WATER,
 )
 from clm_ml.processes import canopy, soil
 from clm_ml.processes.atm_forcing import ForcingRecord, clm_forcing_to_ml
+from clm_ml.processes.constants import denh2o, mmh2o
+from clm_ml.processes.hydrology import soil_hydrology
 from clm_ml.processes.layers import keep
 from clm_ml.processes.leaf_heat_capacity import leaf_heat_capacity
 from clm_ml.processes.plant_hydraulics import plant_resistance, soil_resistance
+from clm_ml.processes.surface_runoff import microtopography, pond_threshold
 from clm_ml.state import CanopyState, Diagnostics, PatchLayers, SoilState, State, StepState
 
 
@@ -59,6 +63,12 @@ class StepOptions(NamedTuple):
     #: follows the device): gradients keep one sub-step's intermediate values instead of a
     #: step's (less memory; much slower on the CPU)
     checkpoint_substeps: bool = False
+    #: soil water (model.yaml soil.water): "prescribed" by the forcing at every step, or
+    #: "predicted" by CLM's soil hydrology (not in CLM-ml v2)
+    soil_water: str = "prescribed"
+    #: passes of the Richards solver's loop with predicted soil water: the largest number
+    #: of trial sub-steps a model step can take (soil_water.max_richards_trials)
+    richards_trials: int = 0
 
     @property
     def n_substeps(self) -> int:
@@ -158,6 +168,9 @@ class PatchConstants(NamedTuple):
     albdry: Array  # (band,) dry soil albedo of the soil colour
     latdeg: Array  # () latitude, degrees
     londeg: Array  # () longitude, degrees
+    # Predicted soil water only (CLM's surface data FMAX and SLOPE)
+    wtfact: Array  # () largest saturated fraction of the surface
+    topo_slope: Array  # () topographic slope, degrees
 
 
 def interpolation_days(calday, calday_beg, options: StepOptions) -> tuple:
@@ -169,7 +182,13 @@ def interpolation_days(calday, calday_beg, options: StepOptions) -> tuple:
     days = options.step_seconds / 86400.0
     if options.substep.interpolation == "none":
         return 0.0, 0.0, 0.0
-    cur = 0.5 * (calday + calday_beg)
+    # The calendar day at the end of a step is below the day at its start where the calendar
+    # day starts again (a step ending at 0Z 1 January; after 0Z 31 December of a Gregorian
+    # leap year): the step's end is then its start plus a step.
+    # Differs from CLM-ml v2: its mean of the two calendar days puts such a step's middle
+    # half a year (or half a day) away from its sub-steps.
+    end = jnp.where(calday < calday_beg, calday_beg + days, calday)
+    cur = 0.5 * (end + calday_beg)
     return cur - days, cur, cur + days
 
 
@@ -236,12 +255,17 @@ def step(
 ) -> StepState:
     """One time step of one patch: the step's results and the state after it.
 
-    In the order of ``clm_drv``: the CLM history record's LAI, SAI and soil water; soil
+    In the order of ``clm_drv``: the CLM history record's LAI, SAI and soil water (with
+    predicted soil water: the state's soil water); soil
     albedo, evaporative resistance, thermal and hydraulic properties; the canopy's forcing,
     solar zenith angle, plant area, soil and plant resistance, leaf heat capacity and soil
     surface humidity; the canopy sub-steps (``canopy.substep``; a ``lax.scan``, with
     ``jax.checkpoint`` on each sub-step if ``options.checkpoint_substeps``); the averages
-    over the sub-steps, the canopy totals, the sunlit/shaded merge; the soil temperature. The conservation checks of the step are
+    over the sub-steps, the canopy totals, the sunlit/shaded merge; the soil temperature;
+    with predicted soil water, the soil hydrology (``hydrology.soil_hydrology``), driven by
+    the step means of the water reaching the ground, the ground evaporation and the
+    transpiration: the canopy of a step sees the soil water left by the step before, as in
+    CLM. The conservation checks of the step are
     recorded in ``diagnostics.balance_error`` (checked on the host). ``params``: the patch's
     PFT parameters (``CanopyParams``); ``tables``: the psihat lookup tables
     (``clm_ml.processes.turbulence.RSLTables``, one copy for all patches and steps of a chunk);
@@ -257,11 +281,20 @@ def step(
     n_soil = options.n_soil
     zero = jnp.zeros((), t_soil.dtype)
 
-    # CLM history record: LAI, SAI (patch) and soil water (column) — clmDataMod::clmData
-    water = soil.soil_water_from_history(
-        inputs.h2osoi, inputs.h2osoi_factor, k.dz, k.watsat, k.nbedrock,
-        n_soil=n_soil, n_adjust=options.n_soil_adjust,
-    )  # fmt: skip
+    predicted = options.soil_water == "predicted"
+    if predicted:
+        # the state's soil water (all liquid; no water in the levels below the
+        # hydrologically active ones)
+        liq = jnp.concatenate(
+            [state.soil.liquid_water, jnp.zeros(k.dz.shape[0] - n_soil, t_soil.dtype)]
+        )
+        water = soil.SoilWater(liq / (k.dz * denh2o), liq, jnp.zeros_like(liq))
+    else:
+        # CLM history record: LAI, SAI (patch) and soil water (column) — clmDataMod::clmData
+        water = soil.soil_water_from_history(
+            inputs.h2osoi, inputs.h2osoi_factor, k.dz, k.watsat, k.nbedrock,
+            n_soil=n_soil, n_adjust=options.n_soil_adjust,
+        )  # fmt: skip
     liq, ice = water.h2osoi_liq, water.h2osoi_ice
 
     # Soil albedo, evaporative resistance, thermal and hydraulic properties (no snow, no
@@ -383,6 +416,60 @@ def step(
     )
     errors = _record(errors, SOIL_TEMPERATURE, soil_error)
 
+    # Soil hydrology (predicted soil water): the step means of the canopy's fluxes move the
+    # soil water. The ground's water vapour flux is evaporation from the soil and from the
+    # pond alike when positive, dew on both when negative; snow reaching the ground enters
+    # as liquid water; the roots take the transpiration from the levels in the proportions
+    # of the plant hydraulics. Not in CLM-ml v2.
+    unset = _fill(zero)
+    if predicted:
+        hp = params.hydrology
+        micro_sigma = microtopography(k.topo_slope, hp.slopebeta, hp.slopemax)
+        ground_evaporation = means.etsoi * mmh2o  # mol H2O m-2 s-1 -> mm s-1
+        transpiration = totals.trveg * mmh2o
+        ground_input = means.qflx_tflrain + means.qflx_tflsnow
+        hyd = soil_hydrology(
+            liq[:n_soil], ice[:n_soil], state.soil.surface_water, state.soil.water_table_depth,
+            ground_input, jnp.maximum(ground_evaporation, 0.0), ground_evaporation,
+            jnp.maximum(-ground_evaporation, 0.0), roots.soil_et_loss * transpiration,
+            k.watsat[:n_soil], k.hksat[:n_soil], k.sucsat[:n_soil], k.bsw[:n_soil],
+            k.dz[:n_soil], k.z[:n_soil], jnp.concatenate([zero[None], k.zi[:n_soil]]),
+            k.nbedrock, k.wtfact, micro_sigma, pond_threshold(micro_sigma, hp.pc),
+            k.topo_slope, float(options.step_seconds), hp,
+            fixed_trials=options.richards_trials,
+        )  # fmt: skip
+        errors = _record(errors, SOIL_WATER, hyd.balance_error)
+        soil_state = SoilState(
+            temperature=t_soil_new,
+            liquid_water=hyd.h2osoi_liq,
+            surface_water=hyd.h2osfc,
+            water_table_depth=hyd.zwt,
+        )
+        hydrology_diagnostics = dict(
+            qflx_rain_grnd_soil=ground_input,
+            qflx_evap_grnd_soil=ground_evaporation,
+            qflx_tran_soil=transpiration,
+            qflx_infl_soil=hyd.qflx_infl,
+            qflx_surf_soil=hyd.qflx_surf,
+            qflx_drain_soil=hyd.qflx_drain,
+            fsat_soil=hyd.fsat,
+            frac_h2osfc_soil=hyd.frac_h2osfc,
+            h2osfc_soil=hyd.h2osfc,
+            zwt_soil=hyd.zwt,
+            num_substeps_soil=hyd.num_substeps.astype(t_soil.dtype),
+            errh2o_soil=hyd.balance_error,
+        )
+    else:
+        soil_state = state.soil._replace(temperature=t_soil_new, liquid_water=liq[:n_soil])
+        hydrology_diagnostics = {
+            name: unset
+            for name in (
+                "qflx_rain_grnd_soil", "qflx_evap_grnd_soil", "qflx_tran_soil", "qflx_infl_soil",
+                "qflx_surf_soil", "qflx_drain_soil", "fsat_soil", "frac_h2osfc_soil",
+                "h2osfc_soil", "zwt_soil", "num_substeps_soil", "errh2o_soil",
+            )
+        }  # fmt: skip
+
     new_state = State(
         canopy=CanopyState(
             air_temperature=end.tair_profile,
@@ -395,7 +482,7 @@ def step(
             acclimation_temperature=c.acclimation_temperature,
             acclimation_steps=c.acclimation_steps,
         ),
-        soil=SoilState(temperature=t_soil_new),
+        soil=soil_state,
     )
     diagnostics = Diagnostics(
         tref_forcing=end.tref_forcing,
@@ -456,6 +543,9 @@ def step(
         gsoi_soil=gsoi,
         btran_soil=end.btran_soil,
         psis_soil=roots.psis,
+        h2osoi_liq_soil=liq,
+        h2osoi_vol_soil=water.h2osoi_vol,
+        **hydrology_diagnostics,
         wind_profile=end.wind_profile,
         shair_profile=keep(use, means.shair, end.shair_profile),
         etair_profile=keep(use, means.etair, end.etair_profile),

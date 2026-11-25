@@ -25,7 +25,13 @@ def _state(tair=300.0, tleaf=(0.0, 295.0)):
         acclimation_temperature=np.array(288.0),
         acclimation_steps=np.array(5.0),
     )
-    return State(canopy=canopy, soil=SoilState(temperature=np.array([285.0, 284.0])))
+    soil = SoilState(
+        temperature=np.array([285.0, 284.0]),
+        liquid_water=np.array([5.0, 9.0]),
+        surface_water=np.array(0.0),
+        water_table_depth=np.array(8.6),
+    )
+    return State(canopy=canopy, soil=soil)
 
 
 #: two layers in use of three slots

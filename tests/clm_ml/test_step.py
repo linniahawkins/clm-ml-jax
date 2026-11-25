@@ -38,6 +38,33 @@ def test_interpolation_days_centred():
     assert S.interpolation_days(121.5, 121.4, _options("none")) == (0.0, 0.0, 0.0)
 
 
+def test_interpolation_days_where_the_calendar_day_starts_again():
+    """The step's middle stays half a step after its start through 1 January and through 31
+    December of a leap year (the Gregorian calendar day falls from 366 to 365 there), so
+    every sub-step lies between the previous and the next record."""
+    import datetime
+
+    from clm_ml.calendar import step_time
+
+    opts = _options(step_seconds=3600)
+    step = 3600 / 86400
+    starts = {datetime.datetime(2010, 12, 31, 22): 1, datetime.datetime(2012, 12, 30, 22): 2}
+    for start, expected in starts.items():
+        wrapped = 0
+        for nstep in range(1, 30):
+            t = step_time(start, 3600, nstep, "GREGORIAN")
+            bef, cur, nxt = (float(d) for d in S.interpolation_days(t.calday, t.calday_beg, opts))
+            np.testing.assert_allclose(cur, t.calday_beg + 0.5 * step, rtol=0, atol=1e-10)
+            assert bef == cur - step and nxt == cur + step
+            days = np.asarray(S.substep_days(t.calday_beg, opts))
+            assert np.all((days > bef) & (days < nxt))
+            if t.calday < t.calday_beg:
+                wrapped += 1
+            else:  # every other step: the mean of its two calendar days, unchanged
+                assert cur == 0.5 * (t.calday + t.calday_beg)
+        assert wrapped == expected
+
+
 def test_substep_days():
     opts = _options()
     assert opts.n_substeps == 6

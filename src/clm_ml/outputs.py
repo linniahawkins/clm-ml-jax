@@ -47,8 +47,13 @@ def step_fields(step, layers) -> dict:
            if n != "balance_error"}  # fmt: skip
     out.update({f"state.{n}": v for n, v in step.state.canopy._asdict().items()})
     out["state.soil_temperature"] = step.state.soil.temperature
+    out.update({f"state.{n}": getattr(step.state.soil, n) for n in _SOIL_WATER_STATE})
     out.update({f"layers.{n}": getattr(layers, n) for n in layers._fields})
     return out
+
+
+#: The soil water fields of the state (``clm_ml.state.SoilState``), as ``state.<name>``
+_SOIL_WATER_STATE = ("liquid_water", "surface_water", "water_table_depth")
 
 
 def field_names() -> tuple:
@@ -59,6 +64,7 @@ def field_names() -> tuple:
         tuple(f"diagnostics.{n}" for n in Diagnostics._fields if n != "balance_error")
         + tuple(f"state.{n}" for n in CanopyState._fields)
         + ("state.soil_temperature",)
+        + tuple(f"state.{n}" for n in _SOIL_WATER_STATE)
         + tuple(f"layers.{n}" for n in PatchLayers._fields)
     )
 
@@ -110,6 +116,12 @@ class _Raw:
         out = self.layer(values, within_canopy_only=True)
         has_leaf = self.layer(self["dpai_profile"], within_canopy_only=True) > 0  # NaN -> False
         return xp.where(has_leaf[..., None], out, xp.nan)
+
+    def hydrology(self, name: str) -> np.ndarray:
+        """A field of the soil hydrology: NaN where the step has none (prescribed soil
+        water, where the field holds the fill value)."""
+        value = self[name]
+        return self.xp.where(self.xp.abs(value) < 1.0e30, value, self.xp.nan)
 
     def by_group(self, total: str, sun: str, sha: str, band: int | None = None) -> np.ndarray:
         parts = [self[total], self[sun], self[sha]]
@@ -244,6 +256,44 @@ VARIABLES: tuple[VariableSpec, ...] = (
     V("fraction_at_minimum_leaf_water_potential", "1",
       "Fraction of canopy at minimum leaf water potential", (), "aux.out col 6",
       lambda r: r["fracminlwp_canopy"]),
+    # --- soil water (not in the legacy files) ---------------------------------------------
+    V("soil_liquid_water", "kg m-2",
+      "Liquid water of the soil levels during the step (0 in the bedrock levels)",
+      ("soil_layer",), "", lambda r: r["h2osoi_liq_soil"]),
+    V("soil_water_content", "m3 m-3",
+      "Volumetric water of the soil levels during the step (0 in the bedrock levels)",
+      ("soil_layer",), "", lambda r: r["h2osoi_vol_soil"]),
+    V("ground_water_input", "kg m-2 s-1",
+      "Water reaching the ground: throughfall and canopy drip, rain and snow "
+      "(predicted soil water)", (), "", lambda r: r.hydrology("qflx_rain_grnd_soil")),
+    V("ground_evaporation", "kg m-2 s-1",
+      "Evaporation from the ground, negative: dew (predicted soil water)", (), "",
+      lambda r: r.hydrology("qflx_evap_grnd_soil")),
+    V("root_water_uptake", "kg m-2 s-1",
+      "Water taken from the soil by roots: the transpiration (predicted soil water)", (), "",
+      lambda r: r.hydrology("qflx_tran_soil")),
+    V("infiltration", "kg m-2 s-1",
+      "Infiltration into the soil, negative when evaporation exceeds the input "
+      "(predicted soil water)", (), "", lambda r: r.hydrology("qflx_infl_soil")),
+    V("surface_runoff", "kg m-2 s-1", "Surface runoff (predicted soil water)", (), "",
+      lambda r: r.hydrology("qflx_surf_soil")),
+    V("drainage", "kg m-2 s-1", "Drainage of the saturated zone (predicted soil water)", (),
+      "", lambda r: r.hydrology("qflx_drain_soil")),
+    V("saturated_fraction", "1", "Saturated fraction of the surface (predicted soil water)",
+      (), "", lambda r: r.hydrology("fsat_soil")),
+    V("surface_water", "mm", "Ponded surface water (predicted soil water)", (), "",
+      lambda r: r.hydrology("h2osfc_soil")),
+    V("surface_water_fraction", "1",
+      "Fraction of the ground under ponded water (predicted soil water)", (), "",
+      lambda r: r.hydrology("frac_h2osfc_soil")),
+    V("water_table_depth", "m", "Water table depth (predicted soil water)", (), "",
+      lambda r: r.hydrology("zwt_soil")),
+    V("soil_water_substeps", "1",
+      "Trial sub-steps of the soil water solver in the step (predicted soil water)", (), "",
+      lambda r: r.hydrology("num_substeps_soil")),
+    V("soil_water_balance_error", "mm",
+      "Soil water balance error of the step (predicted soil water)", (), "",
+      lambda r: r.hydrology("errh2o_soil")),
     # --- vertical profiles (profile.out, fluxprofile.out) -------------------------------
     V("layer_height", "m", "Height of layer center", ("layer",), "profile.out col 2",
       lambda r: r.layer(r["zs_profile"])),
@@ -480,6 +530,7 @@ class Outputs:
                     self.soil_temperature,
                     attrs={"units": "K", "long_name": "Soil temperature"},
                 )
+            if any("soil_layer" in v.dims for v in variables.values()):
                 coords["soil_depth"] = (("patch", "soil_layer"), self.soil_depth, {"units": "m"})
         else:
             coords["gridcell"] = list(self.gridcell_names)

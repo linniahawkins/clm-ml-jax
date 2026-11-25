@@ -24,7 +24,11 @@ def _state(n_patch=3, n_layer=4, n_soil=5, seed=0):
     )  # fmt: skip
     canopy = canopy._replace(air_temperature=canopy.air_temperature.copy())
     canopy.air_temperature[0, -1] = 1e36  # padding slots hold the fill value
-    return State(canopy=canopy, soil=SoilState(temperature=r(n_soil)))
+    soil = SoilState(
+        temperature=r(n_soil), liquid_water=r(n_soil - 1), surface_water=r(),
+        water_table_depth=r(),
+    )  # fmt: skip
+    return State(canopy=canopy, soil=soil)
 
 
 def _content(state):
@@ -96,7 +100,7 @@ def test_schema(tmp_path):
     with nc.Dataset(tmp_path / "r.nc") as ds:
         assert ds.format_version == FORMAT_VERSION
         assert dict((k, len(v)) for k, v in ds.dimensions.items()) == {
-            "patch": 3, "layer": 4, "leaf": 2, "soil_level": 5}  # fmt: skip
+            "patch": 3, "layer": 4, "leaf": 2, "soil_level": 5, "water_level": 4}  # fmt: skip
         temp = ds.groups["state"].variables["canopy_leaf_temperature"]
         assert temp.dimensions == ("patch", "layer", "leaf") and temp.units == "K"
         assert ds.groups["state"].variables["soil_temperature"].dimensions == (

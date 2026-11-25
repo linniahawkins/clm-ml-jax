@@ -82,12 +82,17 @@ def build_patches(domain, params, config, first: dict, acclimation_steps: float 
     nlevsoi, nlevgrnd = soil.NLEVSOI, soil.NLEVGRND
     z, dz, zi = soil.soil_layers()
     nbed_col = soil.bedrock_index(np.asarray(cols.bedrock_depth, dtype=float), zi, nlevsoi)
-    # a missing organic matter content (NaN) is passed on as -999
-    organic = np.where(np.isnan(cols.organic_matter), -999.0, cols.organic_matter)
-    props = soil.soil_properties(
-        np.asarray(cols.sand_percent, dtype=float), np.asarray(cols.clay_percent, dtype=float),
-        organic, list(cols.texture_class), z, nlevsoi,
-    )  # fmt: skip
+    if cols.sand_percent_layers is not None:  # a texture per level, from surface-data layers
+        sand, clay, organic = soil.texture_profile(
+            cols.sand_percent_layers, cols.clay_percent_layers, cols.organic_matter_layers, z,
+            nlevsoi,
+        )  # fmt: skip
+    else:
+        sand = np.asarray(cols.sand_percent, dtype=float)
+        clay = np.asarray(cols.clay_percent, dtype=float)
+        # a missing organic matter content (NaN) is passed on as -999
+        organic = np.where(np.isnan(cols.organic_matter), -999.0, cols.organic_matter)
+    props = soil.soil_properties(sand, clay, organic, list(cols.texture_class), z, nlevsoi)
     albsat, albdry = soil.soil_albedos(cols.color_class)
     beta = np.asarray(params.values["root_profile_beta"], dtype=float)[pft]
     nbed = nbed_col[ci]
@@ -95,6 +100,16 @@ def build_patches(domain, params, config, first: dict, acclimation_steps: float 
 
     def per_patch(a):
         return np.broadcast_to(a, (n_p,) + np.shape(a)).copy()
+
+    # Predicted soil water: the largest saturated fraction and the slope (CLM uses at least
+    # 0.2 degrees). Where they are not given (only predicted soil water needs them, and a
+    # run with it refuses to start without) the constants hold 0 and the smallest slope.
+    def column_value(values, missing):
+        v = np.full(len(nbed_col), np.nan) if values is None else np.asarray(values, dtype=float)
+        return np.where(np.isfinite(v), v, missing)[ci]
+
+    wtfact = column_value(cols.max_saturated_fraction, 0.0)
+    topo_slope = np.maximum(column_value(cols.slope, soil.MIN_SLOPE), soil.MIN_SLOPE)
 
     g = domain.gridcells
     constants = PatchConstants(
@@ -122,6 +137,8 @@ def build_patches(domain, params, config, first: dict, acclimation_steps: float 
         albdry=albdry[ci],
         latdeg=np.asarray(g.latitude, dtype=float)[gi],
         londeg=np.asarray(g.longitude, dtype=float)[gi],
+        wtfact=wtfact,
+        topo_slope=topo_slope,
     )
 
     # initial state (initVerticalProfiles, SoilInit, init_acclim)
@@ -141,7 +158,14 @@ def build_patches(domain, params, config, first: dict, acclimation_steps: float 
             acclimation_temperature=np.asarray(first["tacclim"], dtype=float),
             acclimation_steps=np.full(n_p, float(acclimation_steps)),
         ),
-        soil=SoilState(temperature=np.asarray(first["tsoi"], dtype=float)[:, :nlevgrnd]),
+        # the soil water of a run with predicted soil water is set from the first step's
+        # forcing once the forcing can be read (clm_ml.driver.initial_soil_water)
+        soil=SoilState(
+            temperature=np.asarray(first["tsoi"], dtype=float)[:, :nlevgrnd],
+            liquid_water=np.zeros((n_p, nlevsoi)),
+            surface_water=np.zeros(n_p),
+            water_table_depth=np.zeros(n_p),
+        ),
     )
     c3 = np.round(np.asarray(params.values["c3_photosynthesis"], dtype=float)[pft]) == 1
     return PatchSetup(constants, state, c3, pft, per_patch(z))

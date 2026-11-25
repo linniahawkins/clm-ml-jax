@@ -93,7 +93,9 @@ for p in range(d.n_patches):
         "soil": {{"texture": {{"given_as": "percentages", "sand_percent": float(c.sand_percent[p]),
                               "clay_percent": float(c.clay_percent[p])}},
                  "organic_matter": float(c.organic_matter[p]), "color_class": int(c.color_class[p]),
-                 "bedrock_depth": float(c.bedrock_depth[p])}},
+                 "bedrock_depth": float(c.bedrock_depth[p]),
+                 "max_saturated_fraction": float(c.max_saturated_fraction[p]),
+                 "slope": float(c.slope[p])}},
         "patches": [{{"pft": PFT_NAMES[int(d.patches.pft_index[p])], "weight": 1.0,
                      "canopy_height": float(d.patches.canopy_height[p]),
                      "root_biomass": float(d.patches.root_biomass[p])}}]}}

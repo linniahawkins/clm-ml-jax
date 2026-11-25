@@ -83,7 +83,8 @@ Built by `setup.patches.build_patches` (`setup/patches.py`, NumPy) from `Domain`
 - `zref` (forcing height), `ztop` (canopy height), `root_biomass`, `rootfr` (nlevsoi);
 - soil column (S): `dz`, `z`, `zi`, `soil_dz`, `nbedrock`, `watsat`, `sucsat`, `bsw`, `hksat`,
   `tkmg`, `tkdry`, `csol` (from sand/clay/organic matter or texture class: `setup/soil.py`);
-  `albsat`, `albdry` (band; soil colour);
+  `albsat`, `albdry` (band; soil colour); for predicted soil water `wtfact` (the largest
+  saturated fraction, CLM `FMAX`) and `topo_slope` (degrees, CLM `SLOPE`, at least 0.2);
 - `latdeg`, `londeg`.
 
 ### 2e. PFT parameters (`params.CanopyParams`, one row per PFT, gathered to patches)
@@ -92,7 +93,10 @@ Photosynthesis/stomata: `vcmax25`, `iota`, `gs_min`, `g0/g1_ball_berry`, `g0/g1_
 `root_radius`, `root_density`, `root_resistivity`; leaf/radiation: `leaf_dimension`,
 `leaf_angle_index`, `sla_top`, `leaf_emissivity`, `clumping_index`, `leaf/stem_reflectance`,
 `leaf/stem_transmittance` (spectral fields `[vis, nir]`);
-turbulence: `zeta_max_stable` (decisions.md 123).
+turbulence: `zeta_max_stable` (decisions.md 123). Every row also holds the soil hydrology
+parameters (`hydrology`: `e_ice`, `fff`, `pc`, `mu`, `baseflow_scalar`, `n_baseflow`,
+`aq_sp_yield_min`, `slopebeta`, `slopemax`), which are not per PFT (the `hydrology` section
+of `params.yaml`; decisions.md 145).
 Read at setup only (not differentiable through the run): `root_profile_beta` (root fractions),
 `c3_photosynthesis` (C3/C4 group, static), PFT default canopy height / beta profiles.
 
@@ -118,8 +122,10 @@ them along the Obukhov length.
   forcing, leaves at air T, leaf water potential and interception initial values
   (`setup/canopy.initial_canopy_state`), soil temperature from the history `TSOI`
   (`setup/soil.initial_soil_temperature`), acclimation temperature = first step's air T (or the
-  whole-run mean for `run_mean`).
-- `restart`: `io/restart.read_restart` (netCDF format 6).
+  whole-run mean for `run_mean`). Predicted soil water: the soil water a prescribed run
+  has at its first step, no pond, the water table diagnosed from it
+  (`driver.initial_soil_water`).
+- `restart`: `io/restart.read_restart` (netCDF format 7).
 
 ---
 
@@ -139,22 +145,28 @@ them along the Obukhov length.
 | `canopy.acclimation_temperature` | () | K | 10-day running mean |
 | `canopy.acclimation_steps` | () | – | steps in the running mean |
 | `soil.temperature` | (S,) | K | soil column |
+| `soil.liquid_water` | (20,) | kg m-2 | the hydrologically active levels; with prescribed soil water the forcing's water of the last step |
+| `soil.surface_water` | () | mm | ponded water (0 with prescribed soil water) |
+| `soil.water_table_depth` | () | m | (0 with prescribed soil water) |
 
 Inside a step, the sub-step's own carry (`processes/canopy.Substep`, ~100 work fields incl.
 Runge-Kutta stage increments) exists only within the step.
 
-**`Diagnostics`** (`state.py`) — about 80 fields computed by every step, CLM-ml names: forcing at
+**`Diagnostics`** (`state.py`) — about 95 fields computed by every step, CLM-ml names: forcing at
 the reference height, vegetation (LAI, SAI, added stem area, sunlit/shaded LAI, `dpai`,
 `fracsun`), canopy totals (albedo, absorbed shortwave, net radiation, H, LE, storage, u*, β,
 sunlit/shaded H/LE/GPP/Vcmax25/gs/wind/leaf T, transpiration, evaporation), soil surface (Rn,
 H, LE, G, btran, ψsoil), profiles per layer/level (wind, fluxes, conductances, radiation),
-per leaf (APAR, Rn, H, LE, Anet, gs, Vcmax25, T, ψleaf), and `balance_error` (13 conservation
+per leaf (APAR, Rn, H, LE, Anet, gs, Vcmax25, T, ψleaf), soil water (`*_soil`: liquid water
+and water content per level, water reaching the ground, ground evaporation, root uptake,
+infiltration, runoff, drainage, saturated fraction, pond, water table, Richards sub-steps,
+balance error), and `balance_error` (14 conservation
 checks, `checks.BALANCE_CHECKS`). Not carried; read by outputs and checks only.
 
 **`PatchLayers`** — the fixed layer grid with masks (`in_use`, `in_canopy`, `above_canopy`,
 `leafy`) as properties; part of `PatchConstants`.
 
-**Restart file** (`io/restart.py`, format 6): `State` of every patch (units, long names),
+**Restart file** (`io/restart.py`, format 7): `State` of every patch (units, long names),
 `alive` per patch, the output records in progress (partial sums), time, calendar, device
 layout, output writers in progress. Not stored: constants, parameters, layer grid (rebuilt
 from the configuration).
@@ -200,7 +212,16 @@ from the configuration).
       (`canopy.canopy_totals`), sunlit/shaded leaves merged to the layer mean
       (`canopy.merge_sun_shade`);
    9. soil temperature (heat diffusion, ground heat flux from the canopy solution;
-      `processes/soil.soil_temperature`, `processes/soil.py`).
+      `processes/soil.soil_temperature`, `processes/soil.py`);
+   10. with `soil.water: predicted`, the soil hydrology (`processes/hydrology.soil_hydrology`,
+      CLM's order: ponded fraction, runoff from the saturated fraction and infiltration
+      (`surface_runoff`), the Richards equation with CLM's adaptive sub-steps as a loop of
+      a fixed number of trials (`soil_water.soil_water_movement`), water table, dew,
+      drainage (`drainage`)). Its inputs are the step means of the canopy: throughfall and
+      drip of rain and snow, the ground's water-vapour flux (evaporation if positive, dew
+      if negative), and the transpiration times `soil_et_loss` of each level. Step 2 then
+      takes the soil water from the state instead of the record, so the canopy of a step
+      sees the water left by the step before (decisions.md 145).
    Returns `StepState(state, diagnostics)`.
 5. **One sub-step** (`processes/canopy.substep`):
    - save the start-of-sub-step values (`save_start`);
@@ -229,7 +250,7 @@ from the configuration).
 
 ## 5. Outputs
 
-- **Variables:** 64 named output variables (`outputs.VARIABLES`, `outputs.py`) computed
+- **Variables:** 78 named output variables (`outputs.VARIABLES`, `outputs.py`) computed
   from a step's fields (`outputs.step_fields`: `diagnostics.*`, `state.*`, `layers.*`); raw
   fields can be requested by name (validation).
 - **Streams** (run.yaml `output.streams`; `output_streams.py`): each with variables,
@@ -244,7 +265,8 @@ from the configuration).
   `vegetated_fraction` (values are per m2 of vegetated land); tower runs per gridcell.
 - **Legacy `.out`** (`output.legacy_ascii`, one patch only, validation vs Fortran): an extra
   internal per-step stream in the *same* run, written by `io/legacy.py`.
-- **Checks:** 13 conservation checks recorded per patch per step (max over the chunk), checked
+- **Checks:** 14 conservation checks (the 14th: the soil water balance, CLM's threshold of
+  1e-5 mm per step) recorded per patch per step (max over the chunk), checked
   on the host after each chunk (`checks.check_balance`, `driver.check_batch_balance`); health
   check of the state.
 
@@ -318,7 +340,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  A[acclimation running mean<br/>reads tref; writes acclimation_temperature] --> B[soil water from record<br/>LandInputs.h2osoi]
+  A[acclimation running mean<br/>reads tref; writes acclimation_temperature] --> B[soil water from record<br/>LandInputs.h2osoi<br/>or from the state: predicted]
   B --> C[soil albedo, resistance,<br/>thermal + hydraulic properties]
   C --> D[canopy forcing, solar zenith,<br/>plant area per layer]
   D --> E[soil & plant resistance, leaf-specific<br/>conductance, leaf heat capacity]
@@ -341,7 +363,8 @@ flowchart TB
   SUB --> AV[averages, canopy totals,<br/>balance checks]
   AV --> MG[sunlit/shaded merged to layer mean<br/>writes leaf_temperature, leaf_water_potential]
   MG --> ST[soil temperature diffusion<br/>writes soil.temperature]
-  ST --> OUT[StepState: State + Diagnostics]
+  ST --> HY[predicted soil water only: soil hydrology<br/>writes soil.liquid_water, surface_water, water_table_depth]
+  HY --> OUT[StepState: State + Diagnostics]
 ```
 
 ---

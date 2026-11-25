@@ -14,7 +14,8 @@ Axes (all 0-based):
   ``i - 1``); for fluxes at the ground and every layer, and layer-top heights.
 - ``leaf`` (2): 0 sunlit, 1 shaded.
 - ``band`` (2): 0 visible, 1 near-infrared.
-- ``soil_level`` (``nlevgrnd``): soil layers from the top down.
+- ``soil_level`` (``nlevgrnd``): soil layers from the top down; ``water_level``
+  (``nlevsoi``): the hydrologically active ones, the first of them.
 
 Arrays are JAX arrays (a pytree), so ``jax.grad`` differentiates with respect to them.
 Batched runs add a leading patch axis to every field.
@@ -48,9 +49,16 @@ class CanopyState(NamedTuple):
 
 
 class SoilState(NamedTuple):
-    """The soil column under the patch (one per patch: ``soil.columns: per_patch``)."""
+    """The soil column under the patch (one per patch: ``soil.columns: per_patch``).
+
+    The water fields are prognostic with predicted soil water (model.yaml ``soil.water``).
+    With prescribed soil water the liquid water is the forcing's of the last step and the
+    other two stay as set up (no pond; the water table of the initial soil water)."""
 
     temperature: Array  # (soil_level,) K
+    liquid_water: Array  # (water_level,) kg m-2: the hydrologically active levels (nlevsoi)
+    surface_water: Array  # () ponded water on the surface, mm
+    water_table_depth: Array  # () m
 
 
 class State(NamedTuple):
@@ -127,6 +135,23 @@ class Diagnostics(NamedTuple):
     gsoi_soil: Array  # () soil heat flux, W m-2
     btran_soil: Array  # () soil wetness factor for stomatal conductance
     psis_soil: Array  # () weighted soil water potential, MPa
+    # Soil water (the water the step's canopy and soil temperature saw: prescribed, or the
+    # state before the step's hydrology)
+    h2osoi_liq_soil: Array  # (soil_level,) liquid water, kg m-2
+    h2osoi_vol_soil: Array  # (soil_level,) volumetric water, m3 m-3
+    # Soil hydrology of the step (predicted soil water; spval with prescribed soil water)
+    qflx_rain_grnd_soil: Array  # () water reaching the ground (throughfall, drip), mm s-1
+    qflx_evap_grnd_soil: Array  # () ground evaporation (negative: dew), mm s-1
+    qflx_tran_soil: Array  # () root uptake (the transpiration), mm s-1
+    qflx_infl_soil: Array  # () infiltration, mm s-1
+    qflx_surf_soil: Array  # () surface runoff, mm s-1
+    qflx_drain_soil: Array  # () drainage, mm s-1
+    fsat_soil: Array  # () saturated fraction of the surface
+    frac_h2osfc_soil: Array  # () fraction of the ground under ponded water
+    h2osfc_soil: Array  # () ponded water at the end of the step, mm
+    zwt_soil: Array  # () water table depth at the end of the step, m
+    num_substeps_soil: Array  # () trial sub-steps of the Richards solver
+    errh2o_soil: Array  # () water balance error of the step, mm
     # Profiles
     wind_profile: Array  # (layer,) wind speed, m s-1
     shair_profile: Array  # (layer,) air sensible heat flux, W m-2

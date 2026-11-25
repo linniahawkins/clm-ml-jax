@@ -9,11 +9,15 @@ parameter of every PFT 1-16, with nothing inherited from another file, so a run'
 are all in the one file it names::
 
     units: {vcmax25: umol m-2 s-1, ...}
+    hydrology: {e_ice: 6.0, fff: 0.5, ...}   # soil hydrology: the same for every PFT
     pft:
       needleleaf_evergreen_temperate_tree:
         vcmax25: 62.5
         ...                         # every parameter
       ...                           # every PFT 1-16
+
+The ``hydrology`` section holds CLM's soil hydrology parameters (:data:`HYDROLOGY_SPECS`),
+which do not depend on the PFT; only runs with predicted soil water use them.
 
 Only the canopy roughness ratios (``z0m_to_height_ratio``, ``displacement_to_height_ratio``),
 which only grid runs use, may be left out; a grid run then refuses the file. To make a new
@@ -72,6 +76,10 @@ class CanopyParams(NamedTuple):
     stem_transmittance: object
     # Turbulence
     zeta_max_stable: object
+    # Soil hydrology (``clm_ml.processes.hydrology.HydrologyParameters``): not PFT
+    # parameters, so every row holds the same values, and the derivative with respect to
+    # one of them is the sum over the rows
+    hydrology: object
 
 
 #: CLM PFT names, in CLM index order (index 0 = not_vegetated). Only PFTs 1-16 have
@@ -168,6 +176,39 @@ PARAM_SPECS: tuple[ParamSpec, ...] = (
 
 SPECS_BY_NAME: Mapping[str, ParamSpec] = {s.name: s for s in PARAM_SPECS}
 
+
+@dataclasses.dataclass(frozen=True)
+class HydrologySpec:
+    name: str  # params.yaml name: CLM's (parameter file or namelist)
+    units: str
+    description: str
+    default: float  # ctsm60_params.c251211.nc; baseflow_scalar: the CLM6 namelist
+    source: str = "parameter file"
+
+
+#: CLM's soil hydrology parameters, in the order of
+#: ``clm_ml.processes.hydrology.HydrologyParameters``
+HYDROLOGY_SPECS: tuple[HydrologySpec, ...] = (
+    HydrologySpec("e_ice", "-", "Ice impedance: the hydraulic conductivity is reduced by "
+                  "10^(-e_ice x ice-filled fraction of the pores)", 6.0),
+    HydrologySpec("fff", "m-1", "Decay of the saturated fraction of the surface with the "
+                  "water table depth", 0.5),
+    HydrologySpec("pc", "-", "Fraction of the ground under ponded water above which the "
+                  "ponds connect and run off", 0.4),
+    HydrologySpec("mu", "-", "Exponent of the connected ponded fraction in the pond's "
+                  "runoff", 0.13889),
+    HydrologySpec("baseflow_scalar", "mm s-1 m-1", "Drainage rate per metre of saturated "
+                  "zone above the bedrock, on a 45 degree slope", 0.001, "namelist"),
+    HydrologySpec("n_baseflow", "-", "Exponent of the saturated zone's thickness in the "
+                  "drainage", 1.0),
+    HydrologySpec("aq_sp_yield_min", "-", "Smallest specific yield of a soil level", 0.02),
+    HydrologySpec("slopebeta", "-", "Exponent of the microtopography's dependence on the "
+                  "slope", -3.0),
+    HydrologySpec("slopemax", "degrees", "Slope scale of the microtopography", 0.4),
+)  # fmt: skip
+HYDROLOGY_NAMES: tuple[str, ...] = tuple(s.name for s in HYDROLOGY_SPECS)
+HYDROLOGY_DEFAULTS: Mapping[str, float] = {s.name: s.default for s in HYDROLOGY_SPECS}
+
 #: ``zeta_max_stable`` of a PFT without a limit (CLM-ml v2)
 NO_ZETA_LIMIT = 1.0e30
 #: ``zeta_max_stable`` given by ``clm-ml upgrade`` to a params file that lacks it, by PFT:
@@ -179,10 +220,21 @@ ZETA_MAX_STABLE_DEFAULT: Mapping[str, float] = {
 
 def add_new_parameters(data: dict, report: list[str]) -> dict:
     """A params file's contents with the parameters added since it was written
-    (``zeta_max_stable``) at their defaults (``clm-ml upgrade``)."""
+    (``zeta_max_stable``, the ``hydrology`` section) at their defaults (``clm-ml upgrade``)."""
     pfts = data.get("pft")
     if not isinstance(pfts, dict):
         return data
+    hydrology = data.get("hydrology")
+    if hydrology is None or isinstance(hydrology, dict):
+        absent = [n for n in HYDROLOGY_NAMES if n not in (hydrology or {})]
+        if absent:
+            data["hydrology"] = {
+                n: (hydrology or {}).get(n, HYDROLOGY_DEFAULTS[n]) for n in HYDROLOGY_NAMES
+            }
+            report.append(
+                "params.yaml: added the soil hydrology parameters at CLM's values: "
+                + ", ".join(absent)
+            )
     added = False
     for pft, entries in pfts.items():
         if isinstance(entries, dict) and pft in ZETA_MAX_STABLE_DEFAULT:
@@ -207,6 +259,10 @@ class Params:
 
     values: Mapping[str, np.ndarray]
     source: str = ""  # file the table was loaded from (for provenance)
+    #: the soil hydrology parameters (:data:`HYDROLOGY_SPECS`; not per PFT)
+    hydrology: Mapping[str, float] = dataclasses.field(
+        default_factory=lambda: dict(HYDROLOGY_DEFAULTS)
+    )
 
     def __getattr__(self, name: str) -> np.ndarray:
         if name in SPECS_BY_NAME:
@@ -233,7 +289,7 @@ class Params:
                 f"{source}: a params file must give every parameter of every PFT 1-16 "
                 f"(no defaults are filled in); missing: {shown}"
             )
-        return params
+        return dataclasses.replace(params, hydrology=_check_hydrology(data, source))
 
     @classmethod
     def _from_merged(cls, merged: dict[str, dict[str, object]], source: str) -> "Params":
@@ -264,17 +320,31 @@ class Params:
             if name not in SPECS_BY_NAME:
                 raise ConfigError(f"set(): unknown parameter {name!r}")
             values[name][row] = value
-        return Params(values=values, source=self.source)
+        return dataclasses.replace(self, values=values)
+
+    def set_hydrology(self, **changes) -> "Params":
+        """Return a copy with soil hydrology parameters changed."""
+        unknown = sorted(set(changes) - set(HYDROLOGY_NAMES))
+        if unknown:
+            raise ConfigError(f"set_hydrology(): unknown parameter(s) {unknown}")
+        hydrology = {**self.hydrology, **{k: float(v) for k, v in changes.items()}}
+        return dataclasses.replace(self, hydrology=hydrology)
 
     def canopy_params(self, pft: str):
         """The parameters of one PFT as the processes take them
         (:class:`CanopyParams`, JAX scalars; spectral ``[vis, nir]``)."""
         import jax.numpy as jnp
 
+        from clm_ml.processes.hydrology import HydrologyParameters
+
         row = pft_index(pft, "canopy_params()")
-        return CanopyParams(**{
+        hydrology = HydrologyParameters(**{
+            name: jnp.asarray(self.hydrology[name], dtype=jnp.float64)
+            for name in HYDROLOGY_NAMES
+        })  # fmt: skip
+        return CanopyParams(hydrology=hydrology, **{
             name: jnp.asarray(self.values[name][row], dtype=jnp.float64)
-            for name in CanopyParams._fields
+            for name in CanopyParams._fields if name != "hydrology"
         })  # fmt: skip
 
     def missing_for(self, pft_rows: list[int], names=None) -> list[str]:
@@ -297,6 +367,9 @@ class Params:
                 value = self.values[spec.name][row]
                 shown = f"[{value[0]:g}, {value[1]:g}]" if spec.spectral else f"{value:g}"
                 lines.append(f"  {spec.name:22s} {shown:>16s}  {spec.units}")
+        lines.append("soil hydrology")
+        for spec in HYDROLOGY_SPECS:
+            lines.append(f"  {spec.name:22s} {self.hydrology[spec.name]:>16g}  {spec.units}")
         return "\n".join(lines)
 
 
@@ -337,6 +410,38 @@ def _resolve(path_or_name: Path | str) -> Path:
     return Path(text)
 
 
+def _check_hydrology(data: dict, name: str) -> dict:
+    """The ``hydrology`` section of a params file's contents: every parameter, no other."""
+    section = data.get("hydrology")
+    if not isinstance(section, dict):
+        raise ConfigError(
+            f"{name}: no hydrology section (the soil hydrology parameters "
+            f"{', '.join(HYDROLOGY_NAMES)}); `clm-ml upgrade` adds it at CLM's values"
+        )
+    unknown, absent = sorted(set(section) - set(HYDROLOGY_NAMES)), [
+        n for n in HYDROLOGY_NAMES if n not in section
+    ]
+    if unknown or absent:
+        raise ConfigError(
+            f"{name}: hydrology: "
+            + "; ".join(
+                text
+                for text in (
+                    f"unknown parameter(s) {unknown}" if unknown else "",
+                    f"missing {absent} (`clm-ml upgrade` adds them)" if absent else "",
+                )
+                if text
+            )
+        )
+    values = {}
+    for n in HYDROLOGY_NAMES:
+        v = section[n]
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ConfigError(f"{name}: hydrology.{n}: expected a number, got {v!r}")
+        values[n] = float(v)
+    return values
+
+
 def _check_data(data: dict, name: str) -> dict:
     """``{pft: {name: value}}`` of a params file's contents, checked for unknown keys."""
     if "extends" in data:
@@ -345,14 +450,14 @@ def _check_data(data: dict, name: str) -> dict:
             f"every PFT itself. Write a complete copy to edit with "
             f"`clm-ml params {data['extends']} -o {Path(name).name}`"
         )
-    unknown = sorted(set(data) - {"pft", "units", "description"})
+    unknown = sorted(set(data) - {"pft", "units", "description", "hydrology"})
     if unknown:
         hint = (
             "; a CLM parameter file is converted with `clm-ml params FILE.nc -o FILE.yaml`"
             if "clm_parameters" in unknown
             else ""
         )
-        raise ConfigError(f"{name}: unknown key(s) {unknown}; allowed: pft, units{hint}")
+        raise ConfigError(f"{name}: unknown key(s) {unknown}; allowed: pft, units, hydrology{hint}")
     pfts = data.get("pft") or {}
     if not isinstance(pfts, dict):
         raise ConfigError(f"{name}: pft: expected a mapping of PFT names to parameters")
