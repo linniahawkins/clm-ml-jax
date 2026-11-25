@@ -51,6 +51,18 @@ towers:
       # default: null.
       bedrock_depth: 2.0
 
+      # Largest fraction of the surface that can be saturated, 0 to 1 (FMAX of a CLM surface
+      # dataset at the tower's gridcell): surface runoff. Only used, and then required, with
+      # predicted soil water (model.yaml soil.water).
+      # default: null.
+      max_saturated_fraction: null
+
+      # Topographic slope in degrees (SLOPE of a CLM surface dataset at the tower's gridcell; at
+      # least 0.2 is used, as in CLM): drainage and ponding. Only used, and then required, with
+      # predicted soil water.
+      # default: null.
+      slope: null
+
     # The patches on the tower's gridcell.
     patches:
     # Plant functional type (a name from params.yaml, e.g. broadleaf_deciduous_temperate_tree).

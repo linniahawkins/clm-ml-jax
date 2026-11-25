@@ -1,11 +1,12 @@
 # Phase 10 scope: predicted soil water
 
-Status (2026-11-24, branch `phase10/soil_water`): **10.1 to 10.5 done: every routine of the
-first version is translated and equals CLM's Fortran on idealized sweeps (decisions 142,
-143), and the assembled hydrology follows CLM's Fortran through 14 sequences of 160 steps,
-free running, to 3e-11 with the same sub-step counts (decision 144). Nothing is in the
-time step yet. Stopped for the maintainer's discussion of the agreement reached; next is
-putting the hydrology into the model (10.6), which needs the choices of section 8.** Start with "Resume
+Status (2026-11-24, branch `phase10/soil_water`): **10.1 to 10.5 done (the routines and
+the assembled hydrology equal CLM's Fortran, decisions 142-144). 10.6 in progress: the
+hydrology is in the model as the option `soil.water: predicted` (decision 145), prescribed
+runs are bit for bit unchanged, and a day at CHATS runs with the water balance closed.
+Stopped for the maintainer on a defect found on the way, in the canopy's interception
+(open item O89): it gives a wrong throughfall when it rains, so predicted soil water
+cannot yet run through rain.** Start with "Resume
 here" below. This document is deleted when the phase closes;
 what is decided moves to `decisions.md`, what stays open to `open_items.md` (open item O64).
 
@@ -35,6 +36,7 @@ will not match CLM's soil moisture, because the canopies differ; that is expecte
 | 141 | the sweeps: the proposed scenario list, some frozen cases, both 1800 s and 3600 s |
 | 142 | the Richards solver: one masked loop (ending, or a fixed count for gradients), LAPACK's pivoting solve, agreement judged against the solver's own round-off sensitivity |
 | 144 | the whole hydrology over time: 14 sequences of CLM's routines in CLM's order, compared one step ahead (1e-9) and free running (1e-8) |
+| 145 | predicted soil water in the model: the option, the state, the inputs, how the canopy feeds the hydrology (the maintainer's choices of section 8) |
 | 143 | runoff, pond, water table and drainage routine by routine; CLM's single-precision constants kept; perched water table, rising-water-table branch, hillslope and urban code not translated |
 
 ### What exists
@@ -83,7 +85,14 @@ In the repository (all committed and pushed):
   160 steps), `tests/fortran_validation/test_golden_hydrology_sequences.py`. Result: CLM's
   sub-step count in all 2 240 steps; largest difference 3e-11, one step ahead and free
   running alike; most values bit for bit.
-- Nothing in the time step yet.
+- In the model (10.6, decision 145; in progress): `model.yaml` `soil.water`, `SoilState`'s
+  three water fields, `step.py` (the call of `soil_hydrology`), `PatchConstants.wtfact` and
+  `topo_slope` (`domain.yaml` `soil.max_saturated_fraction`, `soil.slope`; grids `FMAX`,
+  `SLOPE`), the `hydrology` section of `params.yaml`, restart format 7, 14 output
+  variables, a 14th balance check, `driver.initial_soil_water`. Tests:
+  `tests/regression/test_predicted_soil_water.py` (one day at CHATS; the restart test is
+  marked as expected to fail until O89 is corrected). US-MMS's `domain.yaml` has its
+  `FMAX` (0) and slope (0.51 degrees).
 
 Outside the repository (Derecho):
 
@@ -114,32 +123,24 @@ calling the runoff, pond and drainage routines (they compile).
 3. ~~Show the maintainer the harness; settle the sweeps.~~ Done (decision 141).
 4. ~~10.3, the Richards solver end to end.~~ Done (decision 142).
 5. ~~10.4 runoff, pond, water table and drainage.~~ Done (decision 143).
-6. ~~10.5 sequences of the whole hydrology.~~ Done (decision 144). **Stopped here: the
-   maintainer's discussion of the agreement, and the choices 10.6 needs (below).**
-7. 10.6 into the model (state, step,
-   set-up inputs, parameters, restart, outputs, balance check); 10.7 gradients and timing;
-   10.8 coupled runs at US-MMS and close of the phase (section 7).
+6. ~~10.5 sequences of the whole hydrology.~~ Done (decision 144).
+7. **10.6 into the model: in progress (decision 145). Stopped on O89** (the canopy's
+   interception with unused layer slots; the maintainer's decision on the correction).
+   Left of 10.6 after that: the restart test passing, a test with rain, a grid run with
+   predicted soil water (a few steps), the user documentation (`how_the_model_works.md`,
+   `your_own_tower.md`, `model_overview.md`), all of `tests/regression`.
+8. 10.7 gradients and timing; 10.8 coupled runs at US-MMS and close of the phase
+   (section 7).
 
-### Open choices (the maintainer's; each has a recommendation)
+### Open choices (the maintainer's)
 
-- Which loop of the solver a run uses (decision 142; plan section 8, the form of the
-  sub-step loop): the fixed count always (simplest, one program for forward runs and
-  gradients; 0.1-0.2 ms more per column and step), or the ending loop for forward runs and
-  the fixed count for gradients, following `numerics.solver_loops`. To settle with the
-  GPU timing of 10.7 (recommended: the fixed count always unless that timing says otherwise).
-- How the canopy model's single ground evaporation is given to the hydrology (section 8,
-  item 7; needed at 10.6). `soil_hydrology` takes CLM's three terms, each per unit area of
-  the surface it applies to: evaporation from the soil outside the pond, evaporation from
-  the pond, dew. Recommended: positive ground flux as both evaporation terms (the pond and
-  the soil lose water at the same rate per area), negative as dew on the soil outside the
-  pond and as negative pond evaporation, so that the whole flux is accounted for.
-- Section 8, items 4-11: snowfall reaching the ground, root uptake from CLM-ml's
-  `soil_et_loss`, CLM-ml's conductivity for the plants, evaporation and dew from the single
-  ground flux, no irrigation, `FMAX` and `SLOPE` as tower inputs, the form of the sub-step
-  loop, where the hydrology parameters live. **Items 4-7, 9 and 11 are needed for 10.6**:
-  they decide what the step feeds the hydrology and where its inputs and parameters come
-  from.
+- **O89, the canopy's interception with unused layer slots** (`open_items.md`): whether
+  and how to correct it. It changes results of prescribed runs too, on rainy steps
+  (toward Fortran), so it is a correction of its own, in its own commit.
 - Grid runs still take the top level's soil texture (O88).
+- Settled on 2026-11-24 (decision 145): the solver loop (fixed count always), the ground
+  evaporation and dew, root uptake, the plants' conductivity, snowfall, the runoff inputs,
+  where the parameters live. Irrigation is not translated (section 8, item 8).
 
 ### Practical notes
 

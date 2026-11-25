@@ -19,6 +19,7 @@ NLEVSOI = 20
 NLEVGRND = 25
 
 ZMIN_BEDROCK = 0.4  # minimum depth to bedrock, m (clm_varcon)
+MIN_SLOPE = 0.2  # smallest topographic slope, degrees (CLM initVertical)
 
 
 def soil_layers() -> tuple:

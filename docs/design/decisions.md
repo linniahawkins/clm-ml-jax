@@ -500,6 +500,62 @@ CLM's order and work together over time (sub-step counts that vary, a water tabl
 between levels, a pond that fills and drains).
 Source: plan 6.3.
 
+**145. Predicted soil water in the model: an option, the state, the inputs and the choices of how the canopy feeds the hydrology**
+2026-11-24 · Phase 10 (10.6) · maintainer · in force · Departure from Fortran: yes (not in CLM-ml v2; optional)
+`model.yaml` `soil.water: prescribed | predicted` (static; default `prescribed`, which is
+unchanged: every field of the regression reference bit for bit). With `predicted`, the
+step calls `hydrology.soil_hydrology` after the soil temperature, and the canopy of a step
+sees the soil water left by the step before, as in CLM. The maintainer's choices (plan
+section 8, accepted as recommended on 2026-11-24):
+- *Solver loop:* the fixed count always (`StepOptions.richards_trials` =
+  `max_richards_trials(step)`): one program for forward runs and gradients.
+- *Ground evaporation and dew:* the canopy model's single ground water-vapour flux (step
+  mean) is taken from the soil outside the pond and from the pond at the same rate per
+  area when positive, and is dew on both when negative, so that all of it is accounted for.
+- *Root uptake:* the transpiration (step mean) times the fraction taken from each soil
+  level by CLM-ml's plant hydraulics (`soil_et_loss`); no CLM routine.
+- *Conductivity and matric potential for the plants:* CLM-ml v2's form, unchanged; CLM's
+  interface form only inside the Richards solver.
+- *Snowfall reaching the ground* enters the soil as liquid water at once (water is
+  conserved; the timing of melt is not represented; O10).
+- *Runoff inputs:* per tower `soil.max_saturated_fraction` (CLM `FMAX`) and `soil.slope`
+  (degrees, CLM `SLOPE`; at least 0.2 is used) in `domain.yaml`, null by default and
+  required with predicted soil water; grids read `FMAX` and `SLOPE` of the surface data.
+- *Parameters:* a section `hydrology` of `params.yaml` that is not per PFT (`e_ice`, `fff`,
+  `pc`, `mu`, `baseflow_scalar`, `n_baseflow`, `aq_sp_yield_min`, `slopebeta`, `slopemax`;
+  CLM's names and values), required in every params file (`clm-ml upgrade` adds it;
+  `clm-ml params FILE.nc` reads it from a CLM parameter file; `--set
+  params.hydrology.<name>=`). The compiled program takes it as a field of every PFT row of
+  the parameter table, so the derivative with respect to a hydrology parameter is the sum
+  over the rows.
+Implementation:
+- *State:* `SoilState` gains `liquid_water` (the 20 hydrologically active levels, kg m⁻²),
+  `surface_water` (mm) and `water_table_depth` (m); with prescribed soil water the first
+  holds the forcing's water of the last step and the others stay 0. Ice stays an argument
+  fixed at 0 (decision 132). Restart files hold the three fields (format version 7; files
+  of version 6 are refused, as older versions were).
+- *Initial soil water:* what a prescribed run uses at the first step (the CLM history
+  record or soil-water file, with its adjustment factor and the cap at porosity), no pond,
+  and the water table diagnosed from it; or a restart.
+- *Constants:* `PatchConstants.wtfact`, `topo_slope`; the microtopography and the pond
+  threshold are computed in the step from the parameters (they are differentiable).
+- *Check:* a 14th conservation check, the soil water balance of the step, with CLM's
+  stopping threshold (1e-5 mm).
+- *Outputs:* `soil_liquid_water`, `soil_water_content` (per soil level; also with
+  prescribed soil water), and with predicted soil water `ground_water_input`,
+  `ground_evaporation`, `root_water_uptake`, `infiltration`, `surface_runoff`, `drainage`,
+  `saturated_fraction`, `surface_water`, `surface_water_fraction`, `water_table_depth`,
+  `soil_water_substeps`, `soil_water_balance_error` (NaN with prescribed soil water).
+- *Regression reference* regenerated for the added fields only (17 new step fields); the
+  100 fields it held are bit for bit those of the reference before.
+Status at this entry: one day at CHATS runs (the water balance closes to 3e-13 mm per
+step; the first step equals the prescribed run's to round-off). **Not finished:** rain
+exposes a defect of the canopy's interception with unused layer slots (O89), which the
+maintainer decides on; the user documentation of the option follows the correction.
+Reason: the maintainer's choices; a default that leaves every existing run unchanged.
+Source: maintainer, 2026-11-24 ("accept all recommendations ... use fixed count always for
+solver loop"); plan sections 4 and 8.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

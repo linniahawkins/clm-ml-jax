@@ -58,7 +58,9 @@ def edit(folder, *, run=None, domain=None, model=None, params=None) -> Path:
         from clm_ml.params_convert import params_table, write_table
 
         table = params if isinstance(params, Params) else Params.from_yaml(params)
-        write_table(params_table(table), folder / "params.yaml", ["test parameters"])
+        write_table(
+            params_table(table), folder / "params.yaml", ["test parameters"], table.hydrology
+        )
     if any(c is not None for c in (run, domain, model)):
         upgrade_experiment(folder)
     return folder

@@ -91,6 +91,18 @@ class SoilSpec:
     )
     color_class: int = option(15, "CLM soil colour class, 1 (light) to 20 (dark): soil albedo.")
     bedrock_depth: Optional[float] = option(None, "Depth to bedrock (m); null: no bedrock.")
+    max_saturated_fraction: Optional[float] = option(
+        None,
+        "Largest fraction of the surface that can be saturated, 0 to 1 (FMAX of a CLM "
+        "surface dataset at the tower's gridcell): surface runoff. Only used, and then "
+        "required, with predicted soil water (model.yaml soil.water).",
+    )
+    slope: Optional[float] = option(
+        None,
+        "Topographic slope in degrees (SLOPE of a CLM surface dataset at the tower's "
+        "gridcell; at least 0.2 is used, as in CLM): drainage and ponding. Only used, and "
+        "then required, with predicted soil water.",
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -180,6 +192,11 @@ def check_towers(towers: dict[str, TowerSpec], source: str) -> None:
             if patch.root_biomass <= 0:
                 raise ConfigError(f"{where}.root_biomass: must be positive")
         soil, where = tower.soil, f"{source}: towers.{name}.soil"
+        fmax, slope = soil.max_saturated_fraction, soil.slope
+        if fmax is not None and not 0.0 <= fmax <= 1.0:
+            raise ConfigError(f"{where}.max_saturated_fraction: {fmax:g} is not within 0 to 1")
+        if slope is not None and not 0.0 <= slope < 90.0:
+            raise ConfigError(f"{where}.slope: {slope:g} degrees is not within 0 to 90")
         layered_organic = isinstance(soil.organic_matter, tuple)
         if soil.texture.given_as == "layers":
             n = len(soil.texture.sand_percent_layers)
@@ -273,6 +290,10 @@ class SoilColumns:
     sand_percent_layers: Optional[np.ndarray] = None
     clay_percent_layers: Optional[np.ndarray] = None
     organic_matter_layers: Optional[np.ndarray] = None
+    # for predicted soil water ((nc,); NaN: not given): the largest saturated fraction
+    # (CLM FMAX) and the topographic slope in degrees (CLM SLOPE)
+    max_saturated_fraction: Optional[np.ndarray] = None
+    slope: Optional[np.ndarray] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -382,6 +403,8 @@ class Domain:
             sand_percent_layers=layers("sand_percent"),
             clay_percent_layers=layers("clay_percent"),
             organic_matter_layers=layers("organic_matter"),
+            max_saturated_fraction=np.array([nan(s.max_saturated_fraction) for s in c_rows]),
+            slope=np.array([nan(s.slope) for s in c_rows]),
         )
         domain = cls(gridcells, patches, columns, {n: available[n] for n in names})
 

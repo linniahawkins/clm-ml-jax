@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 145.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 146.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:
@@ -47,18 +47,19 @@ Guidance for Claude (and other contributors) working in this repository.
   `main`). No release or version tag yet. Open work: `docs/design/open_items.md`.
 - **Phase 10, predicted soil water** (branch `phase10/soil_water`, started 2026-11-24; O64):
   a code translation of CLM's soil water (`ctsm5.4.004`), judged by agreement with CLM's
-  Fortran on idealized sweeps, not by observations (decisions 131-144). Done: US-MMS set up
+  Fortran on idealized sweeps, not by observations (decisions 131-145). Done: US-MMS set up
   (`experiments/us_mms_2012/`), CLM's soil texture per level and CO₂ as tower options, the
   Fortran test harness on CTSM's unit-test framework (`tests/fortran_validation/ctsm_harness/`,
   decision 140), and every routine of the first version, equal to CLM's Fortran: the
   Richards solver with CLM's adaptive sub-steps (`processes/soil_water.py`, decision 142),
   runoff and pond (`surface_runoff.py`), water table and drainage (`drainage.py`), and the
   assembled step (`hydrology.py::soil_hydrology`; decision 143), which follows CLM's
-  Fortran through 14 sequences of 160 steps to 3e-11 (decision 144). Nothing in the time
-  step yet. **Resume from "Resume here" at the top of `docs/design/soil_water_plan.md`:**
-  stopped for the maintainer's discussion; next is putting the hydrology into the model
-  (10.6), which needs the maintainer's choices of the plan's section 8. CPU jobs on
-  P93300041.
+  Fortran through 14 sequences of 160 steps to 3e-11 (decision 144). In the model as the
+  option `model.yaml` `soil.water: predicted` (10.6 in progress, decision 145; the default
+  `prescribed` is bit for bit unchanged). **Resume from "Resume here" at the top of
+  `docs/design/soil_water_plan.md`:** stopped for the maintainer on open item O89 (the
+  canopy's interception counts unused layer slots: wrong throughfall in rain), which blocks
+  predicted soil water through rain. CPU jobs on P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.
@@ -135,8 +136,10 @@ using Harman & Finnigan (2007, 2008).
   pressure, leaf temperature, leaf water potential, intercepted water and ground temperature;
   output averaged to the step. Wind minimum 0.5 m s⁻¹; within-layer aerodynamic resistance
   capped at 500 s m⁻¹. The model step is configurable (`numerics.step_seconds`).
-- **Soil.** Soil moisture is a **prescribed boundary condition**; soil temperature from a
-  heat-diffusion model specific to the multilayer canopy (CLM5 layer structure only).
+- **Soil.** Soil moisture is a **prescribed boundary condition** by default; soil
+  temperature from a heat-diffusion model specific to the multilayer canopy (CLM5 layer
+  structure only). Not in CLM-ml v2: `soil.water: predicted` moves the soil water with
+  CLM's soil hydrology (CTSM 5.4; unfrozen, snow-free).
 - **Acclimation temperature:** a 10-day running mean (differs from CLM-ml v2's whole-run
   mean, kept as an option for validation).
 

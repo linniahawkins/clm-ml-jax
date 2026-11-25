@@ -17,8 +17,8 @@ _z, _dz, _zi = soil_layers()
 Z, DZ, ZI = (jnp.asarray(x) for x in (_z[:NLEVSOI], _dz[:NLEVSOI], _zi[: NLEVSOI + 1]))
 LEVEL = np.arange(NLEVSOI)
 # ctsm60_params.c251211.nc and the CLM6 namelist: e_ice, fff, pc, mu, baseflow_scalar,
-# n_baseflow, aq_sp_yield_min
-PARAMS = jnp.asarray([6.0, 0.5, 0.4, 0.13889, 0.001, 1.0, 0.02])
+# n_baseflow, aq_sp_yield_min, slopebeta, slopemax
+PARAMS = jnp.asarray([6.0, 0.5, 0.4, 0.13889, 0.001, 1.0, 0.02, -3.0, 0.4])
 SLOPEBETA, SLOPEMAX = -3.0, 0.4
 LOAM = jnp.asarray([0.4386, 0.0037, 227.0, 6.09])  # watsat, hksat, sucsat, bsw
 ROOTS = jnp.exp(-Z / 0.5) / jnp.sum(jnp.exp(-Z / 0.5))
@@ -200,7 +200,7 @@ def _run(column, forcing, dtime, params=PARAMS, fixed_trials=None):
     water reaching the ground, evaporation, dew and total root uptake (mm/s)."""
     c = column
     p = hydrology.HydrologyParameters(*params)
-    micro_sigma = surface_runoff.microtopography(c["topo_slope"], SLOPEBETA, SLOPEMAX)
+    micro_sigma = surface_runoff.microtopography(c["topo_slope"], p.slopebeta, p.slopemax)
     thresh = surface_runoff.pond_threshold(micro_sigma, p.pc)
     zwt = drainage.water_table_depth(
         c["h2osoi_liq"], c["h2osoi_ice"], c["watsat"], DZ, Z, ZI, c["nbedrock"]
@@ -249,7 +249,7 @@ def test_the_hydrology_conserves_water_over_two_days():
 
 def test_hydrology_gradients_are_finite_and_match_finite_differences():
     """Three steps of the hydrology, differentiated (forward and reverse, through the
-    fixed-count solver loop) with respect to the seven hydrology parameters, the four soil
+    fixed-count solver loop) with respect to the nine hydrology parameters, the four soil
     properties, the initial water and pond, the rain, the slope and the largest saturated
     fraction. Cases: dry soil without rain (no pond, no runoff, no drainage: every masked
     branch), a storm that fills a pond, a deep pond running off, a water table with
@@ -257,18 +257,18 @@ def test_hydrology_gradients_are_finite_and_match_finite_differences():
     trials = soil_water.max_richards_trials(1800.0)
 
     def outputs(q, s0, h2osfc, rain, evap, nbedrock, slope, ice_share):
-        soil = [jnp.full(NLEVSOI, LOAM[i] * q[7 + i]) for i in range(4)]
+        soil = [jnp.full(NLEVSOI, LOAM[i] * q[9 + i]) for i in range(4)]
         column = {
             **dict(zip(("watsat", "hksat", "sucsat", "bsw"), soil)),
             "nbedrock": nbedrock,
-            "h2osoi_liq": s0 * LOAM[0] * DZ * 1000.0 * q[11],
+            "h2osoi_liq": s0 * LOAM[0] * DZ * 1000.0 * q[13],
             "h2osoi_ice": ice_share * LOAM[0] * DZ * 917.0,
-            "h2osfc": h2osfc * q[15],
-            "topo_slope": slope * q[13],
-            "wtfact": 0.4 * q[14],
+            "h2osfc": h2osfc * q[17],
+            "topo_slope": slope * q[15],
+            "wtfact": 0.4 * q[16],
         }
-        forcing = tuple(jnp.full(3, x) for x in (rain * q[12], evap, 0.0, 5.0e-5))
-        out = _run(column, forcing, 1800.0, PARAMS * q[:7], trials)
+        forcing = tuple(jnp.full(3, x) for x in (rain * q[14], evap, 0.0, 5.0e-5))
+        out = _run(column, forcing, 1800.0, PARAMS * q[:9], trials)
         state = jnp.concatenate([out.h2osoi_liq[-1], jnp.stack([out.h2osfc[-1], out.zwt[-1]])])
         return jnp.concatenate([state, jnp.stack([out.qflx_surf.sum(), out.qflx_drain.sum()])])
 
@@ -283,7 +283,7 @@ def test_hydrology_gradients_are_finite_and_match_finite_differences():
     }  # fmt: skip
     value = jax.jit(outputs)
     jac_forward, jac_reverse = jax.jit(jax.jacfwd(outputs)), jax.jit(jax.jacrev(outputs))
-    q0 = jnp.ones(16)
+    q0 = jnp.ones(18)
     for name, (s0, *rest) in cases.items():
         case = (jnp.broadcast_to(jnp.asarray(s0, dtype=jnp.float64), (NLEVSOI,)), *rest)
         forward = np.asarray(jac_forward(q0, *case))
@@ -291,7 +291,7 @@ def test_hydrology_gradients_are_finite_and_match_finite_differences():
         assert np.all(np.isfinite(forward)) and np.all(np.isfinite(reverse)), name
         np.testing.assert_allclose(forward, reverse, rtol=1e-6, atol=1e-9, err_msg=name)
         scale = 1.0 + float(jnp.max(jnp.abs(value(q0, *case))))
-        for k in range(16):
+        for k in range(18):
             h = 1e-6
             fd = (value(q0.at[k].add(h), *case) - value(q0.at[k].add(-h), *case)) / (2 * h)
             np.testing.assert_allclose(

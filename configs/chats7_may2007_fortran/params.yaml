@@ -62,6 +62,27 @@ units:
   z0m_to_height_ratio: '-'
   # Displacement height / canopy height (CLM displar) Optional: only grid runs use it.
   displacement_to_height_ratio: '-'
+# Soil hydrology (CLM's parameters; the same for every PFT). Used by runs with
+# predicted soil water (model.yaml soil.water: predicted).
+hydrology:
+  # Ice impedance: the hydraulic conductivity is reduced by 10^(-e_ice x ice-filled fraction of the pores) (-).
+  e_ice: 6.0
+  # Decay of the saturated fraction of the surface with the water table depth (m-1).
+  fff: 0.5
+  # Fraction of the ground under ponded water above which the ponds connect and run off (-).
+  pc: 0.4
+  # Exponent of the connected ponded fraction in the pond's runoff (-).
+  mu: 0.13889
+  # Drainage rate per metre of saturated zone above the bedrock, on a 45 degree slope (mm s-1 m-1; a CLM namelist value).
+  baseflow_scalar: 0.001
+  # Exponent of the saturated zone's thickness in the drainage (-).
+  n_baseflow: 1.0
+  # Smallest specific yield of a soil level (-).
+  aq_sp_yield_min: 0.02
+  # Exponent of the microtopography's dependence on the slope (-).
+  slopebeta: -3.0
+  # Slope scale of the microtopography (degrees).
+  slopemax: 0.4
 pft:
   needleleaf_evergreen_temperate_tree:
     vcmax25: 62.5

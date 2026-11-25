@@ -4,7 +4,8 @@ chunk.
 
 Fortran reference: CLM-ml v2, the ``endrun`` checks of ``MLLeafFluxesMod``,
 ``MLLongwaveRadiationMod``, ``MLCanopyNitrogenProfileMod``, ``MLSoilFluxesMod``,
-``MLSolarRadiationMod``, ``MLCanopyFluxesMod`` and ``MLSoilTemperatureMod``.
+``MLSolarRadiationMod``, ``MLCanopyFluxesMod`` and ``MLSoilTemperatureMod``; for predicted
+soil water, CTSM ``BalanceCheckMod`` (the soil water balance, CLM's stopping threshold).
 """
 
 from __future__ import annotations
@@ -26,10 +27,11 @@ BALANCE_CHECKS = (
     ("radiation at the canopy top (CanopyFluxesDiagnostics 4), W m-2", 1.0e-3),
     ("soil temperature energy conservation (SoilTemperature), W m-2", 1.0e-6),
     ("sunlit and shaded fractions positive (SolarRadiation; 1 = violated)", 0.0),
+    ("soil water balance (predicted soil water; CLM BalanceCheck), mm", 1.0e-5),
 )
 (LEAF_ENERGY, LONGWAVE, NITROGEN, SOIL_ENERGY, SOLAR, NORMAN_SOLAR, PLANT_AREA,
  CANOPY_ENERGY_1, CANOPY_ENERGY_2, CANOPY_ENERGY_3, CANOPY_ENERGY_4, SOIL_TEMPERATURE,
- SUNLIT_FRACTION) = range(len(BALANCE_CHECKS))  # fmt: skip
+ SUNLIT_FRACTION, SOIL_WATER) = range(len(BALANCE_CHECKS))  # fmt: skip
 
 
 class ModelError(RuntimeError):

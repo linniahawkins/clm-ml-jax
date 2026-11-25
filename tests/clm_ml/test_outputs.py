@@ -33,7 +33,7 @@ def outputs(chats_run_dir):
 
 
 def test_every_variable_has_expected_shape(outputs):
-    sizes = {"layer": 50, "leaf_class": 2, "leaf_group": 3, "band": 2}
+    sizes = {"layer": 50, "leaf_class": 2, "leaf_group": 3, "band": 2, "soil_layer": 25}
     for spec in VARIABLES:
         expected = (50, 1) + tuple(sizes[d] for d in spec.dims)
         assert outputs.data[spec.name].shape == expected, spec.name

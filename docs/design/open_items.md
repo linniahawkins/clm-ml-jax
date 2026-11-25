@@ -47,6 +47,7 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O16 | CO₂ profile reset covers the wrong levels (no effect today) | science issue (latent) | after 8 | M |
 | O87 | ~~Tower runs use a fixed CO₂ of 383 ppm~~ (closed 2026-11-24: `forcing.co2`, decision 137) | science issue | closed | M |
 | O88 | One soil texture per column; CLM's soil varies with depth (towers: closed by decision 137; grids: open) | science issue | grids: after Phase 10 | M |
+| O89 | Canopy interception counts unused layer slots: too little intercepted water per layer, wrong throughfall (found in Phase 10.6) | science issue (bug) | Phase 10 (before predicted soil water can run through rain) | M |
 | **2. Other maintainer decisions pending** |||||
 | O17 | ~~Repository organization: where the real configuration files live~~ (closed: decisions 89, 90) | maintainer decision | closed | M |
 | O18 | Norman and well-mixed code in git history only (D8 said "kept") | maintainer decision | after 8 (maintainer 2026-11-01) | M |
@@ -317,6 +318,40 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   top level (`grid.py`); the same mapping could serve them (a change of global results, the
   maintainer's decision).
 - **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
+
+### O89. Canopy interception counts unused layer slots
+- **Kind:** science issue (bug) · **Target:** Phase 10 (10.6) · **Decides:** M
+- **What:** `processes/canopy_water.py::interception` shares the intercepted rain equally
+  among the layers with plant area, which it finds as `dpai > 0`. The step passes the plant
+  area with the fill value (1e36) in the unused slots above the top layer
+  (`max_layers` > layers in use), so those slots count as layers with plant area. Fortran
+  (`MLCanopyWaterMod.F90::CanopyInterception`) loops over the layers in use only.
+- **Consequences:** (1) every leafy layer receives the intercepted water divided by (leafy
+  layers + unused slots) instead of by the leafy layers: 20/24 of Fortran's at CHATS (46
+  layers in use, `max_layers` 50), less the more slots are unused (grid runs: short canopies
+  under a large `max_layers`); the unused slots' share is lost. This affects every run with
+  rain and unused slots, prescribed soil water included: leaf wetness, evaporation of
+  intercepted water and the transpiration it suppresses. (2) The rain reaching the ground
+  (throughfall and drip, `qflx_tflrain`) includes the "drip" of the unused slots, whose
+  intercepted water holds values without meaning (1e109): 1e34 mm s⁻¹ at CHATS on 2 May
+  2007. Nothing used that flux before predicted soil water; with it the soil water balance
+  check stops the run at the first rain.
+- **Why the tests missed it:** the regression reference (50 steps from 1 May 2007) and the
+  padding tests have no rain; the comparison with Fortran over May 2007 has a tolerance of
+  2.5 % and little rain.
+- **Measured (2026-11-24, probe of `interception` alone, CHATS's plant area, rain 1.41e-4
+  mm s⁻¹, one 5-minute sub-step):** intercepted water of a leafy layer 2.099e-3 kg m⁻²
+  without unused slots, 1.749e-3 with 4, 5.67e-4 with 54; rain reaching the ground 1.08e-6
+  mm s⁻¹ without, 1.4e107 with 4 slots holding 1e109.
+- **Proposed correction (not made):** count and fill only the layers in use (pass the
+  layers-in-use mask to `interception`, as `wetted_fraction_implicit` already takes it),
+  and keep the unused slots' intercepted water at 0; a test with rain and unused slots
+  (results independent of `max_layers`), a Fortran golden case for `CanopyInterception`
+  if one can be made. Expected effect: the regression reference stays bit for bit (no
+  rain); results change on rainy steps of every run with unused slots, toward Fortran.
+- **Blocks:** predicted soil water through rain (the restart test of
+  `tests/regression/test_predicted_soil_water.py` is marked as expected to fail until then).
+- **Source:** Phase 10 step 10.6, 2026-11-24.
 
 ## 2. Other maintainer decisions pending
 

@@ -491,7 +491,9 @@ def _apply_overrides(data: dict, overrides, folder: Path) -> None:
                 "(e.g. run.time.length=3 days)"
             )
         value = str(item)[len(prefix) + 1 :]
-        if prefix == "params":  # params.<pft>.<name>=value
+        if prefix == "params" and value.startswith("hydrology."):  # params.hydrology.<name>
+            apply_overrides(data["params"], [value], source="params.yaml")
+        elif prefix == "params":  # params.<pft>.<name>=value
             apply_overrides(data["params"].setdefault("pft", {}), [value], source="params.yaml")
         else:
             apply_overrides(data[prefix], [value], source=FILES[prefix])
@@ -797,6 +799,7 @@ def write_experiment(
                 params_about,
                 generated,
             ],
+            params.hydrology,
         ),
     }
     folder.mkdir(parents=True, exist_ok=True)

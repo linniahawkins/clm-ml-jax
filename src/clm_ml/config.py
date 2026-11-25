@@ -346,6 +346,18 @@ class SoilOptions:
         "gridcell share one column (not yet implemented).",
         "",
     )
+    water: Literal["prescribed", "predicted"] = option(
+        "prescribed",
+        "prescribed: soil water from the forcing (the CLM history file or a soil-water "
+        "file) at every step, as CLM-ml v2. predicted: soil water, ponded surface water and "
+        "the water table are part of the model state, moved by CLM's soil hydrology "
+        "(runoff, infiltration, the Richards equation, drainage) from the canopy's "
+        "throughfall, soil evaporation and root uptake; the forcing gives only the soil "
+        "water at the start. Unfrozen and snow-free: snowfall reaching the ground enters "
+        "the soil as liquid water. Needs each tower's soil.max_saturated_fraction and "
+        "soil.slope in domain.yaml (grids: FMAX and SLOPE of the surface data).",
+        "Not in CLM-ml v2: CLM's soil hydrology (CTSM 5.4).",
+    )
 
 
 @dataclasses.dataclass(frozen=True)

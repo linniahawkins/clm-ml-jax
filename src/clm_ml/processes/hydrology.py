@@ -35,6 +35,8 @@ class HydrologyParameters(NamedTuple):
     baseflow_scalar: Array  # baseflow rate (0.001 mm/s per m of saturated zone)
     n_baseflow: Array  # exponent of the saturated zone's thickness (1)
     aq_sp_yield_min: Array  # smallest specific yield (0.02)
+    slopebeta: Array  # exponent of the microtopography's dependence on the slope (-3)
+    slopemax: Array  # slope (degrees) scale of that dependence (0.4)
 
 
 class SoilHydrology(NamedTuple):

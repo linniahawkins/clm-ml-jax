@@ -114,7 +114,9 @@ def _twin_params_file(directory: Path, sign: float) -> Path:
     chats = Params.from_yaml("chats")
     emissivity = float(chats.get(TWIN_PFT, "leaf_emissivity"))
     twin = chats.set(TWIN_PFT, leaf_emissivity=emissivity * (1.0 + sign * TWIN_PERTURBATION))
-    return write_table(params_table(twin), directory / "twin_params.yaml", ["noise twin of chats"])
+    return write_table(
+        params_table(twin), directory / "twin_params.yaml", ["noise twin of chats"], twin.hydrology
+    )
 
 
 def _provenance(name: str) -> dict[str, np.ndarray]:

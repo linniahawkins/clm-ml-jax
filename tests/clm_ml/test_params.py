@@ -170,3 +170,36 @@ def test_builtin_clm6_is_complete():
     assert not p.missing_for(list(range(1, len(PFT_NAMES))), [s.name for s in PARAM_SPECS])
     assert p.get("needleleaf_evergreen_temperate_tree", "z0m_to_height_ratio") == 0.055
     assert p.get("needleleaf_evergreen_temperate_tree", "leaf_dimension") == 0.000648
+
+
+def test_hydrology_section_is_required_complete_and_upgradable(tmp_path):
+    """params.yaml holds CLM's soil hydrology parameters in a section that is not per PFT:
+    a file without it is refused (``clm-ml upgrade`` adds it), unknown or missing entries
+    are errors, and a written file gives the values back."""
+    import yaml
+
+    from clm_ml.params import HYDROLOGY_DEFAULTS, add_new_parameters
+    from clm_ml.params_convert import params_table, write_table
+
+    params = Params.from_yaml("chats")
+    assert dict(params.hydrology) == dict(HYDROLOGY_DEFAULTS)
+    changed = params.set_hydrology(fff=0.8, baseflow_scalar=0.01)
+    path = write_table(params_table(changed), tmp_path / "p.yaml", ["test"], changed.hydrology)
+    again = Params.from_yaml(path)
+    assert again.hydrology["fff"] == 0.8 and again.hydrology["baseflow_scalar"] == 0.01
+    assert again.hydrology["e_ice"] == HYDROLOGY_DEFAULTS["e_ice"]
+
+    data = yaml.safe_load(path.read_text())
+    without = {k: v for k, v in data.items() if k != "hydrology"}
+    with pytest.raises(ConfigError, match="no hydrology section.*clm-ml upgrade"):
+        Params.from_data(without, "old.yaml")
+    report: list[str] = []
+    upgraded = Params.from_data(add_new_parameters(without, report), "old.yaml")
+    assert dict(upgraded.hydrology) == dict(HYDROLOGY_DEFAULTS) and "hydrology" in report[0]
+
+    data["hydrology"]["nope"] = 1.0
+    del data["hydrology"]["mu"]
+    with pytest.raises(ConfigError, match=r"unknown parameter\(s\) \['nope'\].*missing \['mu'\]"):
+        Params.from_data(data, "bad.yaml")
+    with pytest.raises(ConfigError, match="unknown parameter"):
+        params.set_hydrology(nope=1.0)
