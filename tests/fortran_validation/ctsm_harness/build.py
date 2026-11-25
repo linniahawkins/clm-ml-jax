@@ -71,6 +71,21 @@ VISIBILITY = {
         "  type, private :: params_type",
         "  type(params_type), private ::  params_inst",
     ],
+    "biogeophys/SoilHydrologyMod.F90": [
+        "  real(r8), private   :: baseflow_scalar = 1.e-2_r8",
+    ],
+    "biogeophys/SaturatedExcessRunoffMod.F90": [
+        "  type, private :: params_type",
+        "  type(params_type), private ::  params_inst",
+    ],
+    "biogeophys/InfiltrationExcessRunoffMod.F90": [
+        "  type, private :: params_type",
+        "  type(params_type), private ::  params_inst",
+    ],
+    "biogeophys/SurfaceWaterMod.F90": [
+        "  type, private :: params_type",
+        "  type(params_type), private ::  params_inst",
+    ],
 }
 
 # The harness's files: {path under fortran/: path under src/}.

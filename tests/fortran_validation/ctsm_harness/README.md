@@ -19,8 +19,10 @@ scratch and makes three kinds of change to the copy:
 1. **Sources added to the test build** (CTSM's test build compiles only the files its own
    tests use): the Clapp-Hornberger retention curve, `SoilWaterMovementMod`,
    `SoilWaterPlantSinkMod`, `SurfaceWaterMod`, `TridiagonalMod`.
-2. **Visibility:** on a short list of lines of `SoilWaterMovementMod.F90`, `private` becomes
-   `public`, so that a driver can call a routine that CLM keeps internal. No science line
+2. **Visibility:** on a short list of lines (`VISIBILITY` in `build.py`: routines of
+   `SoilWaterMovementMod.F90`, and the parameter variables of the runoff, surface water and
+   soil hydrology modules, which CLM reads from files), `private` becomes `public`, so that
+   a driver can call a routine that CLM keeps internal or set a parameter. No science line
    changes.
 3. **The harness's files** (`fortran/`): a six-line stand-in for `controlMod` (the name of
    the namelist file) and the test directory `ctsm_harness_test/`.
@@ -38,6 +40,7 @@ or has local changes in `src/`.
 | `fortran/ctsm_harness_test/test_column.pf` | checks of the column itself: the water table routine and the Richards solver run and conserve water |
 | `fortran/ctsm_harness_test/test_retention_curve.pf` | drivers of `soil_hk` and `soil_suction` |
 | `fortran/ctsm_harness_test/test_soil_water.pf` | drivers of the Richards solver (`SoilWater`): single calls, and sequences of calls with the water carried from step to step |
+| `fortran/ctsm_harness_test/test_surface_and_drainage.pf` | drivers of the surface chain (saturated-area runoff, infiltration limit, pond, infiltration), the pond fraction, the water table, dew and drainage; and a copy of CLM's statements for the microtopography and the pond threshold, which CLM computes inside initialization routines that cannot be called for one column |
 
 A **driver** reads `<work>/cases/<routine>.nml` (one namelist group `&case ... /` per case),
 calls the CLM routine for each case, and writes `<work>/out/<routine>.out`: a line `case=i`,
@@ -47,7 +50,8 @@ model step.
 
 Golden files of scalar cases are tested by `../test_golden_jax.py` (step 4 below). The
 solver's cases are arrays over the soil levels and are tested together, in one vectorized
-call, by `../test_golden_soil_water.py`.
+call, by `../test_golden_soil_water.py`; those of the surface, water table and drainage
+routines by `../test_golden_soil_hydrology.py`.
 
 ## Remaking the golden data
 

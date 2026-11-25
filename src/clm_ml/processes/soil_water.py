@@ -31,7 +31,7 @@ import jax
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.processes.constants import denh2o
+from clm_ml.processes.constants import denh2o, denice
 from clm_ml.processes.math import tridiag_pivoting
 
 M_TO_MM = 1.0e3  # millimetres in a metre
@@ -76,6 +76,19 @@ def soil_suction(s: Array, sucsat: Array, bsw: Array) -> tuple[Array, Array]:
 def _level_below(x: Array) -> Array:
     """``x`` of the level below each level (the last level: its own)."""
     return jnp.concatenate([x[1:], x[-1:]])
+
+
+def soil_water_fractions(h2osoi_ice: Array, watsat: Array, dz: Array) -> tuple[Array, Array]:
+    """Fraction of the pore space filled with ice, and the effective porosity (the porosity
+    less the ice volume, at least 0.01), of each level.
+
+    ``h2osoi_ice``: (n,) ice (kg m⁻²); ``watsat``: (n,) porosity; ``dz``: (n,) thickness (m).
+    CLM's excess ice (ice beyond the pore space, which thickens a level) is not included.
+
+    Fortran reference: SoilHydrologyMod.F90::SetSoilWaterFractions.
+    """
+    vol_ice = jnp.minimum(watsat, h2osoi_ice / (dz * denice))
+    return jnp.minimum(1.0, vol_ice / watsat), jnp.maximum(0.01, watsat - vol_ice)
 
 
 def ice_impedance(icefrac: Array, e_ice) -> Array:

@@ -306,6 +306,382 @@ def soil_water_sequence_cases() -> list[dict]:
     return cases
 
 
+ZI = np.concatenate([[0.0], np.cumsum(DZ)])  # depth of the level interfaces (m)
+SLOPEBETA, SLOPEMAX = -3.0, 0.4  # microtopography parameters (ctsm60_params.c251211.nc)
+DENICE = 917.0
+
+
+def _micro_sigma(slope):
+    """Microtopography (m) of a slope (degrees), as CLM's initVertical."""
+    return (slope + SLOPEMAX ** (1.0 / SLOPEBETA)) ** SLOPEBETA
+
+
+def _levels(x) -> list[float]:
+    return [float(v) for v in np.broadcast_to(x, NLEVSOI)]
+
+
+def _ice(rng, watsat) -> np.ndarray:
+    """Ice (kg/m2) of each level: none in three profiles out of four, otherwise ice in the
+    levels above a random depth, from a trace to more than the pores hold."""
+    if rng.random() < 0.75:
+        return np.zeros(NLEVSOI)
+    frozen = np.arange(NLEVSOI) < rng.integers(1, NLEVSOI + 1)
+    return np.where(frozen, rng.uniform(0.0, 1.2, NLEVSOI), 0.0) * watsat * DZ * DENICE
+
+
+def _pick(rng, *choices):
+    """One of ``(probability, draw)`` choices."""
+    u = rng.random()
+    for probability, draw in choices:
+        if u < probability:
+            return float(draw())
+        u -= probability
+    return float(choices[-1][1]())
+
+
+def surface_fluxes_cases() -> list[dict]:
+    """From the water reaching the ground to surface runoff, pond and infiltration.
+
+    Random draws at both model steps: water table from the surface to below the column;
+    maximum saturated fraction from 0 to 0.9; rain from none to cloudbursts; evaporation
+    from the soil and from the pond (the latter also negative: dew); a pond from none
+    (and slightly negative) to deep, covering any fraction of the ground, with a runoff
+    threshold from 0 to above the pond; slopes from 0.2 to 30 degrees; soils from sand to
+    clay; ice in one profile out of four. Then edge values: at the thresholds of the pond's
+    runoff, of its connected fraction (0.4) and of the smallest runoff kept (1e-8)."""
+    rng = np.random.default_rng(SEED + 4)
+    cases = []
+    for i in range(300):
+        props = _soil_properties(*_texture(rng))
+        h2osfc = _pick(
+            rng,
+            (0.35, lambda: 0.0),
+            (0.05, lambda: -_log_uniform(rng, 1e-6, 1e-2, 1)[0]),
+            (0.60, lambda: _log_uniform(rng, 1e-6, 100.0, 1)[0]),
+        )
+        slope = _log_uniform(rng, 0.2, 30.0, 1)[0]
+        cases.append(
+            {
+                "dtime": STEPS[i % 2],
+                "zwt": _pick(
+                    rng,
+                    (0.1, lambda: 0.0),
+                    (0.75, lambda: rng.uniform(0.0, ZI[-1])),
+                    (0.15, lambda: rng.uniform(ZI[-1], 80.0)),
+                ),
+                "wtfact": _pick(rng, (0.1, lambda: 0.0), (0.9, lambda: rng.uniform(0.0, 0.9))),
+                "qflx_rain_plus_snomelt": _pick(
+                    rng, (0.3, lambda: 0.0), (0.7, lambda: _log_uniform(rng, 1e-6, 3e-2, 1)[0])
+                ),
+                "qflx_liqevap_from_top_layer": _pick(
+                    rng, (0.4, lambda: 0.0), (0.6, lambda: _log_uniform(rng, 1e-7, 2e-4, 1)[0])
+                ),
+                "qflx_ev_h2osfc": _pick(
+                    rng,
+                    (0.4, lambda: 0.0),
+                    (0.45, lambda: _log_uniform(rng, 1e-7, 2e-4, 1)[0]),
+                    (0.15, lambda: -_log_uniform(rng, 1e-7, 5e-5, 1)[0]),
+                ),
+                "h2osfc": h2osfc,
+                "frac_h2osfc": 0.0 if h2osfc <= 1e-8 else float(rng.uniform(0.0, 1.0)),
+                "h2osfc_thresh": _pick(
+                    rng,
+                    (0.2, lambda: 0.0),
+                    (0.4, lambda: rng.uniform(0.0, max(h2osfc, 1e-3))),
+                    (0.4, lambda: _log_uniform(rng, 1e-2, 300.0, 1)[0]),
+                ),
+                "topo_slope": float(slope),
+                "h2osoi_ice": _levels(_ice(rng, props["watsat"])),
+                "watsat": _levels(props["watsat"]),
+                "hksat": _levels(props["hksat"]),
+            }
+        )
+
+    loam = _soil_properties(40.0, 20.0, 0.0)
+    base = {
+        "dtime": 1800,
+        "zwt": 2.0,
+        "wtfact": 0.4,
+        "qflx_rain_plus_snomelt": 1.0e-3,
+        "qflx_liqevap_from_top_layer": 2.0e-5,
+        "qflx_ev_h2osfc": 2.0e-5,
+        "h2osfc": 20.0,
+        "frac_h2osfc": 0.6,
+        "h2osfc_thresh": 5.0,
+        "topo_slope": 2.0,
+        "h2osoi_ice": _levels(0.0),
+        "watsat": _levels(loam["watsat"]),
+        "hksat": _levels(loam["hksat"]),
+    }
+    edges = [
+        {},
+        {"qflx_rain_plus_snomelt": 0.0, "h2osfc": 0.0, "frac_h2osfc": 0.0},
+        {"zwt": 0.0, "wtfact": 0.9},  # the largest saturated fraction
+        {"wtfact": 0.0},
+        {"h2osfc": 5.0},  # exactly at the runoff threshold
+        {"frac_h2osfc": 0.4},  # exactly at the connectivity threshold
+        {"frac_h2osfc": 0.4000001},
+        {"frac_h2osfc": 1.0, "h2osfc": 200.0},
+        {"h2osfc": 5.0001, "frac_h2osfc": 0.41},  # a runoff below the smallest kept
+        {"h2osfc": 5.01, "frac_h2osfc": 0.9, "topo_slope": 30.0},  # runoff limited by storage
+        {"h2osfc": -1.0e-3, "frac_h2osfc": 0.0},  # a negative pond is refilled
+        {"qflx_rain_plus_snomelt": 3.0e-2, "frac_h2osfc": 0.0, "h2osfc": 0.0},  # excess
+        {"qflx_rain_plus_snomelt": 3.0e-2, "h2osoi_ice": _levels(0.9 * 0.44 * DZ * DENICE)},
+        {"qflx_rain_plus_snomelt": 0.0, "qflx_liqevap_from_top_layer": 2.0e-4, "h2osfc": 0.0,
+         "frac_h2osfc": 0.0},  # evaporation alone: a negative input to the soil
+        {"h2osfc": 1.0e-3, "frac_h2osfc": 0.05, "qflx_ev_h2osfc": 2.0e-4,
+         "qflx_rain_plus_snomelt": 0.0},  # evaporation empties the pond
+    ]  # fmt: skip
+    for dtime in STEPS:
+        cases += [{**base, **edge, "dtime": dtime} for edge in edges]
+    return cases
+
+
+def frac_h2osfc_cases() -> list[dict]:
+    """Fraction of the ground under ponded water: ponds from none, through the smallest
+    kept (1e-8 mm), to deep; microtopography of slopes from 0.2 to 45 degrees."""
+    rng = np.random.default_rng(SEED + 5)
+    cases = []
+    for i in range(200):
+        cases.append(
+            {
+                "dtime": STEPS[i % 2],
+                "h2osfc": _pick(
+                    rng,
+                    (0.1, lambda: 0.0),
+                    (0.1, lambda: _log_uniform(rng, 1e-12, 1e-8, 1)[0]),
+                    (0.8, lambda: _log_uniform(rng, 1e-8, 300.0, 1)[0]),
+                ),
+                "micro_sigma": float(_micro_sigma(_log_uniform(rng, 0.2, 45.0, 1)[0])),
+                "h2osoi_liq_top": float(rng.uniform(0.0, 9.0)),
+            }
+        )
+    for h2osfc in (1.0e-8, 1.0000001e-8, 1.0, 1000.0):
+        for slope in (0.2, 2.0, 45.0):
+            cases.append(
+                {
+                    "dtime": 1800,
+                    "h2osfc": h2osfc,
+                    "micro_sigma": float(_micro_sigma(slope)),
+                    "h2osoi_liq_top": 3.0,
+                }
+            )
+    return cases
+
+
+def pond_constants_cases() -> list[dict]:
+    """Microtopography and pond threshold from the slope (degrees): CLM's smallest slope
+    (0.2) to cliffs; beyond 100 degrees the microtopography falls below the 1e-6 m under
+    which CLM sets the threshold to zero."""
+    rng = np.random.default_rng(SEED + 6)
+    slopes = list(_log_uniform(rng, 0.2, 60.0, 60)) + [0.2, 1.0, 10.0, 90.0, 100.0, 120.0]
+    return [{"topo_slope": float(x)} for x in slopes]
+
+
+def _column_water(rng, watsat, nbedrock: int) -> np.ndarray:
+    """Liquid water (kg/m2) of every level: a profile of ``_water_profile`` above the
+    bedrock; below it CLM's minimum (0.01), nothing, or a profile as above."""
+    liq = _water_profile(rng) * watsat * DZ * 1000.0
+    below = np.arange(NLEVSOI) >= nbedrock
+    u = rng.random()
+    return np.where(below & (u < 0.9), 0.01 if u < 0.6 else 0.0, liq)
+
+
+def water_table_cases() -> list[dict]:
+    """Water table depth from the soil water: profiles of every kind (uniform, layered,
+    wetting fronts, saturated below a random level, levels above saturation), ice in one
+    profile out of four, bedrock from the second level to below the column; then levels
+    exactly at the 90 % saturation that defines the water table."""
+    rng = np.random.default_rng(SEED + 7)
+    cases = []
+    for _ in range(200):
+        props = _soil_properties(*_texture(rng))
+        nbedrock = NLEVSOI if rng.random() < 0.4 else int(rng.integers(2, NLEVSOI + 1))
+        cases.append(
+            {
+                "nbedrock": nbedrock,
+                "h2osoi_liq": _levels(_column_water(rng, props["watsat"], nbedrock)),
+                "h2osoi_ice": _levels(_ice(rng, props["watsat"])),
+                "watsat": _levels(props["watsat"]),
+            }
+        )
+    # a water table inside the column: saturated below a level, any wetness above it,
+    # in half of the cases with ice making up part of the saturation
+    for _ in range(100):
+        props = _soil_properties(*_texture(rng))
+        nbedrock = NLEVSOI if rng.random() < 0.5 else int(rng.integers(3, NLEVSOI + 1))
+        above = np.arange(NLEVSOI) < rng.integers(1, nbedrock)
+        s = np.where(above, rng.uniform(0.05, 0.9, NLEVSOI), rng.uniform(0.9, 1.05, NLEVSOI))
+        ice_share = rng.uniform(0.0, 0.6, NLEVSOI) * (rng.random() < 0.5)
+        pores = props["watsat"] * DZ
+        cases.append(
+            {
+                "nbedrock": nbedrock,
+                "h2osoi_liq": _levels(s * (1.0 - ice_share) * pores * 1000.0),
+                "h2osoi_ice": _levels(s * ice_share * pores * DENICE),
+                "watsat": _levels(props["watsat"]),
+            }
+        )
+
+    watsat = 0.45
+    for nbedrock in (NLEVSOI, 9):
+        for s in (
+            np.full(NLEVSOI, 1.0),  # saturated throughout
+            np.full(NLEVSOI, 0.3),  # dry throughout
+            np.full(NLEVSOI, 0.9),  # exactly at the threshold
+            np.where(np.arange(NLEVSOI) < 5, 0.5, 0.95),
+            np.where(np.arange(NLEVSOI) < 5, 0.9, 0.9000001),
+            np.where(np.arange(NLEVSOI) < 1, 0.2, 1.0),  # only the top level unsaturated
+            np.where(np.arange(NLEVSOI) < nbedrock - 1, 1.0, 0.5),  # dry at the bedrock
+            np.where(np.arange(NLEVSOI) < 5, 1.0, 0.5),  # wet over dry
+        ):
+            cases.append(
+                {
+                    "nbedrock": nbedrock,
+                    "h2osoi_liq": _levels(s * watsat * DZ * 1000.0),
+                    "h2osoi_ice": _levels(0.0),
+                    "watsat": _levels(watsat),
+                }
+            )
+    return cases
+
+
+def renew_condensation_cases() -> list[dict]:
+    """Dew and frost added to the top level, sublimation removed from it (never more than
+    its ice: CLM stops there)."""
+    rng = np.random.default_rng(SEED + 8)
+    cases = []
+    for i in range(60):
+        dtime = STEPS[i % 2]
+        ice = _pick(rng, (0.5, lambda: 0.0), (0.5, lambda: rng.uniform(0.0, 8.0)))
+        frac = _pick(rng, (0.5, lambda: 0.0), (0.5, lambda: rng.uniform(0.0, 1.0)))
+        frost = _pick(rng, (0.6, lambda: 0.0), (0.4, lambda: _log_uniform(rng, 1e-7, 5e-5, 1)[0]))
+        available = (ice + (1.0 - frac) * frost * dtime) / dtime
+        cases.append(
+            {
+                "dtime": dtime,
+                "h2osoi_liq_top": float(rng.uniform(0.0, 9.0)),
+                "h2osoi_ice_top": ice,
+                "frac_h2osfc": frac,
+                "qflx_liqdew_to_top_layer": _pick(
+                    rng, (0.3, lambda: 0.0), (0.7, lambda: _log_uniform(rng, 1e-7, 5e-5, 1)[0])
+                ),
+                "qflx_soliddew_to_top_layer": frost,
+                "qflx_solidevap_from_top_layer": _pick(
+                    rng, (0.5, lambda: 0.0), (0.5, lambda: rng.uniform(0.0, 0.9) * available)
+                ),
+            }
+        )
+    return cases
+
+
+def lateral_flow_cases() -> list[dict]:
+    """Drainage out of the saturated zone and the corrections after it.
+
+    Random draws at both model steps: water tables from the surface to below the bedrock
+    (no drainage) and CLM's deepest (80 m); bedrock from the third level down; slopes from
+    0.2 to 30 degrees; soils from sand to clay; water profiles of every kind, with levels
+    above saturation (passed upward, to the pond from the top level) and levels below the
+    smallest water CLM keeps (refilled from below, the lowest level from above); ice in one
+    profile out of four, also more than the top level's pores hold; with and without a
+    pond. Then edge cases."""
+    rng = np.random.default_rng(SEED + 9)
+    cases = []
+    for i in range(240):
+        props = _soil_properties(*_texture(rng))
+        nbedrock = NLEVSOI if rng.random() < 0.4 else int(rng.integers(3, NLEVSOI + 1))
+        liq = _column_water(rng, props["watsat"], nbedrock)
+        if rng.random() < 0.3:  # some levels with (almost) no water, or less than none
+            dry = rng.random(NLEVSOI) < 0.25
+            liq = np.where(dry, rng.choice([0.0, 0.004, 0.01, -0.5, 0.02], NLEVSOI), liq)
+        cases.append(
+            {
+                "dtime": STEPS[i % 2],
+                "nbedrock": nbedrock,
+                "zwt": _pick(
+                    rng,
+                    (0.05, lambda: 0.0),
+                    (0.65, lambda: rng.uniform(0.0, ZI[nbedrock])),
+                    (0.2, lambda: rng.uniform(ZI[nbedrock], 12.0)),
+                    (0.1, lambda: 80.0),
+                ),
+                "h2osfc": _pick(rng, (0.6, lambda: 0.0), (0.4, lambda: rng.uniform(0.0, 30.0))),
+                "topo_slope": float(_log_uniform(rng, 0.2, 30.0, 1)[0]),
+                "h2osoi_liq": _levels(liq),
+                "h2osoi_ice": _levels(_ice(rng, props["watsat"])),
+                "watsat": _levels(props["watsat"]),
+                "bsw": _levels(props["bsw"]),
+                "sucsat": _levels(props["sucsat"]),
+            }
+        )
+
+    # a shallow water table under a steep slope: the drainage of a step empties several
+    # thin levels. Every fifth slope is a cliff (82 to 89 degrees) over shallow bedrock:
+    # only there does the drainage of a step exceed what the levels above the bedrock give.
+    for i in range(60):
+        props = _soil_properties(*_texture(rng))
+        nbedrock = NLEVSOI if i % 3 and i % 5 else int(rng.integers(3, 8))
+        zwt = float(rng.uniform(0.0, min(0.5, ZI[nbedrock])))
+        cases.append(
+            {
+                "dtime": STEPS[i % 2],
+                "nbedrock": nbedrock,
+                "zwt": zwt,
+                "h2osfc": 0.0,
+                "topo_slope": float(
+                    rng.uniform(82.0, 89.0) if i % 5 == 0 else rng.uniform(15.0, 45.0)
+                ),
+                "h2osoi_liq": _levels(
+                    np.where(Z > zwt, 1.0, rng.uniform(0.3, 0.9)) * props["watsat"] * DZ * 1000.0
+                ),
+                "h2osoi_ice": _levels(0.0),
+                "watsat": _levels(props["watsat"]),
+                "bsw": _levels(props["bsw"]),
+                "sucsat": _levels(props["sucsat"]),
+            }
+        )
+
+    loam = _soil_properties(40.0, 20.0, 0.0)
+    full = loam["watsat"] * DZ * 1000.0
+    level = np.arange(NLEVSOI)
+    edges = [
+        # (bedrock level, water table, slope, liquid water, ice)
+        (NLEVSOI, 3.0, 2.0, np.where(Z > 3.0, 1.0, 0.4) * full, 0.0),
+        (NLEVSOI, float(ZI[NLEVSOI]), 2.0, 0.4 * full, 0.0),  # exactly at the bedrock
+        (12, float(ZI[12]) + 1e-9, 2.0, 0.4 * full, 0.0),  # just below it: no drainage
+        (NLEVSOI, float(ZI[5]), 2.0, np.where(level >= 5, 1.0, 0.4) * full, 0.0),  # interface
+        (NLEVSOI, 0.0, 30.0, 1.0 * full, 0.0),  # saturated to the surface, steep
+        (NLEVSOI, 8.0, 30.0, np.where(level >= 19, 0.02, 0.3) * full, 0.0),  # runs dry
+        (6, 0.3, 30.0, np.where(level >= 6, 0.0, 0.95) * full, 0.0),
+        (4, 0.0, 89.0, 1.0 * full, 0.0),  # a cliff over shallow bedrock: the column
+        (6, 0.03, 89.0, np.where(Z > 0.03, 1.0, 0.5) * full, 0.0),  # cannot give it all
+        (NLEVSOI, 2.0, 2.0, 1.1 * full, 0.0),  # every level above saturation
+        (NLEVSOI, 2.0, 2.0, np.where(level == 0, 0.0, 0.5) * full, 0.0),  # dry top level
+        (NLEVSOI, 2.0, 2.0, np.where(level == 19, 0.0, 0.5) * full, 0.0),  # dry lowest level
+        (NLEVSOI, 2.0, 2.0, np.where(level >= 17, 0.0, 0.011 / (DZ * 1000.0)), 0.0),
+        (NLEVSOI, 2.0, 2.0, np.zeros(NLEVSOI), 0.0),  # no water anywhere
+        (NLEVSOI, 2.0, 2.0, 0.6 * full, 0.6 * loam["watsat"] * DZ * DENICE),  # ice too much
+        (NLEVSOI, 2.0, 2.0, 0.2 * full, np.where(level < 6, 0.5, 0.0) * full),
+    ]
+    for dtime in STEPS:
+        for nbedrock, zwt, slope, liq, ice in edges:
+            cases.append(
+                {
+                    "dtime": dtime,
+                    "nbedrock": nbedrock,
+                    "zwt": zwt,
+                    "h2osfc": 0.0,
+                    "topo_slope": slope,
+                    "h2osoi_liq": _levels(liq),
+                    "h2osoi_ice": _levels(ice),
+                    "watsat": _levels(loam["watsat"]),
+                    "bsw": _levels(loam["bsw"]),
+                    "sucsat": _levels(loam["sucsat"]),
+                }
+            )
+    return cases
+
+
 class Routine(NamedTuple):
     fortran: str  # Module.F90::Subroutine
     cases: Callable[[], list[dict]]
@@ -324,6 +700,24 @@ ROUTINES = {
         soil_water_sequence_cases,
         "test_SoilWaterMovementMod_SoilWater_sequence.json",
     ),
+    "surface_fluxes": Routine(
+        "HydrologyNoDrainageMod.F90::HydrologyNoDrainage (SetSoilWaterFractions to "
+        "TotalSurfaceRunoff)",
+        surface_fluxes_cases,
+        "test_HydrologyNoDrainageMod_surface_fluxes.json",
+    ),
+    "frac_h2osfc": Routine("SurfaceWaterMod.F90::UpdateFracH2oSfc", frac_h2osfc_cases),
+    "pond_constants": Routine(
+        "initVerticalMod.F90::initVertical, "
+        "SoilHydrologyInitTimeConstMod.F90::SoilHydrologyInitTimeConst (statements copied)",
+        pond_constants_cases,
+        "test_SoilHydrologyInitTimeConstMod_pond_constants.json",
+    ),
+    "water_table": Routine("SoilHydrologyMod.F90::ThetaBasedWaterTable", water_table_cases),
+    "renew_condensation": Routine(
+        "SoilHydrologyMod.F90::RenewCondensation", renew_condensation_cases
+    ),
+    "lateral_flow": Routine("SoilHydrologyMod.F90::SubsurfaceLateralFlow", lateral_flow_cases),
 }
 
 

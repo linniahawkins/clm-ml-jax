@@ -1,0 +1,384 @@
+module test_surface_and_drainage
+
+  ! Drivers of CLM's soil hydrology around the Richards solver, for a snow-free, unfrozen
+  ! vegetated column with the CLM6 default settings:
+  !
+  ! surface_fluxes: the chain of routines of HydrologyNoDrainage that turns the water
+  !   reaching the ground into surface runoff, ponded water and infiltration, in CLM's order
+  !   (SetSoilWaterFractions, SaturatedExcessRunoff, SetQflxInputs, InfiltrationExcessRunoff,
+  !   RouteInfiltrationExcess, UpdateH2osfc, Infiltration, TotalSurfaceRunoff), with the
+  !   result of every routine written out.
+  ! frac_h2osfc: the fraction of the ground under ponded water (UpdateFracH2oSfc).
+  ! pond_constants: the microtopography and the pond's runoff threshold from the slope.
+  !   CLM computes them inside initVertical and SoilHydrologyInitTimeConst, which cannot be
+  !   called for one column: the statements are copied here from those routines.
+  ! water_table: ThetaBasedWaterTable.
+  ! renew_condensation: RenewCondensation.
+  ! lateral_flow: SubsurfaceLateralFlow (after SetSoilWaterFractions, which gives it the
+  !   effective porosity).
+
+  use funit
+  use shr_kind_mod, only : r8 => shr_kind_r8
+  use shr_const_mod, only : shr_const_pi
+  use shr_spfn_mod, only : shr_spfn_erf
+  use unittestSubgridMod, only : bounds
+  use unittestTimeManagerMod, only : unittest_timemgr_setup, unittest_timemgr_teardown
+  use ColumnType, only : col
+  use LandunitType, only : lun
+  use SoilHydrologyMod, only : SetSoilWaterFractions, SetQflxInputs, RouteInfiltrationExcess, &
+       Infiltration, TotalSurfaceRunoff, ThetaBasedWaterTable, RenewCondensation, &
+       SubsurfaceLateralFlow
+  use SurfaceWaterMod, only : UpdateFracH2oSfc, UpdateH2osfc
+  use HarnessColumnMod, only : harness_column_type, harness_column_setup, &
+       harness_column_teardown, harness_nlevsoi, harness_slopebeta, harness_slopemax, harness_pc
+  use HarnessIOMod, only : open_cases, open_output, begin_case, put
+
+  implicit none
+
+  @TestCase
+  type, extends(TestCase) :: TestSurfaceAndDrainage
+     type(harness_column_type) :: column
+     integer :: dtime                     ! the model step the column is set up with (s)
+   contains
+     procedure :: setUp
+     procedure :: tearDown
+     procedure :: set_step
+  end type TestSurfaceAndDrainage
+
+contains
+
+  subroutine setUp(this)
+    class(TestSurfaceAndDrainage), intent(inout) :: this
+    this%dtime = 1800
+    call harness_column_setup(this%column, dtime=this%dtime, nbedrock=harness_nlevsoi)
+  end subroutine setUp
+
+  subroutine tearDown(this)
+    class(TestSurfaceAndDrainage), intent(inout) :: this
+    call harness_column_teardown(this%column)
+  end subroutine tearDown
+
+  subroutine set_step(this, dtime)
+    ! The model step of a case (the time manager is set up again when it changes).
+    class(TestSurfaceAndDrainage), intent(inout) :: this
+    integer, intent(in) :: dtime
+
+    if (dtime /= this%dtime) then
+       call unittest_timemgr_teardown()
+       call unittest_timemgr_setup(dtime=dtime)
+       this%dtime = dtime
+    end if
+  end subroutine set_step
+
+  @Test
+  subroutine drive_surface_fluxes(this)
+    class(TestSurfaceAndDrainage), intent(inout) :: this
+    integer :: dtime
+    real(r8) :: zwt, wtfact, qflx_rain_plus_snomelt, qflx_liqevap_from_top_layer, &
+         qflx_ev_h2osfc, h2osfc, frac_h2osfc, h2osfc_thresh, topo_slope
+    real(r8), dimension(harness_nlevsoi) :: h2osoi_ice, watsat, hksat
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ dtime, zwt, wtfact, qflx_rain_plus_snomelt, qflx_liqevap_from_top_layer, &
+         qflx_ev_h2osfc, h2osfc, frac_h2osfc, h2osfc_thresh, topo_slope, h2osoi_ice, watsat, &
+         hksat
+
+    call open_cases('surface_fluxes', nin, found)
+    if (.not. found) return
+    call open_output('surface_fluxes', nout)
+    c = this%column%c
+    i = 0
+    associate(column => this%column, &
+         soilstate => this%column%soilstate_inst, &
+         soilhydrology => this%column%soilhydrology_inst, &
+         wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst, &
+         wdb => this%column%water_inst%waterdiagnosticbulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       call this%set_step(dtime)
+       soilstate%watsat_col(c,1:harness_nlevsoi) = watsat
+       soilstate%hksat_col(c,1:harness_nlevsoi) = hksat
+       soilstate%wtfact_col(c) = wtfact
+       soilhydrology%zwt_col(c) = zwt
+       soilhydrology%h2osfc_thresh_col(c) = h2osfc_thresh
+       col%topo_slope(c) = topo_slope
+       wsb%h2osoi_ice_col(c,1:harness_nlevsoi) = h2osoi_ice
+       wsb%h2osfc_col(c) = h2osfc
+       wdb%frac_h2osfc_col(c) = frac_h2osfc
+       wdb%frac_h2osfc_nosnow_col(c) = frac_h2osfc
+       wfb%qflx_rain_plus_snomelt_col(c) = qflx_rain_plus_snomelt
+       wfb%qflx_liqevap_from_top_layer_col(c) = qflx_liqevap_from_top_layer
+       wfb%qflx_ev_h2osfc_col(c) = qflx_ev_h2osfc
+
+       ! The order of HydrologyNoDrainage
+       call SetSoilWaterFractions(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            soilhydrology, soilstate, wsb)
+       call column%saturated_excess_runoff_inst%SaturatedExcessRunoff(bounds, &
+            column%num_hydrologyc, column%filter_hydrologyc, lun, col, soilhydrology, &
+            soilstate, wfb)
+       call SetQflxInputs(bounds, column%num_hydrologyc, column%filter_hydrologyc, wfb, wdb)
+       call column%infiltration_excess_runoff_inst%InfiltrationExcessRunoff(bounds, &
+            column%num_hydrologyc, column%filter_hydrologyc, soilhydrology, soilstate, &
+            column%saturated_excess_runoff_inst, wfb, wdb)
+       call RouteInfiltrationExcess(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            wfb, soilhydrology)
+       call UpdateH2osfc(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            column%infiltration_excess_runoff_inst, column%energyflux_inst, soilhydrology, &
+            wfb, wsb, wdb)
+       call Infiltration(bounds, column%num_hydrologyc, column%filter_hydrologyc, wfb)
+       call TotalSurfaceRunoff(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            column%num_urbanc, column%filter_urbanc, wfb, soilhydrology, wsb)
+
+       call begin_case(nout, i)
+       call put(nout, 'icefrac', soilhydrology%icefrac_col(c,1:harness_nlevsoi))
+       call put(nout, 'eff_porosity', soilstate%eff_porosity_col(c,1:harness_nlevsoi))
+       call put(nout, 'fsat', column%saturated_excess_runoff_inst%fsat_col(c))
+       call put(nout, 'qflx_sat_excess_surf', wfb%qflx_sat_excess_surf_col(c))
+       call put(nout, 'qflx_in_soil', wfb%qflx_in_soil_col(c))
+       call put(nout, 'qflx_top_soil_to_h2osfc', wfb%qflx_top_soil_to_h2osfc_col(c))
+       call put(nout, 'qinmax', column%infiltration_excess_runoff_inst%qinmax_col(c))
+       call put(nout, 'qflx_infl_excess', wfb%qflx_infl_excess_col(c))
+       call put(nout, 'qflx_in_soil_limited', wfb%qflx_in_soil_limited_col(c))
+       call put(nout, 'qflx_in_h2osfc', wfb%qflx_in_h2osfc_col(c))
+       call put(nout, 'qflx_h2osfc_surf', wfb%qflx_h2osfc_surf_col(c))
+       call put(nout, 'qflx_h2osfc_drain', wfb%qflx_h2osfc_drain_col(c))
+       call put(nout, 'h2osfc', wsb%h2osfc_col(c))
+       call put(nout, 'qflx_infl', wfb%qflx_infl_col(c))
+       call put(nout, 'qflx_surf', wfb%qflx_surf_col(c))
+    end do
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_surface_fluxes
+
+  @Test
+  subroutine drive_frac_h2osfc(this)
+    class(TestSurfaceAndDrainage), intent(inout) :: this
+    integer :: dtime
+    real(r8) :: h2osfc, micro_sigma, h2osoi_liq_top
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ dtime, h2osfc, micro_sigma, h2osoi_liq_top
+
+    call open_cases('frac_h2osfc', nin, found)
+    if (.not. found) return
+    call open_output('frac_h2osfc', nout)
+    c = this%column%c
+    i = 0
+    associate(wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst, &
+         wdb => this%column%water_inst%waterdiagnosticbulk_inst)
+    wsb%h2osno_no_layers_col(c) = 0._r8
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       call this%set_step(dtime)
+       col%micro_sigma(c) = micro_sigma
+       wsb%h2osfc_col(c) = h2osfc
+       wsb%h2osoi_liq_col(c,1) = h2osoi_liq_top
+       ! the hydrology filter serves as the soil filter: the one column
+       call UpdateFracH2oSfc(bounds, this%column%num_hydrologyc, &
+            this%column%filter_hydrologyc, this%column%water_inst)
+       call begin_case(nout, i)
+       call put(nout, 'frac_h2osfc', wdb%frac_h2osfc_col(c))
+       call put(nout, 'qflx_too_small_h2osfc_to_soil', &
+            wfb%qflx_too_small_h2osfc_to_soil_col(c))
+       call put(nout, 'h2osfc', wsb%h2osfc_col(c))
+       call put(nout, 'h2osoi_liq_top', wsb%h2osoi_liq_col(c,1))
+    end do
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_frac_h2osfc
+
+  @Test
+  subroutine drive_pond_constants(this)
+    class(TestSurfaceAndDrainage), intent(inout) :: this
+    real(r8) :: topo_slope
+    real(r8) :: slope0, micro_sigma, h2osfc_thresh, d, fd, dfdd
+    integer :: nin, nout, ios, i, p
+    logical :: found
+    namelist /case/ topo_slope
+
+    call open_cases('pond_constants', nin, found)
+    if (.not. found) return
+    call open_output('pond_constants', nout)
+    i = 0
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+
+       ! Copied from initVerticalMod.F90::initVertical (a column that is not a hillslope
+       ! column), with params_inst%slopemax and slopebeta as the harness's parameters
+       slope0 = harness_slopemax**(1._r8/harness_slopebeta)
+       micro_sigma = (topo_slope + slope0)**(harness_slopebeta)
+
+       ! Copied from SoilHydrologyInitTimeConstMod.F90::SoilHydrologyInitTimeConst (surface
+       ! water active), with params_inst%pc as the harness's parameter
+       h2osfc_thresh = 0._r8
+       if (micro_sigma > 1.e-6_r8) then
+          d = 0.0_r8
+          do p = 1,4
+             fd   = 0.5_r8*(1.0_r8+shr_spfn_erf(d/(micro_sigma*sqrt(2.0_r8)))) - harness_pc
+             dfdd = exp(-d**2/(2.0_r8*micro_sigma**2))/(micro_sigma*sqrt(2.0_r8*shr_const_pi))
+             d    = d - fd/dfdd
+          enddo
+          h2osfc_thresh = 0.5_r8*d*(1.0_r8+shr_spfn_erf(d/(micro_sigma*sqrt(2.0_r8)))) + &
+               micro_sigma/sqrt(2.0_r8*shr_const_pi)*exp(-d**2/(2.0_r8*micro_sigma**2))
+          h2osfc_thresh = 1.e3_r8 * h2osfc_thresh !convert to mm from meters
+       else
+          h2osfc_thresh = 0._r8
+       endif
+
+       call begin_case(nout, i)
+       call put(nout, 'micro_sigma', micro_sigma)
+       call put(nout, 'h2osfc_thresh', h2osfc_thresh)
+    end do
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_pond_constants
+
+  @Test
+  subroutine drive_water_table(this)
+    class(TestSurfaceAndDrainage), intent(inout) :: this
+    integer :: nbedrock
+    real(r8), dimension(harness_nlevsoi) :: h2osoi_liq, h2osoi_ice, watsat
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ nbedrock, h2osoi_liq, h2osoi_ice, watsat
+
+    call open_cases('water_table', nin, found)
+    if (.not. found) return
+    call open_output('water_table', nout)
+    c = this%column%c
+    i = 0
+    associate(wsb => this%column%water_inst%waterstatebulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       col%nbedrock(c) = nbedrock
+       this%column%soilstate_inst%watsat_col(c,1:harness_nlevsoi) = watsat
+       wsb%h2osoi_liq_col(c,1:harness_nlevsoi) = h2osoi_liq
+       wsb%h2osoi_ice_col(c,1:harness_nlevsoi) = h2osoi_ice
+       call ThetaBasedWaterTable(bounds, this%column%num_hydrologyc, &
+            this%column%filter_hydrologyc, this%column%num_urbanc, this%column%filter_urbanc, &
+            this%column%soilhydrology_inst, this%column%soilstate_inst, wsb, &
+            this%column%water_inst%waterfluxbulk_inst)
+       call begin_case(nout, i)
+       call put(nout, 'zwt', this%column%soilhydrology_inst%zwt_col(c))
+    end do
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_water_table
+
+  @Test
+  subroutine drive_renew_condensation(this)
+    class(TestSurfaceAndDrainage), intent(inout) :: this
+    integer :: dtime
+    real(r8) :: h2osoi_liq_top, h2osoi_ice_top, frac_h2osfc, qflx_liqdew_to_top_layer, &
+         qflx_soliddew_to_top_layer, qflx_solidevap_from_top_layer
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ dtime, h2osoi_liq_top, h2osoi_ice_top, frac_h2osfc, &
+         qflx_liqdew_to_top_layer, qflx_soliddew_to_top_layer, qflx_solidevap_from_top_layer
+
+    call open_cases('renew_condensation', nin, found)
+    if (.not. found) return
+    call open_output('renew_condensation', nout)
+    c = this%column%c
+    i = 0
+    associate(wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst, &
+         wdb => this%column%water_inst%waterdiagnosticbulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       call this%set_step(dtime)
+       wsb%h2osoi_liq_col(c,1) = h2osoi_liq_top
+       wsb%h2osoi_ice_col(c,1) = h2osoi_ice_top
+       wdb%frac_h2osfc_col(c) = frac_h2osfc
+       wfb%qflx_liqdew_to_top_layer_col(c) = qflx_liqdew_to_top_layer
+       wfb%qflx_soliddew_to_top_layer_col(c) = qflx_soliddew_to_top_layer
+       wfb%qflx_solidevap_from_top_layer_col(c) = qflx_solidevap_from_top_layer
+       call RenewCondensation(bounds, this%column%num_hydrologyc, &
+            this%column%filter_hydrologyc, this%column%num_urbanc, this%column%filter_urbanc, &
+            this%column%soilhydrology_inst, this%column%soilstate_inst, wsb, wdb, wfb)
+       call begin_case(nout, i)
+       call put(nout, 'h2osoi_liq_top', wsb%h2osoi_liq_col(c,1))
+       call put(nout, 'h2osoi_ice_top', wsb%h2osoi_ice_col(c,1))
+    end do
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_renew_condensation
+
+  @Test
+  subroutine drive_lateral_flow(this)
+    class(TestSurfaceAndDrainage), intent(inout) :: this
+    integer :: dtime, nbedrock
+    real(r8) :: zwt, h2osfc, topo_slope
+    real(r8), dimension(harness_nlevsoi) :: h2osoi_liq, h2osoi_ice, watsat, bsw, sucsat
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ dtime, nbedrock, zwt, h2osfc, topo_slope, h2osoi_liq, h2osoi_ice, watsat, &
+         bsw, sucsat
+
+    call open_cases('lateral_flow', nin, found)
+    if (.not. found) return
+    call open_output('lateral_flow', nout)
+    c = this%column%c
+    i = 0
+    associate(column => this%column, &
+         soilstate => this%column%soilstate_inst, &
+         soilhydrology => this%column%soilhydrology_inst, &
+         wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       call this%set_step(dtime)
+       col%nbedrock(c) = nbedrock
+       col%topo_slope(c) = topo_slope
+       soilstate%watsat_col(c,1:harness_nlevsoi) = watsat
+       soilstate%bsw_col(c,1:harness_nlevsoi) = bsw
+       soilstate%sucsat_col(c,1:harness_nlevsoi) = sucsat
+       soilhydrology%zwt_col(c) = zwt
+       wsb%h2osoi_liq_col(c,1:harness_nlevsoi) = h2osoi_liq
+       wsb%h2osoi_ice_col(c,1:harness_nlevsoi) = h2osoi_ice
+       wsb%h2osfc_col(c) = h2osfc
+       call SetSoilWaterFractions(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            soilhydrology, soilstate, wsb)
+       call SubsurfaceLateralFlow(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            column%num_urbanc, column%filter_urbanc, soilhydrology, soilstate, wsb, wfb, &
+            column%water_inst%wateratm2lndbulk_inst)
+       call begin_case(nout, i)
+       call put(nout, 'h2osoi_liq', wsb%h2osoi_liq_col(c,1:harness_nlevsoi))
+       call put(nout, 'h2osoi_ice_top', wsb%h2osoi_ice_col(c,1))
+       call put(nout, 'zwt', soilhydrology%zwt_col(c))
+       call put(nout, 'h2osfc', wsb%h2osfc_col(c))
+       call put(nout, 'qflx_latflow_out', wfb%qflx_latflow_out_col(c))
+       call put(nout, 'qflx_rsub_sat', wfb%qflx_rsub_sat_col(c))
+       call put(nout, 'qflx_drain', wfb%qflx_drain_col(c))
+       call put(nout, 'qflx_ice_runoff_xs', wfb%qflx_ice_runoff_xs_col(c))
+    end do
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_lateral_flow
+
+end module test_surface_and_drainage

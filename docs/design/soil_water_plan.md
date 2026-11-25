@@ -1,9 +1,10 @@
 # Phase 10 scope: predicted soil water
 
-Status (2026-11-24, branch `phase10/soil_water`): **10.1, 10.1b, 10.2 and 10.3 done: the
-Richards solver is translated and reproduces CLM's Fortran, sub-step for sub-step (decision
-142). It is not in the time step yet. Stopped for the maintainer's discussion of agreement
-and cost, before the runoff, pond and drainage routines (10.4).** Start with "Resume
+Status (2026-11-24, branch `phase10/soil_water`): **10.1 to 10.4 done: every routine of the
+first version is translated and equals CLM's Fortran on idealized sweeps (the Richards
+solver sub-step for sub-step, decision 142; runoff, pond, water table and drainage to
+round-off, decision 143), and the assembled hydrology conserves water. Nothing is in the
+time step yet. Next: the multi-step sequences of the whole hydrology against CLM (10.5).** Start with "Resume
 here" below. This document is deleted when the phase closes;
 what is decided moves to `decisions.md`, what stays open to `open_items.md` (open item O64).
 
@@ -32,6 +33,7 @@ will not match CLM's soil moisture, because the canopies differ; that is expecte
 | 140 | the harness: extra tests in CTSM's unit-test framework, built from a checked copy of `src/` |
 | 141 | the sweeps: the proposed scenario list, some frozen cases, both 1800 s and 3600 s |
 | 142 | the Richards solver: one masked loop (ending, or a fixed count for gradients), LAPACK's pivoting solve, agreement judged against the solver's own round-off sensitivity |
+| 143 | runoff, pond, water table and drainage routine by routine; CLM's single-precision constants kept; perched water table, rising-water-table branch, hillslope and urban code not translated |
 
 ### What exists
 
@@ -62,7 +64,19 @@ In the repository (all committed and pushed):
   to 4e-6, as much as the JAX answer itself moves under a 1e-15 change of its input. Cost
   per column and step: 0.2-0.3 ms with the fixed-count loop, 1-3 ms for a gradient (a CHATS
   step is about 9 ms, its gradient 47 ms).
-- Nothing else of the soil water physics yet; nothing in the time step.
+- Runoff, pond, water table, drainage and the assembled step (10.4, decision 143):
+  `processes/surface_runoff.py`, `processes/drainage.py`,
+  `processes/hydrology.py::soil_hydrology` (CLM's order, with the step's water balance
+  error), `soil_water.soil_water_fractions`. Golden data of six drivers (1 316 cases,
+  `golden_IO/test_HydrologyNoDrainageMod_surface_fluxes.json`, `test_SurfaceWaterMod_*`,
+  `test_SoilHydrologyMod_*`, `test_SoilHydrologyInitTimeConstMod_*`), tested by
+  `tests/fortran_validation/test_golden_soil_hydrology.py`; properties, conservation and
+  gradients in `tests/clm_ml/test_processes_hydrology.py`.
+- Result of 10.4: every output equal to the Fortran's to round-off (largest relative
+  difference 1e-11, most values bit for bit). The assembled hydrology closes the water
+  balance to 1e-12 mm, except in rare ill-conditioned solver steps (3e-9 mm; CLM's own Fortran reaches 3e-4 mm in the
+  extreme sweep cases). A whole hydrology step costs 0.16-0.35 ms per column.
+- Nothing in the time step yet.
 
 Outside the repository (Derecho):
 
@@ -91,10 +105,9 @@ calling the runoff, pond and drainage routines (they compile).
 1. ~~Build the harness in the repository.~~ Done (decision 140).
 2. ~~Warm-up, the retention curve.~~ Done.
 3. ~~Show the maintainer the harness; settle the sweeps.~~ Done (decision 141).
-4. ~~10.3, the Richards solver end to end.~~ Done (decision 142). **Stopped here: the
-   maintainer's discussion of agreement and cost.**
-5. 10.4 runoff, pond, water table and drainage (each with its sweeps just before its
-   translation); 10.5 sequences of the whole hydrology; 10.6 into the model (state, step,
+4. ~~10.3, the Richards solver end to end.~~ Done (decision 142).
+5. ~~10.4 runoff, pond, water table and drainage.~~ Done (decision 143). **Here now.**
+6. 10.5 sequences of the whole hydrology; 10.6 into the model (state, step,
    set-up inputs, parameters, restart, outputs, balance check); 10.7 gradients and timing;
    10.8 coupled runs at US-MMS and close of the phase (section 7).
 
@@ -105,6 +118,12 @@ calling the runoff, pond and drainage routines (they compile).
   gradients; 0.1-0.2 ms more per column and step), or the ending loop for forward runs and
   the fixed count for gradients, following `numerics.solver_loops`. To settle with the
   GPU timing of 10.7 (recommended: the fixed count always unless that timing says otherwise).
+- How the canopy model's single ground evaporation is given to the hydrology (section 8,
+  item 7; needed at 10.6). `soil_hydrology` takes CLM's three terms, each per unit area of
+  the surface it applies to: evaporation from the soil outside the pond, evaporation from
+  the pond, dew. Recommended: positive ground flux as both evaporation terms (the pond and
+  the soil lose water at the same rate per area), negative as dew on the soil outside the
+  pond and as negative pond evaporation, so that the whole flux is accounted for.
 - Section 8, items 4-11: snowfall reaching the ground, root uptake from CLM-ml's
   `soil_et_loss`, CLM-ml's conductivity for the plants, evaporation and dew from the single
   ground flux, no irrigation, `FMAX` and `SLOPE` as tower inputs, the form of the sub-step
@@ -129,6 +148,12 @@ calling the runoff, pond and drainage routines (they compile).
   `<work>/build/__command_line_test__/__command_line_test__` and run
   `clm_biogeophys_test/ctsm_harness_test/ctsm_harness`. `gdb` fails on this build (an
   internal error on Fortran types): trace with `write` statements.
+- The harness column is unfrozen and snow-free by construction (`HarnessColumnMod`): frost
+  table and perched water table as `PerchedWaterTable` leaves them above freezing. The
+  sequence driver of 10.5 can call the routines in the order of `soil_hydrology`; all the
+  fields they need are allocated.
+- CLM constants written without `_r8` are single precision (`sat_lev=0.9`, `1.0e-8`):
+  look for them in any routine translated later.
 - A test file added to the harness is compiled but not run unless pFUnit's main program is
   compiled again: `build.py` touches it before every build.
 - In the sweeps, levels at the dry bound (relative saturation 0.01) in clay have matric

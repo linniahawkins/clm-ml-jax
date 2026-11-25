@@ -407,6 +407,68 @@ the regression policy's noise twin rather than a wider tolerance for every case.
 Source: plan 5.1, 6.1-6.3; `tests/fortran_validation/test_golden_soil_water.py`;
 `tests/clm_ml/test_processes_soil_water.py`.
 
+**143. Runoff, pond, water table and drainage: translated routine by routine, with CLM's single-precision constants and without the branches a snow-free, unfrozen, non-hillslope column cannot reach**
+2026-11-24 · Phase 10 (10.4) · implementation · in force · Departure from Fortran: no
+The rest of CLM's soil hydrology, for the CLM6 defaults (TOPMODEL saturated fraction,
+infiltration limited by the saturated conductivity, surface water active, no aquifer):
+- `processes/surface_runoff.py`: `saturated_fraction`, `infiltration_capacity`,
+  `pond_fraction`, `pond_runoff`, `pond_drainage`, `surface_fluxes` (CLM's chain from
+  `SaturatedExcessRunoff` to `TotalSurfaceRunoff`), `renew_condensation`, and the constants
+  of a column's surface, `microtopography` and `pond_threshold`.
+- `processes/drainage.py`: `water_table_depth` (`ThetaBasedWaterTable`) and
+  `subsurface_drainage` (`SubsurfaceLateralFlow`: baseflow, its removal level by level with
+  the falling water table, water above saturation passed upward and to the pond, the
+  minimum water of every level).
+- `processes/soil_water.py::soil_water_fractions` (`SetSoilWaterFractions`).
+- `processes/hydrology.py::soil_hydrology`: one model step in CLM's order (pond fraction,
+  ice fractions, surface fluxes, Richards solver, water table, dew, drainage), with the
+  water balance error of the step. Not yet in the time step.
+Copied from CLM as they stand:
+- Two constants that CLM writes without a kind, so that they are single-precision values:
+  the saturation that defines the water table (`sat_lev=0.9`, in fact 0.89999998) and the
+  smallest pond runoff kept (`1.0e-8`, in fact 9.9999999e-9).
+- π is CLM's (`SHR_CONST_PI`); CLM-ml v2's `rpi = 3.141592654` (`processes/constants.py`)
+  is not used in these modules.
+- The level loops of the drainage routine run over all 20 soil levels, those below the
+  bedrock included: they are given the minimum water (0.01 mm) from the levels above.
+Not translated, with the reason:
+- The perched water table and the frost table (`PerchedWaterTable`, and their use in the
+  saturated fraction): for soil above freezing CLM's routine finds no perched table
+  (decision 132; later, with frozen soil).
+- The branch of the drainage routine for a rising water table: it needs water flowing in
+  from a neighbouring column, which only hillslope columns have.
+- Excess ice, urban columns, the VIC and hillslope options, flood water, snow.
+Golden data (decisions 139-141; 1 316 cases at both step lengths): the surface chain with
+the result of every routine (330), the pond fraction (212), the water table (316), dew
+(60), the drainage routine (332), and the surface constants (66). Every output equals the
+Fortran's to round-off (most values bit for bit; largest relative difference 1e-11, in the
+pond fraction of very shallow ponds, otherwise 3e-14), tested
+by `tests/fortran_validation/test_golden_soil_hydrology.py`, which also checks that the
+sweeps reach each branch.
+Two things about the golden data:
+- The microtopography and the pond threshold are computed by CLM inside two initialization
+  routines that read files and cannot be called for one column. The harness driver holds a
+  copy of those statements (marked as such); every other driver calls CLM's routine.
+- Two branches cannot be reached with realistic inputs and are covered by idealized ones
+  only: drainage larger than the levels above the bedrock can give in a step (it needs a
+  slope above about 80 degrees), and pond runoff limited by the pond's storage (it needs a
+  model step longer than about 3 hours; not covered).
+Water balance: the assembled hydrology closes the balance to round-off (1e-12 mm) on 200
+random columns over two days, except in rare steps where the Richards solver's matrix is
+ill-conditioned (a level dried to the minimum beside a wet one; decision 142): 3e-9 mm in
+one step of 19 200. CLM's own Fortran has the same property: in the solver's golden sweep
+its balance error exceeds 1e-9 mm in 19 of 342 cases and reaches 3e-4 mm in the most
+extreme (CLM warns at 1e-9 and stops at 1e-5). The unit test allows 1e-7 mm, and requires
+99.9 % of the steps below 1e-10.
+Cost of a whole hydrology step (one column, login-node CPU): 0.16 ms (1800 s) to 0.35 ms
+(3600 s) with the fixed-count solver loop, 1.5-3.6 ms for a reverse gradient: the Richards
+solver is nearly all of it. Gradients with respect to the seven hydrology parameters, the
+soil properties, the initial state, the rain, the slope and `FMAX` are finite in every
+branch and match finite differences.
+Reason: the Fortran is the reference, single-precision constants included (136); routines
+that the first version cannot reach would be untested code.
+Source: plan 3.2, 6.1; `tests/clm_ml/test_processes_hydrology.py`.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**
