@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 151.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 152.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:
@@ -68,6 +68,10 @@ Guidance for Claude (and other contributors) working in this repository.
   O93): with predicted soil water the canopy sees the soil levels weighted by their
   conductance (CLM's root water potential) and the roots can redistribute water
   (`soil.root_redistribution`); prescribed runs keep CLM-ml v2's weighting (decision 150).
+  Options `soil.root_conductance: clm_ml | clm` and `soil.root_biomass: prescribed |
+  from_leaf_area`, with CLM's four root parameters in `params.yaml` (decision 151): with
+  CLM's roots US-MMS follows CLM through the 2012 drought (July latent heat 55 W m⁻²
+  against CLM's 59; 92 before).
   The US-MMS experiment folder is outside the repository
   (`/glade/work/linnia/phase10_us_mms/from_repo_495442e`). In progress: see O93.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at

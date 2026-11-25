@@ -267,6 +267,34 @@ def test_upgrade_adds_the_stable_zeta_limit(chats_run_dir):
     assert p.get("broadleaf_deciduous_temperate_tree", "zeta_max_stable") == 1.0e30
 
 
+def test_upgrade_adds_clm_root_parameters(chats_run_dir):
+    """A params.yaml without CLM's root parameters gets CLM6's values by PFT; a value that
+    is there is kept."""
+    names = ("root_to_leaf_ratio", "root_conductance_max", "root_psi50", "root_ck")
+    tree = "broadleaf_deciduous_temperate_tree"
+
+    def old(d):
+        for pft, entries in d["pft"].items():
+            for name in names:
+                if (pft, name) != (tree, "root_ck"):
+                    entries.pop(name)
+        d["pft"][tree]["root_ck"] = 5.0
+        for name in names:
+            d["units"].pop(name, None)
+
+    _edit(chats_run_dir, "params.yaml", old)
+    with pytest.raises(ConfigError, match="root_"):
+        load_experiment(chats_run_dir)
+    report = upgrade_experiment(chats_run_dir)
+    assert any("root parameters" in line for line in report)
+    p = load_experiment(chats_run_dir).params
+    assert p.get(tree, "root_to_leaf_ratio") == 1.39
+    assert p.get(tree, "root_conductance_max") == 1.037788e-10
+    assert p.get(tree, "root_psi50") == pytest.approx(-2.6477, abs=1e-4)  # -269 987 mm
+    assert p.get(tree, "root_ck") == 5.0
+    assert p.get("c4_grass", "root_to_leaf_ratio") == 1.5
+
+
 def test_upgrade_converts_the_layout_before_experiment_folders(chats_run_dir, tmp_path):
     """A folder as `clm-ml convert` wrote it before experiment folders becomes the same experiment
     as the current conversion."""

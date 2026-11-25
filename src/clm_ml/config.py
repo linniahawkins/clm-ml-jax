@@ -368,6 +368,26 @@ class SoilOptions:
         "Not in CLM-ml v2.",
         when={"water": "predicted"},
     )
+    root_conductance: Literal["clm_ml", "clm"] = option(
+        "clm_ml",
+        "How easily each soil level gives water to the roots (predicted soil water). clm_ml: "
+        "CLM-ml's soil and root resistances (Bonan et al. 2014; the root's by its biomass "
+        "and params.yaml root_resistivity). clm: CLM's (CTSM 5.4 plant hydraulics): the "
+        "root's by the level's root area and root_conductance_max, falling with the "
+        "level's depth and as the root dries (root_psi50, root_ck); the top level gives "
+        "none; the levels' potentials include gravity.",
+        "Not in CLM-ml v2.",
+        when={"water": "predicted"},
+    )
+    root_biomass: Literal["prescribed", "from_leaf_area"] = option(
+        "prescribed",
+        "The fine root biomass (predicted soil water). prescribed: the patch's root_biomass "
+        "(domain.yaml), constant, as CLM-ml. from_leaf_area: CLM's without its carbon "
+        "cycle, leaf area index / sla_top x root_to_leaf_ratio x 2 g biomass per g carbon "
+        "(params.yaml), following the leaf area through the year.",
+        "Not in CLM-ml v2.",
+        when={"water": "predicted"},
+    )
 
 
 @dataclasses.dataclass(frozen=True)

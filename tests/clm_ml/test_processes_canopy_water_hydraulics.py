@@ -216,6 +216,14 @@ def test_soil_uptake_fractions_sum_to_one_above_bedrock():
     assert float(r.soil_et_loss[3]) == 0.0  # below bedrock
 
 
+ROOTS = plant_hydraulics.RootParameters(
+    root_radius=PARAMS[2], root_density=PARAMS[3], root_resistivity=PARAMS[4],
+    root_to_leaf_ratio=1.39, root_conductance_max=1.037788e-10, root_psi50=-2.6476,
+    root_ck=3.95,
+)  # fmt: skip
+Z_SOI = jnp.asarray([0.1, 0.3, 0.5, 0.7])  # level depths, m
+
+
 def _soil_columns():
     rng = np.random.default_rng(5)
     hk = jnp.asarray(rng.uniform(1e-7, 1e-4, N_SOI))
@@ -231,21 +239,31 @@ def _soil_columns():
     return hk, smp, args
 
 
+def _by_conductance(scheme, hk, smp, args, ice=None, biomass=500.0):
+    dz, rootfr, no_ice, n_bedrock, lai, _ = args
+    return plant_hydraulics.root_zone_by_conductance(
+        scheme, hk, jnp.full(N_SOI, 5e-5), smp, dz, Z_SOI, rootfr,
+        no_ice if ice is None else ice, n_bedrock, lai, 0.5, biomass, ROOTS,
+    )  # fmt: skip
+
+
 def test_soil_weighted_by_conductance_is_the_root_water_potential():
-    """With the weighting "conductance" the levels act as parallel resistors, each from
-    its own potential: the soil water potential is the potential of their common end (the
-    roots) without flow, and each level's uptake is its conductance times its potential
-    difference to the roots under transpiration."""
+    """The levels act as parallel conductors, each from its own potential: the soil water
+    potential is the potential of their common end (the roots) without flow, and each
+    level's uptake is its conductance times its potential difference to the roots under
+    transpiration."""
     hk, smp, args = _soil_columns()
-    r = plant_hydraulics.soil_resistance(hk, smp, *args, *PARAMS[2:5], weighting="conductance")
+    r = _by_conductance("clm_ml", hk, smp, args)
     v2 = plant_hydraulics.soil_resistance(hk, smp, *args, *PARAMS[2:5])
-    assert float(r.rsoil) == float(v2.rsoil)  # the belowground resistance is the same
+    np.testing.assert_allclose(float(r.rsoil), float(v2.rsoil), rtol=1e-14)  # A25 either way
     assert np.all(np.asarray(v2.redistribution) == 0.0)
     psi = np.asarray(smp)[:3] * 1e-3 * plant_hydraulics.HEAD
-    cond = np.asarray(r.soil_et_loss)[:3] * 1.4 / float(r.rsoil)  # k = share * sum(k)
+    resistance = plant_hydraulics.soil_root_resistance(hk, *args[:2], 500.0, *PARAMS[2:5])
+    cond = 1.0 / np.asarray(resistance)[:3]
+    np.testing.assert_allclose(float(r.rsoil), 1.4 / cond.sum(), rtol=1e-12)
     np.testing.assert_allclose(float(r.psis), (cond * psi).sum() / cond.sum(), rtol=1e-12)
     assert psi.min() < float(r.psis) < psi.max()
-    np.testing.assert_allclose(float(jnp.sum(r.soil_et_loss)), 1.0, rtol=1e-12)
+    np.testing.assert_allclose(np.asarray(r.soil_et_loss)[:3], cond / cond.sum(), rtol=1e-12)
     assert float(r.soil_et_loss[3]) == 0.0 and float(r.redistribution[3]) == 0.0  # bedrock
     redistribution = np.asarray(r.redistribution)[:3]
     np.testing.assert_allclose(redistribution, cond * (psi - float(r.psis)), rtol=1e-12)
@@ -266,25 +284,72 @@ def test_soil_weighted_by_conductance_is_the_root_water_potential():
 def test_soil_weightings_agree_in_a_uniform_soil_and_skip_frozen_levels():
     hk, _, args = _soil_columns()
     smp = jnp.full(N_SOI, -5.0e4)
-    r = plant_hydraulics.soil_resistance(hk, smp, *args, *PARAMS[2:5], weighting="conductance")
+    r = _by_conductance("clm_ml", hk, smp, args)
     v2 = plant_hydraulics.soil_resistance(hk, smp, *args, *PARAMS[2:5])
     np.testing.assert_allclose(float(r.psis), float(v2.psis), rtol=1e-12)
     np.testing.assert_allclose(np.asarray(r.soil_et_loss), np.asarray(v2.soil_et_loss), rtol=1e-12)
     assert np.abs(np.asarray(r.redistribution)).max() < 1e-12
 
     hk, smp, args = _soil_columns()
-    ice = jnp.asarray([0.0, 5.0, 0.0, 0.0])
-    frozen = (*args[:2], ice, *args[3:])
-    r = plant_hydraulics.soil_resistance(hk, smp, *frozen, *PARAMS[2:5], weighting="conductance")
-    assert float(r.soil_et_loss[1]) == 0.0 and float(r.redistribution[1]) == 0.0
-    all_frozen = (*args[:2], jnp.ones(N_SOI), *args[3:])
-    r = plant_hydraulics.soil_resistance(
-        hk, smp, *all_frozen, *PARAMS[2:5], weighting="conductance"
+    for scheme in plant_hydraulics.ROOT_CONDUCTANCE:
+        r = _by_conductance(scheme, hk, smp, args, ice=jnp.asarray([0.0, 5.0, 0.0, 0.0]))
+        assert float(r.soil_et_loss[1]) == 0.0 and float(r.redistribution[1]) == 0.0
+        r = _by_conductance(scheme, hk, smp, args, ice=jnp.ones(N_SOI))
+        assert float(r.psis) == plant_hydraulics.MINLWP_SPA
+        np.testing.assert_allclose(np.asarray(r.soil_et_loss), [1 / 3, 1 / 3, 1 / 3, 0.0])
+    with pytest.raises(ValueError, match="root conductance"):
+        _by_conductance("roots", hk, smp, args)
+
+
+def test_clm_soil_root_conductance_follows_clm_formulas():
+    """CLM's root-soil interface conductance written out from PhotosynthesisMod.F90 in
+    CLM's units (mm/s per mm), level by level, against the function."""
+    hk, smp, args = _soil_columns()
+    dz, rootfr = np.asarray(args[0]), np.asarray(args[1])
+    hksat, lai, sai, froot_carbon = np.full(N_SOI, 5e-5), 1.4, 0.5, 250.0
+    psi50_mm = ROOTS.root_psi50 / (1e-3 * plant_hydraulics.HEAD)
+    expected = np.zeros(N_SOI)
+    for j in range(N_SOI):
+        density = max(2.0 * 1.0, 2.0 * froot_carbon * rootfr[j] / dz[j])
+        length_density = density / (0.31e6 * np.pi * 0.29e-3**2)
+        rai = (sai + lai) * 1.39 * rootfr[j]
+        r_soil = np.sqrt(1.0 / (np.pi * length_density))
+        soil = max(min(hksat[j], float(hk[j])) / (1e3 * r_soil), 1e-16)
+        plc = 2.0 ** (-((float(smp[j]) / psi50_mm) ** 3.95))
+        plc = 0.0 if plc < 0.005 else plc
+        root = max(plc * rai * 1.037788e-10 / (0.25 + float(Z_SOI[j])), 1e-16)
+        expected[j] = 1.0 / (1.0 / soil + 1.0 / root) if j > 0 else 0.0
+    k = plant_hydraulics.soil_root_conductance_clm(
+        hk, jnp.asarray(hksat), smp, args[0], Z_SOI, args[1], 2.0 * froot_carbon, lai, sai, ROOTS
     )
-    assert float(r.psis) == plant_hydraulics.MINLWP_SPA
-    np.testing.assert_allclose(np.asarray(r.soil_et_loss), [1 / 3, 1 / 3, 1 / 3, 0.0])
-    with pytest.raises(ValueError, match="weighting"):
-        plant_hydraulics.soil_resistance(hk, smp, *args, *PARAMS[2:5], weighting="roots")
+    per_mm = 1e6 / (0.01802 * plant_hydraulics.HEAD)  # 1/s -> mmol m-2 s-1 MPa-1
+    np.testing.assert_allclose(np.asarray(k) / per_mm, expected, rtol=1e-8)
+    assert expected[1:].min() > 0.0
+
+    # the root water potential includes the gravitational potential of the levels' depths
+    r = _by_conductance("clm", hk, smp, args)
+    cond = np.asarray(k)[:3]
+    psi = (np.asarray(smp) - 1000.0 * np.asarray(Z_SOI))[:3] * 1e-3 * plant_hydraulics.HEAD
+    np.testing.assert_allclose(float(r.psis), (cond * psi).sum() / cond.sum(), rtol=1e-12)
+    assert float(r.soil_et_loss[0]) == 0.0  # CLM's top level gives no water
+    # dry roots lose conductance; deeper levels conduct less for the same roots
+    assert float(plant_hydraulics.vulnerability(-2.6476, -2.6476, 3.95)) == 0.5
+    assert float(plant_hydraulics.vulnerability(-8.0, -2.6476, 3.95)) == 0.0
+    even = plant_hydraulics.soil_root_conductance_clm(
+        jnp.full(N_SOI, 1e-4), jnp.asarray(hksat), jnp.full(N_SOI, -1e3), args[0], Z_SOI,
+        jnp.full(N_SOI, 0.25), 500.0, lai, sai, ROOTS,
+    )  # fmt: skip
+    assert np.all(np.diff(np.asarray(even)[1:]) < 0.0)
+
+
+def test_fine_root_biomass_from_leaf_area():
+    """CLM without its carbon cycle: leaf carbon (LAI / SLA) times the root-to-leaf ratio,
+    2 g biomass per g carbon. A temperate deciduous forest at LAI 5: about 420 g m-2."""
+    b = plant_hydraulics.fine_root_biomass(5.0, 0.03281, 1.39)
+    np.testing.assert_allclose(float(b), 2.0 * 5.0 / 0.03281 * 1.39, rtol=1e-14)
+    assert 400.0 < float(b) < 450.0
+    assert float(plant_hydraulics.fine_root_biomass(5.0, 0.0, 1.39)) == 0.0
+    assert float(plant_hydraulics.fine_root_biomass(0.0, 0.03, 1.39)) == 0.0
 
 
 def test_root_uptake_without_redistribution_gives_no_level_water():
@@ -302,26 +367,20 @@ def test_root_uptake_without_redistribution_gives_no_level_water():
         np.testing.assert_allclose(np.asarray(u), [1.0, 0.6, 0.4, 0.0], rtol=1e-12)
 
 
-def test_soil_weighted_by_conductance_has_finite_derivatives():
+def test_root_zone_by_conductance_has_finite_derivatives():
     hk, smp, args = _soil_columns()
+    for scheme in plant_hydraulics.ROOT_CONDUCTANCE:
 
-    def f(hk, smp):
-        r = plant_hydraulics.soil_resistance(hk, smp, *args, *PARAMS[2:5], weighting="conductance")
-        u = plant_hydraulics.root_water_uptake(r.soil_et_loss, r.redistribution, 2.0, False)
-        return r.psis + jnp.sum(u * jnp.arange(N_SOI))
+        def f(hk, smp, biomass, ice=None, scheme=scheme):
+            r = _by_conductance(scheme, hk, smp, args, ice=ice, biomass=biomass)
+            u = plant_hydraulics.root_water_uptake(r.soil_et_loss, r.redistribution, 2.0, False)
+            return r.psis + r.rsoil + jnp.sum(u * jnp.arange(N_SOI))
 
-    for ice in (jnp.zeros(N_SOI), jnp.ones(N_SOI)):
-        a = (*args[:2], ice, *args[3:])
-        g = jax.grad(
-            lambda hk, smp: plant_hydraulics.soil_resistance(
-                hk, smp, *a, *PARAMS[2:5], weighting="conductance"
-            ).psis,
-            argnums=(0, 1),
-        )(hk, smp)
-        assert all(np.isfinite(np.asarray(x)).all() for x in g)
-    g = jax.grad(f, argnums=(0, 1))(hk, smp)
-    assert all(np.isfinite(np.asarray(x)).all() for x in g)
-    assert np.abs(np.asarray(g[1])[:3]).min() > 0.0
+        g = jax.grad(f, argnums=(0, 1, 2))(hk, smp, 500.0)
+        assert all(np.isfinite(np.asarray(x)).all() for x in g), scheme
+        assert np.abs(np.asarray(g[1])[1:3]).min() > 0.0
+        g = jax.grad(f, argnums=(0, 1, 2))(hk, smp, 500.0, jnp.ones(N_SOI))  # no conductance
+        assert all(np.isfinite(np.asarray(x)).all() for x in g), scheme
 
 
 def test_leaf_water_potential_relaxes_to_steady_state():

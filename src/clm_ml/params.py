@@ -64,6 +64,10 @@ class CanopyParams(NamedTuple):
     root_radius: object
     root_density: object
     root_resistivity: object
+    root_to_leaf_ratio: object
+    root_conductance_max: object
+    root_psi50: object
+    root_ck: object
     # Leaf structure and radiation
     leaf_dimension: object
     leaf_angle_index: object
@@ -149,6 +153,18 @@ PARAM_SPECS: tuple[ParamSpec, ...] = (
     ParamSpec("root_resistivity", "MPa s g mmol-1 H2O", "Hydraulic resistivity of root tissue",
               "MLpftcon", "root_resist_SPA"),
     ParamSpec("root_profile_beta", "-", "Root profile shape parameter", "pftcon", "rootprof_beta"),
+    # CLM's roots (not in CLM-ml v2): used with predicted soil water by model.yaml
+    # soil.root_biomass: from_leaf_area and soil.root_conductance: clm
+    ParamSpec("root_to_leaf_ratio", "gC gC-1",
+              "Fine root carbon per leaf carbon (CLM froot_leaf)", "", "froot_leaf"),
+    ParamSpec("root_conductance_max", "m s-1",
+              "Largest root conductance per root area, mm H2O s-1 per mm of water potential, "
+              "times the path length in m (CLM krmax)", "", "krmax"),
+    ParamSpec("root_psi50", "MPa",
+              "Water potential at 50% loss of root conductance (CLM psi50, root segment)",
+              "", "psi50"),
+    ParamSpec("root_ck", "-",
+              "Shape of the root's vulnerability curve (CLM ck, root segment)", "", "ck"),
     # Leaf structure and radiation
     ParamSpec("leaf_dimension", "m", "Leaf dimension (for boundary-layer conductance)",
               "pftcon", "dleaf"),
@@ -218,9 +234,35 @@ ZETA_MAX_STABLE_DEFAULT: Mapping[str, float] = {
 }
 
 
+#: CLM's root parameters given by ``clm-ml upgrade`` to a params file that lacks them, by
+#: PFT 1-16 (``ctsm60_params.c251211.nc``: froot_leaf, krmax, psi50 in mm of water, ck)
+_CLM6_FROOT_LEAF = (1.5, 1.56, 0.73, 1.47, 1.63, 1.28, 1.39, 0.6, 1.5, 1.5, 1.2, 1.2, 1.57,
+                    1.5, 1.57, 1.0)  # fmt: skip
+_CLM6_KRMAX = (1.492742e-10, 1.567796e-10, 1.077457e-10, 1.660956e-10, 8.352224e-11,
+               3.404328e-09, 1.037788e-10, 1.393969e-10, 1.028656e-09, 3.775307e-08,
+               4.645430e-11, 8.049845e-11, 2.077390e-08, 2.972871e-08, 9.559138e-10,
+               7.943282e-10)  # fmt: skip
+_CLM6_PSI50_MM = (-530060.345342, -437128.183811, -332264.120599, -243171.114482,
+                  -250115.17114, -340055.717896, -269987.218025, -244862.329732, -400000.0,
+                  -390000.0, -390000.0, -340000.0, -439046.327761, -340000.0, -439046.327761,
+                  -340000.0)  # fmt: skip
+#: MPa per mm of water (CLM's water potentials are in mm)
+MPA_PER_MM = 9.80665e-6
+CLM_ROOT_DEFAULTS: Mapping[str, Mapping[str, float]] = {
+    name: {
+        "root_to_leaf_ratio": _CLM6_FROOT_LEAF[i],
+        "root_conductance_max": _CLM6_KRMAX[i],
+        "root_psi50": _CLM6_PSI50_MM[i] * MPA_PER_MM,
+        "root_ck": 3.95,
+    }
+    for i, name in enumerate(PFT_NAMES[1:])
+}
+
+
 def add_new_parameters(data: dict, report: list[str]) -> dict:
     """A params file's contents with the parameters added since it was written
-    (``zeta_max_stable``, the ``hydrology`` section) at their defaults (``clm-ml upgrade``)."""
+    (``zeta_max_stable``, CLM's root parameters, the ``hydrology`` section) at their
+    defaults (``clm-ml upgrade``)."""
     pfts = data.get("pft")
     if not isinstance(pfts, dict):
         return data
@@ -245,6 +287,22 @@ def add_new_parameters(data: dict, report: list[str]) -> dict:
         report.append(
             "params.yaml: added zeta_max_stable (0.5 for shrubs, grasses and crops, 1e30 = no "
             "limit for trees)"
+        )
+    roots = set()
+    for pft, entries in pfts.items():
+        if isinstance(entries, dict) and pft in CLM_ROOT_DEFAULTS:
+            for name, value in CLM_ROOT_DEFAULTS[pft].items():
+                if name not in entries:
+                    entries[name] = value
+                    roots.add(name)
+    if roots:
+        units = data.get("units")
+        if isinstance(units, dict):
+            for name in roots:
+                units.setdefault(name, SPECS_BY_NAME[name].units)
+        report.append(
+            "params.yaml: added CLM's root parameters at the values of CLM6 "
+            "(ctsm60_params.c251211.nc): " + ", ".join(sorted(roots))
         )
     return data
 

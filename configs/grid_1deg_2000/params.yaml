@@ -38,6 +38,14 @@ units:
   root_resistivity: MPa s g mmol-1 H2O
   # Root profile shape parameter
   root_profile_beta: '-'
+  # Fine root carbon per leaf carbon (CLM froot_leaf)
+  root_to_leaf_ratio: gC gC-1
+  # Largest root conductance per root area, mm H2O s-1 per mm of water potential, times the path length in m (CLM krmax)
+  root_conductance_max: m s-1
+  # Water potential at 50% loss of root conductance (CLM psi50, root segment)
+  root_psi50: MPa
+  # Shape of the root's vulnerability curve (CLM ck, root segment)
+  root_ck: '-'
   # Leaf dimension (for boundary-layer conductance)
   leaf_dimension: m
   # Leaf angle departure from spherical (chi_l)
@@ -101,6 +109,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.976
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 1.4927420426307013e-10
+    root_psi50: -5.198116285644025
+    root_ck: 3.95
     leaf_dimension: 0.000648
     leaf_angle_index: 0.01
     sla_top: 0.0125
@@ -138,6 +150,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.45
+    root_conductance_max: 1.5677957411185452e-10
+    root_psi50: -2.7458620000000002
+    root_ck: 3.95
     leaf_dimension: 0.000648
     leaf_angle_index: 0.01
     sla_top: 0.01218
@@ -175,6 +191,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 0.73
+    root_conductance_max: 1.0774566856428492e-10
+    root_psi50: -3.258397938271349
+    root_ck: 3.95
     leaf_dimension: 0.0036
     leaf_angle_index: 0.01
     sla_top: 0.0226
@@ -212,6 +232,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.993
+    root_to_leaf_ratio: 1.47
+    root_conductance_max: 1.6609561720727344e-10
+    root_psi50: -2.3846940098330123
+    root_ck: 3.95
     leaf_dimension: 0.040275
     leaf_angle_index: 0.45
     sla_top: 0.01852
@@ -249,6 +273,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.966
+    root_to_leaf_ratio: 1.63
+    root_conductance_max: 8.352223618897751e-11
+    root_psi50: -2.452791943061534
+    root_ck: 3.95
     leaf_dimension: 0.040001
     leaf_angle_index: 0.32
     sla_top: 0.019
@@ -286,6 +314,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.993
+    root_to_leaf_ratio: 1.28
+    root_conductance_max: 3.404328275953683e-09
+    root_psi50: -3.334807405906422
+    root_ck: 3.95
     leaf_dimension: 0.039976
     leaf_angle_index: 0.2
     sla_top: 0.03081
@@ -323,6 +355,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.966
+    root_to_leaf_ratio: 1.39
+    root_conductance_max: 1.0377877444892252e-10
+    root_psi50: -2.647670151642783
+    root_ck: 3.95
     leaf_dimension: 0.039952
     leaf_angle_index: 0.59
     sla_top: 0.03281
@@ -360,6 +396,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 0.6
+    root_conductance_max: 1.39396863800964e-10
+    root_psi50: -2.4012791658697488
+    root_ck: 3.95
     leaf_dimension: 0.040018
     leaf_angle_index: 0.59
     sla_top: 0.03347
@@ -397,6 +437,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.964
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 1.0286563257985295e-09
+    root_psi50: -3.92266
+    root_ck: 3.95
     leaf_dimension: 0.04455
     leaf_angle_index: 0.32
     sla_top: 0.01795
@@ -434,6 +478,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.964
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 3.775306624680719e-08
+    root_psi50: -3.8245935
+    root_ck: 3.95
     leaf_dimension: 0.040003
     leaf_angle_index: 0.59
     sla_top: 0.0307
@@ -471,6 +519,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.914
+    root_to_leaf_ratio: 1.2
+    root_conductance_max: 4.64543005274104e-11
+    root_psi50: -3.8245935
+    root_ck: 3.95
     leaf_dimension: 0.040002
     leaf_angle_index: 0.59
     sla_top: 0.028
@@ -508,6 +560,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.914
+    root_to_leaf_ratio: 1.2
+    root_conductance_max: 8.049844718999254e-11
+    root_psi50: -3.334261
+    root_ck: 3.95
     leaf_dimension: 0.009072
     leaf_angle_index: -0.23
     sla_top: 0.021
@@ -545,6 +601,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.57
+    root_conductance_max: 2.077389772217998e-08
+    root_psi50: -4.305573670140552
+    root_ck: 3.95
     leaf_dimension: 0.001352
     leaf_angle_index: -0.23
     sla_top: 0.03991
@@ -582,6 +642,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 2.9728708148111633e-08
+    root_psi50: -3.334261
+    root_ck: 3.95
     leaf_dimension: 0.009072
     leaf_angle_index: -0.23
     sla_top: 0.03846
@@ -619,6 +683,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.0
+    root_conductance_max: 2.077389772218e-08
+    root_psi50: -4.305573670140552
+    root_ck: 3.95
     leaf_dimension: 0.001352
     leaf_angle_index: 0.3
     sla_top: 0.03991
@@ -656,6 +724,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.0
+    root_conductance_max: 2.077389772218e-08
+    root_psi50: -4.305573670140549
+    root_ck: 3.95
     leaf_dimension: 0.001352
     leaf_angle_index: 0.3
     sla_top: 0.03991

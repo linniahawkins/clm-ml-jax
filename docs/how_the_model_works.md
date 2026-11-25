@@ -284,7 +284,14 @@ What differs is mostly how the code is written. The few science departures are l
   level can still supply as in CLM-ml v2: dry levels with many roots then count, and the
   stomata close in a drought. Each level gives its share of the transpiration, and the
   roots also move water from wetter to drier levels (`soil.root_redistribution`, on by
-  default; off: no level receives water from the roots). It starts from the soil water a
+  default; off: no level receives water from the roots). Two more choices, both CLM-ml's
+  by default: `soil.root_conductance` (`clm_ml`: CLM-ml's soil and root resistances;
+  `clm`: CLM's, in which a level's roots conduct less the deeper the level and the drier
+  the root, and the top level gives no water) and `soil.root_biomass` (`prescribed`: the
+  patch's fine root biomass; `from_leaf_area`: CLM's, leaf area index / `sla_top` ×
+  `root_to_leaf_ratio` × 2). CLM's roots use four parameters of `params.yaml`
+  (`root_to_leaf_ratio`, `root_conductance_max`, `root_psi50`, `root_ck`; `clm-ml
+  upgrade` adds them to older files at CLM6's values). It starts from the soil water a
   prescribed run has at its first step, or from a restart. What it does not have: snow
   and frozen soil water (snowfall enters the soil as liquid at once), irrigation, and
   any exchange between soil columns. Its results are not CLM's soil moisture: the canopy

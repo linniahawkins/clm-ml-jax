@@ -910,6 +910,12 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   stomatal curve (exponent 40 against CLM's 3.95), xylem that loses conductance as it
   dries, CLM's root conductance (small for deep roots); a target from the tower's
   measurements.
+- **2026-11-25, decision 151:** CLM's root conductance (`soil.root_conductance: clm`) and
+  CLM's fine root biomass (`soil.root_biomass: from_leaf_area`) as options. With CLM's
+  roots the latent heat follows CLM through the drought (July 55 W m⁻² against 59, the
+  five months 3 to 6 W m⁻² below CLM; transpiration 366 against 382 mm). What remains:
+  July GPP falls less than CLM's (6.4 against 4.4 µmol m⁻² s⁻¹): the stomata and the
+  xylem are still CLM-ml's. Not run yet with CLM's roots: the five years, the globe.
 - **Source:** Phase 10 steps 10.1 and 10.8; decision 148 (the US-MMS experiment folder is
   not in the repository: `git show 495442e:experiments/us_mms_2012/README.md`).
 

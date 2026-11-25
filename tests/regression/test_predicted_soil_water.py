@@ -39,7 +39,9 @@ VARIABLES = SCALARS + ["soil_liquid_water", "soil_water_content"]
 SURFACE = {"max_saturated_fraction": 0.4, "slope": 1.0}
 
 
-def _experiment(workdir: Path, length: str, restart: Path | None = None, surface=SURFACE):
+def _experiment(
+    workdir: Path, length: str, restart: Path | None = None, surface=SURFACE, soil=None
+):
     sys.path.insert(0, str(ROOT / "src"))
     sys.path.insert(0, str(ROOT))
     from clm_ml.experiment import load_experiment
@@ -60,7 +62,7 @@ def _experiment(workdir: Path, length: str, restart: Path | None = None, surface
         workdir,
         namelist=ROOT / "data" / "namelists" / "nl.CHATS7.1day",
         run=run,
-        model={"soil": {"water": "predicted"}},
+        model={"soil": {"water": "predicted", **(soil or {})}},
         domain=lambda data: data["towers"]["CHATS7"]["soil"].update(surface),
     )
     return load_experiment(workdir)
@@ -99,6 +101,32 @@ def test_predicted_soil_water_one_day(tmp_path):
     assert -8.0 < stored[-1] - stored[0] < -2.0
     assert np.all(full["root_water_uptake"] > 0.0)
     assert np.all((full["soil_water_substeps"] >= 1) & (full["soil_water_substeps"] <= 64))
+
+
+def test_clm_roots_and_no_redistribution(tmp_path):
+    """One day with CLM's root conductances, CLM's fine root biomass from the leaf area and
+    no redistribution, beside the default (CLM-ml's root resistances, the prescribed
+    biomass, redistribution): the water balance closes either way and the roots take the
+    transpiration."""
+    default = _experiment(tmp_path / "default", "1 day").execute(quiet=True)["step"].data
+    soil = {"root_conductance": "clm", "root_biomass": "from_leaf_area",
+            "root_redistribution": False}  # fmt: skip
+    clm = _experiment(tmp_path / "clm", "1 day", soil=soil).execute(quiet=True)["step"].data
+    for data in (default, clm):
+        assert np.max(np.abs(data["soil_water_balance_error"])) < 1e-9
+        assert np.all(data["root_water_uptake"] > 0.0)
+    # the same soil water at the first step, a different canopy response to it
+    np.testing.assert_allclose(
+        clm["soil_water_content"][0, 0], default["soil_water_content"][0, 0], rtol=1e-14
+    )
+    daily = [d["latent_heat_flux"][:, 0].mean() for d in (default, clm)]
+    assert daily[0] != daily[1] and abs(daily[1] - daily[0]) < 0.2 * daily[0]
+    # the dry top level: wetted by the roots with redistribution (the default, CLM-ml's
+    # conductances); CLM's top level has no exchange with the roots and dries
+    top = [
+        d["soil_liquid_water"][-1, 0, 0] - d["soil_liquid_water"][0, 0, 0] for d in (default, clm)
+    ]
+    assert top[0] > 0.0 > top[1]
 
 
 def test_resumed_from_a_restart_equals_the_uninterrupted_run(tmp_path, monkeypatch):

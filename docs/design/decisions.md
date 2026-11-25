@@ -727,6 +727,52 @@ soil water tests and their gradient tests pass unchanged except the statement th
 predicted run's first step equals the prescribed run's (now within 1 %).
 Source: maintainer, 2026-11-25; open item O93.
 
+**151. CLM's root conductance and CLM's fine root biomass as options of predicted soil water**
+2026-11-25 · Phase 11 (O93) · maintainer · in force · Departure from Fortran: yes (options, predicted soil water only)
+Two `model.yaml` settings, used only with `soil.water: predicted`, both CLM-ml's by default:
+- `soil.root_conductance: clm_ml | clm`. `clm_ml`: the inverse of CLM-ml's soil and root
+  resistances (Bonan et al. 2014, eqs. A23-A24; `plant_hydraulics.soil_root_resistance`).
+  `clm`: CLM's root-soil interface conductance as it is in `ctsm5.4.004`
+  (`PhotosynthesisMod.F90`, `k_soil_root`; `plant_hydraulics.soil_root_conductance_clm`):
+  the soil's conductance `min(hksat, hk)` over the mean distance between roots, in series
+  with the root's, `plc(smp) × root area index of the level × krmax / (0.25 m + depth)`;
+  floors of 1e-16; none in the top level; root biomass density at least 2 g m⁻³. With it
+  the levels' potentials include gravity (`smp − 1000 z`), as in CLM's `getvegwp`.
+- `soil.root_biomass: prescribed | from_leaf_area`. `prescribed`: the patch's
+  `root_biomass` (CLM-ml). `from_leaf_area`: CLM's without its carbon cycle
+  (`CNVegetationFacade.F90::get_froot_carbon_patch`), LAI / `sla_top` × `froot_leaf`, × 2 g
+  biomass per g C (`plant_hydraulics.fine_root_biomass`).
+Four PFT parameters, required in every `params.yaml`: `root_to_leaf_ratio` (CLM
+`froot_leaf`), `root_conductance_max` (`krmax`), `root_psi50` (`psi50` of the root
+segment, in MPa), `root_ck` (`ck`). `clm-ml params` reads them from a CLM parameter
+file; `clm-ml upgrade` adds them at the values of `ctsm60_params.c251211.nc`; the
+built-in tables took them from the files they were made from (`clm6`), or from
+`clm5_params.c200717.nc` (`clm5_defaults`, `chats`).
+Structure: `plant_hydraulics` has one function per piece (the level resistances or
+conductances of each scheme, the vulnerability curve, the fine root biomass, the root
+zone as parallel conductors `root_zone`, the uptake `root_water_uptake`);
+`root_zone_by_conductance` selects the scheme; CLM-ml v2's `soil_resistance` is unchanged
+and serves prescribed runs. Still CLM-ml's with `clm`: the stem and leaf path (a constant
+`plant_conductance`, no loss of conductance in the xylem) and the stomata.
+Reason: CLM's root conductance falls with depth and with drying; CLM-ml's depends only on
+the level's root biomass, so its deep roots supplied much of the July 2012 transpiration
+at US-MMS and, with redistribution, rewetted the root zone (decision 150).
+Results (US-MMS, May-September 2012, redistribution on; latent heat May to September in
+W m⁻², transpiration): CLM 101, 96, 59, 90, 64, 382 mm; `clm` roots 97, 90, 55, 85, 60,
+366 mm; `clm_ml` roots 102, 113, 81, 92, 61, 430 mm. July GPP 6.4 µmol m⁻² s⁻¹ with
+`clm` (CLM 4.4; `clm_ml` 8.0). Without redistribution, `clm`: July 52, 361 mm. The fine
+root biomass from the leaf area (440-480 g m⁻² in summer against the prescribed 500)
+changes July by 0.2 W m⁻² with `clm` and 2 with `clm_ml`. The water balance closes as
+before. Prescribed runs are bit for bit unchanged (the regression reference is not
+regenerated).
+Not checked against running Fortran: CLM's conductance is inside
+`PhotosynthesisHydraulicStress` and cannot be called by the harness; its test compares
+the function with the formulas written out from the source.
+Tests: `tests/clm_ml/test_processes_canopy_water_hydraulics.py`,
+`tests/clm_ml/test_experiment.py` (the upgrade), `tests/regression/
+test_predicted_soil_water.py::test_clm_roots_and_no_redistribution`.
+Source: maintainer, 2026-11-25; open item O93.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

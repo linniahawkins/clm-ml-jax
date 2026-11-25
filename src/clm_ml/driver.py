@@ -379,6 +379,8 @@ def step_options(run):
             checkpoint_substeps=checkpoint_substeps(run.config.numerics.checkpoint_substeps),
             soil_water=run.config.soil.water,
             root_redistribution=bool(run.config.soil.root_redistribution),
+            root_conductance=run.config.soil.root_conductance,
+            root_biomass=run.config.soil.root_biomass,
             richards_trials=(
                 max_richards_trials(run.step_seconds) if run.config.soil.water == "predicted" else 0
             ),

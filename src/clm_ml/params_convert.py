@@ -26,15 +26,20 @@ import numpy as np
 
 from clm_ml.io import netcdf
 from clm_ml.io.yaml_schema import ConfigError
-from clm_ml.params import HYDROLOGY_SPECS, PARAM_SPECS, PFT_NAMES, Params
+from clm_ml.params import HYDROLOGY_SPECS, MPA_PER_MM, PARAM_SPECS, PFT_NAMES, Params
 
 #: params.yaml name -> (CLM parameter-file variable(s), scale). Spectral parameters take a
 #: (vis, nir) pair of variables. ``rootprof_beta`` has two variants; CLM's root profile for
 #: water (``rooting_profile_varindex_water`` = 1), which CLM-ml's root profile is, is the
-#: first.
+#: first. ``psi50`` and ``ck`` have a row per segment of the plant (sunlit leaves, shaded
+#: leaves, xylem, root): the root's is taken.
 CLM_PARAMETER_FILE_FIELDS: Mapping[str, tuple] = {
     "c3_photosynthesis": (("c3psn",), 1.0),
     "root_profile_beta": (("rootprof_beta",), 1.0),
+    "root_to_leaf_ratio": (("froot_leaf",), 1.0),
+    "root_conductance_max": (("krmax",), 1.0),
+    "root_psi50": (("psi50",), MPA_PER_MM),  # mm of water -> MPa
+    "root_ck": (("ck",), 1.0),
     "leaf_dimension": (("dleaf",), 1.0),
     "leaf_angle_index": (("xl",), 1.0),
     "sla_top": (("slatop",), 1.0),
@@ -69,7 +74,8 @@ def read_clm_parameter_file(path: Path) -> dict[str, dict]:
             if var not in ds.variables:
                 raise ConfigError(f"{path}: variable {var} not found")
             v = np.asarray(ds.variables[var][:], dtype=float)
-            return v[0, :n] if v.ndim == 2 else v[:n]  # rootprof_beta: (variants, pft)
+            row = 3 if var in ("psi50", "ck") else 0  # the root segment; the first variant
+            return v[row, :n] if v.ndim == 2 else v[:n]
 
         values: dict[str, dict] = {name: {} for name in PFT_NAMES[1:]}
         for key, (variables, scale) in CLM_PARAMETER_FILE_FIELDS.items():

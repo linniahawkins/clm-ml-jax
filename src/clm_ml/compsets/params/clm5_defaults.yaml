@@ -1,33 +1,74 @@
 # Values of CLM-ml v2's pftcon / MLpftcon tables with pftcon_val = 0.
 # CLM5 / CLM-ml v1 default parameters for PFTs 1-16.
+# CLM's root parameters (root_to_leaf_ratio, root_conductance_max, root_psi50, root_ck) from
+# /glade/campaign/cesm/cesmdata/inputdata/lnd/clm2/paramdata/clm5_params.c200717.nc.
 
+# Units and meaning of each parameter (spectral ones are [visible, near-infrared]).
 units:
+  # Maximum carboxylation rate at 25 C, canopy top
   vcmax25: umol m-2 s-1
+  # Marginal water-use efficiency (WUE stomatal model)
   iota: umol CO2 mol-1 H2O
+  # Minimum stomatal conductance
   gs_min: mol H2O m-2 s-1
+  # Ball-Berry minimum leaf conductance
   g0_ball_berry: mol H2O m-2 s-1
+  # Ball-Berry slope
   g1_ball_berry: '-'
+  # Medlyn minimum leaf conductance
   g0_medlyn: mol H2O m-2 s-1
+  # Medlyn slope
   g1_medlyn: kPa0.5
+  # Leaf water potential at 50% loss of stomatal conductance
   psi50_gs: MPa
+  # Shape parameter for stomatal closure with leaf water potential
   shape_gs: '-'
+  # 1 for C3 photosynthesis, 0 for C4 (structural)
   c3_photosynthesis: '1'
+  # Stem hydraulic conductance per unit leaf area
   plant_conductance: mmol H2O m-2 s-1 MPa-1
+  # Plant capacitance per unit leaf area
   plant_capacitance: mmol H2O m-2 MPa-1
+  # Fine root radius
   root_radius: m
+  # Fine root density (biomass per root volume)
   root_density: g m-3
+  # Hydraulic resistivity of root tissue
   root_resistivity: MPa s g mmol-1 H2O
+  # Root profile shape parameter
   root_profile_beta: '-'
+  # Fine root carbon per leaf carbon (CLM froot_leaf)
+  root_to_leaf_ratio: gC gC-1
+  # Largest root conductance per root area, mm H2O s-1 per mm of water potential, times the path length in m (CLM krmax)
+  root_conductance_max: m s-1
+  # Water potential at 50% loss of root conductance (CLM psi50, root segment)
+  root_psi50: MPa
+  # Shape of the root's vulnerability curve (CLM ck, root segment)
+  root_ck: '-'
+  # Leaf dimension (for boundary-layer conductance)
   leaf_dimension: m
+  # Leaf angle departure from spherical (chi_l)
   leaf_angle_index: '-'
+  # Specific leaf area at canopy top
   sla_top: m2 gC-1
+  # Leaf emissivity
   leaf_emissivity: '-'
+  # Foliage clumping index
   clumping_index: '-'
+  # Leaf reflectance [vis, nir]
   leaf_reflectance: '-'
+  # Leaf transmittance [vis, nir]
   leaf_transmittance: '-'
+  # Stem reflectance [vis, nir]
   stem_reflectance: '-'
+  # Stem transmittance [vis, nir]
   stem_transmittance: '-'
+  # Largest stability (reference height - displacement height) / Obukhov length in stable conditions (CLM zetamaxstable); 1e30: no limit, as CLM-ml v2
   zeta_max_stable: '-'
+  # Momentum roughness length / canopy height (CLM z0mr) Optional: only grid runs use it.
+  z0m_to_height_ratio: '-'
+  # Displacement height / canopy height (CLM displar) Optional: only grid runs use it.
+  displacement_to_height_ratio: '-'
 # Soil hydrology (CLM's parameters; the same for every PFT). Used by runs with
 # predicted soil water (model.yaml soil.water: predicted).
 hydrology:
@@ -67,6 +108,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.976
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 1.0000000000000001e-11
+    root_psi50: -5.1975245
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.01
     sla_top: 0.01
@@ -102,6 +147,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 1.9952623149688828e-10
+    root_psi50: -3.92266
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.01
     sla_top: 0.008
@@ -137,6 +186,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 3.1622776601683795e-10
+    root_psi50: -3.726527
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.01
     sla_top: 0.024
@@ -172,6 +225,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.993
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 6.309573444801943e-09
+    root_psi50: -2.4516625000000003
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.1
     sla_top: 0.012
@@ -207,6 +264,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.966
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 3.981071705534969e-09
+    root_psi50: -2.6477955
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.1
     sla_top: 0.012
@@ -242,6 +303,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.993
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 7.943282347242822e-09
+    root_psi50: -3.334261
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.01
     sla_top: 0.03
@@ -277,6 +342,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.966
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 3.981071705534969e-09
+    root_psi50: -2.6477955
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.25
     sla_top: 0.03
@@ -312,6 +381,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 1.995262314968879e-08
+    root_psi50: -1.96133
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.25
     sla_top: 0.03
@@ -347,6 +420,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.964
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 1.9952623149688828e-10
+    root_psi50: -3.92266
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.01
     sla_top: 0.012
@@ -382,6 +459,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.964
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 2.511886431509582e-10
+    root_psi50: -3.8245935
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.25
     sla_top: 0.03
@@ -417,6 +498,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.914
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 2.511886431509582e-10
+    root_psi50: -3.8245935
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: 0.25
     sla_top: 0.03
@@ -452,6 +537,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.914
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 7.943282347242822e-10
+    root_psi50: -3.334261
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: -0.3
     sla_top: 0.03
@@ -487,6 +576,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 7.943282347242822e-10
+    root_psi50: -3.334261
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: -0.3
     sla_top: 0.03
@@ -522,6 +615,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 7.943282347242822e-10
+    root_psi50: -3.334261
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: -0.3
     sla_top: 0.03
@@ -557,6 +654,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.5
+    root_conductance_max: 7.943282347242822e-10
+    root_psi50: -3.334261
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: -0.3
     sla_top: 0.03
@@ -592,6 +693,10 @@ pft:
     root_density: 310000.0
     root_resistivity: 25.0
     root_profile_beta: 0.943
+    root_to_leaf_ratio: 1.0
+    root_conductance_max: 7.943282347242822e-10
+    root_psi50: -3.334261
+    root_ck: 3.95
     leaf_dimension: 0.04
     leaf_angle_index: -0.3
     sla_top: 0.03

@@ -41,8 +41,11 @@ from clm_ml.processes.hydrology import soil_hydrology
 from clm_ml.processes.layers import keep
 from clm_ml.processes.leaf_heat_capacity import leaf_heat_capacity
 from clm_ml.processes.plant_hydraulics import (
+    RootParameters,
+    fine_root_biomass,
     plant_resistance,
     root_water_uptake,
+    root_zone_by_conductance,
     soil_resistance,
 )
 from clm_ml.processes.surface_runoff import microtopography, pond_threshold
@@ -76,6 +79,12 @@ class StepOptions(NamedTuple):
     #: with predicted soil water, whether the roots move water from wetter to drier soil
     #: levels (model.yaml soil.root_redistribution)
     root_redistribution: bool = True
+    #: with predicted soil water, the functions of each soil level's soil-to-root
+    #: conductance (model.yaml soil.root_conductance; plant_hydraulics.ROOT_CONDUCTANCE)
+    root_conductance: str = "clm_ml"
+    #: with predicted soil water, the fine root biomass: the patch's prescribed value or
+    #: from the leaf area (model.yaml soil.root_biomass; plant_hydraulics.ROOT_BIOMASS)
+    root_biomass: str = "prescribed"
 
     @property
     def n_substeps(self) -> int:
@@ -339,11 +348,26 @@ def step(
     errors = _record(jnp.zeros(len(BALANCE_CHECKS), t_soil.dtype), PLANT_AREA, area.error)
 
     # Plant hydraulics and leaf heat capacity (every layer slot)
-    roots = soil_resistance(
-        hk_l, smp_l, k.dz[:n_soil], k.rootfr, soil_level_ice(ice, n_soil), k.nbedrock, area.lai,
-        k.root_biomass, params.root_radius, params.root_density, params.root_resistivity,
-        weighting="conductance" if predicted else "supply",
-    )  # fmt: skip
+    # The soil as the canopy sees it. Prescribed soil water: CLM-ml v2. Predicted: the
+    # levels weighted by their conductance (not in CLM-ml v2), with CLM-ml's or CLM's root
+    # functions and the prescribed fine root biomass or CLM's from the leaf area.
+    if predicted:
+        if options.root_biomass == "from_leaf_area":
+            root_biomass = fine_root_biomass(area.lai, params.sla_top, params.root_to_leaf_ratio)
+        else:
+            root_biomass = k.root_biomass
+        roots = root_zone_by_conductance(
+            options.root_conductance, hk_l, k.hksat[:n_soil], smp_l, k.dz[:n_soil],
+            k.z[:n_soil], k.rootfr, soil_level_ice(ice, n_soil), k.nbedrock, area.lai,
+            inputs.esai, root_biomass,
+            RootParameters(*(getattr(params, name) for name in RootParameters._fields)),
+        )  # fmt: skip
+    else:
+        roots = soil_resistance(
+            hk_l, smp_l, k.dz[:n_soil], k.rootfr, soil_level_ice(ice, n_soil), k.nbedrock,
+            area.lai, k.root_biomass, params.root_radius, params.root_density,
+            params.root_resistivity,
+        )  # fmt: skip
     lsc = plant_resistance(dpai, roots.rsoil, params.plant_conductance)
     cpleaf = leaf_heat_capacity(dpai, params.sla_top)
     rhg = canopy.soil_surface_humidity(smp_l[0], t_soil[0])
