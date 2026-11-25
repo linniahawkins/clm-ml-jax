@@ -3,7 +3,8 @@ module HarnessIOMod
   ! Files of the harness drivers. A driver reads its cases from
   ! <harness_dir>/cases/<routine>.nml (one namelist group per case, written by
   ! generate_golden.py) and writes <harness_dir>/out/<routine>.out: a line "case=i", then one
-  ! line "name=value" per output, reals with 17 significant digits.
+  ! line "name=value" per output, reals with 17 significant digits. A driver of a sequence
+  ! writes a line "step=k" before the outputs of each model step of a case.
 
   use shr_kind_mod, only : r8 => shr_kind_r8
   use HarnessPathsMod, only : harness_dir
@@ -14,6 +15,7 @@ module HarnessIOMod
   public :: open_cases   ! open a routine's case file, if there is one
   public :: open_output  ! open a routine's output file
   public :: begin_case   ! start the outputs of a case
+  public :: begin_step   ! start the outputs of a model step of a case (sequences)
   public :: put          ! write one output
 
   interface put
@@ -53,6 +55,12 @@ contains
 
     write(unit,'(a,i0)') 'case=', i
   end subroutine begin_case
+
+  subroutine begin_step(unit, k)
+    integer, intent(in) :: unit, k
+
+    write(unit,'(a,i0)') 'step=', k
+  end subroutine begin_step
 
   subroutine put_real(unit, name, value)
     integer, intent(in) :: unit

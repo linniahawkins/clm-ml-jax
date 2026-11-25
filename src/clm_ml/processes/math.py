@@ -215,6 +215,64 @@ def tridiag(
 
 
 # ---------------------------------------------------------------------------
+# Public: tridiagonal solver with partial pivoting
+# ---------------------------------------------------------------------------
+
+
+def tridiag_pivoting(a: Array, b: Array, c: Array, r: Array) -> Array:
+    """
+    Solve a tridiagonal system by Gaussian elimination with partial pivoting (row
+    interchanges), as ``lax.scan`` loops: the solver CLM's soil water movement uses.
+
+    Fortran reference: LAPACK ``dgtsv``.
+
+    Rows as in :func:`tridiag`: row ``j`` reads ``a[j] u[j-1] + b[j] u[j] + c[j] u[j+1] =
+    r[j]``; ``a[0]`` and ``c[-1]`` are not used. At each row the larger of the diagonal and
+    the element below it becomes the pivot; an interchange leaves an element two places
+    right of the diagonal, which the back substitution uses. Without interchanges the
+    operations are those of elimination without pivoting. A singular matrix (a zero pivot,
+    where LAPACK returns an error) gives non-finite values.
+
+    Rows that are the identity (``a = c = 0``, placed after the last row of a shorter
+    system) change nothing in the rows before them: the padded system's solution is that of
+    the shorter system, bit for bit.
+
+    Returns:
+        The solution ``u``, shape ``(n,)``.
+    """
+    a, b, c, r = (jnp.asarray(x) for x in (a, b, c, r))
+    zero = jnp.zeros((), dtype=b.dtype)
+    c = c.at[-1].set(0.0)
+
+    def _eliminate(carry, below):
+        # row i as the eliminations so far left it; row i + 1 as given
+        d_i, du_i, r_i = carry
+        dl_i, d_n, du_n, r_n = below
+        keep = jnp.abs(d_i) >= jnp.abs(dl_i)
+        # no interchange: row i + 1 minus fact times row i
+        fact = dl_i / jnp.where(keep, d_i, 1.0)
+        kept = ((d_n - fact * du_i, du_n, r_n - fact * r_i), (d_i, du_i, zero, r_i))
+        # interchange: row i + 1 becomes the pivot row
+        fact = d_i / jnp.where(keep, 1.0, dl_i)
+        swapped = ((du_i - fact * d_n, -fact * du_n, r_i - fact * r_n), (dl_i, d_n, du_n, r_n))
+        return jax.tree.map(lambda x, y: jnp.where(keep, x, y), kept, swapped)
+
+    (d_last, _, r_last), (d, du, du2, rhs) = jax.lax.scan(
+        _eliminate, (b[0], c[0], r[0]), (a[1:], b[1:], c[1:], r[1:])
+    )
+
+    def _substitute(carry, row):
+        u1, u2 = carry  # the solution one and two rows below
+        d_i, du_i, du2_i, r_i = row
+        u = (r_i - du_i * u1 - du2_i * u2) / d_i
+        return (u, u1), u
+
+    u_last = r_last / d_last
+    _, u_head = jax.lax.scan(_substitute, (u_last, zero), (d, du, du2, rhs), reverse=True)
+    return jnp.concatenate([u_head, u_last[None]])
+
+
+# ---------------------------------------------------------------------------
 # Public: coupled 2-equation tridiagonal solver
 # ---------------------------------------------------------------------------
 

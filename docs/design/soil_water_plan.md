@@ -1,8 +1,9 @@
 # Phase 10 scope: predicted soil water
 
-Status (2026-11-24, branch `phase10/soil_water`): **10.1, 10.1b and 10.2 done: the Fortran
-harness is in the repository and the retention curve (the warm-up) is translated and matches
-CLM's Fortran. Stopped for the maintainer before the solver (10.3).** Start with "Resume
+Status (2026-11-24, branch `phase10/soil_water`): **10.1, 10.1b, 10.2 and 10.3 done: the
+Richards solver is translated and reproduces CLM's Fortran, sub-step for sub-step (decision
+142). It is not in the time step yet. Stopped for the maintainer's discussion of agreement
+and cost, before the runoff, pond and drainage routines (10.4).** Start with "Resume
 here" below. This document is deleted when the phase closes;
 what is decided moves to `decisions.md`, what stays open to `open_items.md` (open item O64).
 
@@ -28,6 +29,9 @@ will not match CLM's soil moisture, because the canopies differ; that is expecte
 | 137 | towers can take CLM's soil texture per level and CLM's CO₂; CLM-ml's property formulas (thermal included) are kept |
 | 138 | the translated routines are written in CLM-ml's style (pure functions by process in `processes/`), not mirrored from CLM's modules |
 | 139 | golden data from idealized sweeps of CLM's Fortran in a test harness, as CLM-ml was translated; no site tracing |
+| 140 | the harness: extra tests in CTSM's unit-test framework, built from a checked copy of `src/` |
+| 141 | the sweeps: the proposed scenario list, some frozen cases, both 1800 s and 3600 s |
+| 142 | the Richards solver: one masked loop (ending, or a fixed count for gradients), LAPACK's pivoting solve, agreement judged against the solver's own round-off sensitivity |
 
 ### What exists
 
@@ -45,6 +49,19 @@ In the repository (all committed and pushed):
   312 and 318 cases (300 random, the rest edge values), adapters in `test_golden_jax.py`,
   unit tests of the derivatives in `tests/clm_ml/test_processes_soil_water.py`. JAX equals
   the Fortran in every digit on all 630 cases (the test's tolerance is 1e-9).
+- The Richards solver (10.3, decision 142): `processes/soil_water.py`
+  (`hydraulic_properties`, `moisture_fluxes`, `richards_system`, `soil_water_movement`,
+  `max_richards_trials`) and `processes/math.py::tridiag_pivoting` (LAPACK `dgtsv`). Golden
+  data: 342 whole calls of `SoilWater` and 12 sequences of 120 steps
+  (`golden_IO/test_SoilWaterMovementMod_SoilWater*.json`, 1.9 MB), tested by
+  `tests/fortran_validation/test_golden_soil_water.py`; property and gradient tests in
+  `tests/clm_ml/test_processes_soil_water.py`.
+- Result of 10.3: CLM's number of trial sub-steps in every case; the water equal to better
+  than 1e-12 in 322 of 342 sweep cases and in all 1440 sequence steps one step ahead; 5
+  ill-conditioned sweep cases (a nearly dry clay level beside a saturated one) differ by 1e-9
+  to 4e-6, as much as the JAX answer itself moves under a 1e-15 change of its input. Cost
+  per column and step: 0.2-0.3 ms with the fixed-count loop, 1-3 ms for a gradient (a CHATS
+  step is about 9 ms, its gradient 47 ms).
 - Nothing else of the soil water physics yet; nothing in the time step.
 
 Outside the repository (Derecho):
@@ -73,13 +90,9 @@ calling the runoff, pond and drainage routines (they compile).
 
 1. ~~Build the harness in the repository.~~ Done (decision 140).
 2. ~~Warm-up, the retention curve.~~ Done.
-3. **Stop: show the maintainer the harness and the first golden tests** before the solver.
-   To settle then: the scenario list of the sweeps, frozen cases, and the step lengths
-   (the first three open choices below).
-4. **10.3, the Richards solver end to end:** golden sweeps of a whole `SoilWater` call
-   (including the number of sub-steps), the translation (hydraulic properties, fluxes, the
-   adaptive solver as a fixed-count loop, section 5.1), one-step-ahead sequences (6.3), a
-   first timing and gradient check. **Stop: report agreement and cost.**
+3. ~~Show the maintainer the harness; settle the sweeps.~~ Done (decision 141).
+4. ~~10.3, the Richards solver end to end.~~ Done (decision 142). **Stopped here: the
+   maintainer's discussion of agreement and cost.**
 5. 10.4 runoff, pond, water table and drainage (each with its sweeps just before its
    translation); 10.5 sequences of the whole hydrology; 10.6 into the model (state, step,
    set-up inputs, parameters, restart, outputs, balance check); 10.7 gradients and timing;
@@ -87,10 +100,11 @@ calling the runoff, pond and drainage routines (they compile).
 
 ### Open choices (the maintainer's; each has a recommendation)
 
-- The scenario list of the sweeps (6.1, "Idealized sweeps") was proposed, not yet confirmed.
-- Frozen cases in the sweeps now (recommended: yes, a few; the JAX routines keep ice as an
-  argument) or liquid only.
-- Sweeps at both 1800 s and 3600 s steps (recommended: both).
+- Which loop of the solver a run uses (decision 142; plan section 8, the form of the
+  sub-step loop): the fixed count always (simplest, one program for forward runs and
+  gradients; 0.1-0.2 ms more per column and step), or the ending loop for forward runs and
+  the fixed count for gradients, following `numerics.solver_loops`. To settle with the
+  GPU timing of 10.7 (recommended: the fixed count always unless that timing says otherwise).
 - Section 8, items 4-11: snowfall reaching the ground, root uptake from CLM-ml's
   `soil_et_loss`, CLM-ml's conductivity for the plants, evaporation and dew from the single
   ground flux, no irrigation, `FMAX` and `SLOPE` as tower inputs, the form of the sub-step
@@ -115,8 +129,14 @@ calling the runoff, pond and drainage routines (they compile).
   `<work>/build/__command_line_test__/__command_line_test__` and run
   `clm_biogeophys_test/ctsm_harness_test/ctsm_harness`. `gdb` fails on this build (an
   internal error on Fortran types): trace with `write` statements.
+- A test file added to the harness is compiled but not run unless pFUnit's main program is
+  compiled again: `build.py` touches it before every build.
+- In the sweeps, levels at the dry bound (relative saturation 0.01) in clay have matric
+  potentials of 1e20 mm and more; beside wet levels they make a sub-step's matrix
+  ill-conditioned and the result sensitive to the last digit. Expect the same in the sweeps
+  of 10.4 wherever the solver is part of the routine under test.
 - The private solver routines are already made public by the harness's build (they
-  compile; not yet called). The golden test's absolute guard (1e-15) passes any value
+  compile; not yet called: the whole solver agreed, so its parts needed no golden data). The golden test's absolute guard (1e-15) passes any value
   smaller than that, such as the conductivity of very dry clay: compare such outputs in
   relative terms when judging agreement.
 - Found in `ctsm5.4.004`: the PLUMBER2 user mods' forcing-stream settings are ignored (the

@@ -2,7 +2,8 @@
 
 The Fortran golden tests check every routine against Fortran (unguarded pivots); these check
 the guarded variant used by the solar radiation and soil temperature solves, and the
-derivatives of the coupled solver ``tridiag_2eq`` in both modes.
+derivatives of the coupled solver ``tridiag_2eq`` in both modes, and the solver with row
+interchanges ``tridiag_pivoting`` (LAPACK's algorithm, which CLM's soil water uses).
 """
 
 import jax
@@ -11,7 +12,7 @@ import numpy as np
 
 jax.config.update("jax_enable_x64", True)
 
-from clm_ml.processes.math import tridiag, tridiag_2eq  # noqa: E402
+from clm_ml.processes.math import tridiag, tridiag_2eq, tridiag_pivoting  # noqa: E402
 
 
 def _system(n, seed):
@@ -154,3 +155,65 @@ def test_unrolled_solves_match_the_loops():
     ]
     for got, ref in zip(grads[1], grads[0]):
         np.testing.assert_allclose(got, ref, rtol=1e-12, atol=1e-14)
+
+
+def _general_system(n, seed, weak_diagonal):
+    rng = np.random.default_rng(seed)
+    a, b, c, r = (rng.normal(size=n) for _ in range(4))
+    if weak_diagonal:
+        b = 0.1 * b  # most rows need an interchange
+    return a, b, c, r
+
+
+def test_tridiag_pivoting_solves_systems_that_need_interchanges():
+    solve = jax.jit(tridiag_pivoting)
+    for n in (1, 2, 3, 7, 50):
+        for seed in range(20):
+            a, b, c, r = _general_system(n, seed, weak_diagonal=seed % 2 == 1)
+            expected = np.linalg.solve(_dense(a, b, c), r)
+            u = np.asarray(solve(a, b, c, r))
+            np.testing.assert_allclose(u, expected, rtol=1e-8, atol=1e-10)
+
+
+def test_tridiag_pivoting_without_interchanges_is_plain_elimination():
+    a, b, c, r = _system(50, 3)
+    np.testing.assert_allclose(
+        np.asarray(tridiag_pivoting(a, b, c, r)), np.asarray(tridiag(a, b, c, r)), rtol=1e-13
+    )
+
+
+def test_tridiag_pivoting_identity_rows_after_a_system_change_nothing():
+    """A system padded with identity rows (levels below bedrock) has the shorter system's
+    solution, bit for bit, and zeros in the padding."""
+    m, pad = 12, 8
+    for weak in (False, True):
+        a, b, c, r = _general_system(m, 5, weak)
+        c[-1] = 0.0
+        short = np.asarray(tridiag_pivoting(a, b, c, r))
+        zeros = np.zeros(pad)
+        padded = np.asarray(
+            tridiag_pivoting(
+                np.r_[a, zeros], np.r_[b, -np.ones(pad)], np.r_[c, zeros], np.r_[r, zeros]
+            )
+        )
+        np.testing.assert_array_equal(padded[:m], short)
+        assert not np.any(padded[m:])
+
+
+def test_tridiag_pivoting_gradients_match_the_dense_solve():
+    a, b, c, r = (jnp.asarray(x) for x in _general_system(9, 2, weak_diagonal=True))
+
+    def scan(a, b, c, r):
+        return jnp.sum(tridiag_pivoting(a, b, c, r) ** 2)
+
+    def dense(a, b, c, r):
+        matrix = jnp.diag(b) + jnp.diag(a[1:], -1) + jnp.diag(c[:-1], 1)
+        return jnp.sum(jnp.linalg.solve(matrix, r) ** 2)
+
+    for got, expected in zip(
+        jax.grad(scan, (0, 1, 2, 3))(a, b, c, r), jax.grad(dense, (0, 1, 2, 3))(a, b, c, r)
+    ):
+        got, expected = np.asarray(got), np.asarray(expected)
+        assert np.all(np.isfinite(got))
+        # a[0] and c[-1] are not part of the matrix
+        np.testing.assert_allclose(got[1:-1], expected[1:-1], rtol=1e-8, atol=1e-10)

@@ -346,6 +346,67 @@ Reason: lists that a script applies and then verifies independently are easier t
 to extend routine by routine than a patch; CTSM's framework already provides the column.
 Source: plan 6.1; the harness's README.
 
+**141. The sweeps of the soil water golden data: the proposed scenarios, frozen cases, both step lengths**
+2026-11-24 · Phase 10 (10.3) · maintainer · in force · Departure from Fortran: n/a (testing)
+The idealized sweeps of decision 139 use the scenario list of the plan (6.1): soil water from
+the dry bound to saturation and above, uniform and layered; soils from sand to clay and
+organic; bedrock from shallow to below the column; root uptake small to large, from wet and
+dry levels; infiltration from none (and negative) to pulses that force halved sub-steps;
+later, water tables, ponding, `FMAX` and slope. Some cases have ice in the pores (the JAX
+routines take the ice fraction as an argument, although the first version of the model runs
+unfrozen, decision 132), and every sweep is made at both model steps, 1800 s (CHATS) and
+3600 s (US-MMS).
+Reason: the frozen path and both step lengths are then tested against the Fortran from the
+start, at no cost to the model.
+Source: maintainer, 2026-11-24 ("scenario list is fine, 2) yes 3) yes both").
+
+**142. The Richards solver: CLM's adaptive sub-steps as one masked loop, LAPACK's pivoting solve, agreement judged against the solver's own round-off sensitivity**
+2026-11-24 · Phase 10 (10.3) · implementation · in force · Departure from Fortran: form only
+`processes/soil_water.py::soil_water_movement` translates
+`SoilWaterMovementMod.F90::soilwater_moisture_form` for CLM's default settings (flux at the
+surface, zero flux at the bottom, solved to the bedrock level), from `hydraulic_properties`,
+`moisture_fluxes` and `richards_system`. Not yet in the time step.
+- *The loop.* CLM's loop with exits is one loop whose passes are masked. With
+  `fixed_trials=None` it ends when the step is covered (`lax.while_loop`: forward only);
+  with an integer it makes that many passes, those after the end changing nothing
+  (`lax.scan`: reverse-mode gradients work). The two give the same values bit for bit.
+  `max_richards_trials(dtime, dtmin)` is the bound, `2·ceil(dtime/dtmin) − 1 +
+  ceil(log2(dtime/dtmin))`: 64 trials for 1800 s and 125 for 3600 s (an enumeration of every
+  accept/halve/double sequence gives 63 and 124). Which loop a run uses is chosen when the
+  solver enters the step (10.6).
+- *The linear solve.* CLM calls LAPACK `dgtsv` (elimination with row interchanges).
+  `math.py::tridiag_pivoting` is that algorithm as two scans; the existing `tridiag` has no
+  interchanges. Identity rows below the bedrock leave the rows above bit for bit unchanged.
+- *Levels below bedrock* are computed in every slot and masked; `nbedrock` is data.
+- *Agreement with the Fortran* (342 whole calls and 12 sequences of 120 steps, half at each
+  step length): the number of trial sub-steps is CLM's in every case (1 to 66). The water
+  agrees to better than 1e-12 of the column's largest value in 322 of 342 sweep cases and in
+  all 1440 sequence steps taken one step ahead (largest 3e-16); free running, the sequences
+  stay within 1e-6 with the same sub-step counts. In 5 sweep cases the water differs by 1e-9
+  to 4e-6: columns with a nearly dry clay level beside a saturated one, where matric
+  potentials differ by twenty orders of magnitude and the sub-step's matrix has a condition
+  number up to 1e15. There the JAX solver's own answer moves by the same amount when its
+  input water is changed by 1e-15 (twins), case by case, so the Fortran cannot be matched
+  more closely by any arithmetic but its own. The golden test
+  (`test_golden_soil_water.py`) therefore requires 1e-9, or up to 20 times the twins' own
+  difference, with at most 6 % of the cases above 1e-9; fluxes are compared relative to the
+  terms of Darcy's law (a flux between two nearly dry levels is a difference of huge
+  potentials).
+- *Found in CLM's solver* (kept, it is CLM's): at the shortest sub-step (60 s) a trial is
+  accepted whatever its error estimate; and saturated levels have no potential gradient (the
+  relative saturation is capped at 1), so water moves down through them at the saturated
+  conductivity and gathers above saturation at the bottom, until the drainage routines pass
+  it back up.
+- *Cost* (one column, Derecho login node CPU): 0.06-0.15 ms with the ending loop, 0.18 ms
+  (1800 s) and 0.3 ms (3600 s) with the fixed count, 1.3-3.1 ms for a reverse gradient;
+  beside about 9 ms for a model step at CHATS and 47 ms for its gradient. Gradients match
+  finite differences (soil properties, initial water, infiltration, root uptake, `e_ice`).
+Reason: forward values are the solver's own (CLM's algorithm and stopping rule); a fixed
+number of passes is what reverse-mode differentiation needs; the test's allowance follows
+the regression policy's noise twin rather than a wider tolerance for every case.
+Source: plan 5.1, 6.1-6.3; `tests/fortran_validation/test_golden_soil_water.py`;
+`tests/clm_ml/test_processes_soil_water.py`.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

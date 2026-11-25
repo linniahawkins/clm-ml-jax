@@ -37,11 +37,17 @@ or has local changes in `src/`.
 | `fortran/ctsm_harness_test/HarnessIOMod.F90` | reading case files, writing outputs |
 | `fortran/ctsm_harness_test/test_column.pf` | checks of the column itself: the water table routine and the Richards solver run and conserve water |
 | `fortran/ctsm_harness_test/test_retention_curve.pf` | drivers of `soil_hk` and `soil_suction` |
+| `fortran/ctsm_harness_test/test_soil_water.pf` | drivers of the Richards solver (`SoilWater`): single calls, and sequences of calls with the water carried from step to step |
 
 A **driver** reads `<work>/cases/<routine>.nml` (one namelist group `&case ... /` per case),
 calls the CLM routine for each case, and writes `<work>/out/<routine>.out`: a line `case=i`,
 then `name=value` lines with 17 significant digits (`name(j)=value` for arrays, `j` being
-CLM's 1-based level).
+CLM's 1-based level). A sequence driver writes a line `step=k` before the outputs of each
+model step.
+
+Golden files of scalar cases are tested by `../test_golden_jax.py` (step 4 below). The
+solver's cases are arrays over the soil levels and are tested together, in one vectorized
+call, by `../test_golden_soil_water.py`.
 
 ## Remaking the golden data
 
@@ -64,4 +70,5 @@ unit tests together with the harness's.
    read the case's namelist, fill the column's fields, call the routine, `put` the outputs.
 2. If the routine is private in CLM, add its `private ::` line to `VISIBILITY` in `build.py`.
 3. A case generator and an entry of `ROUTINES` in `generate_golden.py`.
-4. An adapter in `../test_golden_jax.py`, keyed `ctsm_harness:<routine>`.
+4. An adapter in `../test_golden_jax.py`, keyed `ctsm_harness:<routine>` (or, for cases with
+   arrays, a test of its own like `../test_golden_soil_water.py`).

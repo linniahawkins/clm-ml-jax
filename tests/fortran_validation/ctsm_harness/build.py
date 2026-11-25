@@ -79,6 +79,8 @@ ADDED = {
     "ctsm_harness_test": "biogeophys/test/ctsm_harness_test",
 }
 PATHS_MODULE = "biogeophys/test/ctsm_harness_test/HarnessPathsMod.F90"
+# The harness's directory in the build
+HARNESS_BUILD = "__command_line_test__/__command_line_test__/clm_biogeophys_test/ctsm_harness_test"
 
 
 def check_checkout(ctsm: Path) -> None:
@@ -224,6 +226,11 @@ def run_tests(work: Path, src: Path, only_harness: bool = False) -> None:
     ]  # fmt: skip
     if only_harness:
         command += ["--ctest-args=-R ctsm_harness"]
+    # pFUnit's main program includes the list of test modules, a dependency make does not
+    # see: without this, a test file added since the last build is compiled but not run.
+    main_program = work / "build" / HARNESS_BUILD / "ctsm_harness_driver.F90"
+    if main_program.exists():
+        main_program.touch()
     log = work / "last_run.log"
     with open(log, "w") as out:
         result = subprocess.run(command, cwd=src, stdout=out, stderr=subprocess.STDOUT)
