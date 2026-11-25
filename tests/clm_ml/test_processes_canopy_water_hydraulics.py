@@ -21,6 +21,8 @@ from clm_ml.processes.constants import (  # noqa: E402
 N_SLOTS = 6  # layer slots
 N_SOI = 4  # soil levels
 DTIME = 300.0
+IN_USE = jnp.ones(N_SLOTS, dtype=bool)
+SPVAL = 1.0e36  # what the slots above the layers in use hold
 Params = namedtuple(
     "Params",
     "plant_conductance plant_capacitance root_radius root_density root_resistivity sla_top",
@@ -37,7 +39,7 @@ def _dpai():
 def test_interception_conserves_water():
     dpai = _dpai()
     bef = jnp.where(dpai > 0, 0.1, 0.0)
-    r = canopy_water.interception(5e-3, 1e-3, 1.4, 0.7, dpai, bef, DTIME)
+    r = canopy_water.interception(5e-3, 1e-3, 1.4, 0.7, dpai, bef, DTIME, IN_USE)
     drip = r.qflx_tflrain + r.qflx_tflsnow - (6e-3 - r.qflx_intr)  # beyond direct throughfall
     stored = float(jnp.sum(r.h2ocan - bef))
     np.testing.assert_allclose(stored + float(drip) * DTIME, float(r.qflx_intr) * DTIME, rtol=1e-12)
@@ -45,11 +47,55 @@ def test_interception_conserves_water():
     assert np.all(np.asarray(r.h2ocan)[np.asarray(dpai) == 0] == 0.0)
 
 
+def _with_unused_slots(values, n_unused, fill=SPVAL):
+    return jnp.concatenate([jnp.asarray(values), jnp.full(n_unused, fill)])
+
+
+def test_interception_does_not_depend_on_unused_slots():
+    """Rain on the same canopy with 0, 4 and 54 slots above the layers in use: the same
+    water on every layer, the same throughfall, and the unused slots untouched."""
+    dpai = _dpai()
+    bef = jnp.where(dpai > 0, 0.02, 0.0)
+    for rain in (2e-4, 5e-3):  # below and above the layers' capacity
+        ref = canopy_water.interception(rain, 1e-4, 1.4, 0.7, dpai, bef, DTIME, IN_USE)
+        assert float(ref.qflx_tflrain) > 0.0
+        for n_unused in (4, 54):
+            use = jnp.arange(N_SLOTS + n_unused) < N_SLOTS
+            r = canopy_water.interception(
+                rain, 1e-4, 1.4, 0.7, _with_unused_slots(dpai, n_unused),
+                _with_unused_slots(bef, n_unused), DTIME, use,
+            )  # fmt: skip
+            np.testing.assert_array_equal(r.h2ocan[:N_SLOTS], ref.h2ocan)
+            np.testing.assert_array_equal(r.h2ocan[N_SLOTS:], SPVAL)
+            assert float(r.qflx_tflrain) == float(ref.qflx_tflrain)
+            assert float(r.qflx_tflsnow) == float(ref.qflx_tflsnow)
+            assert float(r.qflx_intr) == float(ref.qflx_intr)
+
+
+def test_evaporation_does_not_depend_on_unused_slots():
+    dpai, fracsun = _dpai(), jnp.full(N_SLOTS, 0.3)
+    h2ocan = jnp.where(dpai > 0, 0.1, 0.0)
+    ev = jnp.full((N_SLOTS, 2), 1e-5)
+    tr = jnp.full((N_SLOTS, 2), -2e-6)
+    ref = canopy_water.evaporation(h2ocan, dpai, fracsun, ev, tr, DTIME, IN_USE)
+    n_unused = 4
+    use = jnp.arange(N_SLOTS + n_unused) < N_SLOTS
+    pad2 = lambda v: jnp.concatenate([v, jnp.full((n_unused, 2), SPVAL)])  # noqa: E731
+    new = canopy_water.evaporation(
+        _with_unused_slots(h2ocan, n_unused), _with_unused_slots(dpai, n_unused),
+        _with_unused_slots(fracsun, n_unused), pad2(ev), pad2(tr), DTIME, use,
+    )  # fmt: skip
+    np.testing.assert_array_equal(new[:N_SLOTS], ref)
+    np.testing.assert_array_equal(new[N_SLOTS:], SPVAL)
+
+
 def test_evaporation_removes_what_the_leaves_evaporate():
     dpai, fracsun = _dpai(), jnp.full(N_SLOTS, 0.3)
     h2ocan = jnp.where(dpai > 0, 0.1, 0.05)
     ev = jnp.full((N_SLOTS, 2), 1e-5)
-    new = canopy_water.evaporation(h2ocan, dpai, fracsun, ev, jnp.zeros((N_SLOTS, 2)), DTIME)
+    new = canopy_water.evaporation(
+        h2ocan, dpai, fracsun, ev, jnp.zeros((N_SLOTS, 2)), DTIME, IN_USE
+    )
     expected = h2ocan - jnp.where(dpai > 0, 1e-5 * dpai * mmh2o * DTIME, 0.0)
     np.testing.assert_allclose(new, expected, rtol=1e-12)
 

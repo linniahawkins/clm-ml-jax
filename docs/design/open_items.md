@@ -47,7 +47,7 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O16 | CO₂ profile reset covers the wrong levels (no effect today) | science issue (latent) | after 8 | M |
 | O87 | ~~Tower runs use a fixed CO₂ of 383 ppm~~ (closed 2026-11-24: `forcing.co2`, decision 137) | science issue | closed | M |
 | O88 | One soil texture per column; CLM's soil varies with depth (towers: closed by decision 137; grids: open) | science issue | grids: after Phase 10 | M |
-| O89 | Canopy interception counts unused layer slots: too little intercepted water per layer, wrong throughfall (found in Phase 10.6) | science issue (bug) | Phase 10 (before predicted soil water can run through rain) | M |
+| O89 | ~~Canopy interception counts unused layer slots: too little intercepted water per layer, wrong throughfall (found in Phase 10.6)~~ (closed 2026-11-25: decision 146) | science issue (bug) | closed | M |
 | **2. Other maintainer decisions pending** |||||
 | O17 | ~~Repository organization: where the real configuration files live~~ (closed: decisions 89, 90) | maintainer decision | closed | M |
 | O18 | Norman and well-mixed code in git history only (D8 said "kept") | maintainer decision | after 8 (maintainer 2026-11-01) | M |
@@ -320,6 +320,9 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 - **Source:** Phase 10 step 10.1 (US-MMS set up), 2026-11-24.
 
 ### O89. Canopy interception counts unused layer slots
+- **Closed 2026-11-25** (decision 146): `interception` and `evaporation` take the mask of
+  the layers in use; the unused slots keep their value (not 0 as first proposed, so the
+  regression reference stays bit for bit). The text below is the diagnosis as written.
 - **Kind:** science issue (bug) · **Target:** Phase 10 (10.6) · **Decides:** M
 - **What:** `processes/canopy_water.py::interception` shares the intercepted rain equally
   among the layers with plant area, which it finds as `dpai > 0`. The step passes the plant

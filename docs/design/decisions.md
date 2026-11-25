@@ -556,6 +556,29 @@ Reason: the maintainer's choices; a default that leaves every existing run uncha
 Source: maintainer, 2026-11-24 ("accept all recommendations ... use fixed count always for
 solver loop"); plan sections 4 and 8.
 
+**146. The canopy's interception and the evaporation of intercepted water count only the layers in use**
+2026-11-25 · correction (O89, found in Phase 10.6) · maintainer · in force · Departure from Fortran: no (restores Fortran's loop over the layers in use)
+`canopy_water.interception` and `canopy_water.evaporation` take the mask of the layers in
+use: a layer has plant area if it is in use and `dpai > 0`. The slots above the top layer,
+which hold the fill value (1e36), no longer count as layers with plant area, receive no
+intercepted water, do not drip, and keep their value.
+Reason: with unused slots (`max_layers` larger than the layers in use) the intercepted rain
+was divided by (leafy layers + unused slots), so every leafy layer received too little
+(20/24 at CHATS) and the rest was lost, and the rain reaching the ground included a "drip"
+of the unused slots without meaning (1e34 mm s⁻¹ at CHATS), which stopped predicted soil
+water at the first rain. Fortran (`MLCanopyWaterMod.F90::CanopyInterception`,
+`CanopyEvaporation`) loops over the layers in use.
+Effect: none without rain or without unused slots; the regression reference (no rain) is
+bit for bit unchanged and was not regenerated. On rainy steps of runs with unused slots
+the results change, prescribed soil water included: at CHATS (four days from 1 May 2007,
+rain on 2 May) the latent heat flux changes by up to 8.4 W m⁻² at a step and by +0.45
+W m⁻² in the mean of the rainy day (sensible heat −0.43), and by less than 0.001 W m⁻² in
+the daily means of the two days after.
+Tests: rain on the same canopy with 0, 4 and 54 unused slots gives identical water on
+every layer and identical throughfall (`tests/clm_ml/test_processes_canopy_water_hydraulics.py`).
+There is no Fortran golden case for `CanopyInterception`.
+Source: maintainer, 2026-11-25; open item O89.
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

@@ -142,11 +142,13 @@ class Interception(NamedTuple):
 
 
 def interception(
-    qflx_rain, qflx_snow, lai, sai, dpai: Array, h2ocan_bef: Array, dtime: float
-) -> Interception:
+    qflx_rain, qflx_snow, lai, sai, dpai: Array, h2ocan_bef: Array, dtime: float,
+    active: Array,
+) -> Interception:  # fmt: skip
     """Interception of rain and snow (CLM5 form, ``interception_fraction tanh(lai + sai)``),
     shared equally by the layers with plant area; water above a layer's capacity
-    ``dewmx dpai`` drips to the ground with the throughfall.
+    ``dewmx dpai`` drips to the ground with the throughfall. Only the layers in use
+    (``active``) count and drip; the slots above them keep their value.
 
     Fortran reference: MLCanopyWaterMod.F90::CanopyInterception.
     Reads: ``qflx_rain_forcing``, ``qflx_snow_forcing``, ``lai_canopy``, ``sai_canopy``,
@@ -167,7 +169,7 @@ def interception(
     qflx_intr = total_precip * fpi
 
     # Water balance of the layers with plant area
-    has_pai = dpai > 0.0
+    has_pai = active & (dpai > 0.0)
     n_active = jnp.sum(has_pai.astype(jnp.float64))
     n_safe = jnp.maximum(n_active, 1.0)  # avoid /0
     # jnp.maximum avoids select op -> prevents XLA select_divide_fusion bug
@@ -182,7 +184,7 @@ def interception(
     h2ocan = jnp.where(drip, h2ocanmx, h2ocan)
 
     return Interception(
-        h2ocan=h2ocan,
+        h2ocan=jnp.where(active, h2ocan, h2ocan_bef),
         qflx_intr=qflx_intr,
         qflx_tflrain=qflx_through_rain + qflx_candrip * fracrain,
         qflx_tflsnow=qflx_through_snow + qflx_candrip * fracsnow,
@@ -190,18 +192,20 @@ def interception(
 
 
 def evaporation(
-    h2ocan: Array, dpai: Array, fracsun: Array, evleaf: Array, trleaf: Array, dtime: float
-) -> Array:
+    h2ocan: Array, dpai: Array, fracsun: Array, evleaf: Array, trleaf: Array, dtime: float,
+    active: Array,
+) -> Array:  # fmt: skip
     """Intercepted water (layer,) after dew and evaporation of the sunlit and shaded leaves
     (``evleaf``, ``trleaf``: (layer, leaf), mol H2O/m2 leaf/s). Dew (a negative
     evaporation-plus-transpiration flux) is added first, then evaporation removed; layers
-    without plant area keep their water. There is no floor at 0 (commented out in Fortran).
+    without plant area and the slots above the layers in use (outside ``active``) keep
+    their water. There is no floor at 0 (commented out in Fortran).
 
     Fortran reference: MLCanopyWaterMod.F90::CanopyEvaporation.
     Reads: ``h2ocan_profile``, ``dpai_profile``, ``fracsun_profile``, ``evleaf_leaf``,
     ``trleaf_leaf``. Writes: ``h2ocan_profile``.
     """
-    has_pai = dpai > 0.0
+    has_pai = active & (dpai > 0.0)
     factor = jnp.where(has_pai, dpai, 0.0) * mmh2o * dtime
     fracsha = 1.0 - fracsun
 
