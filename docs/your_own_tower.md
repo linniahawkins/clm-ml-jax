@@ -43,8 +43,7 @@ towers:
 clay and organic matter of each layer of a CLM surface dataset (`PCT_SAND`, `PCT_CLAY`,
 `ORGANIC`, top to bottom); each soil level then gets the layer at its depth, as CTSM maps
 them, and organic matter counts at every depth (with one value it counts in the top 0.5 m
-only). Use it to give the model the same soil as a CLM run at the tower
-([`experiments/us_mms_2012`](repo:experiments/us_mms_2012) does):
+only). Use it to give the model the same soil as a CLM run at the tower:
 
 ```yaml
     soil:

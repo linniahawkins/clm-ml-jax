@@ -902,7 +902,8 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   85 → 57; plant conductance 2: 101 → 85; root resistivity 100: 87 → 70; exponent 4:
   101 → 86. The changes that lower July lower the wet months as well (May: 89 and 87
   against CLM's 101).
-- **Source:** Phase 10 steps 10.1 and 10.8; `experiments/us_mms_2012/README.md`.
+- **Source:** Phase 10 steps 10.1 and 10.8; decision 148 (the US-MMS experiment folder is
+  not in the repository: `git show 495442e:experiments/us_mms_2012/README.md`).
 
 ## 4. Housekeeping and repository organization (8a)
 

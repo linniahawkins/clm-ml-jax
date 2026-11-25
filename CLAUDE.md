@@ -56,7 +56,8 @@ Guidance for Claude (and other contributors) working in this repository.
   `tests/fortran_validation/ctsm_harness/`). Unfrozen and snow-free. Gradients match
   finite differences; cost 1.03× on a CPU tower, 1.24× for 4 096 patches on an A100.
   Coupled runs at US-MMS beside CLM (five years) and on the 1° globe:
-  `experiments/us_mms_2012/README.md`, decision 148. Corrected on the way: canopy
+  decision 148 (the US-MMS experiment folder and its data are not in the repository:
+  commit `495442e` has them). Corrected on the way: canopy
   interception counted unused layer slots (decision 146); a run stopped at the first 31
   December (decision 149). The plan document is in git history
   (`git show 0e8e907:docs/design/soil_water_plan.md`). Left open: O93 (CLM-ML barely

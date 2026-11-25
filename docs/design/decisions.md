@@ -642,7 +642,10 @@ Source: plan 6.5, 6.6; probes of 2026-11-25.
 Runs with `soil.water: predicted` at commit `cfb2b56` (no evaluation against measurements,
 decision 136). Outputs outside the repository
 (`/glade/work/linnia/phase10_us_mms/`; scripts in `analysis_10_8/`); numbers and a figure
-in `experiments/us_mms_2012/README.md`.
+in the experiment folder's README. The folder (`experiments/us_mms_2012/`, with its forcing
+and CLM history under `data/input_files/`) was taken out of the repository before the
+phase was merged (maintainer, 2026-11-25) and is in git history:
+`git show 495442e:experiments/us_mms_2012/README.md`.
 - *US-MMS, May-September 2012* (3 672 hourly steps, 3 min on a CPU), beside the prescribed
   run and CLM (`ctsm5.4.004`): the water balance closes to 1.4e-12 mm per step; drainage
   165.6 mm against CLM's 166.2, the same water table, the same pond after a storm (22.3
