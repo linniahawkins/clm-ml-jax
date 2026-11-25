@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 148.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 149.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:
@@ -47,7 +47,7 @@ Guidance for Claude (and other contributors) working in this repository.
   `main`). No release or version tag yet. Open work: `docs/design/open_items.md`.
 - **Phase 10, predicted soil water** (branch `phase10/soil_water`, started 2026-11-24; O64):
   a code translation of CLM's soil water (`ctsm5.4.004`), judged by agreement with CLM's
-  Fortran on idealized sweeps, not by observations (decisions 131-147). Done: US-MMS set up
+  Fortran on idealized sweeps, not by observations (decisions 131-148). Done: US-MMS set up
   (`experiments/us_mms_2012/`), CLM's soil texture per level and CO₂ as tower options, the
   Fortran test harness on CTSM's unit-test framework (`tests/fortran_validation/ctsm_harness/`,
   decision 140), and every routine of the first version, equal to CLM's Fortran: the
@@ -60,7 +60,11 @@ Guidance for Claude (and other contributors) working in this repository.
   water balance closed). **Resume from "Resume here" at the top of
   `docs/design/soil_water_plan.md`:** 10.7 is done (gradients through the whole model
   match finite differences; cost 1.03× on a CPU tower, 1.24× for 4 096 patches on an
-  A100; decision 147); next is 10.8 (coupled runs at US-MMS, close of the phase). On the way the canopy's interception was corrected (it
+  A100; decision 147) and the coupled runs of 10.8 are done (decision 148; results in
+  `experiments/us_mms_2012/README.md`). The phase is not closed: the maintainer decides
+  on O92 (a run stops at the first 31 December, prescribed soil water too), O91 (the May
+  2007 Fortran comparison fails in one column, as on `main`) and O93 (CLM-ML barely
+  responds to the 2012 drought). On the way the canopy's interception was corrected (it
   counted unused layer slots: wrong throughfall in rain; decision 146). CPU jobs on
   P93300041.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at

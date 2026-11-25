@@ -9,7 +9,11 @@ A defect found on the way in the canopy's interception (O89: a wrong throughfall
 is corrected (decision 146). 10.7 done (decision 147): the gradients through the whole
 model match finite differences, and predicted soil water costs 1.03x on a CPU tower and
 1.24x for 4 096 patches on an A100. Next, on the maintainer's go-ahead: 10.8 (coupled
-runs at US-MMS, close of the phase).** Start with "Resume
+runs at US-MMS, close of the phase). 10.8: the coupled runs are done (decision 148; US-MMS
+May-September and the whole of 2012, the 1° globe for ten days); three findings outside
+the hydrology are open (O91, O92, O93). The phase is not closed yet: the maintainer
+decides on O92 (a run cannot cross 31 December), which prevented the run of several
+years.** Start with "Resume
 here" below. This document is deleted when the phase closes;
 what is decided moves to `decisions.md`, what stays open to `open_items.md` (open item O64).
 
@@ -129,7 +133,8 @@ calling the runoff, pond and drainage routines (they compile).
 6. ~~10.5 sequences of the whole hydrology.~~ Done (decision 144).
 7. ~~10.6 into the model.~~ Done (decisions 145, 146).
 8. ~~10.7 gradients and timing.~~ Done (decision 147).
-9. **Next: 10.8** coupled runs at US-MMS and close of the phase
+9. **10.8: runs done (decision 148); close pending the maintainer** (O92, then this
+   document is deleted). Was: coupled runs at US-MMS and close of the phase
    (section 7).
 
 ### Open choices (the maintainer's)

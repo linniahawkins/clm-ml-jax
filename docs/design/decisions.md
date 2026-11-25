@@ -582,6 +582,9 @@ the daily means of the two days after.
 Tests: rain on the same canopy with 0, 4 and 54 unused slots gives identical water on
 every layer and identical throughfall (`tests/clm_ml/test_processes_canopy_water_hydraulics.py`).
 There is no Fortran golden case for `CanopyInterception`.
+Against Fortran's output (CHATS, May 2007, `tests/test_fortran_python_comparison.py`): the
+correlation of the latent heat of evaporating intercepted water with Fortran's rises from
+0.9968 (below the test's 0.9999; so it is on `main`) to above 0.99999.
 Source: maintainer, 2026-11-25; open item O89.
 
 **147. Predicted soil water: gradients through the whole model, and its cost**
@@ -633,6 +636,37 @@ writing out the tridiagonal solves on the GPU, as `numerics.solver_loops` does f
 canopy's solvers (not built).
 `timing/time_vmap.py` takes `--set` overrides (as `time_model.py`).
 Source: plan 6.5, 6.6; probes of 2026-11-25.
+
+**148. Predicted soil water in coupled runs: US-MMS beside CLM, a year, the 1° globe**
+2026-11-25 · Phase 10 (10.8) · implementation · in force · Departure from Fortran: n/a
+Runs with `soil.water: predicted` at commit `cfb2b56` (no evaluation against measurements,
+decision 136). Outputs outside the repository
+(`/glade/work/linnia/phase10_us_mms/`; scripts in `analysis_10_8/`); numbers and a figure
+in `experiments/us_mms_2012/README.md`.
+- *US-MMS, May-September 2012* (3 672 hourly steps, 3 min on a CPU), beside the prescribed
+  run and CLM (`ctsm5.4.004`): the water balance closes to 1.4e-12 mm per step; drainage
+  165.6 mm against CLM's 166.2, the same water table, the same pond after a storm (22.3
+  against 22.2 mm, the same 125 hours); 1 Richards sub-step in 55 % of the steps, 2.1 on
+  average, at most 28 (bound 125 at this step length). CLM-ML's fluxes change by less
+  than 0.5 W m⁻² in the monthly mean between prescribed and predicted soil water (its soil
+  water stress stays 1), and its transpiration (447 mm against CLM's 382) leaves the
+  soil 54 mm drier than CLM's at the end, between 0.5 and 2 m (open item O93).
+- *US-MMS, the whole of 2012* (8 784 steps): closes to 1.6e-12 mm per step; drainage 379.8
+  mm against CLM's 380.0; no drift other than the canopy's larger transpiration (39 mm
+  less water than CLM at the end of the year). Winter runs without snow or frozen soil
+  water (decision 132).
+- *A run of several years was not possible*: a tower run stops at the first 31 December
+  with a temperature blow-up, with prescribed soil water too (open item O92, found here;
+  not corrected).
+- *The 1° globe, ten days of July 2000* on one A100 (72 575 patches; 549 s with
+  compilation): every patch runs, none is excluded, largest balance error 1.9e-12 mm per
+  step, at most 35 sub-steps (bound 64), ponds on 415 patches. The start is not in
+  balance where CLM's soil water is partly ice or the soil is organic (drainage up to 56
+  mm per day at first, column water changing by −387 to +275 mm in nine days): O12, O9.
+- *Against Fortran CLM-ml* (May 2007 at CHATS, prescribed soil water): every output column
+  within 2.5 %; one column below the correlation of 0.9999, the leaf water potential of the
+  top layer (0.999896), as on `main` (0.999854): open item O91.
+Source: plan 6.4.
 
 ## B. Configuration and user interface
 

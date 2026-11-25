@@ -59,4 +59,48 @@ user mods `PLUMBER2/US-MMS`, 1-hour step:
   input data; it is in `/glade/work/linnia/phase10_us_mms/inputdata/`, downloaded from the
   CESM input data server.
 
-Measurements (soil moisture, fluxes): not yet obtained (AmeriFlux BASE record of US-MMS).
+## With predicted soil water
+
+`clm-ml run experiments/us_mms_2012 --set model.soil.water=predicted` moves the soil water
+with CLM's soil hydrology, starting from CLM's soil water on 1 May. The runs of 2026-11-25
+(commit `cfb2b56`; outputs in `/glade/work/linnia/phase10_us_mms/us_mms_2012_10_8_prescribed`
+and `..._predicted`, analysis scripts in `.../analysis_10_8`) beside the CLM run:
+
+![Rain, latent heat, column water and soil water at 1 m](predicted_soil_water.png)
+
+Monthly means (latent heat and sensible heat in W m⁻², GPP in µmol m⁻² s⁻¹):
+
+| 2012 | Latent heat: prescribed / predicted / CLM | Sensible heat | GPP |
+|---|---|---|---|
+| May | 101.9 / 101.9 / 101.1 | 40.6 / 40.5 / 42.3 | 10.5 / 10.5 / 9.4 |
+| June | 109.5 / 109.2 / 96.1 | 49.5 / 49.8 / 60.7 | 10.5 / 10.5 / 8.0 |
+| July | 92.1 / 92.4 / 58.6 | 50.5 / 50.3 / 80.2 | 8.7 / 8.7 / 4.4 |
+| August | 97.1 / 96.6 / 90.3 | 33.6 / 34.0 / 38.7 | 9.4 / 9.4 / 7.5 |
+| September | 60.8 / 60.8 / 63.9 | 30.9 / 30.9 / 27.1 | 7.5 / 7.5 / 6.9 |
+
+Water over the five months (mm), CLM-ML with predicted soil water / CLM: rain 361.5 (both);
+reaching the ground 342.5 / 340.4; transpiration 447.2 / 381.9; ground evaporation 21.0 /
+30.0; evaporation of intercepted water 19.2 / 21.6; surface runoff 0 / 0 (`FMAX` is 0);
+drainage 165.6 / 166.2; change of the soil's liquid water −291.3 / −237.6.
+
+- The hydrology behaves as CLM's: the same drainage, the same water table (6.82 to 7.51 m),
+  the same pond after the storm of 7 May (22.3 mm against CLM's 22.2, present in the same
+  125 hours). The water balance closes to 1.4e-12 mm per step; the Richards solver takes
+  one sub-step in 55 % of the steps, 2.1 on average and at most 28.
+- CLM-ML's fluxes barely change with predicted soil water (latent heat within 0.5 W m⁻² in
+  every month): its soil water stress factor stays 1 through the drought, with CLM's soil
+  water and with its own.
+- CLM-ML's trees take 65 mm more water than CLM's (most of it in June and July, when CLM's
+  transpiration falls by 40 % and CLM-ML's by 14 %), so its soil ends 54 mm drier, between
+  0.5 and 2 m: 0.215 against 0.264 m³ m⁻³ at 1.06 m on 30 September. This is the
+  canopy's difference from CLM, not the hydrology's (see the known daytime latent heat
+  bias).
+
+The whole of 2012 (from 1 January, `.../us_mms_2012_year_predicted`): the balance closes
+(1.6e-12 mm per step), drainage 379.8 mm against CLM's 380.0, transpiration 575.7 against
+495.8, the soil's liquid water at the end of the year 39 mm below CLM's. There is no snow
+or frozen soil water in CLM-ML (CLM has 5.5 mm of snowfall and up to 59 mm of soil ice
+that winter). A run cannot yet cross from 31 December to 1 January (open item O92).
+
+Measurements (soil moisture, fluxes): not obtained; the phase compares with CLM only
+(decision 136).
