@@ -254,6 +254,30 @@ def soil_albedos(colour) -> tuple:
     return sat, dry
 
 
+def ice_volume_fraction(soilliq, soilice) -> np.ndarray:
+    """The share of ice in the volume of a soil level's water, from its liquid water and
+    ice (kg m⁻², CLM's ``SOILLIQ`` and ``SOILICE``); 0 where the level holds no water."""
+    liquid = np.asarray(soilliq, dtype=float) / 1000.0
+    ice = np.asarray(soilice, dtype=float) / 917.0
+    total = liquid + ice
+    return np.where(total > 0.0, ice / np.where(total > 0.0, total, 1.0), 0.0)
+
+
+def initial_ice_fraction(path, time_index: int, nlevsoi: int) -> np.ndarray:
+    """The share of ice in each soil level's water volume (nlevsoi,) from a CLM history
+    file (``SOILLIQ``, ``SOILICE``) at 1-based time slice ``time_index``; NaN where the
+    file does not hold both (the run then divides the water by temperature)."""
+    with netcdf.dataset(path) as ds:
+        if "SOILLIQ" not in ds.variables or "SOILICE" not in ds.variables:
+            return np.full(nlevsoi, np.nan)
+        liq = np.ma.filled(ds.variables["SOILLIQ"][time_index - 1, :nlevsoi, 0], np.nan)
+        ice = np.ma.filled(ds.variables["SOILICE"][time_index - 1, :nlevsoi, 0], np.nan)
+    liq, ice = np.asarray(liq, dtype=float), np.asarray(ice, dtype=float)
+    if liq.shape[0] != nlevsoi or not (np.all(np.isfinite(liq)) and np.all(np.isfinite(ice))):
+        return np.full(nlevsoi, np.nan)
+    return ice_volume_fraction(liq, ice)
+
+
 def initial_soil_temperature(path, time_index: int, nlevgrnd: int) -> np.ndarray:
     """The soil temperature (nlevgrnd,) of a CLM history file (``TSOI``) at 1-based time slice
     ``time_index``.

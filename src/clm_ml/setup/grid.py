@@ -30,17 +30,31 @@ def met_records(met: dict, steps) -> dict:
             for k, v in met.items()}  # fmt: skip
 
 
-def first_values(inputs, n_steps: int) -> dict:
+def first_values(inputs, n_steps: int, freezes: bool = False) -> dict:
     """Per patch (P,) the first step's forcing (``uref``, ``tref``, ``qref``, ``pref``,
     ``pco2``) of its gridcell, its initial soil temperature ``tsoi`` (P, nlevgrnd; the soil
     temperature stream at the first step) and acclimation temperature ``tacclim`` (the
-    first step's air temperature, for both acclimation options)."""
+    first step's air temperature, for both acclimation options); with soil that freezes
+    (``freezes``) also ``ice_fraction`` (P, nlevsoi): the share of ice in the water volume
+    of each soil level in the soil stream (``SOILLIQ``, ``SOILICE`` at the first step), NaN
+    if the stream's files have none."""
     gi = inputs.domain.patches.gridcell_index
     met = inputs.met_at(chunk_run_steps(n_steps, 0, 1))  # [halo, step 0, next]
     row = {k: np.asarray(met[k], dtype=float)[1, gi] for k in ("uref", "tref", "qref", "pref",
                                                               "pco2")}  # fmt: skip
     row["tsoi"] = np.asarray(inputs.soil_at_first_step("TSOI"), dtype=float)[gi]
     row["tacclim"] = row["tref"].copy()
+    if freezes:
+        from clm_ml.setup.soil import NLEVSOI, ice_volume_fraction
+
+        if inputs.soil_has("SOILLIQ") and inputs.soil_has("SOILICE"):
+            liq, ice = (
+                np.asarray(inputs.soil_at_first_step(name), dtype=float)[gi][:, :NLEVSOI]
+                for name in ("SOILLIQ", "SOILICE")
+            )
+            row["ice_fraction"] = ice_volume_fraction(liq, ice)
+        else:
+            row["ice_fraction"] = np.full((len(gi), NLEVSOI), np.nan)
     return row
 
 
@@ -87,7 +101,11 @@ def grid_simulation_parts(run) -> dict:
 
     inputs = grid_inputs(run)
     return {
-        "first": first_values(inputs, run.n_steps),
+        "first": first_values(
+            inputs,
+            run.n_steps,
+            freezes=run.config.soil.water == "predicted" and run.config.soil.freeze_thaw,
+        ),
         "reader": GridChunkReader(inputs),
         "land_fn": land_record,
     }

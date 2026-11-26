@@ -53,12 +53,18 @@ class SoilState(NamedTuple):
 
     The water fields are prognostic with predicted soil water (model.yaml ``soil.water``).
     With prescribed soil water the liquid water is the forcing's of the last step and the
-    other two stay as set up (no pond; the water table of the initial soil water)."""
+    others stay as set up (no pond; the water table of the initial soil water). The ice,
+    the snow and the two tables of frozen soil are prognostic with ``soil.freeze_thaw``
+    and stay as set up without it (no ice, no snow, the tables at 0)."""
 
     temperature: Array  # (soil_level,) K
     liquid_water: Array  # (water_level,) kg m-2: the hydrologically active levels (nlevsoi)
     surface_water: Array  # () ponded water on the surface, mm
     water_table_depth: Array  # () m
+    ice: Array  # (water_level,) kg m-2
+    snow: Array  # () snow lying on the ground (no snow layers), kg m-2
+    frost_table_depth: Array  # () top of the first frozen level under thawed soil, m
+    perched_water_table_depth: Array  # () water table perched on the frost table, m
 
 
 class State(NamedTuple):
@@ -152,6 +158,16 @@ class Diagnostics(NamedTuple):
     zwt_soil: Array  # () water table depth at the end of the step, m
     num_substeps_soil: Array  # () trial sub-steps of the Richards solver
     errh2o_soil: Array  # () water balance error of the step, mm
+    # Frozen soil (soil.freeze_thaw; spval without it)
+    h2osoi_ice_soil: Array  # (soil_level,) ice during the step (as the liquid water), kg m-2
+    h2osno_soil: Array  # () snow lying on the ground at the end of the step, kg m-2
+    qflx_snomelt_soil: Array  # () melt of that snow, mm s-1
+    xmf_soil: Array  # () latent heat taken up by melting less that freed by freezing, W m-2
+    frost_table_soil: Array  # () frost table depth, m
+    zwt_perched_soil: Array  # () perched water table depth, m
+    qflx_drain_perched_soil: Array  # () drainage of the perched zone, mm s-1
+    qflx_ice_runoff_soil: Array  # () ice above the top level's pore space, removed, mm s-1
+    qflx_sublimation_soil: Array  # () part of the ground evaporation taken from ice, mm s-1
     # Profiles
     wind_profile: Array  # (layer,) wind speed, m s-1
     shair_profile: Array  # (layer,) air sensible heat flux, W m-2

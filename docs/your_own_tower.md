@@ -72,7 +72,25 @@ names and values; they are not per PFT). Output variables: `soil_water_content`,
 `soil_liquid_water`, `ground_water_input`, `infiltration`, `surface_runoff`, `drainage`,
 `root_water_uptake`, `ground_evaporation`, `saturated_fraction`, `water_table_depth`,
 `surface_water`, `surface_water_fraction`, `soil_water_substeps` and
-`soil_water_balance_error`. There is no snow, frozen soil water or irrigation.
+`soil_water_balance_error`. There is no snowpack or irrigation.
+
+**Freezing soil.** For a tower with frost, add to `model.yaml` and `run.yaml`:
+
+```yaml
+soil:                       # model.yaml
+  water: predicted
+  freeze_thaw: true         # soil water freezes and thaws as in CLM
+forcing:                    # run.yaml
+  meteorology:
+    snowfall: by_temperature   # snow at 0 C and below, rain at 2 C and above (CLM); default: all rain
+```
+
+The run takes the soil's ice at the start from `SOILLIQ` and `SOILICE` of the CLM history
+file if it has them, and divides the water by the soil temperature if not. Snow lies on the
+ground until the soil's heat melts it; there is no snowpack, so the winter soil is colder
+than under snow (see [How the model works](how_the_model_works.md)). More output variables:
+`soil_ice`, `snow_on_ground`, `snow_melt`, `soil_phase_change_heat`, `frost_table_depth`,
+`perched_water_table_depth`, `perched_drainage`, `ice_runoff`, `ground_sublimation`.
 
 A tower can have several patches (for example trees and grass), each with its own PFT,
 canopy and soil column; the tower's output then has one entry per patch, and a gridcell value

@@ -700,8 +700,17 @@ class GridInputs:
         lb = np.array([x - lo for x, _, _ in f])
         return np.stack(recs), lb, np.array([a for _, a, _ in f]), np.array([b for _, _, b in f])
 
+    def soil_has(self, name: str) -> bool:
+        """Whether the soil stream's files hold the variable ``name`` (looked up in the
+        file of the first step's month)."""
+        end = self.step_start(1)
+        months, _ = self.history.months_around(end, end)
+        with netcdf.dataset(self.history.path(*months[0][:2])) as ds:
+            return name in ds.variables
+
     def soil_at_first_step(self, name: str) -> np.ndarray:
-        """``name`` (``TSOI``, ``H2OSOI``) at the end of the first step, (gridcell, levels)."""
+        """``name`` (``TSOI``, ``H2OSOI``, ``SOILLIQ``, ``SOILICE``) at the end of the
+        first step, (gridcell, levels)."""
         end = self.step_start(1)
         months, cal = self.history.months_around(end, end)
         stamps = np.array([s for _, _, s in months])

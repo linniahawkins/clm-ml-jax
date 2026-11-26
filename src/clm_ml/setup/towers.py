@@ -111,10 +111,21 @@ def acclimation_temperature(run, source, first_tref: float) -> float:
 def first_values(run, sources) -> dict:
     """Per gridcell (G,) the first step's forcing (``uref``, ``tref``, ``qref``, ``pref``,
     ``pco2``), its initial soil temperature ``tsoi`` (G, nlevgrnd; the CLM history's
-    ``TSOI`` at the first step's time slice) and acclimation temperature ``tacclim``."""
-    from clm_ml.setup.soil import NLEVGRND, initial_soil_temperature
+    ``TSOI`` at the first step's time slice) and acclimation temperature ``tacclim``; with
+    soil that freezes (model.yaml ``soil.freeze_thaw``) also ``ice_fraction`` (G, nlevsoi):
+    the share of ice in the water volume of each soil level in the CLM history
+    (``SOILLIQ``, ``SOILICE``), NaN where the history has none."""
+    from clm_ml.setup.soil import (
+        NLEVGRND,
+        NLEVSOI,
+        initial_ice_fraction,
+        initial_soil_temperature,
+    )
 
+    freezes = run.config.soil.water == "predicted" and run.config.soil.freeze_thaw
     out: dict = {k: [] for k in ("uref", "tref", "qref", "pref", "pco2", "tsoi", "tacclim")}
+    if freezes:
+        out["ice_fraction"] = []
     for source in sources:
         tower = source.chunk(0, 1).tower
         row = {
@@ -130,4 +141,8 @@ def first_values(run, sources) -> dict:
             initial_soil_temperature(source.clm_history_file, source.history_index(0), NLEVGRND)
         )
         out["tacclim"].append(acclimation_temperature(run, source, row["tref"]))
+        if freezes:
+            out["ice_fraction"].append(
+                initial_ice_fraction(source.clm_history_file, source.history_index(0), NLEVSOI)
+            )
     return {k: np.asarray(v, dtype=float) for k, v in out.items()}

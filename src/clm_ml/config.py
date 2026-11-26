@@ -224,6 +224,20 @@ class NumericsOptions:
         "derivative of the forward values at an affected step.",
         "",
     )
+    phase_change_derivative: Literal["stabilized", "exact"] = option(
+        "stabilized",
+        "Derivative of the freezing of soil water (gradients only; forward results are the "
+        "same either way; used with soil.freeze_thaw). A level that freezes down to the "
+        "water that can stay liquid takes that amount at its temperature before the change "
+        "and is then warmed by the heat of fusion (CLM's scheme): it overshoots, and the "
+        "exact derivative of that grows without bound while a soil freezes (up to 1e21 in a "
+        "clay). stabilized: for such a level, the derivative of the state whose liquid "
+        "water is the amount that can stay liquid at its temperature after the change "
+        "(bounded; derivatives of means over days within about 25 % of a finite change; no "
+        "cost), an approximation: not the exact derivative of the forward values at such a "
+        "step. exact: the exact derivative.",
+        "",
+    )
     checkpoint_steps: bool = option(
         True,
         "Recompute each step when taking gradients instead of storing its intermediate values "
@@ -353,10 +367,24 @@ class SoilOptions:
         "the water table are part of the model state, moved by CLM's soil hydrology "
         "(runoff, infiltration, the Richards equation, drainage) from the canopy's "
         "throughfall, soil evaporation and root uptake; the forcing gives only the soil "
-        "water at the start. Unfrozen and snow-free: snowfall reaching the ground enters "
-        "the soil as liquid water. Needs each tower's soil.max_saturated_fraction and "
-        "soil.slope in domain.yaml (grids: FMAX and SLOPE of the surface data).",
+        "water at the start. Without a snowpack; unfrozen unless freeze_thaw is set. Needs "
+        "each tower's soil.max_saturated_fraction and soil.slope in domain.yaml (grids: "
+        "FMAX and SLOPE of the surface data).",
         "Not in CLM-ml v2: CLM's soil hydrology (CTSM 5.4).",
+    )
+    freeze_thaw: bool = option(
+        False,
+        "With predicted soil water. false: all soil water is liquid (as CLM-ml v2), and snow "
+        "reaching the ground enters the soil as liquid water at once. true: soil water "
+        "freezes and thaws as in CLM (the ice is part of the model state, the soil stays at "
+        "the freezing point while its water changes phase, and some water stays liquid "
+        "below it); the ice slows the water's movement, a water table can perch on frozen "
+        "soil and drain, and vapour is taken from and given to the top level's ice. Snow "
+        "reaching the ground lies on it until the top soil level's heat melts it: there is "
+        "no snowpack (no snow albedo, no insulation), so winter soil is colder than under "
+        "snow. The canopy's ground evaporation keeps the latent heat of vaporization.",
+        "Not in CLM-ml v2: CLM's phase change and perched water table (CTSM 5.4).",
+        when={"water": "predicted"},
     )
     root_redistribution: bool = option(
         True,
@@ -503,7 +531,8 @@ class ModelConfig:
             if k.split(".")[0] in ("processes", "numerics")
             and k not in ("numerics.checkpoint_steps", "numerics.checkpoint_substeps",
                           "numerics.table_search", "numerics.solver_loops",
-                          "numerics.water_stress_derivative", "numerics.obukhov_derivative")
+                          "numerics.water_stress_derivative", "numerics.obukhov_derivative",
+                          "numerics.phase_change_derivative")
             and not (k == "processes.photosynthesis.temperature_acclimation"
                      and self.processes.photosynthesis.temperature_acclimation == "run_mean")
         ]  # fmt: skip

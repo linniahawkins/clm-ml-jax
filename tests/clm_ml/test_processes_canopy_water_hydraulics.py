@@ -395,3 +395,36 @@ def test_leaf_water_potential_relaxes_to_steady_state():
     steady = -0.3 - head * zs[:, None] - 1000.0 * tr / jnp.maximum(lsc, 1e-30)[:, None]
     np.testing.assert_allclose(np.asarray(lwp)[1:3], np.asarray(steady)[1:3], rtol=1e-12)
     assert np.all(np.asarray(lwp)[np.asarray(dpai) == 0] == 0.0)
+
+
+def test_clm_roots_keep_freezing_levels_when_told_to():
+    """CLM-ml v2 takes no water from a level with any ice. CLM has no such rule: with
+    ``exclude_frozen=False`` every level above bedrock counts, and a freezing level is
+    held back by its conductivity (lowered by the ice, by the caller) and by the very
+    negative potential of its liquid water."""
+    hk, smp, args = _soil_columns()
+    ice = jnp.where(jnp.arange(N_SOI) < 2, 1.0, 0.0)  # ice in the two upper levels
+    dz, rootfr, _, n_bedrock, lai, _ = args
+
+    def zone(hk, smp, exclude):
+        return plant_hydraulics.root_zone_by_conductance(
+            "clm", hk, jnp.full(N_SOI, 5e-5), smp, dz, Z_SOI, rootfr, ice, n_bedrock, lai,
+            0.5, 500.0, ROOTS, exclude_frozen=exclude,
+        )  # fmt: skip
+
+    excluded, kept = zone(hk, smp, True), zone(hk, smp, False)
+    assert float(excluded.soil_et_loss[1]) == 0.0 and float(kept.soil_et_loss[1]) > 0.0
+    np.testing.assert_allclose(float(jnp.sum(kept.soil_et_loss)), 1.0, rtol=1e-12)
+    # kept without ice, the result is that of an unfrozen column
+    plain = _by_conductance("clm", hk, smp, args)
+    np.testing.assert_array_equal(np.asarray(kept.soil_et_loss), np.asarray(plain.soil_et_loss))
+    # a frozen level: its liquid water at the freezing-point depression of -5 C (-6 MPa =
+    # -6e5 mm), beyond what the root conducts at, and its conductivity cut by the ice: no
+    # share of the transpiration. At -1 C (-1.2 MPa) the root still conducts.
+    hk_frozen = hk.at[1].multiply(10.0 ** (-6.0 * 0.8))
+    frozen = zone(hk_frozen, smp.at[1].set(-6.0e5), False)
+    assert float(frozen.soil_et_loss[1]) < 1e-4 * float(kept.soil_et_loss[1])
+    assert float(zone(hk_frozen, smp.at[1].set(-1.2e5), False).soil_et_loss[1]) > 0.0
+    smp_frozen = smp.at[1].set(-2.4e5)
+    g = jax.grad(lambda h, s: zone(h, s, False).psis)(hk_frozen, smp_frozen)
+    assert all(np.isfinite(np.asarray(x)).all() for x in g)

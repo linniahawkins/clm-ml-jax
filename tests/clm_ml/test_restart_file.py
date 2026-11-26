@@ -26,7 +26,8 @@ def _state(n_patch=3, n_layer=4, n_soil=5, seed=0):
     canopy.air_temperature[0, -1] = 1e36  # padding slots hold the fill value
     soil = SoilState(
         temperature=r(n_soil), liquid_water=r(n_soil - 1), surface_water=r(),
-        water_table_depth=r(),
+        water_table_depth=r(), ice=r(n_soil - 1), snow=r(), frost_table_depth=r(),
+        perched_water_table_depth=r(),
     )  # fmt: skip
     return State(canopy=canopy, soil=soil)
 

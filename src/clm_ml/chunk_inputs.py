@@ -101,11 +101,23 @@ def met_inputs(bef: dict, cur: dict, nxt: dict, calday, calday_beg) -> MetInputs
     )
 
 
-def forcing_inputs(forcing: Forcing, calday, calday_beg) -> tuple:
+def rain_and_snow(precipitation, air_temperature) -> tuple:
+    """Precipitation divided into ``(rain, snow)`` by the air temperature (K): all snow at
+    0 C and below, all rain at 2 C and above, linear in between.
+
+    Not in CLM-ml v2 (towers have no snowfall there). Fortran reference: CTSM
+    atm2lndMod.F90::repartition_rain_snow_one_col (a column that is not a glacier)."""
+    frac_rain = np.minimum(1.0, np.maximum(0.0, (_f(air_temperature) - 273.15) * 0.5))
+    rain = _f(precipitation) * frac_rain
+    return rain, _f(precipitation) - rain
+
+
+def forcing_inputs(forcing: Forcing, calday, calday_beg, snowfall: str = "none") -> tuple:
     """A tower chunk's ``(MetInputs, LandInputs)``: axes (step, gridcell, ...) and (step,
     patch, ...) for the chunk's steps (the halo records give the previous and next steps).
     ``calday``, ``calday_beg``: (step,) calendar days at the end and the beginning of each
-    step."""
+    step. ``snowfall``: ``"none"`` (all precipitation is rain) or ``"by_temperature"``
+    (:func:`rain_and_snow`)."""
     tower, h = forcing.tower, forcing.clm_history
     n = forcing.n_steps
 
@@ -115,7 +127,10 @@ def forcing_inputs(forcing: Forcing, calday, calday_beg) -> tuple:
     g = tower.air_temperature.shape[1]
     day = np.broadcast_to(_f(calday)[:, None], (n, g))
     day_beg = np.broadcast_to(_f(calday_beg)[:, None], (n, g))
-    met_in = met_inputs(met(slice(0, n)), met(slice(1, n + 1)), met(slice(2, n + 2)), day, day_beg)
+    now = met(slice(1, n + 1))
+    if snowfall == "by_temperature":
+        now["rain"], now["snow"] = rain_and_snow(now["rain"], now["tref"])
+    met_in = met_inputs(met(slice(0, n)), now, met(slice(2, n + 2)), day, day_beg)
     cur = slice(1, n + 1)
     elai = _f(h.leaf_area_index[cur])
     factor = h.soil_water_factor

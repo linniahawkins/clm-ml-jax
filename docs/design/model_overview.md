@@ -51,7 +51,7 @@ In the compiled chunk: `step.MetInputs` (`step.py`), shape (step, G, ...):
 | `uref` | wind speed (min 0.5 applied later) | m s-1 |
 | `tref`, `qref`, `pref` | air temperature, specific humidity, pressure | K, kg kg-1, Pa |
 | `lwsky` | downward longwave | W m-2 |
-| `rain`, `snow` | precipitation (towers: no snow) | kg m-2 s-1 |
+| `rain`, `snow` | precipitation (towers: no snow unless `forcing.meteorology.snowfall: by_temperature`) | kg m-2 s-1 |
 | `solad`, `solai` | direct / diffuse shortwave (band: vis, nir) | W m-2 |
 | `pco2`, `po2` | CO2, O2 partial pressure | Pa |
 | `forcing_bef`, `forcing_next` | the previous and next step's records (3-point interpolation within the step) | |
@@ -95,8 +95,8 @@ Photosynthesis/stomata: `vcmax25`, `iota`, `gs_min`, `g0/g1_ball_berry`, `g0/g1_
 `leaf/stem_transmittance` (spectral fields `[vis, nir]`);
 turbulence: `zeta_max_stable` (decisions.md 123). Every row also holds the soil hydrology
 parameters (`hydrology`: `e_ice`, `fff`, `pc`, `mu`, `baseflow_scalar`, `n_baseflow`,
-`aq_sp_yield_min`, `slopebeta`, `slopemax`), which are not per PFT (the `hydrology` section
-of `params.yaml`; decisions.md 145).
+`aq_sp_yield_min`, `slopebeta`, `slopemax`, `perched_baseflow_scalar`), which are not per
+PFT (the `hydrology` section of `params.yaml`; decisions.md 145, 161).
 Read at setup only (not differentiable through the run): `root_profile_beta` (root fractions),
 `c3_photosynthesis` (C3/C4 group, static), PFT default canopy height / beta profiles.
 
@@ -148,6 +148,10 @@ them along the Obukhov length.
 | `soil.liquid_water` | (20,) | kg m-2 | the hydrologically active levels; with prescribed soil water the forcing's water of the last step |
 | `soil.surface_water` | () | mm | ponded water (0 with prescribed soil water) |
 | `soil.water_table_depth` | () | m | (0 with prescribed soil water) |
+| `soil.ice` | (20,) | kg m-2 | with `soil.freeze_thaw` (0 otherwise) |
+| `soil.snow` | () | kg m-2 | snow lying on the ground, no snow layers; with `soil.freeze_thaw` (0 otherwise) |
+| `soil.frost_table_depth` | () | m | top of the first frozen level under thawed soil; with `soil.freeze_thaw` (0 otherwise) |
+| `soil.perched_water_table_depth` | () | m | with `soil.freeze_thaw` (0 otherwise) |
 
 Inside a step, the sub-step's own carry (`processes/canopy.Substep`, ~100 work fields incl.
 Runge-Kutta stage increments) exists only within the step.
@@ -224,6 +228,19 @@ from the configuration).
       level plus the roots' redistribution between levels (`soil.root_redistribution`). Step 2 then
       takes the soil water from the state instead of the record, so the canopy of a step
       sees the water left by the step before (decisions.md 145).
+      With `soil.freeze_thaw` (decisions.md 152-166), in CLM's order: at the start of the
+      step the ponded fraction (`surface_runoff.pond_fraction`; step 2 then takes liquid
+      water and ice from the state, and the snow lying on the ground adds its heat capacity
+      to the top level); after step 9 the snow that reached the ground in the step joins
+      the snow lying there and `soil.phase_change` freezes and thaws the soil water and
+      melts snow (the soil energy check then counts the latent heat); the ground's
+      water-vapour flux is divided between the top level's liquid water and ice
+      (`surface_runoff.ground_vapor_fluxes`: frost instead of dew where the ground
+      temperature of the step's start is below freezing); the hydrology takes rain and
+      meltwater, uses the perched water table of the step before in the saturated
+      fraction, and computes the frost table and the perched water table
+      (`drainage.perched_water_table`) and the perched zone's drainage
+      (`drainage.perched_drainage`).
    Returns `StepState(state, diagnostics)`.
 5. **One sub-step** (`processes/canopy.substep`):
    - save the start-of-sub-step values (`save_start`);

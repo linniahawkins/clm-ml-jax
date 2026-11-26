@@ -165,6 +165,10 @@ def build_patches(domain, params, config, first: dict, acclimation_steps: float 
             liquid_water=np.zeros((n_p, nlevsoi)),
             surface_water=np.zeros(n_p),
             water_table_depth=np.zeros(n_p),
+            ice=np.zeros((n_p, nlevsoi)),
+            snow=np.zeros(n_p),
+            frost_table_depth=np.zeros(n_p),
+            perched_water_table_depth=np.zeros(n_p),
         ),
     )
     c3 = np.round(np.asarray(params.values["c3_photosynthesis"], dtype=float)[pft]) == 1

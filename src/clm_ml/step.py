@@ -36,7 +36,7 @@ from clm_ml.checks import (  # the conservation checks' indices
 )
 from clm_ml.processes import canopy, soil
 from clm_ml.processes.atm_forcing import ForcingRecord, clm_forcing_to_ml
-from clm_ml.processes.constants import denh2o, mmh2o
+from clm_ml.processes.constants import denh2o, denice, mmh2o
 from clm_ml.processes.hydrology import soil_hydrology
 from clm_ml.processes.layers import keep
 from clm_ml.processes.leaf_heat_capacity import leaf_heat_capacity
@@ -48,7 +48,13 @@ from clm_ml.processes.plant_hydraulics import (
     root_zone_by_conductance,
     soil_resistance,
 )
-from clm_ml.processes.surface_runoff import microtopography, pond_threshold
+from clm_ml.processes.soil_water import ice_impedance, soil_water_fractions
+from clm_ml.processes.surface_runoff import (
+    ground_vapor_fluxes,
+    microtopography,
+    pond_fraction,
+    pond_threshold,
+)
 from clm_ml.state import CanopyState, Diagnostics, PatchLayers, SoilState, State, StepState
 
 
@@ -79,6 +85,10 @@ class StepOptions(NamedTuple):
     #: with predicted soil water, whether the roots move water from wetter to drier soil
     #: levels (model.yaml soil.root_redistribution)
     root_redistribution: bool = True
+    #: soil water freezes and thaws (model.yaml soil.freeze_thaw; predicted soil water)
+    freeze_thaw: bool = False
+    #: "stabilized" | "exact": the derivative of the freezing (soil.phase_change)
+    phase_change_derivative: str = "stabilized"
     #: with predicted soil water, the functions of each soil level's soil-to-root
     #: conductance (model.yaml soil.root_conductance; plant_hydraulics.ROOT_CONDUCTANCE)
     root_conductance: str = "clm_ml"
@@ -298,12 +308,26 @@ def step(
     zero = jnp.zeros((), t_soil.dtype)
 
     predicted = options.soil_water == "predicted"
-    if predicted:
+    freezes = predicted and options.freeze_thaw
+    below = jnp.zeros(k.dz.shape[0] - n_soil, t_soil.dtype)
+    if freezes:
+        # the state's liquid water and ice. The fraction of the ground under ponded water
+        # is found first, as in CLM: a pond too small to keep joins the top level's water.
+        # Not in CLM-ml v2.
+        pond = pond_fraction(
+            state.soil.surface_water, state.soil.liquid_water[0],
+            microtopography(
+                k.topo_slope, params.hydrology.slopebeta, params.hydrology.slopemax
+            ),
+            float(options.step_seconds),
+        )  # fmt: skip
+        liq = jnp.concatenate([pond.h2osoi_liq_top[None], state.soil.liquid_water[1:], below])
+        ice_state = jnp.concatenate([state.soil.ice, below])
+        water = soil.SoilWater(liq / (k.dz * denh2o) + ice_state / (k.dz * denice), liq, ice_state)
+    elif predicted:
         # the state's soil water (all liquid; no water in the levels below the
         # hydrologically active ones)
-        liq = jnp.concatenate(
-            [state.soil.liquid_water, jnp.zeros(k.dz.shape[0] - n_soil, t_soil.dtype)]
-        )
+        liq = jnp.concatenate([state.soil.liquid_water, below])
         water = soil.SoilWater(liq / (k.dz * denh2o), liq, jnp.zeros_like(liq))
     else:
         # CLM history record: LAI, SAI (patch) and soil water (column) — clmDataMod::clmData
@@ -319,9 +343,12 @@ def step(
     _, soilresis = soil.soil_evaporative_resistance(
         liq[0], ice[0], t_soil[0], k.dz[0], k.watsat[0], k.sucsat[0], k.bsw[0]
     )
+    # the snow lying on the ground adds its heat capacity to the top level's (freeze and
+    # thaw; no snow otherwise)
+    snow_before = state.soil.snow if freezes else zero
     thermal = soil.soil_thermal_properties(
-        t_soil, liq, ice, zero, zero, k.dz, k.z, k.zi, k.watsat, k.tkmg, k.tkdry, k.csol,
-        k.nbedrock,
+        t_soil, liq, ice, zero, snow_before, k.dz, k.z, k.zi, k.watsat, k.tkmg, k.tkdry,
+        k.csol, k.nbedrock,
     )  # fmt: skip
     hk_l, smp_l = soil.soil_hydraulic_properties(
         liq[:n_soil], k.dz[:n_soil], k.watsat[:n_soil], k.hksat[:n_soil], k.sucsat[:n_soil],
@@ -356,11 +383,21 @@ def step(
             root_biomass = fine_root_biomass(area.lai, params.sla_top, params.root_to_leaf_ratio)
         else:
             root_biomass = k.root_biomass
+        # Freezing soil with CLM's roots: as CLM, no level is left out; the ice lowers the
+        # level's conductivity (CLM's ice impedance), and its liquid water's potential
+        # (the freezing-point depression) closes the root. CLM-ml's roots keep CLM-ml v2's
+        # rule: no uptake from a level with any ice.
+        clm_frozen = freezes and options.root_conductance == "clm"
+        hk_roots = hk_l
+        if clm_frozen:
+            icefrac, _ = soil_water_fractions(ice[:n_soil], k.watsat[:n_soil], k.dz[:n_soil])
+            hk_roots = hk_l * ice_impedance(icefrac, params.hydrology.e_ice)
         roots = root_zone_by_conductance(
-            options.root_conductance, hk_l, k.hksat[:n_soil], smp_l, k.dz[:n_soil],
+            options.root_conductance, hk_roots, k.hksat[:n_soil], smp_l, k.dz[:n_soil],
             k.z[:n_soil], k.rootfr, soil_level_ice(ice, n_soil), k.nbedrock, area.lai,
             inputs.esai, root_biomass,
             RootParameters(*(getattr(params, name) for name in RootParameters._fields)),
+            exclude_frozen=not clm_frozen,
         )  # fmt: skip
     else:
         roots = soil_resistance(
@@ -446,44 +483,114 @@ def step(
     t_soil_new, soil_error = soil.soil_temperature(
         t_soil, thermal.tk, thermal.cv, k.z, gsoi, options.step_seconds
     )
+    dtime = float(options.step_seconds)
+    if freezes:
+        # Freeze and thaw, after the temperature solution (CLM's Phasechange_beta). The
+        # snow that reached the ground in the step joins the snow lying there first. The
+        # ground heat flux is given to the soil, so the routine has no surface feedback
+        # (dhsdT = 0) and takes the heat capacity of the temperature solution: what the
+        # levels lose in heat is the latent heat. Not in CLM-ml v2.
+        snow = snow_before + means.qflx_tflsnow * dtime
+        change = soil.phase_change(
+            t_soil_new[:n_soil], liq[:n_soil], ice[:n_soil], snow, zero,
+            dtime / thermal.cv[:n_soil], zero, pond.frac_h2osfc, k.watsat[:n_soil],
+            k.sucsat[:n_soil], k.bsw[:n_soil], k.dz[:n_soil], dtime,
+            derivative=options.phase_change_derivative,
+        )  # fmt: skip
+        heat = jnp.sum(thermal.cv[:n_soil] * (change.t_soisno - t_soil_new[:n_soil])) / dtime
+        soil_error = soil_error - (heat + change.xmf)
+        t_soil_new = jnp.concatenate([change.t_soisno, t_soil_new[n_soil:]])
     errors = _record(errors, SOIL_TEMPERATURE, soil_error)
 
     # Soil hydrology (predicted soil water): the step means of the canopy's fluxes move the
     # soil water. The ground's water vapour flux is evaporation from the soil and from the
     # pond alike when positive, dew on both when negative; snow reaching the ground enters
-    # as liquid water. Each level gives the roots its share of the transpiration plus the
+    # as liquid water (with freeze and thaw: when the snow lying on the ground melts, and
+    # the soil's part of the vapour flux is taken from and given to liquid water and ice
+    # as CLM does). Each level gives the roots its share of the transpiration plus the
     # water the roots move between the levels (the start-of-step soil water potentials);
     # without that redistribution no level receives water from the roots: the levels that
     # would are left out and the others give the transpiration in the proportions they
     # had. Not in CLM-ml v2.
     unset = _fill(zero)
+    frozen_names = (
+        "h2osoi_ice_soil", "h2osno_soil", "qflx_snomelt_soil", "xmf_soil", "frost_table_soil",
+        "zwt_perched_soil", "qflx_drain_perched_soil", "qflx_ice_runoff_soil",
+        "qflx_sublimation_soil",
+    )  # fmt: skip
+    frozen_diagnostics = {name: unset for name in frozen_names}
+    frozen_diagnostics["h2osoi_ice_soil"] = _fill(liq)
     if predicted:
         hp = params.hydrology
         micro_sigma = microtopography(k.topo_slope, hp.slopebeta, hp.slopemax)
         ground_evaporation = means.etsoi * mmh2o  # mol H2O m-2 s-1 -> mm s-1
         transpiration = totals.trveg * mmh2o
-        ground_input = means.qflx_tflrain + means.qflx_tflsnow
         root_uptake = root_water_uptake(
             roots.soil_et_loss, roots.redistribution * (1.0e-3 * mmh2o), transpiration,
             options.root_redistribution,
         )  # fmt: skip
-        hyd = soil_hydrology(
-            liq[:n_soil], ice[:n_soil], state.soil.surface_water, state.soil.water_table_depth,
-            ground_input, jnp.maximum(ground_evaporation, 0.0), ground_evaporation,
-            jnp.maximum(-ground_evaporation, 0.0), root_uptake,
+        soil_constants = (
             k.watsat[:n_soil], k.hksat[:n_soil], k.sucsat[:n_soil], k.bsw[:n_soil],
             k.dz[:n_soil], k.z[:n_soil], jnp.concatenate([zero[None], k.zi[:n_soil]]),
             k.nbedrock, k.wtfact, micro_sigma, pond_threshold(micro_sigma, hp.pc),
-            k.topo_slope, float(options.step_seconds), hp,
-            fixed_trials=options.richards_trials,
+            k.topo_slope, dtime, hp,
         )  # fmt: skip
+        if freezes:
+            ground_input = means.qflx_tflrain + change.qflx_snomelt
+            # frost or dew by the ground temperature the step began with (CLM's t_grnd)
+            vapor = ground_vapor_fluxes(
+                ground_evaporation, change.h2osoi_liq[0], change.h2osoi_ice[0],
+                c.ground_temperature, pond.frac_h2osfc, dtime,
+            )  # fmt: skip
+            hyd = soil_hydrology(
+                change.h2osoi_liq, change.h2osoi_ice, pond.h2osfc,
+                state.soil.water_table_depth, ground_input,
+                vapor.qflx_liqevap_from_top_layer, ground_evaporation,
+                vapor.qflx_liqdew_to_top_layer, root_uptake, *soil_constants,
+                qflx_soliddew_to_top_layer=vapor.qflx_soliddew_to_top_layer,
+                qflx_solidevap_from_top_layer=vapor.qflx_solidevap_from_top_layer,
+                t_soisno=change.t_soisno, frost_table=state.soil.frost_table_depth,
+                zwt_perched=state.soil.perched_water_table_depth, pond=pond,
+                fixed_trials=options.richards_trials,
+            )  # fmt: skip
+            soil_state = SoilState(
+                temperature=t_soil_new,
+                liquid_water=hyd.h2osoi_liq,
+                surface_water=hyd.h2osfc,
+                water_table_depth=hyd.zwt,
+                ice=hyd.h2osoi_ice,
+                snow=change.h2osno,
+                frost_table_depth=hyd.frost_table,
+                perched_water_table_depth=hyd.zwt_perched,
+            )
+            frozen_diagnostics = dict(
+                h2osoi_ice_soil=ice,
+                h2osno_soil=change.h2osno,
+                qflx_snomelt_soil=change.qflx_snomelt,
+                xmf_soil=change.xmf,
+                frost_table_soil=hyd.frost_table,
+                zwt_perched_soil=hyd.zwt_perched,
+                qflx_drain_perched_soil=hyd.qflx_drain_perched,
+                qflx_ice_runoff_soil=hyd.qflx_ice_runoff_xs,
+                qflx_sublimation_soil=(1.0 - pond.frac_h2osfc)
+                * vapor.qflx_solidevap_from_top_layer,
+            )
+        else:
+            ground_input = means.qflx_tflrain + means.qflx_tflsnow
+            hyd = soil_hydrology(
+                liq[:n_soil], ice[:n_soil], state.soil.surface_water,
+                state.soil.water_table_depth, ground_input,
+                jnp.maximum(ground_evaporation, 0.0), ground_evaporation,
+                jnp.maximum(-ground_evaporation, 0.0), root_uptake, *soil_constants,
+                fixed_trials=options.richards_trials,
+            )  # fmt: skip
+            soil_state = state.soil._replace(
+                temperature=t_soil_new,
+                liquid_water=hyd.h2osoi_liq,
+                surface_water=hyd.h2osfc,
+                water_table_depth=hyd.zwt,
+            )
         errors = _record(errors, SOIL_WATER, hyd.balance_error)
-        soil_state = SoilState(
-            temperature=t_soil_new,
-            liquid_water=hyd.h2osoi_liq,
-            surface_water=hyd.h2osfc,
-            water_table_depth=hyd.zwt,
-        )
         hydrology_diagnostics = dict(
             qflx_rain_grnd_soil=ground_input,
             qflx_evap_grnd_soil=ground_evaporation,
@@ -585,6 +692,7 @@ def step(
         h2osoi_liq_soil=liq,
         h2osoi_vol_soil=water.h2osoi_vol,
         **hydrology_diagnostics,
+        **frozen_diagnostics,
         wind_profile=end.wind_profile,
         shair_profile=keep(use, means.shair, end.shair_profile),
         etair_profile=keep(use, means.etair, end.etair_profile),

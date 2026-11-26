@@ -40,8 +40,8 @@ import numpy as np
 from clm_ml.io import netcdf
 
 #: The restart format this code writes and reads (1-5: pickles of earlier phases; 6: without
-#: the soil water of the state)
-FORMAT_VERSION = 7
+#: the soil water of the state; 7: without the ice, the snow and the tables of frozen soil)
+FORMAT_VERSION = 8
 
 #: State field -> (netCDF variable, dimensions after patch, units, long name)
 STATE_FIELDS = {
@@ -52,7 +52,9 @@ STATE_FIELDS = {
     ("canopy", "acclimation_temperature"): (), ("canopy", "acclimation_steps"): (),
     ("soil", "temperature"): ("soil_level",),
     ("soil", "liquid_water"): ("water_level",), ("soil", "surface_water"): (),
-    ("soil", "water_table_depth"): (),
+    ("soil", "water_table_depth"): (), ("soil", "ice"): ("water_level",),
+    ("soil", "snow"): (), ("soil", "frost_table_depth"): (),
+    ("soil", "perched_water_table_depth"): (),
 }  # fmt: skip
 UNITS = {
     "air_temperature": ("K", "canopy air temperature"),
@@ -68,6 +70,10 @@ UNITS = {
     "liquid_water": ("kg m-2", "soil liquid water"),
     "surface_water": ("mm", "ponded surface water"),
     "water_table_depth": ("m", "water table depth"),
+    "ice": ("kg m-2", "soil ice"),
+    "snow": ("kg m-2", "snow lying on the ground"),
+    "frost_table_depth": ("m", "frost table depth"),
+    "perched_water_table_depth": ("m", "perched water table depth"),
 }
 
 

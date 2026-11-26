@@ -50,6 +50,14 @@ forcing:
     # choices: constant | linear; default: constant.
     precipitation: constant
 
+    # Which part of the precipitation falls as snow. none: all of it is rain at any temperature
+    # (CLM-ml v2). by_temperature: CLM's division by the air temperature, all snow at 0 C and
+    # below, all rain at 2 C and above, linear in between (as grid runs). The snow is intercepted
+    # by the canopy as snow; on the ground it enters the soil as liquid water, or lies there until
+    # it melts with model.yaml soil.freeze_thaw.
+    # choices: none | by_temperature; default: none.
+    snowfall: none
+
   # The CLM history file.
   clm_history:
     # CLM history file (netCDF, one patch, at the forcing interval) with ELAI, ESAI, H2OSOI and

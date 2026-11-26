@@ -30,6 +30,10 @@ def _state(tair=300.0, tleaf=(0.0, 295.0)):
         liquid_water=np.array([5.0, 9.0]),
         surface_water=np.array(0.0),
         water_table_depth=np.array(8.6),
+        ice=np.array([0.0, 1.0]),
+        snow=np.array(0.0),
+        frost_table_depth=np.array(0.3),
+        perched_water_table_depth=np.array(0.3),
     )
     return State(canopy=canopy, soil=soil)
 

@@ -77,6 +77,15 @@ class MeteorologySection:
         "Precipitation from the data interval to a shorter model step: held (conserves "
         "totals) or linear.",
     )
+    snowfall: Literal["none", "by_temperature"] = option(
+        "none",
+        "Which part of the precipitation falls as snow. none: all of it is rain at any "
+        "temperature (CLM-ml v2). by_temperature: CLM's division by the air temperature, "
+        "all snow at 0 C and below, all rain at 2 C and above, linear in between (as grid "
+        "runs). The snow is intercepted by the canopy as snow; on the ground it enters the "
+        "soil as liquid water, or lies there until it melts with model.yaml "
+        "soil.freeze_thaw.",
+    )
 
 
 @dataclasses.dataclass(frozen=True)

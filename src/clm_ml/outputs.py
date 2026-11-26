@@ -53,7 +53,8 @@ def step_fields(step, layers) -> dict:
 
 
 #: The soil water fields of the state (``clm_ml.state.SoilState``), as ``state.<name>``
-_SOIL_WATER_STATE = ("liquid_water", "surface_water", "water_table_depth")
+_SOIL_WATER_STATE = ("liquid_water", "surface_water", "water_table_depth", "ice", "snow",
+                     "frost_table_depth", "perched_water_table_depth")  # fmt: skip
 
 
 def field_names() -> tuple:
@@ -261,8 +262,8 @@ VARIABLES: tuple[VariableSpec, ...] = (
       "Liquid water of the soil levels during the step (0 in the bedrock levels)",
       ("soil_layer",), "", lambda r: r["h2osoi_liq_soil"]),
     V("soil_water_content", "m3 m-3",
-      "Volumetric water of the soil levels during the step (0 in the bedrock levels)",
-      ("soil_layer",), "", lambda r: r["h2osoi_vol_soil"]),
+      "Volumetric water (liquid and ice) of the soil levels during the step (0 in the "
+      "bedrock levels)", ("soil_layer",), "", lambda r: r["h2osoi_vol_soil"]),
     V("ground_water_input", "kg m-2 s-1",
       "Water reaching the ground: throughfall and canopy drip, rain and snow "
       "(predicted soil water)", (), "", lambda r: r.hydrology("qflx_rain_grnd_soil")),
@@ -294,6 +295,36 @@ VARIABLES: tuple[VariableSpec, ...] = (
     V("soil_water_balance_error", "mm",
       "Soil water balance error of the step (predicted soil water)", (), "",
       lambda r: r.hydrology("errh2o_soil")),
+    # --- frozen soil (soil.freeze_thaw) ---------------------------------------------------
+    V("soil_ice", "kg m-2",
+      "Ice of the soil levels during the step (0 in the bedrock levels; freeze and thaw)",
+      ("soil_layer",), "", lambda r: r.hydrology("h2osoi_ice_soil")),
+    V("snow_on_ground", "kg m-2",
+      "Snow lying on the ground at the end of the step: there is no snowpack, it waits for "
+      "the top soil level's heat to melt it (freeze and thaw)", (), "",
+      lambda r: r.hydrology("h2osno_soil")),
+    V("snow_melt", "kg m-2 s-1", "Melt of the snow lying on the ground (freeze and thaw)",
+      (), "", lambda r: r.hydrology("qflx_snomelt_soil")),
+    V("soil_phase_change_heat", "W m-2",
+      "Latent heat taken up by melting soil ice and snow, negative: freed by freezing "
+      "(freeze and thaw)", (), "", lambda r: r.hydrology("xmf_soil")),
+    V("frost_table_depth", "m",
+      "Depth of the frost table: the top of the first frozen soil level under thawed soil; "
+      "0 where the surface is frozen, the top of the lowest soil level where nothing is "
+      "(freeze and thaw)", (), "", lambda r: r.hydrology("frost_table_soil")),
+    V("perched_water_table_depth", "m",
+      "Depth of the water table perched on the frost table; the frost table's depth where "
+      "nothing is perched (freeze and thaw)", (), "",
+      lambda r: r.hydrology("zwt_perched_soil")),
+    V("perched_drainage", "kg m-2 s-1",
+      "Drainage of the saturated zone perched on frozen soil (freeze and thaw)", (), "",
+      lambda r: r.hydrology("qflx_drain_perched_soil")),
+    V("ice_runoff", "kg m-2 s-1",
+      "Ice of the top soil level above its pore space, removed as runoff (freeze and thaw)",
+      (), "", lambda r: r.hydrology("qflx_ice_runoff_soil")),
+    V("ground_sublimation", "kg m-2 s-1",
+      "Part of the ground evaporation taken from the ice of the top soil level (freeze and "
+      "thaw)", (), "", lambda r: r.hydrology("qflx_sublimation_soil")),
     # --- vertical profiles (profile.out, fluxprofile.out) -------------------------------
     V("layer_height", "m", "Height of layer center", ("layer",), "profile.out col 2",
       lambda r: r.layer(r["zs_profile"])),

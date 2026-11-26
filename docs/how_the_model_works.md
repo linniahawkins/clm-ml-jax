@@ -91,10 +91,12 @@ src/clm_ml/
     leaf_boundary_layer.py photosynthesis.py plant_hydraulics.py nitrogen_profile.py
     flux_profile.py   the implicit solution for air T, vapour, leaf T, ground T
     canopy_water.py   interception, wetted fraction of the leaves, evaporation
-    soil.py           soil water from the prescribed record, soil properties, soil temperature
+    soil.py           soil water from the prescribed record, soil properties, soil temperature,
+                      freezing and thawing of soil water (CLM's)
     soil_water.py surface_runoff.py drainage.py hydrology.py
                       predicted soil water (CLM's soil hydrology): the Richards equation,
-                      runoff and ponded water, water table and drainage, the assembled step
+                      runoff and ponded water, water table and drainage, the frost table
+                      and the perched water table, the assembled step
     integrators.py    Euler and Runge-Kutta tableaus and the state update
     constants.py orbit.py math.py layers.py water_vapor.py leaf_heat_capacity.py
 
@@ -152,7 +154,8 @@ COMPILED       │   │   │   │   -> Runge-Kutta update of the canopy state
 COMPILED       │   │   │   └─ fluxes added to the step's sums
 COMPILED       │   │   ├─ averages over the sub-steps, canopy totals, energy checks
 COMPILED       │   │   ├─ sunlit/shaded leaves merged to the layer mean
-COMPILED       │   │   ├─ soil temperature (heat diffusion)
+COMPILED       │   │   ├─ soil temperature (heat diffusion); with soil.freeze_thaw the
+COMPILED       │   │   │  freezing and thawing of soil water and the melt of snow
 COMPILED       │   │   └─ with predicted soil water: runoff, infiltration, the Richards
 COMPILED       │   │      equation, water table, drainage      processes/hydrology
 COMPILED       │   │   -> new State + Diagnostics
@@ -292,11 +295,48 @@ What differs is mostly how the code is written. The few science departures are l
   `root_to_leaf_ratio` × 2). CLM's roots use four parameters of `params.yaml`
   (`root_to_leaf_ratio`, `root_conductance_max`, `root_psi50`, `root_ck`; `clm-ml
   upgrade` adds them to older files at CLM6's values). It starts from the soil water a
-  prescribed run has at its first step, or from a restart. What it does not have: snow
-  and frozen soil water (snowfall enters the soil as liquid at once), irrigation, and
-  any exchange between soil columns. Its results are not CLM's soil moisture: the canopy
+  prescribed run has at its first step, or from a restart. What it does not have: a
+  snowpack, irrigation, and any exchange between soil columns; soil water freezes only
+  with the next option. Its results are not CLM's soil moisture: the canopy
   that dries the soil is a different one. It needs two more inputs per tower (see
   [Your own tower](your_own_tower.md)); grids read them from the surface data.
+- **Soil water that freezes and thaws** (`model.yaml` `soil.freeze_thaw: true`, with
+  predicted soil water; off by default). CLM's treatment (CTSM 5.4), translated and
+  checked against CLM's Fortran as the soil water was. After the soil temperature of a
+  step is solved, a level above 0 °C that holds ice melts and a level below 0 °C freezes;
+  while its water changes phase the level stays at 0 °C, and the heat this takes or gives
+  is counted in the soil's energy balance. Some water stays liquid below 0 °C (more in
+  clay than in sand, less the colder), as in CLM. Ice slows the movement of water
+  (infiltration, flow between levels, drainage), so rain on frozen ground ponds and runs
+  off. Where thawed soil lies over frozen soil the water above can saturate: CLM's frost
+  table and perched water table are computed, the perched zone drains
+  (`perched_baseflow_scalar` in the `hydrology` section of `params.yaml`), and the
+  saturated fraction of the surface follows the perched water table. Vapour is taken
+  from the top level's liquid water and ice in their proportion, and dew on frozen ground
+  is frost. The run starts from the ice of the CLM history (`SOILLIQ`, `SOILICE`) where
+  the file has them; otherwise the water is divided by the soil temperature. Where this
+  differs from CLM:
+  - *There is no snowpack.* Snow that reaches the ground lies there as a store of water
+    (`snow_on_ground`) until the top soil level's heat melts it, as CLM treats snow too
+    thin for a snow layer. It has no albedo and does not insulate, so the soil in winter
+    is colder and freezes deeper than under snow, and the surface is darker.
+  - *The canopy is CLM-ml's.* The ground's latent heat flux uses the heat of vaporization
+    also when ice sublimes, and the humidity of the soil pores at the surface is computed
+    from the liquid water alone (CLM: liquid and ice), which makes a frozen surface drier.
+  - *Roots.* CLM-ml's roots (the default) take no water from a level with any ice (CLM-ml
+    v2's rule). CLM's roots (`soil.root_conductance: clm`) keep such a level, as CLM
+    does: its ice lowers its conductivity and its liquid water is held at a very negative
+    potential.
+  - *The pond does not freeze* (it has no temperature of its own).
+  Towers: by default all precipitation is rain, at any temperature (CLM-ml v2); set
+  `run.yaml` `forcing.meteorology.snowfall: by_temperature` for CLM's division (snow at
+  0 °C and below, rain at 2 °C and above). Grids always divide it.
+  Two things to know. CLM's freezing overshoots (a freezing level takes the water that
+  may stay liquid at its temperature before the change, then warms): while a fine soil
+  freezes, results are sensitive to differences in the last digit (two runs that start
+  1e-12 apart can differ by hundredths of a degree for a while), and exact derivatives
+  grow without bound. Derivatives therefore use a stable approximation by default
+  (`numerics.phase_change_derivative: stabilized`); forward results are not affected.
 - **Runs across a new year**: the time of a step's forcing record is the middle of the
   step. Fortran takes it as the mean of the calendar days at the step's start and end,
   which is half a year off in the step that ends at midnight of 1 January (the calendar
@@ -395,9 +435,12 @@ What the model does not do, or does differently from what a user might expect:
   degrees too warm in strongly stable conditions (first-order closure cannot represent
   non-local mixing in the canopy); daytime latent heat biased high at CHATS (about
   70 W m⁻²); soil heat flux biased high; soil moisture prescribed by default.
-- **No snow and no frozen soil water:** there is no snowpack on the ground, and all
-  soil water is liquid. With predicted soil water, snowfall reaching the ground enters
-  the soil as liquid water at once.
+- **No snowpack, and frozen soil only as an option:** there is no snowpack on the ground
+  (no snow albedo, no insulation of the soil). By default all soil water is liquid, and
+  with predicted soil water snowfall reaching the ground enters the soil as liquid water
+  at once. With `soil.freeze_thaw` soil water freezes and thaws as in CLM and snow lies on
+  the ground until it melts; without the snowpack, winter soil is colder than it should
+  be. Tower forcing has no snowfall unless `forcing.meteorology.snowfall` is set.
 - **No bare ground:** every patch has a canopy; a patch with almost no leaves is a sparse
   canopy, not bare soil.
 - **Solvers** run a fixed number of iterations instead of Fortran's tolerances, and Fortran's

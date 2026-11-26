@@ -213,6 +213,8 @@ def root_zone_by_conductance(
     sai,
     root_biomass,
     p: RootParameters,
+    *,
+    exclude_frozen: bool = True,
 ) -> SoilResistance:
     """:func:`root_zone` of the soil levels above bedrock that hold no ice, with the
     levels' conductances by ``scheme`` (one of :data:`ROOT_CONDUCTANCE`):
@@ -222,12 +224,18 @@ def root_zone_by_conductance(
     - ``"clm"``: CLM's (:func:`soil_root_conductance_clm`), from the matric potential
       less the gravitational potential of the level's depth, as CLM.
 
+    ``exclude_frozen`` (static): False keeps the levels that hold ice, as CLM does; the
+    caller then gives ``hk`` reduced by the ice, and the matric potential of the liquid
+    water of a freezing level (its freezing-point depression) closes the root.
+
     Not in CLM-ml v2, which weights the levels by what each can supply
     (:func:`soil_resistance`).
     """
     if scheme not in ROOT_CONDUCTANCE:
         raise ValueError(f"root conductance {scheme!r} not one of {ROOT_CONDUCTANCE}")
-    usable = (jnp.arange(hk.shape[0]) < n_bedrock) & ~(h2osoi_ice > 0.0)
+    usable = jnp.arange(hk.shape[0]) < n_bedrock
+    if exclude_frozen:
+        usable = usable & ~(h2osoi_ice > 0.0)
     if scheme == "clm":
         conductance = soil_root_conductance_clm(
             hk, hksat, smp, dz, z, rootfr, root_biomass, lai, sai, p

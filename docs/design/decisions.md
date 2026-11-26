@@ -790,8 +790,8 @@ Source: maintainer, 2026-11-26; `docs/design/frozen_soil_plan.md` section 8.
 **153. Until there is a snowpack, snow reaching the ground lies in CLM's store for snow without layers**
 2026-11-26 · Phase 12 (scoping) · maintainer · in force · Departure from CLM: yes (temporary)
 With `soil.freeze_thaw: true` the snow that reaches the ground is added to a store
-(`h2osno_no_layers` in CLM, kg m⁻²) before the temperature solution, as CLM's
-`UpdateState_AddNewSnow` does for a column without snow layers. The phase change routine
+(`h2osno_no_layers` in CLM, kg m⁻²), as CLM's `UpdateState_AddNewSnow` does for a column
+without snow layers (when in the step: decision 164). The phase change routine
 melts it with the heat of the top soil level before that level's own ice (CLM's code in
 `Phasechange_beta`), the melt reaches the soil as liquid water, and the store's heat capacity
 is added to the top level's (CLM's `SoilThermProp`, already in the translation). Water and
@@ -1026,6 +1026,73 @@ temperature after the change) would be a different forward scheme from CLM's; op
 Reason: the objective is CLM's soil as it is; a derivative of 1e21 is of no use, and the
 repository's rule for such cases is a stated derivative-only approximation (decision 124).
 Source: probes of 2026-11-26 (`test_golden_frozen_sequences.py` reproduces them).
+
+**164. Freeze and thaw in the model: the state, the order of a step, the start of a run**
+2026-11-26 · Phase 12 (12.6) · implementation · in force · Departure from CLM: in the points named
+With `soil.freeze_thaw: true` (decision 152):
+- *State:* `SoilState` gains `ice` (the 20 hydrologically active levels, kg m⁻²), `snow`
+  (the store of decision 153, kg m⁻²), `frost_table_depth` and `perched_water_table_depth`
+  (m; CLM computes the two tables in one step and uses them in the next, so they are
+  carried). Without `freeze_thaw` they stay 0. Restart format version 8 (version 7 files are
+  refused, as older versions were).
+- *Order of a step* (CLM's, `clm_driver`): (1) the ponded fraction, which moves a pond too
+  small to keep into the top level; (2) soil properties from liquid water and ice (the
+  volumetric water of the albedo is liquid plus ice, as CLM's; the snow lying on the ground
+  adds its heat capacity to the top level's); (3) the canopy's sub-steps; (4) the soil
+  temperature (CLM-ml's), then the snow that reached the ground in the step joins the snow
+  lying there, then the phase change (decision 159); (5) the ground's vapour flux divided
+  between the top level's liquid water and ice (decision 161); (6) the hydrology with rain
+  and meltwater.
+- *Where the order cannot be CLM's:* CLM adds a step's snowfall before its fluxes; here the
+  snow reaching the ground is known only after the canopy's sub-steps (the interception is
+  inside them), so it joins the store before the phase change but its heat capacity counts
+  from the next step.
+- *Frost or dew:* CLM decides by the ground temperature the step's fluxes were computed
+  with; here by the canopy's ground (surface) temperature at the start of the step.
+- *Soil energy check* (W m⁻², 1e-6 as before): ground heat flux − change of the levels' heat
+  − latent heat of the phase change.
+- *Start of a run:* decision 154; the history's ice is taken as its share of the water's
+  volume (so that the water volume a prescribed run would have, with the CHATS adjustment
+  and the cap at porosity, is kept); the water table, the frost table and the perched
+  water table are diagnosed from that state; no snow lies on the ground at the start
+  (CLM's snowpack water is not read: there is no snowpack to put it in).
+- *Outputs:* `soil_ice`, `snow_on_ground`, `snow_melt`, `soil_phase_change_heat`,
+  `frost_table_depth`, `perched_water_table_depth`, `perched_drainage`, `ice_runoff`,
+  `ground_sublimation` (NaN without `freeze_thaw`); `soil_water_content` is liquid plus ice.
+- *Regression reference* regenerated for the added fields only (13 new step fields): the
+  117 fields it held are bit for bit those of the reference before, except four padding
+  slots of the intercepted water above the top canopy layer, which hold the fill value
+  since decision 146 (the committed reference was older than that change; the test masks
+  them).
+Tests (`tests/regression/test_frozen_soil.py`):
+- CHATS in May (no frost): the run equals the run without `freeze_thaw`, bit for bit for
+  36 steps and to 5e-11 after (the two are different compiled programs, and the canopy
+  amplifies a last-bit difference by that much: the noise twins of the regression policy
+  differ by 4e-11).
+- A cold CHATS (air and initial soil 18 K colder, snow in the first night, rain on the
+  second day, three days looked at): the top level sits at 0 °C while 8 kg m⁻² of snow melt
+  by day and refreezes at night, the frost table moves between the surface and 0.2 m, a pond
+  forms on the frozen ground and runs off; the water balance closes to 3e-13 mm per step and
+  over the run, the soil energy check passes at every step, and the run resumed from a
+  restart written after its first day is bit for bit the uninterrupted one. The same with
+  CLM's roots and with all precipitation as rain.
+- A grid run (two 1° gridcells in Minnesota, two days of January 2000) starts from the
+  history's ice (`SOILLIQ`, `SOILICE`), frozen from the surface, and closes every patch's
+  water balance.
+Source: plan section 4; `step.py`, `driver.initial_soil_water`.
+
+**165. Towers can divide precipitation into rain and snow as CLM does**
+2026-11-26 · Phase 12 (12.6) · implementation · in force · Departure from Fortran: yes (optional; not in CLM-ml v2)
+`run.yaml` `forcing.meteorology.snowfall: none | by_temperature` (default `none`: all
+precipitation is rain at any air temperature, CLM-ml v2's tower forcing).
+`by_temperature`: CLM's division (`atm2lndMod::repartition_rain_snow`, a column that is not
+a glacier): all snow at 0 °C and below, all rain at 2 °C and above, linear in between; what
+grid runs already do.
+Reason: found while testing freezing soil at a tower. Without it winter precipitation
+reaches frozen ground as liquid water at −10 °C; it then freezes in the top level and
+releases heat of fusion that the snow never had, which is what decision 153 set out to
+avoid. A tower with frost should set it; the default keeps every existing run unchanged.
+Source: `chunk_inputs.rain_and_snow`; `tests/clm_ml/test_frozen_soil_inputs.py`.
 
 ## B. Configuration and user interface
 

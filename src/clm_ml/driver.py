@@ -291,9 +291,10 @@ class TowerReader:
     meteorology per gridcell slot (padding gridcells read the last real gridcell), the land
     data per patch slot (its gridcell's CLM history)."""
 
-    def __init__(self, sources, patch_gridcell):
+    def __init__(self, sources, patch_gridcell, snowfall: str = "none"):
         self.sources = sources
         self.patch_gridcell = np.asarray(patch_gridcell)  # domain patch -> domain gridcell
+        self.snowfall = snowfall  # run.yaml forcing.meteorology.snowfall
 
     def __call__(self, sim: Simulation, first_step: int, n_steps: int):
         from clm_ml.chunk_inputs import forcing_inputs
@@ -301,7 +302,10 @@ class TowerReader:
         times = [sim.time_of(k) for k in range(first_step, first_step + n_steps)]
         days = [t.calday for t in times]
         days_beg = [t.calday_beg for t in times]
-        parts = [forcing_inputs(s.chunk(first_step, n_steps), days, days_beg) for s in self.sources]
+        parts = [
+            forcing_inputs(s.chunk(first_step, n_steps), days, days_beg, self.snowfall)
+            for s in self.sources
+        ]
         met, land = jax.tree.map(lambda *x: np.concatenate(x, axis=1), *parts)
         src_g = np.minimum(np.arange(sim.n_gridcells), sim.n_real_gridcells - 1)
         land_g = self.patch_gridcell[sim.source]
@@ -381,6 +385,8 @@ def step_options(run):
             root_redistribution=bool(run.config.soil.root_redistribution),
             root_conductance=run.config.soil.root_conductance,
             root_biomass=run.config.soil.root_biomass,
+            freeze_thaw=bool(run.config.soil.water == "predicted" and run.config.soil.freeze_thaw),
+            phase_change_derivative=run.config.numerics.phase_change_derivative,
             richards_trials=(
                 max_richards_trials(run.step_seconds) if run.config.soil.water == "predicted" else 0
             ),
@@ -410,7 +416,7 @@ def simulation(run) -> Simulation:
         gi = run.domain.patches.gridcell_index
         parts = {
             "first": {k: v[gi] for k, v in first.items()},
-            "reader": TowerReader(sources, gi),
+            "reader": TowerReader(sources, gi, run.run_file.forcing.meteorology.snowfall),
             "land_fn": None,
         }
     options, opts, _ = step_options(run)
@@ -468,17 +474,25 @@ def simulation(run) -> Simulation:
                     + f"of every soil column; not given for {missing[:5]}"
                     + ("" if run.is_grid else f" (domain.yaml towers.<name>.soil.{key})")
                 )
-        sim.state0 = initial_soil_water(sim)
+        sim.state0 = initial_soil_water(sim, parts["first"].get("ice_fraction"))
     return sim
 
 
-def initial_soil_water(sim: Simulation):
+def initial_soil_water(sim: Simulation, ice_fraction=None):
     """``sim``'s initial state with the soil water of a run with predicted soil water: the
     first step's prescribed soil water (the CLM history record or soil-water file at the
     start, as a prescribed run would use it), no ponded water, and the water table of that
-    soil water."""
-    from clm_ml.processes.drainage import water_table_depth
-    from clm_ml.processes.soil import soil_water_from_history
+    soil water.
+
+    With soil that freezes (``ice_fraction`` given: per patch and soil level the share of
+    ice in the water's volume in the CLM history, NaN where the history has none): that
+    share of the water's volume is ice; where the history has none, the water is liquid up
+    to the amount that stays unfrozen at the level's initial temperature (CLM's supercooled
+    water) and the rest is ice. No snow on the ground. The frost table and the perched
+    water table are those of this state."""
+    from clm_ml.processes.constants import denh2o, denice, tfrz
+    from clm_ml.processes.drainage import perched_water_table, water_table_depth
+    from clm_ml.processes.soil import soil_water_from_history, supercooled_water
 
     n_soil = sim.options.n_soil
     _, xp = sim.read(0, 1)
@@ -501,12 +515,48 @@ def initial_soil_water(sim: Simulation):
         )  # fmt: skip
         return liq, zwt
 
-    liq, zwt = jax.vmap(one)(
-        *(jnp.asarray(x) for x in (land0.h2osoi, land0.h2osoi_factor, k.dz, k.z, k.zi, k.watsat,
-                                   k.nbedrock))
+    def frozen(h2osoi, factor, dz, z, zi, watsat, sucsat, bsw, nbedrock, share, t_soil):
+        water = soil_water_from_history(
+            h2osoi, factor, dz, watsat, nbedrock,
+            n_soil=n_soil, n_adjust=sim.options.n_soil_adjust,
+        )  # fmt: skip
+        dz, z, watsat = dz[:n_soil], z[:n_soil], watsat[:n_soil]
+        volume = water.h2osoi_vol[:n_soil] * dz  # m of water (liquid and ice)
+        # without the history's ice: liquid up to the supercooled water of the temperature
+        unfrozen = supercooled_water(t_soil[:n_soil], watsat, sucsat[:n_soil], bsw[:n_soil], dz)
+        by_temperature = jnp.where(
+            t_soil[:n_soil] < tfrz, jnp.minimum(volume, unfrozen / denh2o), volume
+        )
+        no_history = jnp.isnan(share)
+        liquid_volume = jnp.where(no_history, by_temperature, volume * (1.0 - share))
+        ice_volume = jnp.where(no_history, volume - by_temperature, volume * share)
+        liq, ice = liquid_volume * denh2o, ice_volume * denice
+        interfaces = jnp.concatenate([jnp.zeros(1, zi.dtype), zi[:n_soil]])
+        zwt = water_table_depth(liq, ice, watsat, dz, z, interfaces, nbedrock)
+        frost_table, zwt_perched = perched_water_table(
+            t_soil[:n_soil], liq, ice, zwt, watsat, dz, z, interfaces
+        )
+        return liq, ice, zwt, frost_table, zwt_perched
+
+    columns = (land0.h2osoi, land0.h2osoi_factor, k.dz, k.z, k.zi, k.watsat)
+    if ice_fraction is None:
+        liq, zwt = jax.vmap(one)(*(jnp.asarray(x) for x in (*columns, k.nbedrock)))
+        soil = sim.state0.soil._replace(
+            liquid_water=np.asarray(liq, dtype=float),
+            water_table_depth=np.asarray(zwt, dtype=float),
+        )
+        return sim.state0._replace(soil=soil)
+    fields = jax.vmap(frozen)(
+        *(jnp.asarray(x) for x in (*columns, k.sucsat, k.bsw, k.nbedrock, ice_fraction,
+                                   sim.state0.soil.temperature))
     )  # fmt: skip
+    liq, ice, zwt, frost_table, zwt_perched = (np.asarray(x, dtype=float) for x in fields)
     soil = sim.state0.soil._replace(
-        liquid_water=np.asarray(liq, dtype=float), water_table_depth=np.asarray(zwt, dtype=float)
+        liquid_water=liq,
+        water_table_depth=zwt,
+        ice=ice,
+        frost_table_depth=frost_table,
+        perched_water_table_depth=zwt_perched,
     )
     return sim.state0._replace(soil=soil)
 
