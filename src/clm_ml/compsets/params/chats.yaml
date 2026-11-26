@@ -98,6 +98,8 @@ hydrology:
   slopebeta: -3.0
   # Slope scale of the microtopography (degrees).
   slopemax: 0.4
+  # Drainage of a saturated zone perched on frozen soil: this x sine of the slope x its mean saturated conductivity x its thickness (m-1).
+  perched_baseflow_scalar: 1.0e-05
 pft:
   needleleaf_evergreen_temperate_tree:
     vcmax25: 62.5

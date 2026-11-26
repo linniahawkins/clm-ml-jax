@@ -17,8 +17,8 @@ _z, _dz, _zi = soil_layers()
 Z, DZ, ZI = (jnp.asarray(x) for x in (_z[:NLEVSOI], _dz[:NLEVSOI], _zi[: NLEVSOI + 1]))
 LEVEL = np.arange(NLEVSOI)
 # ctsm60_params.c251211.nc and the CLM6 namelist: e_ice, fff, pc, mu, baseflow_scalar,
-# n_baseflow, aq_sp_yield_min, slopebeta, slopemax
-PARAMS = jnp.asarray([6.0, 0.5, 0.4, 0.13889, 0.001, 1.0, 0.02, -3.0, 0.4])
+# n_baseflow, aq_sp_yield_min, slopebeta, slopemax, perched_baseflow_scalar
+PARAMS = jnp.asarray([6.0, 0.5, 0.4, 0.13889, 0.001, 1.0, 0.02, -3.0, 0.4, 1.0e-5])
 SLOPEBETA, SLOPEMAX = -3.0, 0.4
 LOAM = jnp.asarray([0.4386, 0.0037, 227.0, 6.09])  # watsat, hksat, sucsat, bsw
 ROOTS = jnp.exp(-Z / 0.5) / jnp.sum(jnp.exp(-Z / 0.5))
@@ -268,7 +268,7 @@ def test_hydrology_gradients_are_finite_and_match_finite_differences():
             "wtfact": 0.4 * q[16],
         }
         forcing = tuple(jnp.full(3, x) for x in (rain * q[14], evap, 0.0, 5.0e-5))
-        out = _run(column, forcing, 1800.0, PARAMS * q[:9], trials)
+        out = _run(column, forcing, 1800.0, PARAMS.at[:9].multiply(q[:9]), trials)
         state = jnp.concatenate([out.h2osoi_liq[-1], jnp.stack([out.h2osfc[-1], out.zwt[-1]])])
         return jnp.concatenate([state, jnp.stack([out.qflx_surf.sum(), out.qflx_drain.sum()])])
 

@@ -1,4 +1,5 @@
-"""Soil hydrology below the surface: the water table and the drainage of the saturated zone.
+"""Soil hydrology below the surface: the water table and the drainage of the saturated zone;
+over frozen soil, the frost table, the water table perched on it and its drainage.
 
 The water table is diagnosed from the soil water. Drainage (baseflow) leaves the saturated
 zone above the bedrock at a rate set by the slope and by the thickness of that zone, and is
@@ -29,7 +30,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array
 
-from clm_ml.processes.constants import denh2o, denice
+from clm_ml.processes.constants import denh2o, denice, tfrz
 
 #: Relative saturation at or below which a level counts as unsaturated in the search for
 #: the water table. CLM writes 0.9 in single precision.
@@ -89,6 +90,155 @@ def water_table_depth(
         zi[1],
         jnp.where(interpolate, jnp.maximum(0.0, m * SAT_LEV + b), zi[nbedrock]),
     )
+
+
+def perched_water_table(
+    t_soisno: Array,
+    h2osoi_liq: Array,
+    h2osoi_ice: Array,
+    zwt,
+    watsat: Array,
+    dz: Array,
+    z: Array,
+    zi: Array,
+) -> tuple[Array, Array]:
+    """Depth of the frost table and of the water table perched on it (m).
+
+    The frost table is the top of the first level at or below freezing that has a level
+    above freezing over it; the surface if the top level is at or below freezing; the top
+    of the lowest level if no such level exists (then nothing is perched). The perched
+    water table is the frost table itself unless the water table (``zwt``, of the step
+    before) lies below a frozen frost table and some level above it is thawed: then,
+    searching upward from the frost table, the first level whose water (liquid and ice)
+    fills 90 % of the pores or less lies above the perched water table, and its depth is
+    interpolated between that level's node and the next by their relative saturations; if
+    that level is the wetter of the two, the perched water table is at its top. If every
+    level is wetter than 90 %, the top level takes that part.
+
+    Differs from CLM: where the two levels of the interpolation are equally saturated CLM
+    divides by zero; here the perched water table is then at the top of the upper one, as
+    when it is the wetter.
+
+    Not in CLM-ml v2.
+
+    Fortran reference: CTSM SoilHydrologyMod.F90::PerchedWaterTable.
+
+    Args:
+        t_soisno: (n,) soil temperature (K).
+        h2osoi_liq, h2osoi_ice: (n,) liquid water and ice (kg m⁻²).
+        zwt: water table depth (m).
+        watsat: (n,) porosity; dz, z: (n,) thickness and node depth (m).
+        zi: (n + 1,) interface depths (m).
+
+    Returns:
+        ``(frost_table, zwt_perched)``.
+    """
+    n = t_soisno.shape[0]
+    level = jnp.arange(n)
+    # the first frozen level under a thawed one
+    crossing = (t_soisno[:-1] > tfrz) & (t_soisno[1:] <= tfrz)
+    k_frz = jnp.where(
+        jnp.any(crossing), jnp.argmax(crossing) + 1, jnp.where(t_soisno[0] > tfrz, n - 1, 0)
+    )
+    frost_table = zi[k_frz]
+    frozen = t_soisno[k_frz] <= tfrz
+
+    s = (h2osoi_liq / (dz * denh2o) + h2osoi_ice / (dz * denice)) / watsat
+    unsaturated = (s <= SAT_LEV) & (level <= k_frz)
+    k_perch = jnp.max(jnp.where(unsaturated, level, 0))  # 0 also when no level is unsaturated
+    k_perch = jnp.where(frozen, k_perch, k_frz)
+
+    below = jnp.minimum(k_perch + 1, n - 1)
+    s1, s2 = s[k_perch], s[below]
+    interpolate = s2 > s1
+    m = (z[below] - z[k_perch]) / jnp.where(interpolate, s2 - s1, 1.0)
+    b = z[below] - m * s2
+    perched = jnp.where(interpolate, jnp.maximum(0.0, m * SAT_LEV + b), zi[k_perch])
+    water_table_above = (zwt < frost_table) & frozen
+    search = ~water_table_above & (k_frz > 0) & (k_frz > k_perch)
+    return frost_table, jnp.where(search, perched, frost_table)
+
+
+def perched_drainage(
+    h2osoi_liq: Array,
+    frost_table,
+    zwt_perched,
+    watsat: Array,
+    hksat: Array,
+    sucsat: Array,
+    bsw: Array,
+    dz: Array,
+    zi: Array,
+    nbedrock,
+    topo_slope,
+    dtime,
+    perched_baseflow_scalar,
+    aq_sp_yield_min,
+) -> tuple[Array, Array]:
+    """Drain the saturated zone perched on frozen soil over a model step.
+
+    With the perched water table above the frost table, the zone between them drains at
+    ``perched_baseflow_scalar × sin(slope) × (mean saturated conductivity of its levels) ×
+    (frost table depth − perched water table depth)``. The water is taken level by level
+    from the one holding the perched water table down to the one above the frost table;
+    each gives at most what lies between the perched water table (or its own top) and its
+    bottom, times its specific yield (from the retention curve, at least
+    ``aq_sp_yield_min``). What the levels cannot give is not drained. A level is not
+    asked whether it holds that much liquid water, as in CLM (the drainage of a step is a
+    small fraction of a millimetre); the drainage of the saturated zone that follows
+    restores the minimum water of every level.
+
+    Not in CLM-ml v2. Not translated: CLM's branches for hillslope columns.
+
+    Fortran reference: CTSM SoilHydrologyMod.F90::PerchedLateralFlow.
+
+    Args:
+        h2osoi_liq: (n,) liquid water (kg m⁻²).
+        frost_table, zwt_perched: depths (m) from :func:`perched_water_table`.
+        watsat, hksat, sucsat, bsw: (n,) porosity, conductivity at saturation (mm s⁻¹),
+            suction at saturation (mm), Clapp-Hornberger *b*.
+        dz: (n,) thickness (m); zi: (n + 1,) interface depths (m).
+        nbedrock: number of levels above the bedrock.
+        topo_slope: topographic slope (degrees); dtime: model step (s).
+        perched_baseflow_scalar, aq_sp_yield_min: CLM parameters.
+
+    Returns:
+        ``(h2osoi_liq, qflx_drain_perched)``: the liquid water (kg m⁻²) and the drainage
+        (mm s⁻¹).
+    """
+    n = h2osoi_liq.shape[0]
+    level = jnp.arange(n)
+    above_bedrock = level < nbedrock
+
+    def level_of(depth):
+        """The level above the bedrock that holds ``depth``; the lowest one if none does."""
+        holds = (depth >= zi[:-1]) & (depth < zi[1:]) & above_bedrock
+        return jnp.where(jnp.any(holds), jnp.argmax(holds), nbedrock - 1)
+
+    k_frost, k_perch = level_of(frost_table), level_of(zwt_perched)
+    zone = (level >= k_perch) & (level < k_frost)
+
+    q_perch_max = perched_baseflow_scalar * jnp.sin(topo_slope * (math.pi / 180.0))
+    q_perch = _sequential_sum(jnp.where(zone, hksat * dz, 0.0))
+    wtsub = _sequential_sum(jnp.where(zone, dz, 0.0))
+    q_perch = jnp.where(wtsub > 0.0, q_perch / jnp.where(wtsub > 0.0, wtsub, 1.0), q_perch)
+    drainage = jnp.where(
+        frost_table > zwt_perched, q_perch_max * q_perch * (frost_table - zwt_perched), 0.0
+    )
+
+    def remove(drainage_tot, row):
+        k, in_zone, watsat_k, sucsat_k, bsw_k, dz_k, zi_k = row
+        s_y = watsat_k * (1.0 - (1.0 + 1.0e3 * zwt_perched / sucsat_k) ** (-1.0 / bsw_k))
+        s_y = jnp.maximum(s_y, aq_sp_yield_min)
+        thickness = jnp.where(k == k_perch, zi_k - zwt_perched, dz_k)
+        layer = jnp.maximum(jnp.minimum(drainage_tot, s_y * thickness * 1.0e3), 0.0)
+        layer = jnp.where(in_zone, layer, 0.0)
+        return drainage_tot - layer, layer
+
+    drainage_tot, removed = jax.lax.scan(
+        remove, drainage * dtime, (level, zone, watsat, sucsat, bsw, dz, zi[1:])
+    )
+    return h2osoi_liq - removed, drainage - drainage_tot / dtime
 
 
 class SubsurfaceDrainage(NamedTuple):

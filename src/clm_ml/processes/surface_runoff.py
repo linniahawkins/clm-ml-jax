@@ -28,6 +28,7 @@ import numpy as np
 from jax import Array
 from jax.scipy.special import erf
 
+from clm_ml.processes.constants import tfrz
 from clm_ml.processes.soil_water import ice_impedance
 
 #: Relative size below which a state that fluxes should have brought to zero is set to zero.
@@ -133,16 +134,23 @@ def pond_fraction(h2osfc, h2osoi_liq_top, micro_sigma, dtime) -> PondFraction:
 # ---------------------------------------------------------------------------
 
 
-def saturated_fraction(zwt, wtfact, fff) -> Array:
+def saturated_fraction(zwt, wtfact, fff, frost_table=None, zwt_perched=None) -> Array:
     """Fraction of the surface that is saturated (the water table at the surface), from the
     water table depth ``zwt`` (m): ``wtfact`` (the largest fraction, from the topography)
     decaying with depth at the rate ``fff`` (m⁻¹).
 
-    The perched water table that CLM uses instead above frozen soil is not included.
+    With a frost table (``frost_table``, ``zwt_perched``: depths in m from
+    ``drainage.perched_water_table``): where the frost table lies below the perched water
+    table and at or above the water table, the perched water table takes the water
+    table's place.
 
     Fortran reference: SaturatedExcessRunoffMod.F90::ComputeFsatTopmodel.
     """
-    return wtfact * jnp.exp(-0.5 * fff * zwt)
+    fsat = wtfact * jnp.exp(-0.5 * fff * zwt)
+    if frost_table is None:
+        return fsat
+    perched = (frost_table > zwt_perched) & (frost_table <= zwt)
+    return jnp.where(perched, wtfact * jnp.exp(-0.5 * fff * zwt_perched), fsat)
 
 
 def infiltration_capacity(icefrac: Array, hksat: Array, e_ice) -> Array:
@@ -220,6 +228,8 @@ def surface_fluxes(
     e_ice,
     pc,
     mu,
+    frost_table=None,
+    zwt_perched=None,
 ) -> SurfaceFluxes:
     """Partition the water reaching the ground over a model step into surface runoff,
     ponded water and infiltration.
@@ -247,13 +257,16 @@ def surface_fluxes(
         dtime: model step (s).
         fff, e_ice, pc, mu: CLM parameters (decay of the saturated fraction, ice impedance,
             pond connectivity threshold and exponent).
+        frost_table, zwt_perched: depths (m) of the frost table and of the water table
+            perched on it (:func:`saturated_fraction`); without them the soil is taken as
+            unfrozen.
 
     Fortran reference: SaturatedExcessRunoffMod.F90::SaturatedExcessRunoff,
     SoilHydrologyMod.F90::SetQflxInputs, RouteInfiltrationExcess, Infiltration,
     TotalSurfaceRunoff, InfiltrationExcessRunoffMod.F90::InfiltrationExcessRunoff,
     SurfaceWaterMod.F90::UpdateH2osfc.
     """
-    fsat = saturated_fraction(zwt, wtfact, fff)
+    fsat = saturated_fraction(zwt, wtfact, fff, frost_table, zwt_perched)
     qflx_sat_excess_surf = fsat * qflx_rain_plus_snomelt
 
     available = qflx_rain_plus_snomelt - qflx_sat_excess_surf
@@ -289,6 +302,55 @@ def surface_fluxes(
         qflx_infl=qflx_in_soil_limited + qflx_h2osfc_drain,
         qflx_surf=qflx_sat_excess_surf + qflx_h2osfc_surf,
     )
+
+
+# ---------------------------------------------------------------------------
+# Evaporation, sublimation, dew and frost
+# ---------------------------------------------------------------------------
+
+
+class GroundVaporFluxes(NamedTuple):
+    qflx_liqevap_from_top_layer: Array  # evaporation of liquid water (mm/s)
+    qflx_solidevap_from_top_layer: Array  # sublimation of ice (mm/s)
+    qflx_liqdew_to_top_layer: Array  # dew (mm/s)
+    qflx_soliddew_to_top_layer: Array  # frost (mm/s)
+
+
+def ground_vapor_fluxes(
+    qflx_evap, h2osoi_liq_top, h2osoi_ice_top, t_grnd, frac_h2osfc, dtime
+) -> GroundVaporFluxes:
+    """The water vapour flux of the soil surface ``qflx_evap`` (mm s⁻¹, positive to the
+    air, per unit area of ground outside the pond) divided into its four parts.
+
+    A flux to the air is taken from the liquid water and the ice of the top soil level in
+    their proportion (all as liquid from a level with no water); sublimation is at most the
+    ice of the level in a step, and what exceeds it is taken as liquid. A flux to the
+    ground is frost where the ground temperature ``t_grnd`` (K) is below freezing, dew
+    otherwise.
+
+    Not in CLM-ml v2.
+
+    Fortran reference: CTSM SoilFluxesMod.F90::SoilFluxes (a column without snow layers).
+    """
+    upward = qflx_evap >= 0.0
+    water = h2osoi_liq_top + h2osoi_ice_top
+    wet = water > 0.0
+    liquid = jnp.where(
+        wet, jnp.maximum(qflx_evap * (h2osoi_liq_top / jnp.where(wet, water, 1.0)), 0.0), 0.0
+    )
+    liqevap = jnp.where(upward, liquid, 0.0)
+    solidevap = jnp.where(upward, qflx_evap - liquid, 0.0)
+    cold = t_grnd < tfrz
+    soliddew = jnp.where(~upward & cold, jnp.abs(qflx_evap), 0.0)
+    liqdew = jnp.where(~upward & ~cold, jnp.abs(qflx_evap), 0.0)
+
+    # sublimation is limited to the ice; evaporation of liquid water is not limited
+    ground = frac_h2osfc < 1.0
+    limit = h2osoi_ice_top / (dtime * jnp.where(ground, 1.0 - frac_h2osfc, 1.0))
+    limited = ground & (solidevap >= limit)
+    liqevap = jnp.where(limited, liqevap + (solidevap - limit), liqevap)
+    solidevap = jnp.where(limited, limit, solidevap)
+    return GroundVaporFluxes(liqevap, solidevap, liqdew, soliddew)
 
 
 # ---------------------------------------------------------------------------

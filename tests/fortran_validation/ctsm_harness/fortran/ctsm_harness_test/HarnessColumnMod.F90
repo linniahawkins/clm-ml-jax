@@ -3,10 +3,10 @@ module HarnessColumnMod
   ! One vegetated soil column for the harness drivers, set up with CTSM's unit-test helpers:
   ! CLM's 20-level soil structure (25 ground levels), the fields that the soil water routines
   ! read, the soil water namelists of the CLM6 defaults and the parameters of
-  ! ctsm60_params.c251211.nc. The column is unfrozen and snow-free: no snow layers, no snow
-  ! cover, and a frost table and perched water table as CLM's PerchedWaterTable sets them for
-  ! soil above freezing. A driver fills the soil properties and the water state of its case
-  ! and calls the CLM routine.
+  ! ctsm60_params.c251211.nc. The column starts unfrozen and has no snow layers and no snow
+  ! cover; its frost table and perched water table are as CLM's PerchedWaterTable sets them
+  ! for soil above freezing. A driver fills the soil properties, the temperature and the
+  ! water state of its case and calls the CLM routine.
 
   use shr_kind_mod, only : r8 => shr_kind_r8
   use unittestSubgridMod, only : bounds, unittest_subgrid_teardown
@@ -14,7 +14,7 @@ module HarnessColumnMod
   use unittestSimpleSubgridSetupsMod, only : setup_single_veg_patch
   use unittestTimeManagerMod, only : unittest_timemgr_setup, unittest_timemgr_teardown
   use unittestWaterTypeFactory, only : unittest_water_type_factory_type
-  use clm_varpar, only : nlevgrnd, nlevsno
+  use clm_varpar, only : nlevgrnd, nlevsno, nlevurb, nlevmaxurbgrnd
   use clm_varctl, only : use_bedrock, use_hydrstress
   use ColumnType, only : col
   use WaterType, only : water_type
@@ -23,6 +23,7 @@ module HarnessColumnMod
   use TemperatureType, only : temperature_type
   use EnergyFluxType, only : energyflux_type
   use CanopyStateType, only : canopystate_type
+  use UrbanParamsType, only : urbanparams_type
   use SoilWaterRetentionCurveClappHornberg1978Mod, only : &
        soil_water_retention_curve_clapp_hornberg_1978_type
   use SoilWaterMovementMod, only : init_soilwater_movement, params_inst
@@ -58,6 +59,7 @@ module HarnessColumnMod
      type(temperature_type) :: temperature_inst
      type(energyflux_type) :: energyflux_inst
      type(canopystate_type) :: canopystate_inst
+     type(urbanparams_type) :: urbanparams_inst
      type(soil_water_retention_curve_clapp_hornberg_1978_type) :: retention_curve
      type(saturated_excess_runoff_type) :: saturated_excess_runoff_inst
      type(infiltration_excess_runoff_type) :: infiltration_excess_runoff_inst
@@ -162,6 +164,42 @@ contains
     this%soilhydrology_inst%qout_col(c,:) = 0._r8
     allocate(this%temperature_inst%t_soisno_col(c:c,-nlevsno+1:nlevgrnd))
     this%temperature_inst%t_soisno_col(c,:) = 285._r8
+    ! What the phase change routine reads and writes besides the soil temperature
+    allocate(this%temperature_inst%fact_col(c:c,-nlevsno+1:nlevmaxurbgrnd), &
+         this%temperature_inst%imelt_col(c:c,-nlevsno+1:nlevmaxurbgrnd), &
+         this%temperature_inst%xmf_col(c:c), &
+         this%energyflux_inst%eflx_snomelt_col(c:c), &
+         this%energyflux_inst%eflx_snomelt_r_col(c:c), &
+         this%energyflux_inst%eflx_snomelt_u_col(c:c))
+    this%temperature_inst%fact_col(c,:) = 1.e-3_r8
+    this%temperature_inst%imelt_col(c,:) = 0
+    this%temperature_inst%xmf_col(c) = 0._r8
+    ! What the thermal properties routine reads and writes: the soil's thermal fields
+    ! (placeholders: a loam), and the urban fields that it names (there is no urban column)
+    allocate(this%soilstate_inst%thk_col(c:c,-nlevsno+1:nlevmaxurbgrnd), &
+         this%soilstate_inst%tkmg_col(c:c,nlevgrnd), &
+         this%soilstate_inst%tkdry_col(c:c,nlevgrnd), &
+         this%soilstate_inst%csol_col(c:c,nlevgrnd), &
+         this%soilstate_inst%tksatu_col(c:c,nlevgrnd))
+    this%soilstate_inst%thk_col(c,:) = 0._r8
+    this%soilstate_inst%tkmg_col(c,:) = 3._r8
+    this%soilstate_inst%tkdry_col(c,:) = 0.25_r8
+    this%soilstate_inst%csol_col(c,:) = 2.2e6_r8
+    this%soilstate_inst%tksatu_col(c,:) = 0._r8
+    allocate(this%urbanparams_inst%nlev_improad(bounds%begl:bounds%endl), &
+         this%urbanparams_inst%tk_wall(bounds%begl:bounds%endl,nlevurb), &
+         this%urbanparams_inst%tk_roof(bounds%begl:bounds%endl,nlevurb), &
+         this%urbanparams_inst%tk_improad(bounds%begl:bounds%endl,nlevurb), &
+         this%urbanparams_inst%cv_wall(bounds%begl:bounds%endl,nlevurb), &
+         this%urbanparams_inst%cv_roof(bounds%begl:bounds%endl,nlevurb), &
+         this%urbanparams_inst%cv_improad(bounds%begl:bounds%endl,nlevurb))
+    this%urbanparams_inst%nlev_improad(:) = 0
+    this%urbanparams_inst%tk_wall(:,:) = 1._r8
+    this%urbanparams_inst%tk_roof(:,:) = 1._r8
+    this%urbanparams_inst%tk_improad(:,:) = 1._r8
+    this%urbanparams_inst%cv_wall(:,:) = 1._r8
+    this%urbanparams_inst%cv_roof(:,:) = 1._r8
+    this%urbanparams_inst%cv_improad(:,:) = 1._r8
 
     ! CLM6 defaults: soil depth to bedrock, root uptake from plant hydraulic stress, the
     ! adaptive moisture-form solver with a flux at the surface and no flux at the bottom

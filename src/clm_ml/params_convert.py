@@ -183,9 +183,17 @@ def params_text(table: dict, header: list[str], hydrology: Mapping | None = None
     for h in HYDROLOGY_SPECS:
         value = h.default if hydrology is None else hydrology[h.name]
         where = "" if h.source == "parameter file" else f"; a CLM {h.source} value"
-        text += f"  # {h.description} ({h.units}{where}).\n  {h.name}: {float(value)!r}\n"
+        text += f"  # {h.description} ({h.units}{where}).\n  {h.name}: {_yaml_float(value)}\n"
     text += yaml.safe_dump({"pft": table}, sort_keys=False, width=100)
     return text
+
+
+def _yaml_float(value) -> str:
+    """A number as YAML reads it back as a number: with a decimal point before an exponent
+    (``1.0e-05``; YAML takes ``1e-05`` for text)."""
+    text = repr(float(value))
+    mantissa, e, exponent = text.partition("e")
+    return text if not e or "." in mantissa else f"{mantissa}.0e{exponent}"
 
 
 def write_table(

@@ -82,6 +82,7 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O91 | The comparison with Fortran over May 2007 fails in one column: leaf water potential of the top layer, correlation 0.999896 (as on `main`; found in Phase 10.8) | bug or known difference, not diagnosed | after Phase 10 | M |
 | O92 | ~~A run stops at the first 31 December: the step that ends at midnight of 1 January takes its middle from the calendar days 365.96 and 1.0 (found in Phase 10.8)~~ (closed 2026-11-25: decision 149) | bug | closed | M |
 | O93 | US-MMS 2012: CLM-ML's transpiration hardly falls in the drought with CLM-ml's roots (the default); with CLM's roots (decision 151) the latent heat follows CLM, GPP still falls less | science question | after Phase 11 | M |
+| O94 | CLM's phase change overshoots when a level freezes to its supercooled water: results sensitive to round-off while a fine soil freezes, exact derivatives unbounded (a stabilized derivative rule is the default, decision 163); a scheme without the overshoot would differ from CLM (found in Phase 12.5) | science question | after Phase 12 | M |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
@@ -927,6 +928,30 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   `PhotosynthesisHydraulicStress`, which the harness cannot call).
 - **Source:** Phase 10 steps 10.1 and 10.8; decision 148 (the US-MMS experiment folder is
   not in the repository: `git show 495442e:experiments/us_mms_2012/README.md`).
+
+### O94. CLM's phase change overshoots where a level freezes to its supercooled water
+- **Kind:** science question · **Target:** after Phase 12 · **Decides:** M
+- **What:** `Phasechange_beta` takes the liquid water that may stay unfrozen at the
+  temperature *before* the change, freezes the rest, and then warms the level with the heat
+  of fusion. The level ends warmer than its liquid water allows, cannot melt below 0 °C,
+  and waits a step before it freezes again. The temperature after has the slope `1 − gain`
+  with respect to the temperature before; `gain` (heat of fusion of the supercooled water's
+  change per degree over the heat capacity) is above 2 from 0 °C to about −1.5 °C in loam
+  and clay. The translation is CLM's, to round-off (decisions 159, 162).
+- **Measured (sequences of decision 162):** two runs that start 1e-12 apart differ by up to
+  0.7 % in a level's ice and 1e-2 K while a clay freezes, and agree again afterwards;
+  exact derivatives reach 1e21. A run with freezing soil cannot meet the noise-twin
+  tolerance of the regression policy (4e-11).
+- **Now:** forward values are CLM's. Derivatives use a stabilized rule by default
+  (`numerics.phase_change_derivative`, decision 163): bounded, within 25 % of finite
+  changes of the sequence means.
+- **Option not built:** a phase change in which the liquid water left is the supercooled
+  water of the temperature *after* the change (one equation per level, the root that the
+  stabilized rule already finds). No overshoot, a stable derivative that is the exact one,
+  energy conserved as now; but not CLM's scheme, so results would differ from CLM's by the
+  size of the overshoot. A science change: the maintainer's.
+- **Source:** Phase 12 step 12.5, 2026-11-26; `tests/fortran_validation/
+  test_golden_frozen_sequences.py`.
 
 ## 4. Housekeeping and repository organization (8a)
 

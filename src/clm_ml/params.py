@@ -221,6 +221,9 @@ HYDROLOGY_SPECS: tuple[HydrologySpec, ...] = (
     HydrologySpec("slopebeta", "-", "Exponent of the microtopography's dependence on the "
                   "slope", -3.0),
     HydrologySpec("slopemax", "degrees", "Slope scale of the microtopography", 0.4),
+    HydrologySpec("perched_baseflow_scalar", "m-1", "Drainage of a saturated zone perched "
+                  "on frozen soil: this x sine of the slope x its mean saturated "
+                  "conductivity x its thickness", 1.0e-5),
 )  # fmt: skip
 HYDROLOGY_NAMES: tuple[str, ...] = tuple(s.name for s in HYDROLOGY_SPECS)
 HYDROLOGY_DEFAULTS: Mapping[str, float] = {s.name: s.default for s in HYDROLOGY_SPECS}

@@ -1,0 +1,289 @@
+module test_frozen_sequence
+
+  ! Driver of CLM's soil routines over many model steps for a column whose soil freezes and
+  ! thaws, without snow layers and with the CLM6 default settings: for each case of
+  ! cases/frozen_sequence.nml the routines are called step after step in CLM's order, the
+  ! state carried from one step to the next. The temperature solution is not CLM's to give
+  ! (the multilayer canopy has its own): it is stood for by a relaxation of every level's
+  ! temperature toward a temperature given for each step, faster near the surface, applied
+  ! before the phase change.
+  !
+  ! The order is that of clm_driver: new snow (HandleNewSnow: the statement of
+  ! UpdateState_AddNewSnow for a column without snow layers, copied), UpdateFracH2oSfc,
+  ! SoilTemperature (SoilThermProp for the heat capacity, the relaxation of the temperature,
+  ! Phasechange_beta with the heat flux into the soil given: dhsdT = 0 and fact = step /
+  ! heat capacity), SoilFluxes (the partition of the ground's vapour flux: statements
+  ! copied), HydrologyNoDrainage (the water reaching the soil: the statement of
+  ! SumFlux_AddSnowPercolation for a column without snow layers, copied; then
+  ! SetSoilWaterFractions to RenewCondensation, as in test_hydrology_sequence) and
+  ! HydrologyDrainage (PerchedLateralFlow, SubsurfaceLateralFlow).
+
+  use funit
+  use shr_kind_mod, only : r8 => shr_kind_r8
+  use unittestSubgridMod, only : bounds
+  use unittestTimeManagerMod, only : unittest_timemgr_setup, unittest_timemgr_teardown
+  use clm_varcon, only : tfrz
+  use clm_varpar, only : nlevgrnd, nlevsno, nlevmaxurbgrnd
+  use ColumnType, only : col
+  use LandunitType, only : lun
+  use SoilTemperatureMod, only : Phasechange_beta, SoilThermProp
+  use SoilHydrologyMod, only : SetSoilWaterFractions, SetQflxInputs, RouteInfiltrationExcess, &
+       Infiltration, TotalSurfaceRunoff, PerchedWaterTable, ThetaBasedWaterTable, &
+       RenewCondensation, PerchedLateralFlow, SubsurfaceLateralFlow
+  use SurfaceWaterMod, only : UpdateFracH2oSfc, UpdateH2osfc
+  use SoilWaterMovementMod, only : SoilWater
+  use HarnessColumnMod, only : harness_column_type, harness_column_setup, &
+       harness_column_teardown, harness_nlevsoi
+  use HarnessIOMod, only : open_cases, open_output, begin_case, begin_step, put
+
+  implicit none
+
+  integer, parameter :: max_steps = 400   ! longest sequence
+
+  @TestCase
+  type, extends(TestCase) :: TestFrozenSequence
+     type(harness_column_type) :: column
+   contains
+     procedure :: setUp
+     procedure :: tearDown
+  end type TestFrozenSequence
+
+contains
+
+  subroutine setUp(this)
+    class(TestFrozenSequence), intent(inout) :: this
+    call harness_column_setup(this%column, dtime=1800, nbedrock=harness_nlevsoi)
+  end subroutine setUp
+
+  subroutine tearDown(this)
+    class(TestFrozenSequence), intent(inout) :: this
+    call harness_column_teardown(this%column)
+  end subroutine tearDown
+
+  @Test
+  subroutine drive_frozen_sequence(this)
+    ! Step k has the rain qflx_liq_grnd(k) and the snow qflx_snow_grnd(k) reaching the
+    ! ground, the water vapour flux of the ground qflx_ev(k) (positive to the air; the pond
+    ! has the same per unit area), the root uptake uptake(k)*root_fraction of each level,
+    ! and the temperature change heat_rate*exp(-z/heat_depth)*(t_target(k) - t) of each
+    ! level.
+    class(TestFrozenSequence), intent(inout) :: this
+    integer :: dtime, nbedrock, nsteps
+    real(r8) :: wtfact, topo_slope, micro_sigma, h2osfc_thresh, h2osfc, h2osno_no_layers, &
+         heat_depth, heat_rate
+    real(r8), dimension(harness_nlevsoi) :: watsat, hksat, bsw, sucsat, tkmg, tkdry, csol, &
+         t_soisno, h2osoi_liq, h2osoi_ice, root_fraction
+    real(r8), dimension(max_steps) :: qflx_liq_grnd, qflx_snow_grnd, qflx_ev, uptake, &
+         t_target
+    real(r8) :: tk(bounds%begc:bounds%endc,-nlevsno+1:nlevmaxurbgrnd)
+    real(r8) :: cv(bounds%begc:bounds%endc,-nlevsno+1:nlevmaxurbgrnd)
+    real(r8) :: tk_h2osfc(bounds%begc:bounds%endc)
+    real(r8) :: dhsdT(bounds%begc:bounds%endc)
+    real(r8) :: t_grnd, qflx_ev_snow, evaporation_limit, evaporation_demand
+    real(r8) :: qflx_liqevap_from_top_layer, qflx_solidevap_from_top_layer, &
+         qflx_soliddew_to_top_layer, qflx_liqdew_to_top_layer
+    integer :: nin, nout, ios, i, j, k, c, current_dtime
+    logical :: found
+    namelist /case/ dtime, nbedrock, nsteps, wtfact, topo_slope, micro_sigma, h2osfc_thresh, &
+         h2osfc, h2osno_no_layers, heat_depth, heat_rate, watsat, hksat, bsw, sucsat, tkmg, tkdry, &
+         csol, t_soisno, h2osoi_liq, h2osoi_ice, root_fraction, qflx_liq_grnd, &
+         qflx_snow_grnd, qflx_ev, uptake, t_target
+
+    call open_cases('frozen_sequence', nin, found)
+    if (.not. found) return
+    call open_output('frozen_sequence', nout)
+    c = this%column%c
+    current_dtime = 1800
+    dhsdT(:) = 0._r8
+    i = 0
+    associate(column => this%column, &
+         soilstate => this%column%soilstate_inst, &
+         soilhydrology => this%column%soilhydrology_inst, &
+         temperature => this%column%temperature_inst, &
+         water => this%column%water_inst, &
+         wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst, &
+         wdb => this%column%water_inst%waterdiagnosticbulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       @assertTrue(nsteps <= max_steps)
+       if (dtime /= current_dtime) then
+          call unittest_timemgr_teardown()
+          call unittest_timemgr_setup(dtime=dtime)
+          current_dtime = dtime
+       end if
+
+       ! The column's constants and its initial state. The ground levels below the soil
+       ! levels hold no water and keep their temperature.
+       col%snl(c) = 0
+       col%nbedrock(c) = nbedrock
+       col%topo_slope(c) = topo_slope
+       col%micro_sigma(c) = micro_sigma
+       soilstate%watsat_col(c,1:harness_nlevsoi) = watsat
+       soilstate%hksat_col(c,1:harness_nlevsoi) = hksat
+       soilstate%bsw_col(c,1:harness_nlevsoi) = bsw
+       soilstate%sucsat_col(c,1:harness_nlevsoi) = sucsat
+       soilstate%tkmg_col(c,1:harness_nlevsoi) = tkmg
+       soilstate%tkdry_col(c,1:harness_nlevsoi) = tkdry
+       soilstate%csol_col(c,1:harness_nlevsoi) = csol
+       soilstate%wtfact_col(c) = wtfact
+       soilhydrology%h2osfc_thresh_col(c) = h2osfc_thresh
+       temperature%t_soisno_col(c,:) = 285._r8
+       temperature%t_soisno_col(c,1:harness_nlevsoi) = t_soisno
+       wsb%h2osoi_liq_col(c,:) = 0._r8
+       wsb%h2osoi_ice_col(c,:) = 0._r8
+       wsb%h2osoi_liq_col(c,1:harness_nlevsoi) = h2osoi_liq
+       wsb%h2osoi_ice_col(c,1:harness_nlevsoi) = h2osoi_ice
+       wsb%excess_ice_col(c,:) = 0._r8
+       wsb%h2osfc_col(c) = h2osfc
+       wsb%h2osno_no_layers_col(c) = h2osno_no_layers
+       wdb%snow_depth_col(c) = 0._r8
+       wdb%frac_sno_col(c) = 0._r8
+       wdb%frac_sno_eff_col(c) = 0._r8
+       wdb%snomelt_accum_col(c) = 0._r8
+       ! the frost table and the perched water table of a column not yet looked at: as for
+       ! unfrozen soil (the top of the lowest soil level)
+       soilhydrology%frost_table_col(c) = col%zi(c,harness_nlevsoi-1)
+       soilhydrology%zwt_perched_col(c) = col%zi(c,harness_nlevsoi-1)
+       call ThetaBasedWaterTable(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            column%num_urbanc, column%filter_urbanc, soilhydrology, soilstate, wsb, wfb)
+       call begin_case(nout, i)
+       call put(nout, 'zwt_initial', soilhydrology%zwt_col(c))
+
+       do k = 1, nsteps
+          ! clm_driver, before the fluxes: new snow, then the ponded fraction.
+          ! Copied from SnowHydrologyMod.F90::UpdateState_AddNewSnow (snl = 0)
+          wsb%h2osno_no_layers_col(c) = wsb%h2osno_no_layers_col(c) + (qflx_snow_grnd(k) * dtime)
+          call UpdateFracH2oSfc(bounds, column%num_hydrologyc, column%filter_hydrologyc, water)
+          wdb%frac_h2osfc_nosnow_col(c) = wdb%frac_h2osfc_col(c)
+          t_grnd = temperature%t_soisno_col(c,1)
+
+          ! SoilTemperature: the heat capacity, the temperature solution (given), the
+          ! phase change
+          call SoilThermProp(bounds, column%num_urbanc, column%filter_urbanc, &
+               column%num_hydrologyc, column%filter_hydrologyc, tk, cv, tk_h2osfc, &
+               column%urbanparams_inst, temperature, wsb, wdb, soilstate)
+          do j = 1, nlevgrnd
+             temperature%fact_col(c,j) = dtime / cv(c,j)
+          end do
+          do j = 1, harness_nlevsoi
+             temperature%t_soisno_col(c,j) = temperature%t_soisno_col(c,j) &
+                  + heat_rate*exp(-col%z(c,j)/heat_depth) &
+                  *(t_target(k) - temperature%t_soisno_col(c,j))
+          end do
+          call Phasechange_beta(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+               dhsdT, soilstate, wsb, wdb, wfb, column%energyflux_inst, temperature)
+
+          ! SoilFluxes: the ground's vapour flux divided into its four parts.
+          ! Copied from SoilFluxesMod.F90::SoilFluxes (not urban, snl = 0: j = 1)
+          qflx_ev_snow = qflx_ev(k)
+          qflx_liqevap_from_top_layer   = 0._r8
+          qflx_solidevap_from_top_layer = 0._r8
+          qflx_soliddew_to_top_layer    = 0._r8
+          qflx_liqdew_to_top_layer      = 0._r8
+          if (qflx_ev_snow >= 0._r8) then
+             if ((wsb%h2osoi_liq_col(c,1)+wsb%h2osoi_ice_col(c,1)) > 0._r8) then
+                qflx_liqevap_from_top_layer = max(qflx_ev_snow*(wsb%h2osoi_liq_col(c,1)/ &
+                     (wsb%h2osoi_liq_col(c,1)+wsb%h2osoi_ice_col(c,1))), 0._r8)
+             else
+                qflx_liqevap_from_top_layer = 0._r8
+             end if
+             qflx_solidevap_from_top_layer = qflx_ev_snow - qflx_liqevap_from_top_layer
+          else
+             if (t_grnd < tfrz) then
+                qflx_soliddew_to_top_layer = abs(qflx_ev_snow)
+             else
+                qflx_liqdew_to_top_layer = abs(qflx_ev_snow)
+             end if
+          end if
+          if (wdb%frac_h2osfc_col(c) < 1._r8) then
+             evaporation_limit = wsb%h2osoi_ice_col(c,1)/(dtime*(1._r8 - wdb%frac_h2osfc_col(c)))
+             if (qflx_solidevap_from_top_layer >= evaporation_limit) then
+                evaporation_demand = qflx_solidevap_from_top_layer
+                qflx_solidevap_from_top_layer &
+                     = evaporation_limit
+                qflx_liqevap_from_top_layer  &
+                     = qflx_liqevap_from_top_layer  &
+                     + (evaporation_demand - evaporation_limit)
+             endif
+          endif
+          wfb%qflx_liqevap_from_top_layer_col(c) = qflx_liqevap_from_top_layer
+          wfb%qflx_solidevap_from_top_layer_col(c) = qflx_solidevap_from_top_layer
+          wfb%qflx_soliddew_to_top_layer_col(c) = qflx_soliddew_to_top_layer
+          wfb%qflx_liqdew_to_top_layer_col(c) = qflx_liqdew_to_top_layer
+          wfb%qflx_ev_h2osfc_col(c) = qflx_ev(k)
+          wfb%qflx_rootsoi_col(c,1:harness_nlevsoi) = uptake(k)*root_fraction
+
+          ! HydrologyNoDrainage.
+          ! Copied from SnowHydrologyMod.F90::SumFlux_AddSnowPercolation (no snow layers)
+          wfb%qflx_rain_plus_snomelt_col(c) = qflx_liq_grnd(k) + wfb%qflx_snomelt_col(c)
+          call SetSoilWaterFractions(bounds, column%num_hydrologyc, &
+               column%filter_hydrologyc, soilhydrology, soilstate, wsb)
+          call column%saturated_excess_runoff_inst%SaturatedExcessRunoff(bounds, &
+               column%num_hydrologyc, column%filter_hydrologyc, lun, col, soilhydrology, &
+               soilstate, wfb)
+          call SetQflxInputs(bounds, column%num_hydrologyc, column%filter_hydrologyc, wfb, wdb)
+          call column%infiltration_excess_runoff_inst%InfiltrationExcessRunoff(bounds, &
+               column%num_hydrologyc, column%filter_hydrologyc, soilhydrology, soilstate, &
+               column%saturated_excess_runoff_inst, wfb, wdb)
+          call RouteInfiltrationExcess(bounds, column%num_hydrologyc, &
+               column%filter_hydrologyc, wfb, soilhydrology)
+          call UpdateH2osfc(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+               column%infiltration_excess_runoff_inst, column%energyflux_inst, &
+               soilhydrology, wfb, wsb, wdb)
+          call Infiltration(bounds, column%num_hydrologyc, column%filter_hydrologyc, wfb)
+          call TotalSurfaceRunoff(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+               column%num_urbanc, column%filter_urbanc, wfb, soilhydrology, wsb)
+          call SoilWater(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+               column%num_urbanc, column%filter_urbanc, soilhydrology, soilstate, wfb, wsb, &
+               column%temperature_inst, column%canopystate_inst, column%energyflux_inst, &
+               column%retention_curve)
+          call PerchedWaterTable(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+               column%num_urbanc, column%filter_urbanc, soilhydrology, soilstate, &
+               column%temperature_inst, wsb, wfb)
+          call ThetaBasedWaterTable(bounds, column%num_hydrologyc, &
+               column%filter_hydrologyc, column%num_urbanc, column%filter_urbanc, &
+               soilhydrology, soilstate, wsb, wfb)
+          call RenewCondensation(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+               column%num_urbanc, column%filter_urbanc, soilhydrology, soilstate, wsb, wdb, &
+               wfb)
+
+          ! HydrologyDrainage
+          call PerchedLateralFlow(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+               soilhydrology, soilstate, wsb, wfb, water%wateratm2lndbulk_inst)
+          call SubsurfaceLateralFlow(bounds, column%num_hydrologyc, &
+               column%filter_hydrologyc, column%num_urbanc, column%filter_urbanc, &
+               soilhydrology, soilstate, wsb, wfb, water%wateratm2lndbulk_inst)
+
+          call begin_step(nout, k)
+          call put(nout, 't_soisno', temperature%t_soisno_col(c,1:harness_nlevsoi))
+          call put(nout, 'h2osoi_liq', wsb%h2osoi_liq_col(c,1:harness_nlevsoi))
+          call put(nout, 'h2osoi_ice', wsb%h2osoi_ice_col(c,1:harness_nlevsoi))
+          call put(nout, 'h2osno_no_layers', wsb%h2osno_no_layers_col(c))
+          call put(nout, 'h2osfc', wsb%h2osfc_col(c))
+          call put(nout, 'zwt', soilhydrology%zwt_col(c))
+          call put(nout, 'frost_table', soilhydrology%frost_table_col(c))
+          call put(nout, 'zwt_perched', soilhydrology%zwt_perched_col(c))
+          call put(nout, 'frac_h2osfc', wdb%frac_h2osfc_col(c))
+          call put(nout, 'fsat', column%saturated_excess_runoff_inst%fsat_col(c))
+          call put(nout, 'xmf', temperature%xmf_col(c))
+          call put(nout, 'qflx_snomelt', wfb%qflx_snomelt_col(c))
+          call put(nout, 'qflx_infl', wfb%qflx_infl_col(c))
+          call put(nout, 'qflx_surf', wfb%qflx_surf_col(c))
+          call put(nout, 'qflx_drain', wfb%qflx_drain_col(c))
+          call put(nout, 'qflx_drain_perched', wfb%qflx_drain_perched_col(c))
+          call put(nout, 'qflx_ice_runoff_xs', wfb%qflx_ice_runoff_xs_col(c))
+          call put(nout, 'qflx_solidevap_from_top_layer', qflx_solidevap_from_top_layer)
+          call put(nout, 'qflx_soliddew_to_top_layer', qflx_soliddew_to_top_layer)
+          call put(nout, 'num_substeps', nint(soilhydrology%num_substeps_col(c)))
+       end do
+    end do
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_frozen_sequence
+
+end module test_frozen_sequence

@@ -1,0 +1,407 @@
+module test_frozen_soil
+
+  ! Drivers of CLM's routines for frozen soil, for a vegetated column without snow layers
+  ! and with the CLM6 default settings:
+  !
+  ! soil_therm_prop: SoilThermProp, the thermal conductivity and heat capacity of the soil
+  !   levels with liquid water and ice.
+  ! phase_change: Phasechange_beta, the freezing and thawing of soil water after the
+  !   temperature solution, with snow that is not resolved into layers lying on the ground.
+  ! perched_water_table: PerchedWaterTable (the frost table and the water table perched
+  !   on it).
+  ! saturated_fraction: SaturatedExcessRunoff, the saturated fraction of the surface from
+  !   the water table or from the perched water table.
+  ! perched_lateral_flow: PerchedLateralFlow, the drainage of the perched saturated zone.
+  ! evaporation_split: the partition of the ground's water vapour flux into evaporation of
+  !   liquid, sublimation, dew and frost. CLM does it inside SoilFluxes, which cannot be
+  !   called for one column: the statements are copied here from that routine.
+
+  use funit
+  use shr_kind_mod, only : r8 => shr_kind_r8
+  use unittestSubgridMod, only : bounds
+  use unittestTimeManagerMod, only : unittest_timemgr_setup, unittest_timemgr_teardown
+  use clm_varcon, only : tfrz
+  use clm_varpar, only : nlevgrnd, nlevsno, nlevmaxurbgrnd
+  use ColumnType, only : col
+  use LandunitType, only : lun
+  use SoilTemperatureMod, only : Phasechange_beta, SoilThermProp
+  use SoilHydrologyMod, only : PerchedWaterTable, PerchedLateralFlow
+  use HarnessColumnMod, only : harness_column_type, harness_column_setup, &
+       harness_column_teardown, harness_nlevsoi, harness_nlevgrnd
+  use HarnessIOMod, only : open_cases, open_output, begin_case, put
+
+  implicit none
+
+  @TestCase
+  type, extends(TestCase) :: TestFrozenSoil
+     type(harness_column_type) :: column
+     integer :: dtime                     ! the model step the column is set up with (s)
+   contains
+     procedure :: setUp
+     procedure :: tearDown
+     procedure :: set_step
+  end type TestFrozenSoil
+
+contains
+
+  subroutine setUp(this)
+    class(TestFrozenSoil), intent(inout) :: this
+    this%dtime = 1800
+    call harness_column_setup(this%column, dtime=this%dtime, nbedrock=harness_nlevsoi)
+  end subroutine setUp
+
+  subroutine tearDown(this)
+    class(TestFrozenSoil), intent(inout) :: this
+    call harness_column_teardown(this%column)
+  end subroutine tearDown
+
+  subroutine set_step(this, dtime)
+    ! The model step of a case (the time manager is set up again when it changes).
+    class(TestFrozenSoil), intent(inout) :: this
+    integer, intent(in) :: dtime
+
+    if (dtime /= this%dtime) then
+       call unittest_timemgr_teardown()
+       call unittest_timemgr_setup(dtime=dtime)
+       this%dtime = dtime
+    end if
+  end subroutine set_step
+
+  @Test
+  subroutine drive_soil_therm_prop(this)
+    ! Every ground level is given (the soil levels and the levels below them); tk is the
+    ! conductivity at the interface below each level.
+    class(TestFrozenSoil), intent(inout) :: this
+    integer :: nbedrock
+    real(r8) :: h2osfc, h2osno_no_layers
+    real(r8), dimension(harness_nlevgrnd) :: t_soisno, h2osoi_liq, h2osoi_ice, watsat, tkmg, &
+         tkdry, csol
+    real(r8) :: tk(bounds%begc:bounds%endc,-nlevsno+1:nlevmaxurbgrnd)
+    real(r8) :: cv(bounds%begc:bounds%endc,-nlevsno+1:nlevmaxurbgrnd)
+    real(r8) :: tk_h2osfc(bounds%begc:bounds%endc)
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ nbedrock, h2osfc, h2osno_no_layers, t_soisno, h2osoi_liq, h2osoi_ice, &
+         watsat, tkmg, tkdry, csol
+
+    call open_cases('soil_therm_prop', nin, found)
+    if (.not. found) return
+    call open_output('soil_therm_prop', nout)
+    c = this%column%c
+    i = 0
+    associate(column => this%column, &
+         soilstate => this%column%soilstate_inst, &
+         temperature => this%column%temperature_inst, &
+         wsb => this%column%water_inst%waterstatebulk_inst, &
+         wdb => this%column%water_inst%waterdiagnosticbulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       col%snl(c) = 0
+       col%nbedrock(c) = nbedrock
+       soilstate%watsat_col(c,:) = watsat
+       soilstate%tkmg_col(c,:) = tkmg
+       soilstate%tkdry_col(c,:) = tkdry
+       soilstate%csol_col(c,:) = csol
+       temperature%t_soisno_col(c,1:nlevgrnd) = t_soisno
+       wsb%h2osoi_liq_col(c,1:nlevgrnd) = h2osoi_liq
+       wsb%h2osoi_ice_col(c,1:nlevgrnd) = h2osoi_ice
+       wsb%excess_ice_col(c,:) = 0._r8
+       wsb%h2osfc_col(c) = h2osfc
+       wsb%h2osno_no_layers_col(c) = h2osno_no_layers
+       wdb%frac_sno_eff_col(c) = 0._r8
+
+       call SoilThermProp(bounds, column%num_urbanc, column%filter_urbanc, &
+            column%num_hydrologyc, column%filter_hydrologyc, tk, cv, tk_h2osfc, &
+            column%urbanparams_inst, temperature, wsb, wdb, soilstate)
+
+       call begin_case(nout, i)
+       call put(nout, 'thk', soilstate%thk_col(c,1:nlevgrnd))
+       call put(nout, 'tk', tk(c,1:nlevgrnd))
+       call put(nout, 'cv', cv(c,1:nlevgrnd))
+       call put(nout, 'tk_h2osfc', tk_h2osfc(c))
+    end do
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_soil_therm_prop
+
+  @Test
+  subroutine drive_phase_change(this)
+    ! fact is CLM's factor of the temperature solution (the step over the heat capacity,
+    ! K m2 W-1), dhsdT the derivative of the surface heat flux with respect to the ground
+    ! temperature (W m-2 K-1). The ground levels below the soil levels hold no water.
+    class(TestFrozenSoil), intent(inout) :: this
+    integer :: dtime
+    real(r8) :: dhsdT, frac_h2osfc, h2osno_no_layers, snow_depth
+    real(r8), dimension(harness_nlevsoi) :: t_soisno, h2osoi_liq, h2osoi_ice, watsat, &
+         sucsat, bsw, fact
+    real(r8) :: dhsdT_col(bounds%begc:bounds%endc)
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ dtime, dhsdT, frac_h2osfc, h2osno_no_layers, snow_depth, t_soisno, &
+         h2osoi_liq, h2osoi_ice, watsat, sucsat, bsw, fact
+
+    call open_cases('phase_change', nin, found)
+    if (.not. found) return
+    call open_output('phase_change', nout)
+    c = this%column%c
+    i = 0
+    associate(column => this%column, &
+         soilstate => this%column%soilstate_inst, &
+         temperature => this%column%temperature_inst, &
+         wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst, &
+         wdb => this%column%water_inst%waterdiagnosticbulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       call this%set_step(dtime)
+       col%snl(c) = 0
+       soilstate%watsat_col(c,1:harness_nlevsoi) = watsat
+       soilstate%sucsat_col(c,1:harness_nlevsoi) = sucsat
+       soilstate%bsw_col(c,1:harness_nlevsoi) = bsw
+       temperature%t_soisno_col(c,:) = 285._r8
+       temperature%t_soisno_col(c,1:harness_nlevsoi) = t_soisno
+       temperature%fact_col(c,:) = 1.e-3_r8
+       temperature%fact_col(c,1:harness_nlevsoi) = fact
+       wsb%h2osoi_liq_col(c,:) = 0._r8
+       wsb%h2osoi_ice_col(c,:) = 0._r8
+       wsb%h2osoi_liq_col(c,1:harness_nlevsoi) = h2osoi_liq
+       wsb%h2osoi_ice_col(c,1:harness_nlevsoi) = h2osoi_ice
+       wsb%excess_ice_col(c,:) = 0._r8
+       wsb%h2osno_no_layers_col(c) = h2osno_no_layers
+       wdb%snow_depth_col(c) = snow_depth
+       wdb%frac_sno_eff_col(c) = 0._r8
+       wdb%frac_h2osfc_col(c) = frac_h2osfc
+       wdb%snomelt_accum_col(c) = 0._r8
+       dhsdT_col(:) = dhsdT
+
+       call Phasechange_beta(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            dhsdT_col, soilstate, wsb, wdb, wfb, column%energyflux_inst, temperature)
+
+       call begin_case(nout, i)
+       call put(nout, 't_soisno', temperature%t_soisno_col(c,1:harness_nlevsoi))
+       call put(nout, 'h2osoi_liq', wsb%h2osoi_liq_col(c,1:harness_nlevsoi))
+       call put(nout, 'h2osoi_ice', wsb%h2osoi_ice_col(c,1:harness_nlevsoi))
+       call put(nout, 'imelt', real(temperature%imelt_col(c,1:harness_nlevsoi), r8))
+       call put(nout, 'xmf', temperature%xmf_col(c))
+       call put(nout, 'h2osno_no_layers', wsb%h2osno_no_layers_col(c))
+       call put(nout, 'snow_depth', wdb%snow_depth_col(c))
+       call put(nout, 'qflx_snomelt', wfb%qflx_snomelt_col(c))
+       call put(nout, 'qflx_snow_drain', wfb%qflx_snow_drain_col(c))
+    end do
+    wsb%h2osno_no_layers_col(c) = 0._r8
+    temperature%t_soisno_col(c,:) = 285._r8
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_phase_change
+
+  @Test
+  subroutine drive_perched_water_table(this)
+    class(TestFrozenSoil), intent(inout) :: this
+    real(r8) :: zwt
+    real(r8), dimension(harness_nlevsoi) :: t_soisno, h2osoi_liq, h2osoi_ice, watsat
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ zwt, t_soisno, h2osoi_liq, h2osoi_ice, watsat
+
+    call open_cases('perched_water_table', nin, found)
+    if (.not. found) return
+    call open_output('perched_water_table', nout)
+    c = this%column%c
+    i = 0
+    associate(column => this%column, &
+         soilstate => this%column%soilstate_inst, &
+         soilhydrology => this%column%soilhydrology_inst, &
+         wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       soilstate%watsat_col(c,1:harness_nlevsoi) = watsat
+       soilhydrology%zwt_col(c) = zwt
+       column%temperature_inst%t_soisno_col(c,1:harness_nlevsoi) = t_soisno
+       wsb%h2osoi_liq_col(c,1:harness_nlevsoi) = h2osoi_liq
+       wsb%h2osoi_ice_col(c,1:harness_nlevsoi) = h2osoi_ice
+       call PerchedWaterTable(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            column%num_urbanc, column%filter_urbanc, soilhydrology, soilstate, &
+            column%temperature_inst, wsb, wfb)
+       call begin_case(nout, i)
+       call put(nout, 'frost_table', soilhydrology%frost_table_col(c))
+       call put(nout, 'zwt_perched', soilhydrology%zwt_perched_col(c))
+    end do
+    column%temperature_inst%t_soisno_col(c,:) = 285._r8
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_perched_water_table
+
+  @Test
+  subroutine drive_saturated_fraction(this)
+    class(TestFrozenSoil), intent(inout) :: this
+    real(r8) :: zwt, wtfact, frost_table, zwt_perched, qflx_rain_plus_snomelt
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ zwt, wtfact, frost_table, zwt_perched, qflx_rain_plus_snomelt
+
+    call open_cases('saturated_fraction', nin, found)
+    if (.not. found) return
+    call open_output('saturated_fraction', nout)
+    c = this%column%c
+    i = 0
+    associate(column => this%column, &
+         soilstate => this%column%soilstate_inst, &
+         soilhydrology => this%column%soilhydrology_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       soilstate%wtfact_col(c) = wtfact
+       soilhydrology%zwt_col(c) = zwt
+       soilhydrology%frost_table_col(c) = frost_table
+       soilhydrology%zwt_perched_col(c) = zwt_perched
+       wfb%qflx_rain_plus_snomelt_col(c) = qflx_rain_plus_snomelt
+       call column%saturated_excess_runoff_inst%SaturatedExcessRunoff(bounds, &
+            column%num_hydrologyc, column%filter_hydrologyc, lun, col, soilhydrology, &
+            soilstate, wfb)
+       call begin_case(nout, i)
+       call put(nout, 'fsat', column%saturated_excess_runoff_inst%fsat_col(c))
+       call put(nout, 'qflx_sat_excess_surf', wfb%qflx_sat_excess_surf_col(c))
+    end do
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_saturated_fraction
+
+  @Test
+  subroutine drive_perched_lateral_flow(this)
+    class(TestFrozenSoil), intent(inout) :: this
+    integer :: dtime, nbedrock
+    real(r8) :: zwt, frost_table, zwt_perched, topo_slope
+    real(r8), dimension(harness_nlevsoi) :: h2osoi_liq, h2osoi_ice, watsat, hksat, bsw, sucsat
+    integer :: nin, nout, ios, i, c
+    logical :: found
+    namelist /case/ dtime, nbedrock, zwt, frost_table, zwt_perched, topo_slope, h2osoi_liq, &
+         h2osoi_ice, watsat, hksat, bsw, sucsat
+
+    call open_cases('perched_lateral_flow', nin, found)
+    if (.not. found) return
+    call open_output('perched_lateral_flow', nout)
+    c = this%column%c
+    i = 0
+    associate(column => this%column, &
+         soilstate => this%column%soilstate_inst, &
+         soilhydrology => this%column%soilhydrology_inst, &
+         wsb => this%column%water_inst%waterstatebulk_inst, &
+         wfb => this%column%water_inst%waterfluxbulk_inst)
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+       call this%set_step(dtime)
+       col%nbedrock(c) = nbedrock
+       col%topo_slope(c) = topo_slope
+       soilstate%watsat_col(c,1:harness_nlevsoi) = watsat
+       soilstate%hksat_col(c,1:harness_nlevsoi) = hksat
+       soilstate%bsw_col(c,1:harness_nlevsoi) = bsw
+       soilstate%sucsat_col(c,1:harness_nlevsoi) = sucsat
+       soilhydrology%zwt_col(c) = zwt
+       soilhydrology%frost_table_col(c) = frost_table
+       soilhydrology%zwt_perched_col(c) = zwt_perched
+       wsb%h2osoi_liq_col(c,1:harness_nlevsoi) = h2osoi_liq
+       wsb%h2osoi_ice_col(c,1:harness_nlevsoi) = h2osoi_ice
+       call PerchedLateralFlow(bounds, column%num_hydrologyc, column%filter_hydrologyc, &
+            soilhydrology, soilstate, wsb, wfb, column%water_inst%wateratm2lndbulk_inst)
+       call begin_case(nout, i)
+       call put(nout, 'h2osoi_liq', wsb%h2osoi_liq_col(c,1:harness_nlevsoi))
+       call put(nout, 'qflx_drain_perched', wfb%qflx_drain_perched_col(c))
+    end do
+    col%nbedrock(c) = harness_nlevsoi
+    end associate
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_perched_lateral_flow
+
+  @Test
+  subroutine drive_evaporation_split(this)
+    ! qflx_ev_snow is, on a column without snow, the water vapour flux of the soil
+    ! (positive to the atmosphere), as SoilFluxes sets it.
+    class(TestFrozenSoil), intent(inout) :: this
+    integer :: dtime
+    real(r8) :: qflx_ev_snow, h2osoi_liq_top, h2osoi_ice_top, t_grnd, frac_h2osfc
+    real(r8) :: qflx_liqevap_from_top_layer, qflx_solidevap_from_top_layer, &
+         qflx_soliddew_to_top_layer, qflx_liqdew_to_top_layer
+    real(r8) :: evaporation_limit, evaporation_demand
+    integer :: nin, nout, ios, i
+    logical :: found
+    namelist /case/ dtime, qflx_ev_snow, h2osoi_liq_top, h2osoi_ice_top, t_grnd, frac_h2osfc
+
+    call open_cases('evaporation_split', nin, found)
+    if (.not. found) return
+    call open_output('evaporation_split', nout)
+    i = 0
+    do
+       read(nin, nml=case, iostat=ios)
+       if (ios /= 0) exit
+       i = i + 1
+
+       ! Copied from SoilFluxesMod.F90::SoilFluxes (a column that is not urban, without
+       ! snow layers: j = 1), with the top level's water and the patch's flux as scalars
+       qflx_liqevap_from_top_layer   = 0._r8
+       qflx_solidevap_from_top_layer = 0._r8
+       qflx_soliddew_to_top_layer    = 0._r8
+       qflx_liqdew_to_top_layer      = 0._r8
+       if (qflx_ev_snow >= 0._r8) then
+          ! for evaporation partitioning between liquid evap and ice sublimation,
+          ! use the ratio of liquid to (liquid+ice) in the top layer to determine split
+          if ((h2osoi_liq_top+h2osoi_ice_top) > 0._r8) then
+             qflx_liqevap_from_top_layer = max(qflx_ev_snow*(h2osoi_liq_top/ &
+                  (h2osoi_liq_top+h2osoi_ice_top)), 0._r8)
+          else
+             qflx_liqevap_from_top_layer = 0._r8
+          end if
+          qflx_solidevap_from_top_layer = qflx_ev_snow - qflx_liqevap_from_top_layer
+       else
+          if (t_grnd < tfrz) then
+             qflx_soliddew_to_top_layer = abs(qflx_ev_snow)
+          else
+             qflx_liqdew_to_top_layer = abs(qflx_ev_snow)
+          end if
+       end if
+       ! limit only solid evaporation (sublimation) from top soil layer
+       ! (liquid evaporation from soil should not be limited)
+       if (frac_h2osfc < 1._r8) then
+          evaporation_limit = h2osoi_ice_top/(dtime*(1._r8 - frac_h2osfc))
+          if (qflx_solidevap_from_top_layer >= evaporation_limit) then
+             evaporation_demand = qflx_solidevap_from_top_layer
+             qflx_solidevap_from_top_layer &
+                  = evaporation_limit
+             qflx_liqevap_from_top_layer  &
+                  = qflx_liqevap_from_top_layer  &
+                  + (evaporation_demand - evaporation_limit)
+          endif
+       endif
+
+       call begin_case(nout, i)
+       call put(nout, 'qflx_liqevap_from_top_layer', qflx_liqevap_from_top_layer)
+       call put(nout, 'qflx_solidevap_from_top_layer', qflx_solidevap_from_top_layer)
+       call put(nout, 'qflx_soliddew_to_top_layer', qflx_soliddew_to_top_layer)
+       call put(nout, 'qflx_liqdew_to_top_layer', qflx_liqdew_to_top_layer)
+    end do
+    close(nin)
+    close(nout)
+    @assertTrue(i > 0)
+  end subroutine drive_evaporation_split
+
+end module test_frozen_soil

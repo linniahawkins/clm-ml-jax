@@ -11,6 +11,8 @@ Fortran reference: CLM-ml v2 ``clmDataMod.F90::clmData``, ``SurfaceAlbedoMod.F90
 ``SurfaceResistanceMod.F90::calc_soil_resistance_sl14``,
 ``MLSoilTemperatureMod.F90::SoilThermProp``/``SoilTemperature``,
 ``SoilWaterMovementMod.F90::soilwater_moisture_form``/``compute_hydraulic_properties``.
+The freezing and thawing of soil water is CLM's own (CTSM ``ctsm5.4.004``,
+``SoilTemperatureMod.F90::Phasechange_beta``): CLM-ml v2 has none.
 
 Each function's reads and writes are its arguments and results; ``Reads``/``Writes`` in the
 docstrings name the CLM-ml v2 (``mlcanopy_type``) fields they correspond to.
@@ -22,6 +24,7 @@ from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 
 from clm_ml.processes.constants import (
@@ -36,6 +39,10 @@ from clm_ml.processes.constants import (
     tkwat,
 )
 from clm_ml.processes.math import tridiag
+
+#: 1e-3 as CLM writes it in the surface water's conductivity: without a kind, so a
+#: single-precision number.
+MM_TO_M_SINGLE = float(np.float32(1.0e-3))
 
 
 def _below_bedrock(n: int, nbedrock) -> Array:
@@ -240,8 +247,9 @@ def soil_thermal_properties(
     denom_safe = jnp.where(jnp.abs(denom) > 0.0, denom, 1.0e-10)
     tk = jnp.concatenate([thk_j * thk_jp1 * (z_jp1 - z_j) / denom_safe, jnp.zeros(1, dz.dtype)])
 
-    # Surface water conductivity
-    zh2osfc = 1.0e-3 * (0.5 * h2osfc)
+    # Surface water conductivity (the conversion from mm to m is a single-precision number
+    # in CLM)
+    zh2osfc = MM_TO_M_SINGLE * (0.5 * h2osfc)
     denom = tkwat * z[0] + thk[0] * zh2osfc
     tk_h2osfc = jnp.where(
         jnp.abs(denom) > 0.0,
@@ -360,3 +368,210 @@ def soil_temperature(
 
     edif, _ = jax.lax.scan(add, jnp.zeros((), cv.dtype), cv * (t_new - t_soisno) / dtime)
     return t_new, gsoi - edif
+
+
+# ---------------------------------------------------------------------------
+# Freezing and thawing of soil water
+# ---------------------------------------------------------------------------
+
+#: Latent heat of fusion (J/kg) and gravitational acceleration (m/s2) as CLM has them
+#: (``SHR_CONST_LATICE``, ``SHR_CONST_G``). CLM-ml v2's gravity is 9.80665.
+HFUS = 3.337e5
+GRAV_CLM = 9.80616
+
+
+def supercooled_water(t_soisno: Array, watsat: Array, sucsat: Array, bsw: Array, dz: Array):
+    """Liquid water (kg m⁻²) that stays unfrozen in a soil level below freezing: the water
+    whose matric potential equals the freezing-point depression at the level's temperature
+    (Niu and Yang 2006). Zero at and above freezing, where the routine does not use it.
+
+    Not in CLM-ml v2.
+
+    Fortran reference: CTSM SoilTemperatureMod.F90::Phasechange_beta.
+
+    Args:
+        t_soisno: (n,) soil temperature (K).
+        watsat, sucsat, bsw: (n,) porosity, suction at saturation (mm), Clapp-Hornberger *b*.
+        dz: (n,) thickness (m).
+    """
+    below = t_soisno < tfrz
+    t = jnp.where(below, t_soisno, tfrz - 1.0)  # a finite power on the unused side
+    smp = HFUS * (tfrz - t) / (GRAV_CLM * t) * 1000.0  # mm
+    supercool = watsat * (smp / sucsat) ** (-1.0 / bsw)
+    supercool = supercool * dz * 1000.0
+    return jnp.where(below, supercool, 0.0)
+
+
+class PhaseChange(NamedTuple):
+    t_soisno: Array  # (n,) soil temperature (K)
+    h2osoi_liq: Array  # (n,) liquid water (kg/m2)
+    h2osoi_ice: Array  # (n,) ice (kg/m2)
+    h2osno: Array  # () snow lying on the ground without snow layers (kg/m2)
+    snow_depth: Array  # () its depth (m)
+    qflx_snomelt: Array  # () melt of that snow (kg/m2/s): it drains to the ground
+    xmf: Array  # () latent heat taken up by melting, minus that freed by freezing (W/m2)
+    imelt: Array  # (n,) 1 where a level melted, 2 where it froze, 0 elsewhere
+
+
+def phase_change(
+    t_soisno: Array,
+    h2osoi_liq: Array,
+    h2osoi_ice: Array,
+    h2osno,
+    snow_depth,
+    fact: Array,
+    dhsdT,
+    frac_h2osfc,
+    watsat: Array,
+    sucsat: Array,
+    bsw: Array,
+    dz: Array,
+    dtime,
+    *,
+    derivative: str = "exact",
+) -> PhaseChange:
+    """Freezing and thawing of the water of the soil levels after the temperature solution.
+
+    A level above freezing that holds ice melts; a level below freezing that holds more
+    liquid water than can stay unfrozen there (:func:`supercooled_water`) freezes. Such a
+    level is put at the freezing point; the heat that this frees (melting) or lacks
+    (freezing), ``-(tfrz - T) / fact`` per unit time, changes the phase of that much water,
+    at most the ice there is, or the liquid above the supercooled amount. Heat left over
+    moves the temperature away from the freezing point again. Snow lying on the ground
+    without snow layers (``h2osno``) is melted first, with the top level's heat.
+
+    ``fact`` is the temperature change of a level per unit of heat flux into it (the model
+    step over the heat capacity; K m² W⁻¹). ``dhsdT`` is the derivative of the heat flux
+    into the top level with respect to its temperature (W m⁻² K⁻¹): CLM's top soil level is
+    also the surface, so resetting its temperature changes the surface fluxes; with
+    ``frac_h2osfc``, the ponded fraction of the ground, which has its own surface
+    temperature in CLM. Where the heat flux into the soil is given, ``dhsdT`` is zero and
+    the routine conserves energy exactly: ``heat capacity × temperature change / dtime +
+    xmf = 0`` summed over the levels.
+
+    ``derivative`` (static) changes derivatives only, never a result. A level that freezes
+    down to its supercooled water takes that amount at the temperature before the change,
+    and then warms by the heat of fusion: it ends warmer than the temperature its liquid
+    water belongs to. With respect to the temperature before, the temperature after has
+    the slope ``1 - gain``, ``gain`` being the heat of fusion of the supercooled water's
+    change per degree over the heat capacity: 3 at -1 C and 18 at -0.2 C in a clay. Step
+    after step that slope multiplies, and the exact derivative grows without bound while a
+    level freezes (the forward values stay within the size of the overshoot).
+    ``"stabilized"``: for such a level, the derivative of the state in which the liquid
+    water is the supercooled water of the temperature after (found by bisection; slope
+    ``1 / (1 + gain)``): an approximation, not the derivative of the forward values.
+    ``"exact"``: the exact derivative.
+
+    Not in CLM-ml v2. Not translated: snow layers, excess ice, urban columns.
+
+    Fortran reference: CTSM SoilTemperatureMod.F90::Phasechange_beta.
+
+    Args:
+        t_soisno: (n,) soil temperature from the temperature solution (K).
+        h2osoi_liq, h2osoi_ice: (n,) liquid water and ice (kg m⁻²).
+        h2osno, snow_depth: snow without layers (kg m⁻²) and its depth (m).
+        fact: (n,) see above; dhsdT, frac_h2osfc: see above.
+        watsat, sucsat, bsw: (n,) porosity, suction at saturation (mm), Clapp-Hornberger *b*.
+        dz: (n,) thickness (m); dtime: model step (s).
+    """
+    top = jnp.arange(t_soisno.shape[0]) == 0
+    wice0, wliq0 = h2osoi_ice, h2osoi_liq
+    wmass0 = h2osoi_ice + h2osoi_liq
+    snow = h2osno > 0.0
+
+    # Which levels change phase; they are put at the freezing point
+    supercool = supercooled_water(t_soisno, watsat, sucsat, bsw, dz)
+    melting = (t_soisno > tfrz) & ((h2osoi_ice > 0.0) | (top & snow))
+    freezing = (t_soisno < tfrz) & (h2osoi_liq > supercool)
+    flagged = melting | freezing
+    tinc = jnp.where(flagged, tfrz - t_soisno, 0.0)
+    t = jnp.where(flagged, tfrz, t_soisno)
+
+    # Heat available for melting (positive) or to be freed by freezing (negative), W/m2
+    hm_top = dhsdT * tinc - tinc / fact
+    hm_top = jnp.where(frac_h2osfc != 0.0, hm_top - frac_h2osfc * (dhsdT * tinc), hm_top)
+    hm = jnp.where(flagged, jnp.where(top, hm_top, -tinc / fact), 0.0)
+    # heat of the wrong sign (possible with a surface feedback): no phase change, and the
+    # level stays at the freezing point (CLM's rule)
+    wrong = (melting & (hm < 0.0)) | (freezing & (hm > 0.0))
+    hm = jnp.where(wrong, 0.0, hm)
+    melting, freezing = melting & ~wrong, freezing & ~wrong
+    changing = (melting | freezing) & (jnp.abs(hm) > 0.0)
+    xm = jnp.where(changing, hm * dtime / HFUS, 0.0)  # kg/m2
+
+    # Snow without layers is melted first, by the top level
+    melts_snow = top[0] & changing[0] & snow & (xm[0] > 0.0)
+    temp1 = jnp.where(snow, h2osno, 1.0)
+    h2osno_left = jnp.maximum(0.0, temp1 - xm[0])
+    heatr_snow = hm[0] - HFUS * (temp1 - h2osno_left) / dtime
+    more = heatr_snow > 0.0
+    xm = xm.at[0].set(jnp.where(melts_snow, jnp.where(more, heatr_snow * dtime / HFUS, 0.0), xm[0]))
+    hm = hm.at[0].set(jnp.where(melts_snow, jnp.where(more, heatr_snow, 0.0), hm[0]))
+    qflx_snomelt = jnp.where(melts_snow, jnp.maximum(0.0, temp1 - h2osno_left) / dtime, 0.0)
+    snow_depth = jnp.where(melts_snow, h2osno_left / temp1 * snow_depth, snow_depth)
+    h2osno = jnp.where(melts_snow, h2osno_left, h2osno)
+
+    # Ice after the change, and the heat left over
+    melt = changing & (xm > 0.0)
+    freeze = changing & (xm < 0.0)
+    ice_melted = jnp.maximum(0.0, wice0 - xm)
+    ice_frozen = jnp.where(wmass0 < supercool, 0.0, jnp.minimum(wmass0 - supercool, wice0 - xm))
+    ice = jnp.where(melt, ice_melted, jnp.where(freeze, ice_frozen, wice0))
+    heatr = jnp.where(melt | freeze, hm - HFUS * (wice0 - ice) / dtime, 0.0)
+    liq = jnp.where(changing, jnp.maximum(0.0, wmass0 - ice), wliq0)
+
+    # The heat left over moves the temperature away from the freezing point
+    feedback = jnp.where(top, 1.0 - (1.0 - frac_h2osfc) * fact * dhsdT, 1.0)
+    warmed = t + fact * heatr / feedback
+    t = jnp.where(changing & (jnp.abs(heatr) > 0.0), warmed, t)
+
+    if derivative == "stabilized":
+        # Levels frozen down to their supercooled water: the derivatives of the state whose
+        # liquid water is the supercooled water of the temperature after the change
+        limited = freeze & (wmass0 >= supercool) & (wmass0 - supercool < wice0 - xm)
+
+        def after(temperature):
+            """Temperature after the change if the level kept the supercooled water of
+            ``temperature`` as liquid; that water."""
+            keeps = supercooled_water(temperature, watsat, sucsat, bsw, dz)
+            return tfrz + fact * (hm - HFUS * (wice0 - (wmass0 - keeps)) / dtime) / feedback, keeps
+
+        def bisect(bounds, _):
+            low, high = bounds
+            middle = 0.5 * (low + high)
+            above = middle - after(middle)[0] > 0.0
+            return (jnp.where(above, low, middle), jnp.where(above, middle, high)), None
+
+        start = jax.lax.stop_gradient(jnp.where(limited, t_soisno, tfrz - 1.0))
+        (low, high), _ = jax.lax.scan(bisect, (start, jnp.full_like(start, tfrz)), None, length=50)
+        root = jax.lax.stop_gradient(0.5 * (low + high))
+        # one Newton step from the root carries the derivative of the root (the implicit
+        # function theorem) and leaves its value
+        residual = root - after(root)[0]
+        # each level's residual depends on its own temperature only
+        _, slope = jax.jvp(lambda x: x - after(x)[0], (root,), (jnp.ones_like(root),))
+        slope = jax.lax.stop_gradient(slope)
+        consistent_t = root - (residual - jax.lax.stop_gradient(residual)) / slope
+        consistent_liq = after(consistent_t)[1]
+        consistent_ice = wmass0 - consistent_liq
+
+        def with_rule(value, consistent):
+            # the bracket is exactly zero: the value is the routine's own
+            ruled = jax.lax.stop_gradient(value) + (consistent - jax.lax.stop_gradient(consistent))
+            return jnp.where(limited, ruled, value)
+
+        t = with_rule(t, consistent_t)
+        ice = with_rule(ice, consistent_ice)
+        liq = with_rule(liq, consistent_liq)
+    elif derivative != "exact":
+        raise ValueError(f"phase change derivative {derivative!r}: expected exact or stabilized")
+
+    # Latent heat of the column: the snow's, then the levels' in order
+    def add(total, x):
+        return total + x, None
+
+    xmf, _ = jax.lax.scan(
+        add, HFUS * qflx_snomelt, jnp.where(changing, HFUS * (wice0 - ice) / dtime, 0.0)
+    )
+    imelt = jnp.where(melting, 1, jnp.where(freezing, 2, 0))
+    return PhaseChange(t, liq, ice, h2osno, snow_depth, qflx_snomelt, xmf, imelt)

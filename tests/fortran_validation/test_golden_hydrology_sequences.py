@@ -38,10 +38,10 @@ FREE_TOL = 1e-8  # free running: round-off may grow from step to step
 ABS_TOL = 1e-15
 NLEVSOI = 20
 # The harness's parameters: e_ice, fff, pc, mu, baseflow_scalar, n_baseflow,
-# aq_sp_yield_min, slopebeta, slopemax (the last two enter through the sequences' given
-# microtopography)
+# aq_sp_yield_min, slopebeta, slopemax (these two enter through the sequences' given
+# microtopography), perched_baseflow_scalar
 PARAMS = hydrology.HydrologyParameters(
-    *(jnp.asarray(v) for v in (6.0, 0.5, 0.4, 0.13889, 0.001, 1.0, 0.02, -3.0, 0.4))
+    *(jnp.asarray(v) for v in (6.0, 0.5, 0.4, 0.13889, 0.001, 1.0, 0.02, -3.0, 0.4, 1.0e-5))
 )
 FORCING = (
     "qflx_rain_plus_snomelt",

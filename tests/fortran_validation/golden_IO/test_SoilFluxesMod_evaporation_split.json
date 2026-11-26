@@ -1,0 +1,3208 @@
+{
+ "generated_utc": "2026-11-26T15:44:50.108213+00:00",
+ "executable": "ctsm_harness:evaporation_split",
+ "routine": "SoilFluxesMod.F90::SoilFluxes (statements copied)",
+ "ctsm_tag": "ctsm5.4.004",
+ "cases": [
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -5.7631009920591036e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 2.4014008968950176,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 5.7631009920591036e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -3.563534433251648e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.018661042278122895,
+    "t_grnd": 292.55060594261414,
+    "frac_h2osfc": 0.5211050802398497
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 3.563534433251648e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 2.3029054770530616e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 6.258367757731141,
+    "t_grnd": 262.5933882667744,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 2.3029054770530616e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 3.6305393880460447e-06,
+    "h2osoi_liq_top": 8.339575614833342,
+    "h2osoi_ice_top": 1.4248087530701294,
+    "t_grnd": 270.0537889456509,
+    "frac_h2osfc": 0.1717549547639171
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.1007748782160673e-06,
+    "qflx_solidevap_from_top_layer": 5.297645098299774e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 2.90521015908325e-08,
+    "h2osoi_liq_top": 5.256459261185262,
+    "h2osoi_ice_top": 4.647819018579649,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.5418709385016527e-08,
+    "qflx_solidevap_from_top_layer": 1.3633392205815973e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.6103325075568813e-06,
+    "h2osoi_liq_top": 4.019421242870954,
+    "h2osoi_ice_top": 8.915204811635662e-05,
+    "t_grnd": 278.5414445275821,
+    "frac_h2osfc": 0.08327750838525472
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.6102967906592763e-06,
+    "qflx_solidevap_from_top_layer": 3.5716897605012895e-11,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 6.43853647990681e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.033641693732491866,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.11251558147673535
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 6.43853647990681e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.1791595695153652e-06,
+    "h2osoi_liq_top": 4.618611767206888,
+    "h2osoi_ice_top": 2.744689766163748e-06,
+    "t_grnd": 282.9928330764705,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.1791595695153652e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -6.343167720577888e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 4.329812803322516,
+    "t_grnd": 276.79165424866994,
+    "frac_h2osfc": 0.8840911592286971
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 6.343167720577888e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.6952361472346085e-08,
+    "h2osoi_liq_top": 4.013097225117835,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 283.52198225913594,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 2.6952361472346085e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.00022823275069574052,
+    "h2osoi_liq_top": 7.708651500626295,
+    "h2osoi_ice_top": 0.0003637781822653223,
+    "t_grnd": 285.60790894829177,
+    "frac_h2osfc": 0.39699236838206675
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.00022822198069565898,
+    "qflx_solidevap_from_top_layer": 1.0770000081540033e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 5.330224817097753,
+    "t_grnd": 293.1084704974341,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -2.249225933693956e-06,
+    "h2osoi_liq_top": 0.2905736288393921,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 277.82163626286876,
+    "frac_h2osfc": 0.0029940100350945853
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 2.249225933693956e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.6430013379572837e-06,
+    "h2osoi_liq_top": 1.350167734323258,
+    "h2osoi_ice_top": 5.166018440844995,
+    "t_grnd": 273.1780423642021,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.6430013379572837e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.1146675055031396e-08,
+    "h2osoi_liq_top": 5.518955260935888,
+    "h2osoi_ice_top": 8.95068860339895e-05,
+    "t_grnd": 276.1769322242336,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.1146675055031396e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 2.607099415045108e-06,
+    "h2osoi_liq_top": 2.203555338869063,
+    "h2osoi_ice_top": 6.634548352107185,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.3966443549350678
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 6.500136268881549e-07,
+    "qflx_solidevap_from_top_layer": 1.957085788156953e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 3.1629672327948512e-06,
+    "h2osoi_liq_top": 0.8021923304559707,
+    "h2osoi_ice_top": 6.161879624413987e-05,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.8213071395253653
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.1627242944663755e-06,
+    "qflx_solidevap_from_top_layer": 2.4293832847569534e-10,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.00012108652572514473,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.029464142287962798,
+    "t_grnd": 287.2772643411171,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.00011290204175626618,
+    "qflx_solidevap_from_top_layer": 8.184483968878555e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 5.0105354260334056e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 256.2387187852861,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 5.0105354260334056e-05,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 2.001645634741348e-07,
+    "h2osoi_liq_top": 0.2080132244945162,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 287.3029622930402,
+    "frac_h2osfc": 0.7946901575376799
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.001645634741348e-07,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.4417242842927685e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 275.12716568290057,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.4417242842927685e-05,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.2267452884763372e-07,
+    "h2osoi_liq_top": 8.77367555098158,
+    "h2osoi_ice_top": 3.426055390883173,
+    "t_grnd": 255.96863592445533,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 8.822379113175368e-08,
+    "qflx_solidevap_from_top_layer": 3.445073771588004e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.7375293553893713e-05,
+    "h2osoi_liq_top": 2.1544204891278684,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 260.4765077618257,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.7375293553893713e-05,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.909701531136183e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.00017289599234138005,
+    "t_grnd": 284.3402746903539,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 1.909701531136183e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 6.143833837632287,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 261.5991073329749,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 4.866191784072659e-08,
+    "h2osoi_liq_top": 4.0068652337006885,
+    "h2osoi_ice_top": 0.9854179710076592,
+    "t_grnd": 269.51243849139405,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.905662776048331e-08,
+    "qflx_solidevap_from_top_layer": 9.605290080243275e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -2.6538540518525445e-05,
+    "h2osoi_liq_top": 5.599080665668373,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 267.45122783916094,
+    "frac_h2osfc": 0.482095895870861
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 2.6538540518525445e-05,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.5767588278043716e-06,
+    "h2osoi_liq_top": 3.904555799618181,
+    "h2osoi_ice_top": 0.0009172934625817079,
+    "t_grnd": 282.4087017459394,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.5763884884036534e-06,
+    "qflx_solidevap_from_top_layer": 3.7033940071827236e-10,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 4.680612017820835e-05,
+    "h2osoi_liq_top": 2.0355959263706773,
+    "h2osoi_ice_top": 0.008434167547119434,
+    "t_grnd": 270.85292107526834,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 4.6612986691089795e-05,
+    "qflx_solidevap_from_top_layer": 1.9313348711855828e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 7.0991549413449455,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 255.1373300869495,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.00018321152161780287,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.004256760144682992,
+    "t_grnd": 264.8002094945327,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.00018084665487075677,
+    "qflx_solidevap_from_top_layer": 2.3648667470461067e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.602505233338557e-07,
+    "h2osoi_liq_top": 7.822755614511588,
+    "h2osoi_ice_top": 3.5458420896652355e-05,
+    "t_grnd": 280.42262329639635,
+    "frac_h2osfc": 0.041376565694459244
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 2.602505233338557e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 3.174185453401452e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0012900901337252891,
+    "t_grnd": 260.6290470337781,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.102513779305603e-05,
+    "qflx_solidevap_from_top_layer": 7.167167409584939e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -3.8378428042608715e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 261.8996171055278,
+    "frac_h2osfc": 0.15510141627317908
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 3.8378428042608715e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 2.404040609019562e-08,
+    "h2osoi_liq_top": 1.8929001861442916,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 270.2069264575607,
+    "frac_h2osfc": 0.6310471249960894
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.404040609019562e-08,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.3915194929646926e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 7.2190390568343,
+    "t_grnd": 253.16608007206867,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 1.3915194929646926e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 5.2271010335738544e-08,
+    "h2osoi_liq_top": 7.514584601412567,
+    "h2osoi_ice_top": 4.4476203781129665e-05,
+    "t_grnd": 274.5054222469628,
+    "frac_h2osfc": 0.3183976606637481
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 5.227070096370121e-08,
+    "qflx_solidevap_from_top_layer": 3.093720373341211e-13,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.6126611088922724e-07,
+    "h2osoi_liq_top": 6.926245059490228,
+    "h2osoi_ice_top": 2.8484160323598466,
+    "t_grnd": 284.661011761151,
+    "frac_h2osfc": 0.3484328125127404
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 2.6126611088922724e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.6383670303784702e-05,
+    "h2osoi_liq_top": 4.004893362918824,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 272.2053574234923,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.6383670303784702e-05,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.1236501240273215e-08,
+    "h2osoi_liq_top": 3.629726268699245,
+    "h2osoi_ice_top": 0.9288349601366503,
+    "t_grnd": 255.94186287427686,
+    "frac_h2osfc": 0.6288562873581652
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 8.946994824177578e-09,
+    "qflx_solidevap_from_top_layer": 2.289506416095637e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.6807150916586374e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.009519590226951624,
+    "t_grnd": 274.08582818395524,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.6807150916586374e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 2.776040994706237e-07,
+    "h2osoi_liq_top": 2.921202844155435,
+    "h2osoi_ice_top": 1.1117549231998134e-05,
+    "t_grnd": 287.26597022195756,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.776030429655942e-07,
+    "qflx_solidevap_from_top_layer": 1.056505029543621e-12,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 8.228736867661599e-07,
+    "h2osoi_liq_top": 1.9347918781302615,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 290.31925961605657,
+    "frac_h2osfc": 0.11594533409126684
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 8.228736867661599e-07,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.4569301191312995e-06,
+    "h2osoi_liq_top": 5.71941549530533,
+    "h2osoi_ice_top": 2.2681318942070634,
+    "t_grnd": 257.07743577641986,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.4569301191312995e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -9.965077346833241e-08,
+    "h2osoi_liq_top": 5.279153720405286,
+    "h2osoi_ice_top": 4.5785365634114035,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 9.965077346833241e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.5305604988462779e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 284.807846929059,
+    "frac_h2osfc": 0.6103826469460897
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.5305604988462779e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -7.110539820959312e-08,
+    "h2osoi_liq_top": 1.5307657330330946,
+    "h2osoi_ice_top": 0.0004049507162014042,
+    "t_grnd": 257.1264082884212,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 7.110539820959312e-08,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -7.886977239246312e-07,
+    "h2osoi_liq_top": 5.170251536995979,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.27693122156275374
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 7.886977239246312e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -4.761635082808296e-06,
+    "h2osoi_liq_top": 2.727370227056002,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 258.24312631208466,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 4.761635082808296e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.180360780110651e-06,
+    "h2osoi_liq_top": 0.778662505484703,
+    "h2osoi_ice_top": 5.320373238302825,
+    "t_grnd": 257.11364092632687,
+    "frac_h2osfc": 0.2678007215522058
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 2.180360780110651e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 7.104533326693309e-08,
+    "h2osoi_liq_top": 0.7227812906474488,
+    "h2osoi_ice_top": 1.5368600508073234e-06,
+    "t_grnd": 253.51010420677295,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 7.104518220256032e-08,
+    "qflx_solidevap_from_top_layer": 1.5106437277534183e-13,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 2.049916226382645e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 262.7348146588674,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.049916226382645e-07,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 3.575919649129507e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.05573625694092003,
+    "t_grnd": 275.8912034207483,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 3.575919649129507e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 7.448640347157849e-07,
+    "h2osoi_liq_top": 4.836496663474652,
+    "h2osoi_ice_top": 0.00015805150531604637,
+    "t_grnd": 266.1442533274097,
+    "frac_h2osfc": 0.9789805479435151
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 7.4483969415627e-07,
+    "qflx_solidevap_from_top_layer": 2.434055951490898e-11,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 3.332222455474351e-07,
+    "h2osoi_liq_top": 8.312306170084737,
+    "h2osoi_ice_top": 0.02122167623878276,
+    "t_grnd": 254.2223903309409,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.323736812009816e-07,
+    "qflx_solidevap_from_top_layer": 8.485643464535119e-10,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.567124366852127e-08,
+    "h2osoi_liq_top": 4.491838098223118,
+    "h2osoi_ice_top": 2.173028892213944,
+    "t_grnd": 287.3033748264613,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.567124366852127e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.7208973765726636e-06,
+    "h2osoi_liq_top": 7.776961198250271,
+    "h2osoi_ice_top": 0.0004501940888688019,
+    "t_grnd": 274.87882795726847,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.7207977627310653e-06,
+    "qflx_solidevap_from_top_layer": 9.961384159836397e-11,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 3.182744559259964e-08,
+    "h2osoi_liq_top": 4.627807268681216,
+    "h2osoi_ice_top": 5.7310395330704536,
+    "t_grnd": 262.5545845062728,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.421888815192071e-08,
+    "qflx_solidevap_from_top_layer": 1.760855744067893e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.9415286615866989e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.03995466420955141,
+    "t_grnd": 273.39437813654035,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.9415286615866989e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.1554526883661024e-08,
+    "h2osoi_liq_top": 4.351576663600646,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 269.5325523722905,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.1554526883661024e-08,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.5287419959390508e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.000118248598917438,
+    "t_grnd": 279.25632239556154,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.5287419959390508e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.4294123436854273e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 283.3541032228924,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.4294123436854273e-05
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 8.018041483117119e-07,
+    "h2osoi_liq_top": 8.00818467063364,
+    "h2osoi_ice_top": 7.437042803243029e-06,
+    "t_grnd": 286.9141890059847,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 8.018034036927403e-07,
+    "qflx_solidevap_from_top_layer": 7.446189716015449e-13,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 1.9068288813284635,
+    "h2osoi_ice_top": 2.073340446192664,
+    "t_grnd": 279.6166961880697,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.2573940120519419e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.07730259986419252,
+    "t_grnd": 255.70927200542542,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.2573940120519419e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.00010955221487290678,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 2.7951541910503972e-05,
+    "t_grnd": 270.02777257317166,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.00010954445055570942,
+    "qflx_solidevap_from_top_layer": 7.764317197362215e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 2.2930103321603872e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 254.5633373886713,
+    "frac_h2osfc": 0.8455540235215969
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.2930103321603872e-05,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 4.1706188908968536e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 4.020697027543243,
+    "t_grnd": 289.7239560684031,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 4.1706188908968536e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -2.1524650331971806e-08,
+    "h2osoi_liq_top": 8.197517012844187,
+    "h2osoi_ice_top": 5.147502640302638,
+    "t_grnd": 259.7595505469305,
+    "frac_h2osfc": 0.3964021785232542
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 2.1524650331971806e-08,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -3.652481931776405e-05,
+    "h2osoi_liq_top": 2.933907314869188,
+    "h2osoi_ice_top": 0.003148478497099891,
+    "t_grnd": 254.5619173019962,
+    "frac_h2osfc": 0.8804515736773163
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 3.652481931776405e-05,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.959540207505828e-05,
+    "h2osoi_liq_top": 0.6487836103652764,
+    "h2osoi_ice_top": 0.0018592021699675933,
+    "t_grnd": 259.4409279203019,
+    "frac_h2osfc": 0.9008461443729463
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.959540207505828e-05,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -4.597224301010037e-06,
+    "h2osoi_liq_top": 3.6564892298452456,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 290.66279340013034,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 4.597224301010037e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.716577754986032e-05,
+    "h2osoi_liq_top": 3.677136904989549,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 260.0814851132265,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.716577754986032e-05,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.11122771081203009,
+    "t_grnd": 277.6209230843533,
+    "frac_h2osfc": 0.7799589629075244
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.00016287957364939299,
+    "h2osoi_liq_top": 4.433207331628284,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 281.3544903203557,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.00016287957364939299,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 2.1936010616291955e-06,
+    "h2osoi_liq_top": 6.03634361091547,
+    "h2osoi_ice_top": 5.188752758349676e-05,
+    "t_grnd": 275.6282097119668,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.1935822059171035e-06,
+    "qflx_solidevap_from_top_layer": 1.8855712092021032e-11,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.6072271003148822e-07,
+    "h2osoi_liq_top": 7.463274289162346,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 285.5581450158479,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.6072271003148822e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.687732615154435e-05,
+    "h2osoi_liq_top": 3.0878975626983642,
+    "h2osoi_ice_top": 1.0285018463858115e-05,
+    "t_grnd": 283.9753834781032,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.687726993755752e-05,
+    "qflx_solidevap_from_top_layer": 5.621398683117152e-11,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.3851963717459358e-08,
+    "h2osoi_liq_top": 0.2316052794472958,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 291.3035199633106,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.3851963717459358e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -4.6183019522226484e-08,
+    "h2osoi_liq_top": 5.249583031835656,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 281.1994854158934,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 4.6183019522226484e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.507091487956286e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 4.627676525921104,
+    "t_grnd": 270.9317316930026,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.507091487956286e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0002513048497725748,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 7.367687402349757,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0002513048497725748,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 5.897798344420418e-07,
+    "h2osoi_liq_top": 4.5738273108039165,
+    "h2osoi_ice_top": 3.5533295679876815,
+    "t_grnd": 269.2744496255684,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.319181793047304e-07,
+    "qflx_solidevap_from_top_layer": 2.578616551373114e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 265.24264646223213,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 2.152704168205977e-06,
+    "h2osoi_liq_top": 2.5596978114620756,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 266.4989549901264,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.152704168205977e-06,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 8.303302156864694e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 280.7845361831384,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 8.303302156864694e-06,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.0922404634422832e-06,
+    "h2osoi_liq_top": 5.704209719141242,
+    "h2osoi_ice_top": 7.416134237005878,
+    "t_grnd": 292.88726239016466,
+    "frac_h2osfc": 0.9284691518662513
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 4.7486321151571374e-07,
+    "qflx_solidevap_from_top_layer": 6.173772519265694e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 4.675848231205808e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 4.675848231205808e-08,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 5.355061190486347e-07,
+    "h2osoi_liq_top": 1.281505933843057,
+    "h2osoi_ice_top": 5.247846070246983,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.0510296714593063e-07,
+    "qflx_solidevap_from_top_layer": 4.3040315190270407e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.2070954497543627e-07,
+    "h2osoi_liq_top": 3.979458560377203,
+    "h2osoi_ice_top": 0.00017828920567044648,
+    "t_grnd": 288.72645430702937,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.2070413714308775e-07,
+    "qflx_solidevap_from_top_layer": 5.407832348519135e-12,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.044949308331553e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.00016428569053290502,
+    "t_grnd": 266.56315385929037,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.044949308331553e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 3.3933052784549384e-05,
+    "h2osoi_liq_top": 8.867538158705825,
+    "h2osoi_ice_top": 2.1395028794703856,
+    "t_grnd": 274.88695057012586,
+    "frac_h2osfc": 0.6230021749228728
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.7337287047875682e-05,
+    "qflx_solidevap_from_top_layer": 6.595765736673702e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -3.449899605836026e-07,
+    "h2osoi_liq_top": 1.7220668436769038,
+    "h2osoi_ice_top": 1.3673524884002348e-05,
+    "t_grnd": 264.6104868253995,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 3.449899605836026e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.6740901527678295e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.41250722190880573,
+    "t_grnd": 285.12785164697357,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.6740901527678295e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 5.7824254842337067e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.921699609685124,
+    "t_grnd": 291.4678616852164,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 5.7824254842337067e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.3599386940986545e-08,
+    "h2osoi_liq_top": 0.5615013156974374,
+    "h2osoi_ice_top": 6.222518343648509,
+    "t_grnd": 265.3203868316829,
+    "frac_h2osfc": 0.16747024987589687
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.1255972186818066e-09,
+    "qflx_solidevap_from_top_layer": 1.2473789722304739e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -7.11956258604825e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 4.67451939846825,
+    "t_grnd": 256.1014991145016,
+    "frac_h2osfc": 0.1678944743474009
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 7.11956258604825e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 2.8224185719615552e-05,
+    "h2osoi_liq_top": 3.4979900097131558,
+    "h2osoi_ice_top": 4.223892947329472,
+    "t_grnd": 282.99458203868653,
+    "frac_h2osfc": 0.6022582539010007
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.2785472174174902e-05,
+    "qflx_solidevap_from_top_layer": 1.543871354544065e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 7.135217990802489e-06,
+    "h2osoi_liq_top": 3.675164382263475,
+    "h2osoi_ice_top": 6.968851326283908,
+    "t_grnd": 255.4349813164746,
+    "frac_h2osfc": 0.32777762693627044
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.4636471551263427e-06,
+    "qflx_solidevap_from_top_layer": 4.671570835676147e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.655124821257106e-05,
+    "h2osoi_liq_top": 0.2670860874403159,
+    "h2osoi_ice_top": 4.7798951556387586,
+    "t_grnd": 281.98141988215303,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 2.655124821257106e-05
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.0329991561910877e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 4.638671449756577e-06,
+    "t_grnd": 280.81306418055505,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 1.0329991561910877e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.6136959078942183e-06,
+    "h2osoi_liq_top": 6.86925547617591,
+    "h2osoi_ice_top": 0.012081781721952149,
+    "t_grnd": 282.41682092663535,
+    "frac_h2osfc": 0.935398105335008
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 2.6136959078942183e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 6.090354107593231,
+    "h2osoi_ice_top": 5.605617702743963,
+    "t_grnd": 282.1957385051179,
+    "frac_h2osfc": 0.33510811151724873
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 7.045037135886028e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 291.83378972189706,
+    "frac_h2osfc": 0.5728633420103537
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 7.045037135886028e-07,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.0193433196626185e-06,
+    "h2osoi_liq_top": 3.288119083865929,
+    "h2osoi_ice_top": 0.0031443683851791293,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.0193433196626185e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.2972665416923228e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 262.995505706197,
+    "frac_h2osfc": 0.6232778393784183
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.2972665416923228e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -3.5297859100323325e-06,
+    "h2osoi_liq_top": 5.20166222654834,
+    "h2osoi_ice_top": 6.065156581062359,
+    "t_grnd": 269.7846469963038,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 3.5297859100323325e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.7637780252605778e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 6.344710231187705e-05,
+    "t_grnd": 263.9917014094402,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.7637780252605778e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 6.948990507348074,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 267.75853854518635,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.5335657258829903e-05,
+    "h2osoi_liq_top": 1.5920170453689182,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 277.7730767052195,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.5335657258829903e-05
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 2.2436384926578993e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 8.041548732503268e-06,
+    "t_grnd": 287.6390327111319,
+    "frac_h2osfc": 0.25825305248595753
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.2376155125990182e-06,
+    "qflx_solidevap_from_top_layer": 6.022980058880996e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.907452588645084e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 4.752745656261553,
+    "t_grnd": 255.57053094613593,
+    "frac_h2osfc": 0.2058312840145996
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 2.907452588645084e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 9.565944991535724e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 280.37246522951455,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 9.565944991535724e-05,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.1453404232264016e-06,
+    "h2osoi_liq_top": 7.57802164525896,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 253.3919259859439,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.1453404232264016e-06,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -7.11220293522892e-07,
+    "h2osoi_liq_top": 8.410682376412227,
+    "h2osoi_ice_top": 2.60342856576291e-05,
+    "t_grnd": 264.94789498071486,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 7.11220293522892e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 3.772646592854997e-08,
+    "h2osoi_liq_top": 6.684814293599006,
+    "h2osoi_ice_top": 0.0018689046332607203,
+    "t_grnd": 260.1407187830583,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.7715921512898715e-08,
+    "qflx_solidevap_from_top_layer": 1.0544415651256014e-11,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.3133155458360385e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 3.509077141992308,
+    "t_grnd": 280.15478218864774,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 1.3133155458360385e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.1958133589640476e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 5.129040851163024,
+    "t_grnd": 279.4173593307478,
+    "frac_h2osfc": 0.2120727200481738
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.1958133589640476e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.8416652692151226e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 1.9375621035955577,
+    "t_grnd": 255.68171966816965,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.8416652692151226e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -5.507232196974105e-07,
+    "h2osoi_liq_top": 1.0189787975519247,
+    "h2osoi_ice_top": 0.008107322224945233,
+    "t_grnd": 270.75875874985064,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 5.507232196974105e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 4.8948417311701196e-08,
+    "h2osoi_liq_top": 3.9304145736890987,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 292.8918118010104,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 4.8948417311701196e-08,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 2.6127259108402497e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 255.6264582654459,
+    "frac_h2osfc": 0.7241333487565501
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.6127259108402497e-06,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -7.55869512531303e-08,
+    "h2osoi_liq_top": 3.8587417442518475,
+    "h2osoi_ice_top": 6.168416434180369,
+    "t_grnd": 282.29031567018797,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 7.55869512531303e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.239936318009044e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 261.44961940832496,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.239936318009044e-05,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.0827612604527454e-07,
+    "h2osoi_liq_top": 0.7974870235494627,
+    "h2osoi_ice_top": 5.804566326112593,
+    "t_grnd": 282.33022229661043,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.3079083265168168e-08,
+    "qflx_solidevap_from_top_layer": 9.519704278010637e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 2.0935302317580275e-08,
+    "h2osoi_liq_top": 2.366779666476608,
+    "h2osoi_ice_top": 2.5107160711387646,
+    "t_grnd": 254.2131234188514,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.0158747542240687e-08,
+    "qflx_solidevap_from_top_layer": 1.0776554775339589e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -9.071639196848446e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 1.1290153380892534,
+    "t_grnd": 264.93672563198857,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 9.071639196848446e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -5.109124123665452e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 1.218966971826215,
+    "t_grnd": 284.1780132146941,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 5.109124123665452e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.4700918574361658e-07,
+    "h2osoi_liq_top": 7.356508818899803,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 268.4132238498563,
+    "frac_h2osfc": 0.6754366296829734
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.4700918574361658e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.024406515289327e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0009202075083645933,
+    "t_grnd": 283.6494492324387,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 2.024406515289327e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 1.0260026442549908,
+    "h2osoi_ice_top": 5.029836146005353e-06,
+    "t_grnd": 254.50059291647986,
+    "frac_h2osfc": 0.40758348127714283
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 0.942965280404659,
+    "h2osoi_ice_top": 0.00028056190127181795,
+    "t_grnd": 260.6108397066767,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -4.1606836149137454e-07,
+    "h2osoi_liq_top": 2.537331313136091,
+    "h2osoi_ice_top": 0.00011377915499966314,
+    "t_grnd": 258.77568504271767,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 4.1606836149137454e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.00021813885259833125,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0016224634048821096,
+    "t_grnd": 291.9205774837707,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.00021768816831919735,
+    "qflx_solidevap_from_top_layer": 4.506842791339193e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 4.312650478146704e-08,
+    "h2osoi_liq_top": 1.1396999733594526,
+    "h2osoi_ice_top": 4.085697254819606e-06,
+    "t_grnd": 280.7296141498186,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 4.3126350178313006e-08,
+    "qflx_solidevap_from_top_layer": 1.5460315403270942e-13,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.2330308432209041e-08,
+    "h2osoi_liq_top": 6.5471034935028625,
+    "h2osoi_ice_top": 0.5997910385408378,
+    "t_grnd": 285.5053671436083,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.1295508147004791e-08,
+    "qflx_solidevap_from_top_layer": 1.03480028520425e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 6.742356948404718e-05,
+    "h2osoi_liq_top": 6.208744777434869,
+    "h2osoi_ice_top": 1.8728944548650616e-05,
+    "t_grnd": 281.8239274916739,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 6.742336609857552e-05,
+    "qflx_solidevap_from_top_layer": 2.0338547165876797e-10,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.4516255798803093e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.6452713590731101,
+    "t_grnd": 256.5492392317134,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.4516255798803093e-05,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -2.2102993677649056e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 4.661039454918609,
+    "t_grnd": 272.0411452848769,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 2.2102993677649056e-08,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 1.80528183703409,
+    "h2osoi_ice_top": 0.02954850277423234,
+    "t_grnd": 254.2657211145487,
+    "frac_h2osfc": 0.963985791527031
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 6.859633855325293e-05,
+    "h2osoi_liq_top": 7.369159714964431,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.6838521125579597
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 6.859633855325293e-05,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 7.38180376273186e-05,
+    "h2osoi_liq_top": 2.4700910897911266,
+    "h2osoi_ice_top": 5.781046751120743,
+    "t_grnd": 289.25191209142133,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.2098440302986732e-05,
+    "qflx_solidevap_from_top_layer": 5.171959732433187e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.1534500799263177e-05,
+    "h2osoi_liq_top": 7.398451498945848,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 274.61750998460593,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.1534500799263177e-05
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.001722662005316e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 273.2254282400255,
+    "frac_h2osfc": 0.8822129035883886
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.001722662005316e-08,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 7.640858016369449e-06,
+    "h2osoi_liq_top": 1.4575905636630129,
+    "h2osoi_ice_top": 7.24272182367248,
+    "t_grnd": 269.15445516769216,
+    "frac_h2osfc": 0.8857661912350403
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.2800968571152445e-06,
+    "qflx_solidevap_from_top_layer": 6.360761159254204e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -4.7196179867408535e-06,
+    "h2osoi_liq_top": 6.342540659494625,
+    "h2osoi_ice_top": 1.1781637028679367e-06,
+    "t_grnd": 280.4570781339892,
+    "frac_h2osfc": 0.08743311137867327
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 4.7196179867408535e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 9.730829748928913e-05,
+    "h2osoi_liq_top": 1.7712718115547534,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 272.76677010690213,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 9.730829748928913e-05,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 8.402901884842766,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 276.63512448891595,
+    "frac_h2osfc": 0.8655950665767851
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.0001684801261290779,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.7060184411681254,
+    "t_grnd": 268.6139854464439,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0001684801261290779,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 5.9348769602517534e-06,
+    "h2osoi_liq_top": 7.121419846652916,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 259.34740005366274,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 5.9348769602517534e-06,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.00019228367861958405,
+    "h2osoi_liq_top": 4.280755106569101,
+    "h2osoi_ice_top": 3.692878199093861,
+    "t_grnd": 258.84725004976667,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0001032301471119932,
+    "qflx_solidevap_from_top_layer": 8.905353150759084e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -3.650138712735153e-07,
+    "h2osoi_liq_top": 8.819474160425505,
+    "h2osoi_ice_top": 0.0006743675159556648,
+    "t_grnd": 256.1969423832256,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 3.650138712735153e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -7.43422272341848e-07,
+    "h2osoi_liq_top": 5.448674918133123,
+    "h2osoi_ice_top": 7.646740704615208e-06,
+    "t_grnd": 262.6337760740495,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 7.43422272341848e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 8.62080686606767,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.4010138882649137
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.943067648515306e-05,
+    "h2osoi_liq_top": 6.084524395174817,
+    "h2osoi_ice_top": 0.00028576435088537564,
+    "t_grnd": 278.5635265712611,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.942976395139975e-05,
+    "qflx_solidevap_from_top_layer": 9.125337533103428e-10,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.6743621497043634e-06,
+    "h2osoi_liq_top": 0.08793383420896783,
+    "h2osoi_ice_top": 6.572466396588543,
+    "t_grnd": 285.76559090911826,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 2.6743621497043634e-06
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 5.3884183976422064e-08,
+    "h2osoi_liq_top": 0.4135680195323467,
+    "h2osoi_ice_top": 2.1883496468394695e-05,
+    "t_grnd": 278.0029711375105,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 5.3881332905007804e-08,
+    "qflx_solidevap_from_top_layer": 2.8510714142599086e-12,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 9.301514643215352e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 6.695975103996229,
+    "t_grnd": 264.16048643970316,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 9.301514643215352e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.1351954660062899e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.7373019062966693,
+    "t_grnd": 281.6701116231294,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.1351954660062899e-05
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 3.882674457242618e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 1.2426136511486652,
+    "t_grnd": 282.40136475508297,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 3.882674457242618e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 2.492936921153833e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 2.588737200440389,
+    "t_grnd": 278.7989498664433,
+    "frac_h2osfc": 0.6908305913224594
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 2.492936921153833e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -3.9633883148364744e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 3.5925093343162394e-06,
+    "t_grnd": 290.4144232305349,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 3.9633883148364744e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 3.280917694985572e-05,
+    "h2osoi_liq_top": 5.056391949878568,
+    "h2osoi_ice_top": 4.652518426180945e-05,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.280887506681876e-05,
+    "qflx_solidevap_from_top_layer": 3.018830369602536e-10,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 5.817999797884024e-08,
+    "h2osoi_liq_top": 5.833770495713044,
+    "h2osoi_ice_top": 3.034941720342819,
+    "t_grnd": 255.42286565886783,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.827035395681677e-08,
+    "qflx_solidevap_from_top_layer": 1.990964402202347e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.0002102277170507185,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 1.0334449437275319e-06,
+    "t_grnd": 283.58904846026553,
+    "frac_h2osfc": 0.9880781887292063
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.00021017955858999406,
+    "qflx_solidevap_from_top_layer": 4.8158460724433545e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 5.355910099563972e-05,
+    "h2osoi_liq_top": 6.964153202276086,
+    "h2osoi_ice_top": 1.5867190604740076,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 4.362055393280452e-05,
+    "qflx_solidevap_from_top_layer": 9.938547062835203e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -4.0097771742914826e-08,
+    "h2osoi_liq_top": 5.2043046607416805,
+    "h2osoi_ice_top": 4.855545767623308e-05,
+    "t_grnd": 274.7153526427554,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 4.0097771742914826e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 2.0234850845400295e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 1.066281037663197e-05,
+    "t_grnd": 265.77138835832994,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.7272959074113638e-08,
+    "qflx_solidevap_from_top_layer": 2.961891771286658e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 2.544190792637444e-08,
+    "h2osoi_liq_top": 8.400726148058919,
+    "h2osoi_ice_top": 0.021614682224597448,
+    "t_grnd": 284.1981005847579,
+    "frac_h2osfc": 0.9207466604868683
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.5376615062300507e-08,
+    "qflx_solidevap_from_top_layer": 6.529286407393463e-11,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 3.1729000214632653e-06,
+    "h2osoi_liq_top": 8.40587293031822,
+    "h2osoi_ice_top": 7.324883036430506,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.9603950595523366
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.6954680663409078e-06,
+    "qflx_solidevap_from_top_layer": 1.4774319551223575e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 292.32441332324186,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.7213912734025788e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 4.386176787145081,
+    "t_grnd": 285.92695165879917,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 1.7213912734025788e-06,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 3.014983319629034e-07,
+    "h2osoi_liq_top": 0.09936219670099455,
+    "h2osoi_ice_top": 0.0003901200412446228,
+    "t_grnd": 277.521889802798,
+    "frac_h2osfc": 1.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.0031920604841975e-07,
+    "qflx_solidevap_from_top_layer": 1.179125914483627e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.2808964092639401e-05,
+    "h2osoi_liq_top": 6.389510076946449,
+    "h2osoi_ice_top": 1.4212802689434154,
+    "t_grnd": 281.70871944819635,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.2808964092639401e-05
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -7.80347261989894e-07,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 2.9235689334984256,
+    "t_grnd": 255.54405745985164,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 7.80347261989894e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 9.331925430390905e-07,
+    "h2osoi_liq_top": 4.55137454831748,
+    "h2osoi_ice_top": 4.7064530001968095,
+    "t_grnd": 290.8057793398441,
+    "frac_h2osfc": 0.7079172845044669
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 4.5878028801145646e-07,
+    "qflx_solidevap_from_top_layer": 4.744122550276341e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.75481816214383e-05,
+    "h2osoi_liq_top": 6.126125450988739,
+    "h2osoi_ice_top": 6.058763853913151,
+    "t_grnd": 267.34070967296213,
+    "frac_h2osfc": 0.825778138629946
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.75481816214383e-05,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -2.7900079952039744e-07,
+    "h2osoi_liq_top": 4.300740364584577,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 280.92231013309294,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 2.7900079952039744e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": -1.9327894411194194e-07,
+    "h2osoi_liq_top": 8.415125210375592,
+    "h2osoi_ice_top": 3.747894930097344e-05,
+    "t_grnd": 281.97260901371607,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 1.9327894411194194e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 0.0002106727657347224,
+    "h2osoi_liq_top": 8.007403473684285,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 292.03954717459555,
+    "frac_h2osfc": 0.40270515020420383
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0002106727657347224,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 0.0,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 261.03443889394515,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -6.87140867427809e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 1.5818747267386981e-06,
+    "t_grnd": 261.52894815625604,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 6.87140867427809e-06,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.542525089921788e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 2.9194523460920372e-06,
+    "t_grnd": 261.5318521136655,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.542362898124783e-05,
+    "qflx_solidevap_from_top_layer": 1.6219179700511317e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -1.4751285808304933e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.7538842904959981,
+    "t_grnd": 266.28169910144175,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 1.4751285808304933e-05,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.0767170518607715e-05,
+    "h2osoi_liq_top": 5.432052805771271,
+    "h2osoi_ice_top": 0.0019031562643678183,
+    "t_grnd": 254.74689925027215,
+    "frac_h2osfc": 0.6749144655013056
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.0763399489146826e-05,
+    "qflx_solidevap_from_top_layer": 3.771029460888957e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.3239506764559226e-06,
+    "h2osoi_liq_top": 3.346386827583901,
+    "h2osoi_ice_top": 4.5783153506377685,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 5.590684677385697e-07,
+    "qflx_solidevap_from_top_layer": 7.64882208717353e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 2.2046595373214337e-06,
+    "h2osoi_liq_top": 7.380347688946982,
+    "h2osoi_ice_top": 4.446585668377537,
+    "t_grnd": 261.44478576431254,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.3757711681962173e-06,
+    "qflx_solidevap_from_top_layer": 8.288883691252163e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -7.970312665654887e-08,
+    "h2osoi_liq_top": 7.412286075535039,
+    "h2osoi_ice_top": 4.4393562128750474,
+    "t_grnd": 277.3635626879005,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 7.970312665654887e-08
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 3.51621552840103e-05,
+    "h2osoi_liq_top": 0.7033243015358628,
+    "h2osoi_ice_top": 5.117201860537787,
+    "t_grnd": 284.65566451948354,
+    "frac_h2osfc": 0.10975914736295012
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 4.248825212188637e-06,
+    "qflx_solidevap_from_top_layer": 3.091333007182166e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 1.688644042174995e-07,
+    "h2osoi_liq_top": 0.049330807481621,
+    "h2osoi_ice_top": 0.04785847332394777,
+    "t_grnd": 269.660688766453,
+    "frac_h2osfc": 0.7821333076708352
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 8.57112774773696e-08,
+    "qflx_solidevap_from_top_layer": 8.315312674012991e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 6.40420254419625e-05,
+    "h2osoi_liq_top": 0.6431299415133831,
+    "h2osoi_ice_top": 3.272363204638446,
+    "t_grnd": 264.4292983992165,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.0519069383984776e-05,
+    "qflx_solidevap_from_top_layer": 5.352295605797772e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 9.750639192289367e-05,
+    "h2osoi_liq_top": 3.1004781271595063,
+    "h2osoi_ice_top": 0.0003958919028910423,
+    "t_grnd": 269.94806553427236,
+    "frac_h2osfc": 0.30315380773747946
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 9.749394317753829e-05,
+    "qflx_solidevap_from_top_layer": 1.2448745355381338e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.1733145194782798e-05,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 5.631411825171723e-05,
+    "t_grnd": 273.15,
+    "frac_h2osfc": 0.1440845217190182
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.169659296264676e-05,
+    "qflx_solidevap_from_top_layer": 3.655223213603751e-08,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 3.016363896784787e-08,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 278.04824480472075,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 3.016363896784787e-08,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.2598389650370168e-06,
+    "h2osoi_liq_top": 0.0,
+    "h2osoi_ice_top": 0.0,
+    "t_grnd": 283.645889719023,
+    "frac_h2osfc": 0.2621667069602581
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 1.2598389650370168e-06,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": 4.953035926404329e-05,
+    "h2osoi_liq_top": 1.882383926408489,
+    "h2osoi_ice_top": 1.433026613734155,
+    "t_grnd": 286.34412846959947,
+    "frac_h2osfc": 0.20825229493815212
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.8121751746576e-05,
+    "qflx_solidevap_from_top_layer": 2.1408607517467287e-05,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.0120813576256055e-08,
+    "h2osoi_liq_top": 6.297335193089109,
+    "h2osoi_ice_top": 7.506089405853339,
+    "t_grnd": 277.4038701886942,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 4.617271247407278e-09,
+    "qflx_solidevap_from_top_layer": 5.503542328848777e-09,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -3.2268631259255646e-07,
+    "h2osoi_liq_top": 8.01050600086017,
+    "h2osoi_ice_top": 2.228612427565394,
+    "t_grnd": 281.1855033491688,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 3.2268631259255646e-07
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 1800,
+    "qflx_ev_snow": 1.0022863953085983e-06,
+    "h2osoi_liq_top": 2.372892518866239,
+    "h2osoi_ice_top": 6.2637562741805395,
+    "t_grnd": 268.723143806204,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 2.7537508426925116e-07,
+    "qflx_solidevap_from_top_layer": 7.26911311039347e-07,
+    "qflx_soliddew_to_top_layer": 0.0,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  },
+  {
+   "inputs": {
+    "dtime": 3600,
+    "qflx_ev_snow": -5.479954191810958e-07,
+    "h2osoi_liq_top": 5.269753366754064,
+    "h2osoi_ice_top": 0.024905583468853357,
+    "t_grnd": 268.4391500555367,
+    "frac_h2osfc": 0.0
+   },
+   "outputs": {
+    "qflx_liqevap_from_top_layer": 0.0,
+    "qflx_solidevap_from_top_layer": 0.0,
+    "qflx_soliddew_to_top_layer": 5.479954191810958e-07,
+    "qflx_liqdew_to_top_layer": 0.0
+   }
+  }
+ ]
+}

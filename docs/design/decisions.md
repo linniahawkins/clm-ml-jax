@@ -775,6 +775,258 @@ derivatives with `clm` and `from_leaf_area` against finite differences on a drie
 `tests/test_gradient_accuracy_soil_water.py`.
 Source: maintainer, 2026-11-25; open item O93.
 
+**152. Freeze and thaw of soil water is an option of predicted soil water, off by default**
+2026-11-26 · Phase 12 (scoping) · maintainer · in force · Departure from Fortran: yes (not in CLM-ml v2; optional)
+`model.yaml` `soil.freeze_thaw: false | true` (static), allowed only with `soil.water:
+predicted`: liquid water and ice are then both the model's own. `false` (the default) is the
+model of Phase 11, bit for bit, prescribed and predicted. Whether it becomes the default of
+predicted soil water is decided later (with a snowpack). Prescribed soil water keeps all its
+water liquid (O9 stays open for prescribed runs).
+The phase is a translation of CLM (`ctsm5.4.004`), judged as Phase 10 was (decision 136):
+by agreement with CLM's Fortran on the same inputs, not by winter results, which need snow.
+Reason: the maintainer's choice ("accept all recommendations", choices 1 and 9 of the plan).
+Source: maintainer, 2026-11-26; `docs/design/frozen_soil_plan.md` section 8.
+
+**153. Until there is a snowpack, snow reaching the ground lies in CLM's store for snow without layers**
+2026-11-26 · Phase 12 (scoping) · maintainer · in force · Departure from CLM: yes (temporary)
+With `soil.freeze_thaw: true` the snow that reaches the ground is added to a store
+(`h2osno_no_layers` in CLM, kg m⁻²) before the temperature solution, as CLM's
+`UpdateState_AddNewSnow` does for a column without snow layers. The phase change routine
+melts it with the heat of the top soil level before that level's own ice (CLM's code in
+`Phasechange_beta`), the melt reaches the soil as liquid water, and the store's heat capacity
+is added to the top level's (CLM's `SoilThermProp`, already in the translation). Water and
+energy are conserved.
+Departure from CLM: CLM uses this store only until the snow is 1 cm deep and then builds
+snow layers; here it holds all the snow. It has no albedo, covers no fraction of the ground
+(CLM gives even unlayered snow a covered fraction with its own surface fluxes), does not
+insulate, does not sublimate (in CLM too the vapour flux of a column without snow layers
+is taken from the top soil level), and its depth is not tracked. Winter soil temperatures
+are therefore those of bare ground. O10 stays open.
+With `freeze_thaw: false`, as before (decision 145): snow enters the soil as liquid at once.
+Reason: liquid water put on freezing ground would freeze in the top level and release heat
+of fusion that the snow never had (5 mm of snowfall in a day: 19 W m⁻² that day); adding it
+to the top level as ice would send most of the winter's snowfall to ice runoff. The store is
+CLM's own code in the routine being translated, and the snowpack will replace it.
+Source: maintainer, 2026-11-26 (choice 2).
+
+**154. Ice at the start of a run**
+2026-11-26 · Phase 12 (scoping) · maintainer · in force · Departure from CLM: n/a (initial state)
+With `soil.freeze_thaw: true` a run starts from the liquid water and ice of the CLM history
+(`SOILLIQ`, `SOILICE`) where the file has them; otherwise the total water (`H2OSOI`) is
+divided by CLM's supercooled-water curve at the initial soil temperature: liquid up to the
+amount that stays unfrozen at that temperature, the rest ice; all liquid above freezing. Or
+a restart.
+Reason: a start with all water liquid in frozen soil would free the heat of fusion of the
+whole column in the first steps.
+Source: maintainer, 2026-11-26 (choice 3).
+
+**155. The canopy is not changed for frozen soil: heat of vaporization at the ground, CLM-ml's surface humidity**
+2026-11-26 · Phase 12 (scoping) · maintainer · in force · Departure from CLM: yes
+Two places where CLM treats a frozen surface differently are inside the multilayer canopy's
+flux solution and stay CLM-ml v2's:
+- *Latent heat of the ground's vapour flux.* CLM uses the heat of sublimation when the top
+  level holds ice and no liquid water (`BiogeophysPreFluxCalcsMod`); here always the heat of
+  vaporization. The water is still taken from ice and liquid as CLM takes it (decision 161),
+  so the energy of sublimed ice is under-counted by the heat of fusion (12 % of that flux).
+- *Humidity of the pore air at the surface.* CLM computes it from the matric potential of
+  the top level's liquid water plus ice (`SurfaceHumidityMod`); here from its liquid water
+  only (`soil.soil_hydraulic_properties`, `canopy.soil_surface_humidity`), which in a frozen
+  level is the supercooled water: the pore air is drier and the evaporation smaller.
+Reason: the soil is translated, the canopy model is not changed in this phase; the effect is
+measured in the coupled runs.
+Source: maintainer, 2026-11-26 (choices 4 and 5).
+
+**156. Roots and ice**
+2026-11-26 · Phase 12 (scoping, 12.1c) · maintainer · in force · Departure from CLM: yes with CLM-ml's roots, no with CLM's
+With CLM-ml's roots (`soil.root_conductance: clm_ml`, the default, and every prescribed run):
+CLM-ml v2's rule, no uptake from a level that holds any ice.
+With CLM's roots (`clm`) and `freeze_thaw: true`: what CLM does. CLM has no such rule: a
+freezing level counts through its matric potential (that of its liquid water, which in
+frozen soil is the freezing-point depression, about −1.2 MPa per degree below freezing, so
+that the root's vulnerability curve closes it) and through its conductivity, reduced by the
+ice (`10^(−e_ice × ice fraction)`, in CLM the value of the soil water solution). Here the
+level's conductivity for the plants is multiplied by that factor of the level's own ice
+fraction (CLM: the mean of two levels, decision 145), and no level is excluded.
+Reason: the maintainer's choice; the probe of CLM's `k_soil_root` (12.1c).
+Source: maintainer, 2026-11-26 (choice 6); `PhotosynthesisMod.F90`,
+`SoilWaterMovementMod.F90::compute_hydraulic_properties`.
+
+**157. Phase 12 is evaluated at US-MMS and on the globe; soil properties on grids and a spun-up start stay out**
+2026-11-26 · Phase 12 (scoping) · maintainer · in force · Departure from Fortran: n/a
+Coupled runs: the winters of 2010-2014 at US-MMS beside CLM's soil ice, liquid water,
+temperature and perched water table (the CLM case of Phase 10), and days of the 1° globe; no
+new cold tower until there is snow. Soil properties per level on grids (O88) and a spun-up
+initial state (O12) are not part of this phase.
+Source: maintainer, 2026-11-26 (choices 7 and 8).
+
+**158. The harness calls CLM's phase change and thermal properties in place**
+2026-11-26 · Phase 12 (12.1a) · implementation · in force · Departure from Fortran: n/a (testing)
+`SoilTemperatureMod.F90` is built in the harness's copy of CTSM's unit-test build (it was
+not part of that build), with `BandDiagonalMod` and `UrbBuildTempOleson2015Mod`, and a
+twelve-line stand-in for `UrbanTimeVarType` (CLM's reads urban data streams through ESMF;
+only the type's two fields are named, and never read without an urban column).
+`Phasechange_beta` and `SoilThermProp` are private: two more lines on which `private`
+becomes `public`. No science line changes; `build.py` checks the copy against the checkout
+as before. So the plan's fallback (a copy of the routine's statements) was not needed for
+these two.
+Statements are copied only where CLM's routine cannot be called for one column: the
+division of the ground's vapour flux (inside `SoilFluxes`), the addition of new snow
+(`UpdateState_AddNewSnow`) and the water reaching the soil without snow layers
+(`SumFlux_AddSnowPercolation`), a few lines each, marked as copies in the drivers.
+New golden data (`tests/fortran_validation/golden_IO/`), all compared at 1e-9:
+| Routine | Cases | Bit for bit | Largest relative difference |
+|---|---|---|---|
+| `SoilThermProp` | 240 | 87 % | 3e-15 |
+| `Phasechange_beta` | 448 | 98 % | 2e-14 |
+| `PerchedWaterTable` | 392 | 96 % | 2e-14 |
+| `SaturatedExcessRunoff` with a frost table | 127 | 91 % | 4e-16 |
+| `PerchedLateralFlow` | 330 | 100 % | 0 |
+| division of the vapour flux | 200 | 100 % | 0 |
+Each test also checks that its sweep reaches the routine's branches
+(`tests/fortran_validation/test_golden_frozen_soil.py`).
+Source: plan 6.1, 9; probe of 2026-11-26.
+
+**159. Freeze and thaw: CLM's routine as written, given CLM-ml's heat capacity factor and no surface feedback**
+2026-11-26 · Phase 12 (12.2) · implementation · in force · Departure from CLM: in the two inputs named
+`soil.phase_change` and `soil.supercooled_water` translate the soil part of
+`Phasechange_beta` (melting, freezing down to the supercooled water of Niu and Yang 2006,
+snow without layers, the "heat of the wrong sign" rule), with CLM's two inputs from its
+temperature solution kept as arguments: `fact` (temperature change of a level per unit of
+heat flux) and `dhsdT` (derivative of the surface heat flux with respect to the ground
+temperature). The golden data sweep both over CLM's ranges. The model passes `fact = step /
+heat capacity` and `dhsdT = 0`.
+Reason for the two values: CLM's top soil level is also its surface, so that resetting its
+temperature to the freezing point changes the surface fluxes (`dhsdT`), and CLM's `fact`
+has a geometric factor in the top level that belongs to that solution. In CLM-ml the ground
+heat flux is a result of the canopy's flux-profile solution, given to the soil, and the
+surface has its own temperature. With these values the routine conserves energy exactly:
+the heat lost by the levels equals the latent heat (`xmf`), every step. The soil energy
+check of the step becomes ground heat flux − (change of heat content + latent heat).
+Copied from CLM as they stand: the latent heat of fusion 3.337e5 J kg⁻¹ and CLM's gravity
+9.80616 m s⁻² in the freezing-point depression (CLM-ml v2's `grav` is 9.80665); the
+supercooled water taken at the temperature before the change (decision 163).
+Not translated: snow layers, excess ice (off in CLM's defaults), urban columns, and the
+freezing of the pond (`PhaseChangeH2osfc` moves the pond's ice to a snow layer; the pond
+has no temperature here, decision 133, and stays liquid).
+Checks without a reference (`tests/clm_ml/test_processes_frozen_soil.py`): water of every
+level and energy conserved on 400 random columns; Stefan's problem (a wet column at 0 °C
+under a surface at −5 °C, CLM-ml's heat diffusion with CLM's phase change and frozen
+thermal properties): the frozen depth within 7 % of the analytical solution over 40 days
+(0.80 m against 0.84 m at the end; the levels there are 0.2 to 0.3 m thick) and growing as
+the square root of time; derivatives against finite differences in nine regimes.
+Source: plan 3.3; `SoilTemperatureMod.F90::Phasechange_beta`.
+
+**160. Thermal properties of frozen soil: CLM-ml v2's copy equals CLM's**
+2026-11-26 · Phase 12 (12.1b) · implementation · in force · Departure from Fortran: no
+`soil.soil_thermal_properties` (from CLM-ml v2's `MLSoilTemperatureMod::SoilThermProp`,
+which had no golden test of its own and was never run with ice) equals `ctsm5.4.004`'s
+`SoilThermProp` for soil levels with liquid water, ice, bedrock, ponded water and snow
+without layers: 240 cases at 1e-9. One constant was made CLM's: the factor 1e-3 in the
+conductivity of the ponded water is written without a kind in CLM, a single-precision
+number (the difference was 3e-8; that conductivity is not used by the model, which gives the
+pond no temperature).
+Source: plan 12.1(b).
+
+**161. Frost table, perched water table, its drainage, and the ground's vapour flux divided between liquid and ice**
+2026-11-26 · Phase 12 (12.3, 12.4) · implementation · in force · Departure from CLM: one case, named
+Translated routine by routine and equal to CLM's Fortran (decision 158):
+- `drainage.perched_water_table` (`PerchedWaterTable`): uses the water table of the step
+  before, as CLM (it is called before `ThetaBasedWaterTable`), CLM's single-precision
+  saturation threshold, and CLM's rule that a level exactly at freezing is frozen. It looks
+  at all soil levels, below the bedrock too, as CLM.
+- `surface_runoff.saturated_fraction` (`ComputeFsatTopmodel`): the perched water table of
+  the step before where the frost table lies between it and the water table.
+- `drainage.perched_drainage` (`PerchedLateralFlow`, the branch of a column that is not a
+  hillslope), with the new parameter `perched_baseflow_scalar` in the `hydrology` section of
+  `params.yaml` (1e-5, CLM's parameter file; `clm-ml upgrade` adds it, `clm-ml params` reads
+  it).
+- `surface_runoff.ground_vapor_fluxes` (`SoilFluxes`): evaporation taken from liquid water
+  and ice of the top level in their proportion, sublimation at most the ice, frost instead
+  of dew where the ground is below freezing.
+`hydrology.soil_hydrology` calls them in CLM's order when given the soil temperature.
+Differs from CLM in one case: where the two levels between which the perched water table
+is interpolated are equally saturated, CLM divides by zero (in a run without floating-point
+traps the result would be not-a-number); here the perched water table is then put at the
+top of the upper level, CLM's result when that level is the wetter one.
+Two things about the golden data: the drainage of the perched zone in a step is a small
+fraction of a millimetre, so that it comes from more than one level only where the perched
+water table lies a sliver above a level's bottom (covered by idealized cases); a number
+written by `clm-ml params` or `upgrade` now keeps a decimal point before its exponent
+(`1.0e-05`: YAML reads `1e-05` as text).
+Source: plan 3.1 rows 8-12; `SoilHydrologyMod.F90`, `SaturatedExcessRunoffMod.F90`,
+`SoilFluxesMod.F90`.
+
+**162. Sequences of a freezing soil against CLM, and how the temperature solution is stood for**
+2026-11-26 · Phase 12 (12.5) · implementation · in force · Departure from Fortran: n/a (testing)
+A harness driver (`test_frozen_sequence.pf`) calls CLM's routines step after step in the
+order of `clm_driver`: new snow, `UpdateFracH2oSfc`, `SoilThermProp`, the temperature
+solution, `Phasechange_beta` (with `dhsdT = 0`, `fact = step / heat capacity`), the
+division of the vapour flux, `HydrologyNoDrainage` (with `PerchedWaterTable`) and
+`HydrologyDrainage` (`PerchedLateralFlow`, `SubsurfaceLateralFlow`). The temperature
+solution is the multilayer canopy's own, so it is stood for by a relaxation of every level
+toward a temperature given for each step, faster near the surface (`heat_rate exp(−z /
+heat_depth) (target − T)`); the plan's first form, a given temperature change per step, let
+temperatures run away once a level had frozen. Eight scenarios of 240 steps at each of 1800 s
+and 3600 s (`golden_IO/test_FrozenSoil_sequence.json`, 5 MB): a wet loam freezing and
+thawing from the top under rain (a perched water table forms, drains, disappears); rain on
+frozen clay; cycles over ground frozen below 0.5 m; a nearly dry sand cooled to −25 °C (all
+its water stays supercooled); a saturated organic soil freezing with frost (ice runoff);
+frost and sublimation for days; daily cycles across freezing with snow at night; shallow
+bedrock with snow at the start and rain on snow.
+`tests/fortran_validation/test_golden_frozen_sequences.py`:
+- *One step ahead* (the acceptance test): each of the 3 840 steps starts from the Fortran's
+  state. Every one of 291 840 values within 1e-9 (96 % bit for bit), the Richards solver's
+  sub-step count equal in every step (1 to 31), water balance closed to 2e-12 mm and the
+  phase change's energy to 2e-11 W m⁻².
+- *Free running*: 14 of the 16 sequences stay within 1e-8 over the 240 steps (most at 1e-15);
+  the two others (frozen clay under rain and the saturated soil, at 3600 s) differ by up to
+  1e-6 in a level's ice while it freezes. This is not a difference of the codes: a start
+  perturbed by 1e-12 changes the same sequences by up to 7e-3 (decision 163), and the test
+  requires the difference to stay under a tenth of that.
+To do this the hydrology step takes the ponded fraction computed at the start of the step
+(`soil_hydrology(pond=...)`): CLM computes it before the temperature solution, and it moves
+a pond too small to keep into the top level, whose water the phase change then sees.
+Source: plan 6.3.
+
+**163. CLM's phase change amplifies small differences while a soil freezes; its derivative gets a stabilized rule**
+2026-11-26 · Phase 12 (12.5) · implementation · in force (the maintainer may revise the default) · Departure from CLM: none in the results
+*What was found.* When a level freezes down to its supercooled water, CLM takes the
+supercooled amount at the temperature before the change and then warms the level with the
+heat of fusion. The level ends warmer than the temperature its liquid water belongs to,
+cannot melt again below freezing, and waits a step: a two-step overshoot. With respect to
+the temperature before, the temperature after has the slope `1 − gain`, where `gain` is the
+heat of fusion of the change of supercooled water per degree over the heat capacity: about 3
+at −1 °C and 18 at −0.2 °C in a clay, below 1 only under about −3 °C. Consequences, the same
+in CLM's Fortran and here (the one-step-ahead agreement is at round-off):
+- *Forward:* a difference of 1e-9 K in the starting temperature changes later temperatures
+  by up to 1e-2 K in a freezing clay, and a perturbation of 1e-12 changes a level's ice by up
+  to 0.7 % within a hundred steps; afterwards the runs come together again. The size is
+  bounded by the overshoot (hundredths of a degree). The noise-twin tolerance of the
+  regression policy (4e-11) cannot hold for a run with freezing soil; the committed
+  reference (CHATS in May) has none.
+- *Derivatives:* the exact derivative of the forward values multiplies by `1 − gain` at
+  every such step and grows without bound: up to 1e21 in the sequences of frozen clay.
+*The rule.* `model.yaml` `numerics.phase_change_derivative: stabilized | exact` (default
+`stabilized`; derivatives only, the forward values are bit for bit the same): for a level
+frozen down to its supercooled water, the derivative is that of the state in which the
+liquid water is the supercooled water of the temperature after the change (found by 50
+bisections; slope `1 / (1 + gain)`, between 0 and 1). Every other regime keeps its exact
+derivative. It is an approximation, in the manner of decision 124.
+*Measured* (sequence means of total ice and of the temperature of the upper ten levels,
+with respect to the driving temperature and `bsw`): the stabilized derivative is within 25 %
+of finite changes of 0.01 to 0.05 (typically 3 to 10 %: −6.1 against −5.7 to −6.6 kg m⁻²
+K⁻¹; −159 against −161; −175 against −176) where the exact derivative is 1e3 to 1e20 times
+too large; in sequences that do not amplify, the two differ by 3 to 14 %.
+Tests: `test_golden_frozen_sequences.py` (the rule changes no value, is bounded, follows
+finite changes; exact derivatives against finite differences in five quieter windows),
+`tests/clm_ml/test_processes_frozen_soil.py` (the slope in the supercooled limit, the other
+regimes unchanged).
+Not done: a phase change without the overshoot (the supercooled water taken at the
+temperature after the change) would be a different forward scheme from CLM's; open item O94.
+Reason: the objective is CLM's soil as it is; a derivative of 1e21 is of no use, and the
+repository's rule for such cases is a stated derivative-only approximation (decision 124).
+Source: probes of 2026-11-26 (`test_golden_frozen_sequences.py` reproduces them).
+
 ## B. Configuration and user interface
 
 **7. Names and platform**

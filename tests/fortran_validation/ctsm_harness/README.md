@@ -1,7 +1,7 @@
 # CTSM test harness: golden data from CLM's own soil water Fortran
 
-The golden files `../golden_IO/test_Soil*.json` (and later the other soil water routines')
-are made here: CLM's Fortran (CTSM `ctsm5.4.004`) is run for one idealized soil column on
+The golden files of CLM's soil routines (`../golden_IO/`: soil water, runoff, drainage, frozen
+soil) are made here: CLM's Fortran (CTSM `ctsm5.4.004`) is run for one idealized soil column on
 inputs that sweep the cases a routine can meet, and its outputs are recorded.
 `../test_golden_jax.py` then requires the JAX functions to reproduce them (relative
 tolerance 1e-9). Running the tests needs none of this; the harness is only needed to remake
@@ -18,14 +18,17 @@ scratch and makes three kinds of change to the copy:
 
 1. **Sources added to the test build** (CTSM's test build compiles only the files its own
    tests use): the Clapp-Hornberger retention curve, `SoilWaterMovementMod`,
-   `SoilWaterPlantSinkMod`, `SurfaceWaterMod`, `TridiagonalMod`.
+   `SoilWaterPlantSinkMod`, `SurfaceWaterMod`, `TridiagonalMod`; for frozen soil,
+   `SoilTemperatureMod` with `BandDiagonalMod` and `UrbBuildTempOleson2015Mod`.
 2. **Visibility:** on a short list of lines (`VISIBILITY` in `build.py`: routines of
-   `SoilWaterMovementMod.F90`, and the parameter variables of the runoff, surface water and
+   `SoilWaterMovementMod.F90`, `Phasechange_beta` and `SoilThermProp` of
+   `SoilTemperatureMod.F90`, and the parameter variables of the runoff, surface water and
    soil hydrology modules, which CLM reads from files), `private` becomes `public`, so that
    a driver can call a routine that CLM keeps internal or set a parameter. No science line
    changes.
 3. **The harness's files** (`fortran/`): a six-line stand-in for `controlMod` (the name of
-   the namelist file) and the test directory `ctsm_harness_test/`.
+   the namelist file), a stand-in for `UrbanTimeVarType` (the type alone: CLM's module
+   reads urban data streams) and the test directory `ctsm_harness_test/`.
 
 Before building, `build.py` compares the copy with the checkout file by file and stops unless
 the only differences are those three. It also stops if the checkout is not at `ctsm5.4.004`
@@ -41,6 +44,8 @@ or has local changes in `src/`.
 | `fortran/ctsm_harness_test/test_retention_curve.pf` | drivers of `soil_hk` and `soil_suction` |
 | `fortran/ctsm_harness_test/test_soil_water.pf` | drivers of the Richards solver (`SoilWater`): single calls, and sequences of calls with the water carried from step to step |
 | `fortran/ctsm_harness_test/test_hydrology_sequence.pf` | driver of the whole soil hydrology over many steps: CLM's routines in CLM's order, the state carried, forced by time series |
+| `fortran/ctsm_harness_test/test_frozen_soil.pf` | drivers of the routines for frozen soil: the thermal properties (`SoilThermProp`), the phase change (`Phasechange_beta`), the frost table and perched water table (`PerchedWaterTable`), the saturated fraction with them, the perched zone's drainage (`PerchedLateralFlow`); and a copy of the statements of `SoilFluxes` that divide the ground's vapour flux between liquid water and ice |
+| `fortran/ctsm_harness_test/test_frozen_sequence.pf` | driver of a column that freezes and thaws over many steps: CLM's routines in the order of `clm_driver` (new snow, ponded fraction, thermal properties, phase change, vapour flux, hydrology with the perched water table and its drainage), the temperature solution stood for by a relaxation toward a given temperature |
 | `fortran/ctsm_harness_test/test_surface_and_drainage.pf` | drivers of the surface chain (saturated-area runoff, infiltration limit, pond, infiltration), the pond fraction, the water table, dew and drainage; and a copy of CLM's statements for the microtopography and the pond threshold, which CLM computes inside initialization routines that cannot be called for one column |
 
 A **driver** reads `<work>/cases/<routine>.nml` (one namelist group `&case ... /` per case),
@@ -52,8 +57,10 @@ model step.
 Golden files of scalar cases are tested by `../test_golden_jax.py` (step 4 below). The
 solver's cases are arrays over the soil levels and are tested together, in one vectorized
 call, by `../test_golden_soil_water.py`; those of the surface, water table and drainage
-routines by `../test_golden_soil_hydrology.py`, and the sequences of the whole hydrology by
-`../test_golden_hydrology_sequences.py`.
+routines by `../test_golden_soil_hydrology.py`, the sequences of the whole hydrology by
+`../test_golden_hydrology_sequences.py`, the routines for frozen soil by
+`../test_golden_frozen_soil.py` and the sequences of a freezing soil by
+`../test_golden_frozen_sequences.py`.
 
 ## Remaking the golden data
 

@@ -47,6 +47,9 @@ SOURCE_LISTS = {
             "  SoilWaterPlantSinkMod.F90",
             "  SurfaceWaterMod.F90",
             "  TridiagonalMod.F90",
+            "  BandDiagonalMod.F90",
+            "  UrbBuildTempOleson2015Mod.F90",
+            "  SoilTemperatureMod.F90",
         ],
     ),
     "biogeophys/test/CMakeLists.txt": (
@@ -55,7 +58,7 @@ SOURCE_LISTS = {
     ),
     "unit_test_stubs/main/CMakeLists.txt": (
         "  GetGlobalValuesMod_stub.F90",
-        ["  controlMod_stub.F90"],
+        ["  controlMod_stub.F90", "  UrbanTimeVarType_stub.F90"],
     ),
 }
 
@@ -70,6 +73,10 @@ VISIBILITY = {
         "  private :: IceImpedance",
         "  type, private :: params_type",
         "  type(params_type), private ::  params_inst",
+    ],
+    "biogeophys/SoilTemperatureMod.F90": [
+        "  private :: PhaseChange_beta    ! Calculation of the phase change within snow and soil layers",
+        "  private :: SoilThermProp       ! Set therm conduct. and heat cap of snow/soil layers",
     ],
     "biogeophys/SoilHydrologyMod.F90": [
         "  real(r8), private   :: baseflow_scalar = 1.e-2_r8",
@@ -91,6 +98,7 @@ VISIBILITY = {
 # The harness's files: {path under fortran/: path under src/}.
 ADDED = {
     "controlMod_stub.F90": "unit_test_stubs/main/controlMod_stub.F90",
+    "UrbanTimeVarType_stub.F90": "unit_test_stubs/main/UrbanTimeVarType_stub.F90",
     "ctsm_harness_test": "biogeophys/test/ctsm_harness_test",
 }
 PATHS_MODULE = "biogeophys/test/ctsm_harness_test/HarnessPathsMod.F90"

@@ -769,6 +769,543 @@ def hydrology_sequence_cases() -> list[dict]:
     return cases
 
 
+TFRZ = 273.15
+
+
+def _temperature_profile(rng) -> np.ndarray:
+    """Soil temperature (K) of each level: warm throughout, cold throughout, within a degree
+    of freezing, frozen above a level and thawed below it, thawed above and frozen below,
+    or frozen in one band; in one profile out of five some levels are exactly at freezing."""
+    kind = rng.integers(6)
+    level = np.arange(NLEVSOI)
+    warm = rng.uniform(TFRZ + 0.01, TFRZ + 25.0, NLEVSOI)
+    cold = rng.uniform(TFRZ - 30.0, TFRZ - 0.01, NLEVSOI)
+    if kind == 0:
+        t = warm
+    elif kind == 1:
+        t = cold
+    elif kind == 2:
+        t = rng.uniform(TFRZ - 1.0, TFRZ + 1.0, NLEVSOI)
+    elif kind == 3:
+        t = np.where(level < rng.integers(1, NLEVSOI), cold, warm)
+    elif kind == 4:
+        t = np.where(level < rng.integers(1, NLEVSOI), warm, cold)
+    else:
+        lo = rng.integers(1, NLEVSOI - 1)
+        t = np.where((level >= lo) & (level < rng.integers(lo + 1, NLEVSOI + 1)), cold, warm)
+    if rng.random() < 0.2:
+        t = np.where(rng.random(NLEVSOI) < 0.3, TFRZ, t)
+    return t
+
+
+def _frozen_water(rng, watsat, t) -> tuple[np.ndarray, np.ndarray]:
+    """Liquid water and ice (kg/m2) of each level: total water of ``_water_profile``; the
+    ice share none, all, any, or following the temperature (ice below freezing)."""
+    s = _water_profile(rng)
+    kind = rng.integers(4)
+    if kind == 0:
+        share = np.zeros(NLEVSOI)
+    elif kind == 1:
+        share = np.ones(NLEVSOI)
+    elif kind == 2:
+        share = rng.uniform(0.0, 1.0, NLEVSOI)
+    else:
+        share = np.where(t < TFRZ, rng.uniform(0.3, 1.0, NLEVSOI), 0.0)
+    pores = watsat * DZ
+    return s * (1.0 - share) * pores * 1000.0, s * share * pores * DENICE
+
+
+NLEVGRND = 25
+
+
+def _ground_levels() -> np.ndarray:
+    """Thickness (m) of CLM's 25 ground levels (as HarnessColumnMod)."""
+    below = DZ[-1] + ((np.arange(1, NLEVGRND - NLEVSOI + 1) * 25.0) ** 1.5) / 100.0
+    return np.concatenate([DZ, below])
+
+
+def soil_therm_prop_cases() -> list[dict]:
+    """Thermal conductivity and heat capacity of the ground levels: temperatures on both
+    sides of freezing and exactly at it; water from none to above saturation, liquid, ice
+    and mixed; mineral conductivity, dry conductivity and heat capacity of the solids over
+    CLM's soils; bedrock from the second level to below the soil; with and without ponded
+    water and snow lying without layers."""
+    rng = np.random.default_rng(SEED + 16)
+    dz = _ground_levels()
+    cases = []
+    for i in range(240):
+        watsat = np.where(
+            rng.random() < 0.5, rng.uniform(0.3, 0.9), rng.uniform(0.3, 0.9, NLEVGRND)
+        )
+        kind = rng.integers(4)
+        s = [
+            rng.uniform(0.0, 1.1, NLEVGRND),
+            _log_uniform(rng, 1e-9, 1.0, NLEVGRND),
+            np.zeros(NLEVGRND),
+            np.full(NLEVGRND, rng.uniform(0.0, 1.0)),
+        ][kind]
+        share = [np.zeros(NLEVGRND), np.ones(NLEVGRND), rng.uniform(0.0, 1.0, NLEVGRND)][
+            rng.integers(3)
+        ]
+        t = rng.uniform(TFRZ - 30.0, TFRZ + 30.0, NLEVGRND)
+        t = np.where(rng.random(NLEVGRND) < 0.1, TFRZ, t)
+        pores = watsat * dz
+        cases.append(
+            {
+                "nbedrock": NLEVSOI if i % 3 == 0 else int(rng.integers(2, NLEVSOI + 1)),
+                "h2osfc": _pick(rng, (0.6, lambda: 0.0), (0.4, lambda: rng.uniform(0.0, 50.0))),
+                "h2osno_no_layers": _pick(
+                    rng, (0.6, lambda: 0.0), (0.4, lambda: rng.uniform(0.0, 10.0))
+                ),
+                "t_soisno": [float(x) for x in t],
+                "h2osoi_liq": [float(x) for x in s * (1.0 - share) * pores * 1000.0],
+                "h2osoi_ice": [float(x) for x in s * share * pores * DENICE],
+                "watsat": [float(x) for x in np.broadcast_to(watsat, NLEVGRND)],
+                "tkmg": [float(x) for x in rng.uniform(1.0, 8.0, NLEVGRND)],
+                "tkdry": [float(x) for x in rng.uniform(0.05, 0.5, NLEVGRND)],
+                "csol": [float(x) for x in rng.uniform(1.9e6, 2.5e6, NLEVGRND)],
+            }
+        )
+    return cases
+
+
+def phase_change_cases() -> list[dict]:
+    """Freezing and thawing of soil water after the temperature solution.
+
+    Random draws at both model steps: temperatures from -30 to +25 C in profiles of every
+    kind, some levels exactly at freezing; soils from sand to clay and organic; water from
+    dry to above saturation, all liquid, all ice and mixed, consistent with the
+    temperature or not; the factor of the temperature solution from the heat capacity of
+    the level (times 0.5 to 1.5: CLM's top level has a geometric factor); the derivative of
+    the surface heat flux zero (a heat flux given to the soil) or down to -30 W m-2 K-1;
+    ponded fraction none or any; snow without layers on the ground none, or from a trace
+    to more than the top level's energy can melt. Then edge cases."""
+    rng = np.random.default_rng(SEED + 11)
+    cases = []
+
+    def case(dtime, t, liq, ice, props, fact, dhsdt, frac_h2osfc, h2osno):
+        return {
+            "dtime": dtime,
+            "dhsdT": float(dhsdt),
+            "frac_h2osfc": float(frac_h2osfc),
+            "h2osno_no_layers": float(h2osno),
+            "snow_depth": float(h2osno / 250.0),
+            "t_soisno": _levels(t),
+            "h2osoi_liq": _levels(liq),
+            "h2osoi_ice": _levels(ice),
+            "watsat": _levels(props["watsat"]),
+            "sucsat": _levels(props["sucsat"]),
+            "bsw": _levels(props["bsw"]),
+            "fact": _levels(fact),
+        }
+
+    def heat_factor(dtime, props, liq, ice, scale):
+        cv = 2.2e6 * (1.0 - props["watsat"]) * DZ + ice * 2117.27 + liq * 4188.0
+        return scale * dtime / cv
+
+    for i in range(400):
+        dtime = STEPS[i % 2]
+        props = _soil_properties(*_texture(rng))
+        t = _temperature_profile(rng)
+        liq, ice = _frozen_water(rng, props["watsat"], t)
+        fact = heat_factor(dtime, props, liq, ice, rng.uniform(0.5, 1.5, NLEVSOI))
+        cases.append(
+            case(
+                dtime, t, liq, ice, props, fact,
+                _pick(rng, (0.5, lambda: 0.0), (0.5, lambda: -rng.uniform(0.0, 30.0))),
+                _pick(rng, (0.7, lambda: 0.0), (0.3, lambda: rng.uniform(0.0, 1.0))),
+                _pick(rng, (0.7, lambda: 0.0), (0.3, lambda: _log_uniform(rng, 1e-3, 30.0, 1)[0])),
+            )
+        )  # fmt: skip
+
+    loam = _soil_properties(40.0, 20.0, 0.0)
+    pores = loam["watsat"] * DZ
+    full_liq, full_ice = pores * 1000.0, pores * DENICE
+    none = np.zeros(NLEVSOI)
+    for dtime in STEPS:
+        fact = heat_factor(dtime, loam, 0.5 * full_liq, none, 1.0)
+        edges = [
+            # (temperature, liquid, ice, dhsdT, ponded fraction, snow)
+            (TFRZ, 0.5 * full_liq, 0.3 * full_ice, 0.0, 0.0, 0.0),  # at freezing: no change
+            (TFRZ + 1e-9, 0.5 * full_liq, 0.3 * full_ice, 0.0, 0.0, 0.0),  # a trace of melt
+            (TFRZ - 1e-9, 0.5 * full_liq, 0.3 * full_ice, 0.0, 0.0, 0.0),  # of freezing
+            (TFRZ + 0.05, 0.5 * full_liq, 0.3 * full_ice, 0.0, 0.0, 0.0),  # part of the ice
+            (TFRZ + 20.0, 0.5 * full_liq, 1e-3 * full_ice, 0.0, 0.0, 0.0),  # all of it
+            (TFRZ + 5.0, 0.5 * full_liq, none, 0.0, 0.0, 0.0),  # warm, no ice
+            (TFRZ - 5.0, none, 0.5 * full_ice, 0.0, 0.0, 0.0),  # cold, no liquid
+            (TFRZ - 0.05, 0.8 * full_liq, none, 0.0, 0.0, 0.0),  # part of the liquid
+            (TFRZ - 25.0, 0.8 * full_liq, none, 0.0, 0.0, 0.0),  # down to the supercooled
+            (TFRZ - 2.0, 0.02 * full_liq, none, 0.0, 0.0, 0.0),  # all of it supercooled
+            (TFRZ - 2.0, 0.02 * full_liq, 0.5 * full_ice, 0.0, 0.0, 0.0),
+            (TFRZ - 2.0, none, none, 0.0, 0.0, 0.0),  # no water
+            (TFRZ + 2.0, none, none, 0.0, 0.0, 0.0),
+            (TFRZ + 3.0, 0.5 * full_liq, 0.3 * full_ice, -15.0, 0.0, 0.0),  # a surface
+            (TFRZ - 3.0, 0.5 * full_liq, 0.3 * full_ice, -15.0, 0.0, 0.0),  # feedback
+            (TFRZ + 3.0, 0.5 * full_liq, 0.3 * full_ice, -15.0, 0.6, 0.0),  # under a pond
+            (TFRZ - 3.0, 0.5 * full_liq, 0.3 * full_ice, -15.0, 0.6, 0.0),
+            (TFRZ + 3.0, 0.5 * full_liq, 0.3 * full_ice, -15.0, 1.0, 0.0),
+            (TFRZ + 0.5, 0.5 * full_liq, none, 0.0, 0.0, 0.05),  # snow melts in part
+            (TFRZ + 8.0, 0.5 * full_liq, none, 0.0, 0.0, 0.05),  # all of it, soil warms
+            (TFRZ + 8.0, 0.5 * full_liq, 0.3 * full_ice, 0.0, 0.0, 0.05),  # then the ice
+            (TFRZ + 8.0, 0.5 * full_liq, 0.3 * full_ice, -15.0, 0.3, 5.0),
+            (TFRZ - 3.0, 0.5 * full_liq, none, 0.0, 0.0, 5.0),  # snow on freezing soil
+            (TFRZ, 0.5 * full_liq, none, 0.0, 0.0, 5.0),
+        ]
+        for t, liq, ice, dhsdt, frac_h2osfc, h2osno in edges:
+            cases.append(case(dtime, t, liq, ice, loam, fact, dhsdt, frac_h2osfc, h2osno))
+    return cases
+
+
+def perched_water_table_cases() -> list[dict]:
+    """Frost table and perched water table: temperature profiles of every kind (unfrozen,
+    frozen from the top, thawed over frozen, frozen at the lowest level only, a frozen
+    band, levels exactly at freezing); saturation above the frost table from dry to full,
+    with ice making up any share; the water table above and below the frost table. CLM
+    divides by the difference of the saturation of two levels: profiles in which two
+    adjacent levels are equally saturated are not drawn."""
+    rng = np.random.default_rng(SEED + 12)
+    cases = []
+
+    def case(zwt, t, s, share, watsat):
+        pores = watsat * DZ
+        return {
+            "zwt": float(zwt),
+            "t_soisno": _levels(t),
+            "h2osoi_liq": _levels(s * (1.0 - share) * pores * 1000.0),
+            "h2osoi_ice": _levels(s * share * pores * DENICE),
+            "watsat": _levels(watsat),
+        }
+
+    for i in range(360):
+        props = _soil_properties(*_texture(rng))
+        t = _temperature_profile(rng)
+        if i % 3 == 0:  # thawed over frozen: where a perched water table can form
+            t = np.where(
+                np.arange(NLEVSOI) < rng.integers(1, NLEVSOI),
+                rng.uniform(TFRZ + 0.01, TFRZ + 15.0, NLEVSOI),
+                rng.uniform(TFRZ - 20.0, TFRZ, NLEVSOI),
+            )
+        kind = rng.integers(3)
+        if kind == 0:  # any profile
+            s = rng.uniform(0.05, 1.05, NLEVSOI)
+        elif kind == 1:  # dry over wet, the wet part reaching the frozen levels
+            s = np.where(
+                np.arange(NLEVSOI) < rng.integers(0, NLEVSOI),
+                rng.uniform(0.05, 0.9, NLEVSOI),
+                rng.uniform(0.9, 1.05, NLEVSOI),
+            )
+        else:  # wet throughout
+            s = rng.uniform(0.9, 1.05, NLEVSOI)
+        share = np.where(t <= TFRZ, rng.uniform(0.0, 1.0, NLEVSOI), 0.0)
+        zwt = _pick(
+            rng,
+            (0.1, lambda: 0.0),
+            (0.6, lambda: rng.uniform(0.0, ZI[-1])),
+            (0.3, lambda: rng.uniform(ZI[-1], 80.0)),
+        )
+        cases.append(case(zwt, t, s, share, props["watsat"]))
+
+    level = np.arange(NLEVSOI)
+    warm, cold = TFRZ + 5.0, TFRZ - 5.0
+    ramp = np.linspace(0.3, 1.0, NLEVSOI)  # wetter with depth, no two levels equal
+    for t, s, zwt in [
+        (np.full(NLEVSOI, warm), ramp, 3.0),  # unfrozen
+        (np.full(NLEVSOI, cold), ramp, 3.0),  # frozen throughout
+        (np.full(NLEVSOI, TFRZ), ramp, 3.0),  # exactly at freezing counts as frozen
+        (np.where(level < 8, warm, cold), ramp, 6.0),  # dry above the frost table
+        (np.where(level < 8, warm, cold), np.where(level < 4, 0.5, 0.95 + 0.002 * level), 6.0),
+        (np.where(level < 8, warm, cold), np.where(level < 4, 0.5, 0.95 + 0.002 * level), 0.2),
+        (np.where(level < 8, warm, cold), 0.95 + 0.002 * level, 6.0),  # wet to the surface
+        (np.where(level < 8, warm, cold), 1.0 - 0.002 * level, 6.0),  # drier with depth
+        (np.where(level < 8, warm, cold), np.where(level < 7, 0.5, 0.95 + 0.002 * level), 6.0),
+        (np.where(level < 8, warm, cold), np.where(level < 8, 0.5 + 0.01 * level, 0.95), 6.0),
+        (np.where(level < 8, warm, cold), np.where(level == 7, 0.9, 0.95 + 0.002 * level), 6.0),
+        (np.where(level < 1, warm, cold), ramp, 6.0),  # only the top level thawed
+        (np.where(level < 19, warm, cold), 0.95 + 0.002 * level, 20.0),  # lowest level frozen
+        (np.where(level < 19, warm, TFRZ), 0.95 + 0.002 * level, 20.0),
+        (np.where((level >= 3) & (level < 6), cold, warm), 0.95 + 0.002 * level, 20.0),
+        (np.where(level < 3, cold, warm), ramp, 6.0),  # frozen from the top
+    ]:
+        for share in (0.0, 0.5):
+            cases.append(case(zwt, t, s, np.where(t <= TFRZ, share, 0.0), 0.45))
+    return cases
+
+
+def saturated_fraction_cases() -> list[dict]:
+    """Saturated fraction of the surface with a frost table: the frost table above,
+    between and below the perched and the main water table, and equal to either."""
+    rng = np.random.default_rng(SEED + 13)
+    cases = []
+    for _ in range(120):
+        depths = np.sort(rng.uniform(0.0, 9.0, 3))
+        order = rng.permutation(3)
+        frost_table, zwt_perched, zwt = (float(depths[j]) for j in order)
+        if rng.random() < 0.2:
+            zwt = float(rng.uniform(9.0, 80.0))
+        cases.append(
+            {
+                "zwt": zwt,
+                "wtfact": _pick(rng, (0.1, lambda: 0.0), (0.9, lambda: rng.uniform(0.0, 0.9))),
+                "frost_table": frost_table,
+                "zwt_perched": zwt_perched,
+                "qflx_rain_plus_snomelt": _pick(
+                    rng, (0.3, lambda: 0.0), (0.7, lambda: _log_uniform(rng, 1e-6, 3e-2, 1)[0])
+                ),
+            }
+        )
+    for frost_table, zwt_perched, zwt in [
+        (1.0, 0.4, 3.0),  # perched table used
+        (1.0, 0.4, 1.0),  # frost table at the water table: used
+        (1.0, 1.0, 3.0),  # no perched zone
+        (1.0, 0.4, 0.5),  # water table above the frost table
+        (0.0, 0.0, 3.0),  # frozen from the surface
+        (float(ZI[NLEVSOI - 1]), float(ZI[NLEVSOI - 1]), 3.0),  # unfrozen
+        (1.0, 0.0, 3.0),  # perched to the surface
+    ]:
+        cases.append(
+            {
+                "zwt": zwt,
+                "wtfact": 0.4,
+                "frost_table": frost_table,
+                "zwt_perched": zwt_perched,
+                "qflx_rain_plus_snomelt": 1.0e-3,
+            }
+        )
+    return cases
+
+
+def perched_lateral_flow_cases() -> list[dict]:
+    """Drainage of the perched saturated zone, at both model steps: frost tables at level
+    interfaces and within levels, from the surface to below the bedrock; perched water
+    tables above, at and below them, in the same level and several levels higher; slopes
+    from 0.2 to 45 degrees; bedrock from the third level down; soils from sand to clay;
+    liquid water of every kind.
+    The drainage of a step is small beside what one level can give, so several levels give
+    only where the perched water table lies a sliver above a level's bottom."""
+    rng = np.random.default_rng(SEED + 14)
+    cases = []
+
+    def case(dtime, nbedrock, zwt, frost_table, zwt_perched, slope, liq, ice, props):
+        return {
+            "dtime": dtime,
+            "nbedrock": int(nbedrock),
+            "zwt": float(zwt),
+            "frost_table": float(frost_table),
+            "zwt_perched": float(zwt_perched),
+            "topo_slope": float(slope),
+            "h2osoi_liq": _levels(liq),
+            "h2osoi_ice": _levels(ice),
+            **{name: _levels(props[name]) for name in ("watsat", "hksat", "bsw", "sucsat")},
+        }
+
+    for i in range(300):
+        props = _soil_properties(*_texture(rng))
+        nbedrock = NLEVSOI if rng.random() < 0.4 else int(rng.integers(3, NLEVSOI + 1))
+        k_frost = int(rng.integers(0, NLEVSOI))  # the frozen level (0-based)
+        frost_table = _pick(
+            rng,
+            (0.7, lambda: ZI[k_frost]),
+            (0.3, lambda: rng.uniform(0.0, ZI[-1])),
+        )
+        zwt_perched = _pick(
+            rng,
+            (0.15, lambda: frost_table),
+            (0.55, lambda: rng.uniform(0.0, max(frost_table, 1e-6))),
+            (0.1, lambda: ZI[int(rng.integers(0, k_frost + 1))]),
+            # a sliver above an interface: the level holding it gives next to nothing
+            (
+                0.1,
+                lambda: max(
+                    ZI[int(rng.integers(1, k_frost + 2))] - 10.0 ** rng.uniform(-9, -6), 0.0
+                ),
+            ),
+            (0.1, lambda: rng.uniform(frost_table, ZI[-1])),
+        )
+        cases.append(
+            case(
+                STEPS[i % 2], nbedrock, rng.uniform(0.0, 12.0), frost_table, zwt_perched,
+                _log_uniform(rng, 0.2, 45.0, 1)[0],
+                _column_water(rng, props["watsat"], nbedrock),
+                _ice(rng, props["watsat"]), props,
+            )
+        )  # fmt: skip
+
+    loam = _soil_properties(40.0, 20.0, 0.0)
+    sand = _soil_properties(92.0, 3.0, 0.0)
+    full = loam["watsat"] * DZ * 1000.0
+    for dtime in STEPS:
+        for nbedrock, frost_table, zwt_perched, slope, liq, props in [
+            (NLEVSOI, ZI[8], 0.3, 2.0, 0.95 * full, loam),
+            (NLEVSOI, ZI[8], ZI[8], 2.0, 0.95 * full, loam),  # no perched zone
+            (NLEVSOI, ZI[8], ZI[7], 2.0, 0.95 * full, loam),  # one whole level
+            (NLEVSOI, ZI[8], ZI[7] + 1e-9, 2.0, 0.95 * full, loam),  # all but nothing of it
+            (NLEVSOI, ZI[8], 0.0, 2.0, 0.95 * full, loam),  # perched to the surface
+            (NLEVSOI, 0.0, 0.0, 2.0, 0.95 * full, loam),  # frozen from the surface
+            (NLEVSOI, ZI[19], ZI[19], 2.0, 0.95 * full, loam),  # unfrozen
+            (6, ZI[8], 0.3, 2.0, 0.95 * full, loam),  # the frost table below the bedrock
+            (6, ZI[4], 0.05, 2.0, 0.95 * full, loam),
+            (NLEVSOI, ZI[12], 0.02, 45.0, 0.95 * full, sand),  # more than the zone holds
+            (NLEVSOI, ZI[12], 0.02, 45.0, 0.02 * full, sand),  # from levels with little water
+            (NLEVSOI, ZI[8], 0.3, 0.2, 0.95 * full, loam),  # nearly flat
+            (NLEVSOI, ZI[8], ZI[6] - 1e-7, 30.0, 0.95 * full, sand),  # a sliver, then two levels
+            (NLEVSOI, ZI[8], ZI[8] - 1e-9, 30.0, 0.95 * full, sand),  # a sliver only
+            (NLEVSOI, ZI[8] + 0.02, ZI[8] + 0.01, 30.0, 0.95 * full, sand),  # within one level
+        ]:
+            cases.append(
+                case(dtime, nbedrock, 6.0, frost_table, zwt_perched, slope, liq, 0.0, props)
+            )
+    return cases
+
+
+def evaporation_split_cases() -> list[dict]:
+    """The ground's water vapour flux divided into evaporation of liquid, sublimation, dew
+    and frost: fluxes of both signs and none; a top level with liquid only, ice only, both
+    and no water; sublimation larger than the ice of the level; the ground above, below and
+    exactly at freezing; with and without a pond."""
+    rng = np.random.default_rng(SEED + 15)
+    cases = []
+    for i in range(200):
+        cases.append(
+            {
+                "dtime": STEPS[i % 2],
+                "qflx_ev_snow": _pick(
+                    rng,
+                    (0.1, lambda: 0.0),
+                    (0.55, lambda: _log_uniform(rng, 1e-8, 3e-4, 1)[0]),
+                    (0.35, lambda: -_log_uniform(rng, 1e-8, 5e-5, 1)[0]),
+                ),
+                "h2osoi_liq_top": _pick(
+                    rng, (0.3, lambda: 0.0), (0.7, lambda: rng.uniform(0, 9.0))
+                ),
+                "h2osoi_ice_top": _pick(
+                    rng,
+                    (0.3, lambda: 0.0),
+                    (0.3, lambda: _log_uniform(rng, 1e-6, 1e-1, 1)[0]),
+                    (0.4, lambda: rng.uniform(0.0, 8.0)),
+                ),
+                "t_grnd": _pick(
+                    rng, (0.1, lambda: TFRZ), (0.9, lambda: rng.uniform(TFRZ - 20.0, TFRZ + 20.0))
+                ),
+                "frac_h2osfc": _pick(
+                    rng,
+                    (0.6, lambda: 0.0),
+                    (0.3, lambda: rng.uniform(0.0, 1.0)),
+                    (0.1, lambda: 1.0),
+                ),
+            }
+        )
+    return cases
+
+
+def frozen_sequence_cases() -> list[dict]:
+    """Sequences of a soil that freezes and thaws, the state carried from step to step, at
+    both model steps (240 steps each). The temperature solution is stood for by a
+    relaxation of every level toward a temperature given for each step,
+    ``heat_rate exp(-z / heat_depth) (t_target(k) - t)``, applied before the phase change.
+    The scenarios:
+
+    1. a wet loam freezing from the top, then thawing from the top under rain: a perched
+       water table forms on the frozen levels, drains and disappears;
+    2. rain on frozen clay: little infiltration, a pond, runoff, then thaw;
+    3. frozen below 0.5 m throughout, the levels above thawing and refreezing in cycles,
+       with rain: the saturated fraction switches between the perched and the main water
+       table;
+    4. a nearly dry sand cooled far below freezing (the water stays supercooled) and
+       warmed again;
+    5. a saturated organic-rich soil freezing (ice to the pore space, ice runoff at the
+       top level), with frost;
+    6. frost and sublimation at the surface of a frozen soil for days, then dew;
+    7. daily cycles across the freezing point in the top levels, with snowfall at night
+       that melts by day, root uptake and evaporation;
+    8. shallow bedrock with frozen levels above it, snow lying at the start, a thaw with
+       rain on snow.
+    """
+    nsteps = 240
+    k = np.arange(nsteps)
+    zero = np.zeros(nsteps)
+    loam = _soil_properties(40.0, 20.0, 0.0)
+    sand = _soil_properties(92.0, 3.0, 0.0)
+    clay = _soil_properties(10.0, 55.0, 0.0)
+    peaty = _soil_properties(
+        np.full(NLEVSOI, 30.0), np.full(NLEVSOI, 25.0), np.where(Z < 0.3, 0.7, 0.1)
+    )
+    cases = []
+    for dtime in STEPS:
+        hours = k * dtime / 3600.0
+        day = 0.5 * (1.0 - np.cos(2.0 * np.pi * hours / 24.0))  # 0 at midnight, 1 at noon
+        half = nsteps // 2
+        scenarios = [
+            # bedrock level, soil, (tkmg, tkdry), temperature (K), saturation, ice share of
+            # the water, snow (kg/m2), slope, largest saturated fraction, heat depth (m),
+            # relaxation per half hour at the surface, target temperature (K), rain, snow,
+            # vapour flux, uptake, root depth (m)
+            (NLEVSOI, loam, (3.0, 0.25), TFRZ + 1.0, 0.85, 0.0, 0.0, 8.0, 0.4, 0.5, 0.5,
+             np.where(k < half, TFRZ - 12.0, TFRZ + 8.0),
+             np.where(k >= half + 10, 3.0e-4, 0.0), zero, 1.0e-5 * day, zero, 0.5),
+            (NLEVSOI, clay, (2.5, 0.2), np.where(Z < 0.6, TFRZ - 3.0, TFRZ + 1.0),
+             np.where(Z < 0.6, 0.97, 0.7), np.where(Z < 0.6, 0.7, 0.0), 0.0, 0.5, 0.5, 0.4,
+             0.3, np.where(k < half, TFRZ - 3.0, TFRZ + 10.0),
+             np.where((k > 10) & (k < 60), 1.5e-3, 0.0) + np.where(k > half + 20, 2.0e-4, 0.0),
+             zero, 5.0e-6 * day, zero, 0.5),
+            (NLEVSOI, loam, (3.0, 0.25), np.where(Z < 0.5, TFRZ + 2.0, TFRZ - 2.0),
+             np.where(Z < 0.5, 0.75, 0.95), np.where(Z < 0.5, 0.0, 0.8), 0.0, 15.0, 0.6,
+             0.1, 0.6, TFRZ + 1.0 + 9.0 * np.sin(2.0 * np.pi * hours / 48.0),
+             np.where(k % 40 < 8, 1.5e-3, 0.0), zero, 1.0e-5 * day, 1.0e-5 * day, 0.3),
+            (NLEVSOI, sand, (4.0, 0.3), TFRZ + 0.5, 0.03, 0.0, 0.0, 5.0, 0.3, 0.5, 0.3,
+             np.where(k < half, TFRZ - 25.0, TFRZ + 5.0), zero, zero, zero, zero, 0.5),
+            (NLEVSOI, peaty, (1.5, 0.1), TFRZ + 0.5, 1.0, 0.0, 0.0, 1.0, 0.5, 0.3, 0.6,
+             np.full(nsteps, TFRZ - 20.0), zero, zero, np.where(k > 30, -2.0e-5, 0.0), zero,
+             0.5),
+            (NLEVSOI, loam, (3.0, 0.25), TFRZ - 4.0, 0.6, 0.9, 0.0, 2.0, 0.4, 0.3, 0.2,
+             TFRZ - 4.0 + 3.0 * np.sin(2.0 * np.pi * hours / 24.0), zero, zero,
+             np.where(k < 150, 2.0e-5 * day + 2.0e-6, -3.0e-6), zero, 0.5),
+            (NLEVSOI, loam, (3.0, 0.25), TFRZ + 0.3, 0.6, 0.0, 0.0, 3.0, 0.4, 0.08, 0.6,
+             TFRZ + 12.0 * np.sin(2.0 * np.pi * (hours - 9.0) / 24.0), zero,
+             np.where(day < 0.1, 4.0e-5, 0.0), 2.0e-5 * day - 2.0e-6, 3.0e-5 * day, 0.3),
+            (7, loam, (3.0, 0.25), np.where(Z < 0.3, TFRZ - 2.0, TFRZ - 0.5), 0.96, 0.6, 6.0,
+             10.0, 0.4, 0.3, 0.4, np.where(k < 30, TFRZ - 2.0, TFRZ + 9.0),
+             np.where((k > 40) & (k < 90), 6.0e-4, 0.0), np.where(k < 20, 5.0e-5, 0.0),
+             1.0e-5 * day, zero, 0.2),
+        ]  # fmt: skip
+        for (nbedrock, props, (tkmg, tkdry), t, s, share, snow0, slope, wtfact, heat_depth,
+             heat_rate, t_target, rain, snow, vapour, uptake, root_depth) in scenarios:  # fmt: skip
+            pores = props["watsat"] * DZ
+            water = np.broadcast_to(s, NLEVSOI) * pores
+            above = np.arange(NLEVSOI) < nbedrock
+            fraction = np.exp(-Z / root_depth)
+            micro_sigma = float(_micro_sigma(slope))
+            cases.append(
+                {
+                    "dtime": dtime,
+                    "nbedrock": nbedrock,
+                    "nsteps": nsteps,
+                    "wtfact": wtfact,
+                    "topo_slope": slope,
+                    "micro_sigma": micro_sigma,
+                    "h2osfc_thresh": _pond_threshold(micro_sigma),
+                    "h2osfc": 0.0,
+                    "h2osno_no_layers": snow0,
+                    "heat_depth": heat_depth,
+                    # the same relaxation per unit time at both model steps
+                    "heat_rate": float(1.0 - (1.0 - heat_rate) ** (dtime / 1800.0)),
+                    **{name: _levels(props[name]) for name in ("watsat", "hksat", "bsw", "sucsat")},
+                    "tkmg": _levels(tkmg),
+                    "tkdry": _levels(tkdry),
+                    "csol": _levels(2.2e6),
+                    "t_soisno": _levels(t),
+                    "h2osoi_liq": _levels(np.where(above, water * (1.0 - share) * 1000.0, 0.01)),
+                    "h2osoi_ice": _levels(np.where(above, water * share * DENICE, 0.0)),
+                    "root_fraction": _levels(fraction / fraction.sum()),
+                    "qflx_liq_grnd": [float(x) for x in rain],
+                    "qflx_snow_grnd": [float(x) for x in snow],
+                    "qflx_ev": [float(x) for x in vapour],
+                    "uptake": [float(x) for x in uptake],
+                    "t_target": [float(x) for x in t_target],
+                }
+            )
+    return cases
+
+
 class Routine(NamedTuple):
     fortran: str  # Module.F90::Subroutine
     cases: Callable[[], list[dict]]
@@ -805,6 +1342,29 @@ ROUTINES = {
         "SoilHydrologyMod.F90::RenewCondensation", renew_condensation_cases
     ),
     "lateral_flow": Routine("SoilHydrologyMod.F90::SubsurfaceLateralFlow", lateral_flow_cases),
+    "soil_therm_prop": Routine("SoilTemperatureMod.F90::SoilThermProp", soil_therm_prop_cases),
+    "phase_change": Routine("SoilTemperatureMod.F90::Phasechange_beta", phase_change_cases),
+    "perched_water_table": Routine(
+        "SoilHydrologyMod.F90::PerchedWaterTable", perched_water_table_cases
+    ),
+    "saturated_fraction": Routine(
+        "SaturatedExcessRunoffMod.F90::SaturatedExcessRunoff", saturated_fraction_cases
+    ),
+    "perched_lateral_flow": Routine(
+        "SoilHydrologyMod.F90::PerchedLateralFlow", perched_lateral_flow_cases
+    ),
+    "evaporation_split": Routine(
+        "SoilFluxesMod.F90::SoilFluxes (statements copied)",
+        evaporation_split_cases,
+        "test_SoilFluxesMod_evaporation_split.json",
+    ),
+    "frozen_sequence": Routine(
+        "clm_driver.F90: SoilTemperatureMod.F90::SoilThermProp and Phasechange_beta, "
+        "SoilFluxesMod.F90::SoilFluxes (statements copied), HydrologyNoDrainage and "
+        "HydrologyDrainage (the soil routines of a column that freezes, in order)",
+        frozen_sequence_cases,
+        "test_FrozenSoil_sequence.json",
+    ),
     "hydrology_sequence": Routine(
         "clm_driver.F90, HydrologyNoDrainageMod.F90::HydrologyNoDrainage, "
         "HydrologyDrainageMod.F90::HydrologyDrainage (the soil hydrology routines, in order)",

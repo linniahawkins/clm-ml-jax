@@ -1,7 +1,8 @@
 """Soil hydrology of a model step: the surface, the Richards equation, the water table and
-drainage, in CLM's order.
+drainage, in CLM's order; over frozen soil also the frost table, the water table perched
+on it and its drainage.
 
-One soil column without snow. The canopy and the ground's energy balance give the water
+One soil column without snow layers. The canopy and the ground's energy balance give the water
 reaching the ground, the evaporation, the dew and the root uptake of each level; this
 module moves the water and returns the new state, the runoff and the water balance error.
 
@@ -19,7 +20,12 @@ from typing import NamedTuple
 import jax.numpy as jnp
 from jax import Array
 
-from clm_ml.processes.drainage import subsurface_drainage, water_table_depth
+from clm_ml.processes.drainage import (
+    perched_drainage,
+    perched_water_table,
+    subsurface_drainage,
+    water_table_depth,
+)
 from clm_ml.processes.soil_water import soil_water_fractions, soil_water_movement
 from clm_ml.processes.surface_runoff import pond_fraction, renew_condensation, surface_fluxes
 
@@ -37,6 +43,7 @@ class HydrologyParameters(NamedTuple):
     aq_sp_yield_min: Array  # smallest specific yield (0.02)
     slopebeta: Array  # exponent of the microtopography's dependence on the slope (-3)
     slopemax: Array  # slope (degrees) scale of that dependence (0.4)
+    perched_baseflow_scalar: Array  # drainage rate of a perched saturated zone (1e-5)
 
 
 class SoilHydrology(NamedTuple):
@@ -54,6 +61,9 @@ class SoilHydrology(NamedTuple):
     hk: Array  # (n,) conductivity at the interface below each level (mm/s)
     smp: Array  # (n,) matric potential (mm)
     balance_error: Array  # change of storage minus net input over the step (mm)
+    frost_table: Array  # depth of the frost table (m)
+    zwt_perched: Array  # depth of the water table perched on it (m)
+    qflx_drain_perched: Array  # drainage of the perched saturated zone (mm/s)
 
 
 def soil_hydrology(
@@ -83,6 +93,10 @@ def soil_hydrology(
     *,
     qflx_soliddew_to_top_layer=0.0,
     qflx_solidevap_from_top_layer=0.0,
+    t_soisno: Array | None = None,
+    frost_table=None,
+    zwt_perched=None,
+    pond=None,
     fixed_trials: int | None = None,
 ) -> SoilHydrology:
     """One model step of the soil hydrology of a column.
@@ -90,6 +104,10 @@ def soil_hydrology(
     In CLM's order: the fraction of the ground under ponded water; the ice fraction of the
     pores; runoff from the saturated fraction, the pond's budget and the infiltration; the
     Richards equation; the water table; dew; drainage and the bounds on the soil water.
+    With the soil temperature given (``t_soisno``; soil that can freeze), also: the
+    saturated fraction from the perched water table of the step before where there is one;
+    after the Richards equation the frost table and the perched water table; before the
+    drainage of the saturated zone, that of the perched zone.
 
     Args:
         h2osoi_liq, h2osoi_ice: (n,) liquid water and ice of the soil levels (kg m⁻²).
@@ -110,17 +128,30 @@ def soil_hydrology(
         params: the hydrology parameters.
         qflx_soliddew_to_top_layer, qflx_solidevap_from_top_layer: frost and sublimation
             (mm s⁻¹), per unit area of ground outside the pond.
+        t_soisno: (n,) soil temperature (K), or None for soil that is taken as unfrozen
+            (no frost table: the results then hold the depth of the top of the lowest
+            level for both tables, as CLM has them in unfrozen soil).
+        frost_table, zwt_perched: depths (m) of the frost table and the perched water
+            table of the step before (with ``t_soisno``).
+        pond: the result of ``surface_runoff.pond_fraction`` where the caller has computed
+            it at the start of the step, as CLM does before the temperature solution
+            (``h2osoi_liq`` then holds its top level's water, and ``h2osfc`` is not used);
+            None: computed here.
         fixed_trials: see :func:`clm_ml.processes.soil_water.soil_water_movement`.
 
     The water balance error is the change of soil water, ice and pond over the step minus
     (water reaching the ground + dew and frost − evaporation and sublimation − root uptake
-    above the bedrock − surface runoff − drainage − ice runoff) × step.
+    above the bedrock − surface runoff − drainage − drainage of the perched zone − ice
+    runoff) × step.
     """
     active = jnp.arange(h2osoi_liq.shape[0]) < nbedrock
-    storage_before = jnp.sum(h2osoi_liq) + jnp.sum(h2osoi_ice) + h2osfc
-
-    pond = pond_fraction(h2osfc, h2osoi_liq[0], micro_sigma, dtime)
-    liq = jnp.concatenate([pond.h2osoi_liq_top[None], h2osoi_liq[1:]])
+    if pond is None:
+        storage_before = jnp.sum(h2osoi_liq) + jnp.sum(h2osoi_ice) + h2osfc
+        pond = pond_fraction(h2osfc, h2osoi_liq[0], micro_sigma, dtime)
+        liq = jnp.concatenate([pond.h2osoi_liq_top[None], h2osoi_liq[1:]])
+    else:
+        storage_before = jnp.sum(h2osoi_liq) + jnp.sum(h2osoi_ice) + pond.h2osfc
+        liq = h2osoi_liq
     frac_h2osfc = pond.frac_h2osfc
 
     icefrac, eff_porosity = soil_water_fractions(h2osoi_ice, watsat, dz)
@@ -141,6 +172,8 @@ def soil_hydrology(
         params.e_ice,
         params.pc,
         params.mu,
+        frost_table if t_soisno is not None else None,
+        zwt_perched if t_soisno is not None else None,
     )
     movement = soil_water_movement(
         liq,
@@ -159,6 +192,13 @@ def soil_hydrology(
         fixed_trials=fixed_trials,
     )
     liq = movement.h2osoi_liq
+    if t_soisno is not None:
+        # with the water table of the step before, as CLM
+        frost_table, zwt_perched = perched_water_table(
+            t_soisno, liq, h2osoi_ice, zwt, watsat, dz, z, zi
+        )
+    else:
+        frost_table = zwt_perched = zi[-2] + 0.0 * zwt
     zwt = water_table_depth(liq, h2osoi_ice, watsat, dz, z, zi, nbedrock)
 
     liq_top, ice_top = renew_condensation(
@@ -170,8 +210,27 @@ def soil_hydrology(
         qflx_solidevap_from_top_layer,
         dtime,
     )
+    liq = jnp.concatenate([liq_top[None], liq[1:]])
+    qflx_drain_perched = jnp.zeros_like(zwt)
+    if t_soisno is not None:
+        liq, qflx_drain_perched = perched_drainage(
+            liq,
+            frost_table,
+            zwt_perched,
+            watsat,
+            hksat,
+            sucsat,
+            bsw,
+            dz,
+            zi,
+            nbedrock,
+            topo_slope,
+            dtime,
+            params.perched_baseflow_scalar,
+            params.aq_sp_yield_min,
+        )
     drained = subsurface_drainage(
-        jnp.concatenate([liq_top[None], liq[1:]]),
+        liq,
         jnp.concatenate([ice_top[None], h2osoi_ice[1:]]),
         zwt,
         surface.h2osfc,
@@ -201,6 +260,8 @@ def soil_hydrology(
         - drained.qflx_drain
         - drained.qflx_ice_runoff_xs
     )
+    if t_soisno is not None:
+        net_input = net_input - qflx_drain_perched
     storage = jnp.sum(drained.h2osoi_liq) + jnp.sum(drained.h2osoi_ice) + drained.h2osfc
     return SoilHydrology(
         h2osoi_liq=drained.h2osoi_liq,
@@ -217,4 +278,7 @@ def soil_hydrology(
         hk=movement.hk,
         smp=movement.smp,
         balance_error=storage - storage_before - net_input * dtime,
+        frost_table=frost_table,
+        zwt_perched=zwt_perched,
+        qflx_drain_perched=qflx_drain_perched,
     )
