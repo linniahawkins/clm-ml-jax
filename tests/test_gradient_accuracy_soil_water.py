@@ -12,6 +12,9 @@ finite differences, and a reverse-mode gradient over two days.
   start, and three plant parameters (through transpiration and root uptake).
 - *Two days*: the reverse-mode gradient of the mean latent heat and of the soil water
   left at the end.
+- *The dry day with CLM's roots* (``soil.root_conductance: clm``, ``soil.root_biomass:
+  from_leaf_area``): derivatives with respect to CLM's four root parameters and the soil's
+  hydraulic properties.
 
 The exact derivatives are compared (``numerics.water_stress_derivative: exact``; the
 default rule replaces the water stress's derivative by a bounded approximation). The
@@ -19,7 +22,7 @@ model is piecewise smooth (limits, the sub-step count, leaves reaching the minim
 conductance): where the two finite differences (steps h and 2h) disagree, a kink lies
 within the step, and the derivative is compared no closer than they agree.
 
-Gradient tier (``tests/gradient_tier.py``): compiles three chunks, two forward
+Gradient tier (``tests/gradient_tier.py``): compiles four chunks, three forward
 derivatives and a gradient.
 """
 
@@ -43,7 +46,8 @@ NAMELIST = ROOT / "data" / "namelists" / "nl.CHATS7.1day"
 STEPS = 8
 HYDROLOGY = ("fff", "baseflow_scalar", "n_baseflow")
 CONSTANTS = ("hksat", "bsw", "sucsat", "watsat", "wtfact", "topo_slope")
-PLANT = ("vcmax25", "psi50_gs", "plant_conductance")
+ROOTS = ("root_to_leaf_ratio", "root_conductance_max", "root_psi50", "root_ck")
+PLANT = ("vcmax25", "psi50_gs", "plant_conductance") + ROOTS
 INPUTS = HYDROLOGY + CONSTANTS + PLANT + ("soil_water",)
 #: per window: the first run step, the factor on the soil water at its start (capped just
 #: below saturation), the inputs differentiated and the step outputs compared
@@ -57,14 +61,23 @@ WINDOWS = {
     "dry day": (
         30,
         1.0,
-        ("hksat", "bsw", "sucsat", "watsat", "soil_water") + PLANT,
+        ("hksat", "bsw", "sucsat", "watsat", "soil_water", "vcmax25", "psi50_gs")
+        + ("plant_conductance",),
         ("latent_heat_flux", "root_water_uptake", "ground_evaporation"),
     ),
 }
+#: the dry day with CLM's root conductance and CLM's fine root biomass, the soil water
+#: lowered until the roots lose conductance (in the wet soil of May the root's
+#: vulnerability parameters change the fluxes by less than the finite differences resolve)
+CLM_ROOTS_WINDOW = (
+    30,
+    0.7,
+    ("hksat", "bsw", "sucsat", "soil_water", "plant_conductance") + ROOTS,
+    ("latent_heat_flux", "root_water_uptake"),
+)
 
 
-@pytest.fixture(scope="module")
-def model():
+def _model(**soil):
     sys.path.insert(0, str(ROOT))
     from clm_ml.experiment import load_experiment
     from clm_ml.model import Model
@@ -74,7 +87,7 @@ def model():
         Path(tempfile.mkdtemp()),
         namelist=NAMELIST,
         run={"time": {"length": "2 days"}},
-        model={"soil": {"water": "predicted"}},
+        model={"soil": {"water": "predicted", **soil}},
         domain=lambda d: d["towers"]["CHATS7"]["soil"].update(
             {"max_saturated_fraction": 0.4, "slope": 1.0}
         ),
@@ -82,6 +95,11 @@ def model():
     return Model.from_experiment(
         load_experiment(folder, ["model.numerics.water_stress_derivative=exact"])
     )
+
+
+@pytest.fixture(scope="module")
+def model():
+    return _model()
 
 
 def _scaled(model, state, scale, names):
@@ -110,11 +128,11 @@ def _stored(state):
     return state.soil.liquid_water[0].sum() + state.soil.surface_water[0]
 
 
-@pytest.mark.parametrize("window", list(WINDOWS))
-def test_derivatives_match_finite_differences(model, window):
+def _check_derivatives(model, first, wet, names, variables):
+    """Forward-mode derivatives of ``STEPS`` steps from run step ``first`` against central
+    finite differences."""
     from clm_ml.output_streams import StreamSpec
 
-    first, wet, names, variables = WINDOWS[window]
     state, _ = model.run_chunk(model.initial_state(), model.forcing(1, first - 1), 1)
     constants = model.constants()
     capacity = jnp.asarray(constants.watsat[:, :20] * constants.dz[:, :20] * 1000.0)
@@ -165,6 +183,18 @@ def test_derivatives_match_finite_differences(model, window):
             close.append(error <= 1e-3 * scale)
     close = np.concatenate(close)
     assert close.mean() > 0.9, close.mean()  # kinks within a step of 1e-5 are rare
+
+
+@pytest.mark.parametrize("window", list(WINDOWS))
+def test_derivatives_match_finite_differences(model, window):
+    _check_derivatives(model, *WINDOWS[window])
+
+
+def test_derivatives_with_clm_roots_match_finite_differences():
+    """CLM's soil-to-root conductance with the fine root biomass from the leaf area."""
+    _check_derivatives(
+        _model(root_conductance="clm", root_biomass="from_leaf_area"), *CLM_ROOTS_WINDOW
+    )
 
 
 def test_two_day_gradient_matches_finite_differences(model):

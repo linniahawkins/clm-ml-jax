@@ -64,16 +64,18 @@ Guidance for Claude (and other contributors) working in this repository.
   responds to the 2012 drought at US-MMS; under discussion), O91 (the May 2007 Fortran
   comparison fails in one column, as on `main`), O90 (end-of-run restarts), and what the
   predicted mode lacks (O64). CPU jobs on P93300041.
-- **Phase 11, drought response** (branch `phase11/drought_response`, started 2026-11-25;
-  O93): with predicted soil water the canopy sees the soil levels weighted by their
+- **Phase 11, drought response** (closed 2026-11-25, branch `phase11/drought_response`,
+  built on `phase10/soil_water`; O93): with predicted soil water the canopy sees the soil levels weighted by their
   conductance (CLM's root water potential) and the roots can redistribute water
   (`soil.root_redistribution`); prescribed runs keep CLM-ml v2's weighting (decision 150).
   Options `soil.root_conductance: clm_ml | clm` and `soil.root_biomass: prescribed |
   from_leaf_area`, with CLM's four root parameters in `params.yaml` (decision 151): with
   CLM's roots US-MMS follows CLM through the 2012 drought (July latent heat 55 W m⁻²
   against CLM's 59; 92 before).
-  The US-MMS experiment folder is outside the repository
-  (`/glade/work/linnia/phase10_us_mms/from_repo_495442e`). In progress: see O93.
+  Both options default to CLM-ml's. The US-MMS experiment folder is outside the
+  repository (`/glade/work/linnia/phase10_us_mms/from_repo_495442e`). Left open (O93):
+  July GPP falls less than CLM's (the stomata and the xylem are CLM-ml's); the five years
+  and the globe were not run with CLM's roots.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.

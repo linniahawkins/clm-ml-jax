@@ -770,7 +770,9 @@ Not checked against running Fortran: CLM's conductance is inside
 the function with the formulas written out from the source.
 Tests: `tests/clm_ml/test_processes_canopy_water_hydraulics.py`,
 `tests/clm_ml/test_experiment.py` (the upgrade), `tests/regression/
-test_predicted_soil_water.py::test_clm_roots_and_no_redistribution`.
+test_predicted_soil_water.py::test_clm_roots_and_no_redistribution`;
+derivatives with `clm` and `from_leaf_area` against finite differences on a dried soil,
+`tests/test_gradient_accuracy_soil_water.py`.
 Source: maintainer, 2026-11-25; open item O93.
 
 ## B. Configuration and user interface

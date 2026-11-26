@@ -81,7 +81,7 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O90 | A run continued from the end-of-run restart of a shorter run differs from the uninterrupted run: the last step of a run repeats its own forcing as the next one (found in Phase 10.6) | behaviour to decide | after Phase 10 | M |
 | O91 | The comparison with Fortran over May 2007 fails in one column: leaf water potential of the top layer, correlation 0.999896 (as on `main`; found in Phase 10.8) | bug or known difference, not diagnosed | after Phase 10 | M |
 | O92 | ~~A run stops at the first 31 December: the step that ends at midnight of 1 January takes its middle from the calendar days 365.96 and 1.0 (found in Phase 10.8)~~ (closed 2026-11-25: decision 149) | bug | closed | M |
-| O93 | US-MMS 2012: CLM-ML's transpiration hardly falls in the drought (soil water stress stays 1) and dries the soil 54 mm more than CLM (found in Phase 10.8) | science question | after Phase 10 | M |
+| O93 | US-MMS 2012: CLM-ML's transpiration hardly falls in the drought with CLM-ml's roots (the default); with CLM's roots (decision 151) the latent heat follows CLM, GPP still falls less | science question | after Phase 11 | M |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
@@ -916,6 +916,12 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   five months 3 to 6 W m⁻² below CLM; transpiration 366 against 382 mm). What remains:
   July GPP falls less than CLM's (6.4 against 4.4 µmol m⁻² s⁻¹): the stomata and the
   xylem are still CLM-ml's. Not run yet with CLM's roots: the five years, the globe.
+- **Phase 11 closed 2026-11-25** with this item open. What remains is the maintainer's:
+  whether CLM's roots become the default of predicted soil water; the GPP response (a
+  gradual stomatal curve, xylem that loses conductance as it dries); a target from the
+  tower's measurements. CLM's root conductance is tested against its formulas written
+  out from the Fortran source, not against running Fortran (the routine is inside
+  `PhotosynthesisHydraulicStress`, which the harness cannot call).
 - **Source:** Phase 10 steps 10.1 and 10.8; decision 148 (the US-MMS experiment folder is
   not in the repository: `git show 495442e:experiments/us_mms_2012/README.md`).
 
