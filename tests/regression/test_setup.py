@@ -80,10 +80,13 @@ def compare(name, a, b):
 # own class (the reference took the next class's)
 ISSUE21 = {{"constants.watsat", "constants.sucsat", "constants.bsw", "constants.hksat",
            "constants.tkmg", "constants.tkdry"}}
-# not in the reference (added with predicted soil water): the runoff inputs, not given for
-# these towers, and the soil water of the state, which a prescribed run sets up empty
+# not in the reference (added with predicted soil water and with soil that freezes): the
+# runoff inputs, not given for these towers, and the soil water, ice and snow of the state
+# and its water, frost and perched water tables, which a prescribed run sets up empty
 NEW = {{"constants.wtfact": 0.0, "constants.topo_slope": 0.2, "state.soil.liquid_water": 0.0,
-       "state.soil.surface_water": 0.0, "state.soil.water_table_depth": 0.0}}
+       "state.soil.surface_water": 0.0, "state.soil.water_table_depth": 0.0,
+       "state.soil.ice": 0.0, "state.soil.snow": 0.0, "state.soil.frost_table_depth": 0.0,
+       "state.soil.perched_water_table_depth": 0.0}}
 g3 = np.asarray(gi) == 2
 for name, tree in (("constants", new.constants), ("state", new.state)):
     for path, b in jax.tree_util.tree_leaves_with_path(tree):

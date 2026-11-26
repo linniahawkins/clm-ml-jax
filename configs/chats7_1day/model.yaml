@@ -157,9 +157,11 @@ numerics:
   # fusion (CLM's scheme): it overshoots, and the exact derivative of that grows without bound
   # while a soil freezes (up to 1e21 in a clay). stabilized: for such a level, the derivative of
   # the state whose liquid water is the amount that can stay liquid at its temperature after the
-  # change (bounded; derivatives of means over days within about 25 % of a finite change; no
-  # cost), an approximation: not the exact derivative of the forward values at such a step. exact:
-  # the exact derivative.
+  # change (bounded; no cost), an approximation: not the exact derivative of the forward values at
+  # such a step. Derivatives of fluxes averaged over days are within about 15 % of a finite
+  # change; those of the soil's ice with respect to its retention curve and water have the right
+  # sign and can be several times too small (a level freezes in on-off pulses, whose number no
+  # derivative sees). exact: the exact derivative.
   # choices: stabilized | exact; default: stabilized.
   phase_change_derivative: stabilized
 

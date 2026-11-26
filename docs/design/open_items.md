@@ -6,6 +6,10 @@ One list of everything still open after Phase 7, gathered from the design docume
 CLAUDE.md, the code, and the Phase 8 survey. Each item keeps its original IDs under
 "Source" so its history can be traced. Items appearing in several places are merged.
 
+**Status (2026-11-26): Phase 12 closed** on branch `phase12/frozen_soil` (frozen soil
+water as an option of predicted soil water: decisions 152-167; O9, O10, O94), built on
+Phases 10 and 11, which are not merged yet.
+
 **Status (2026-11-24): Phase 9 closed** (a clean-up and a small documentation site:
 decisions 128, 129); the scope document was deleted at its close (git history).
 
@@ -37,8 +41,8 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O6 | Latent heat outputs of transpiration and canopy evaporation use the last sub-step's latent heat (deferred, maintainer 2026-11-01) | science issue | after 8 | M |
 | O7 | LAI and SAI gradients have a kink at the minimum plant area | science issue | after 8 | M |
 | O8 | Minimum plant area protects radiation only for clumping above ~0.55 | science issue | after 8 | M |
-| O9 | Frozen soil: all prescribed soil water is liquid | science issue | after 8 | M |
-| O10 | No snowpack on the ground | science issue | after 8 | M |
+| O9 | Frozen soil: all prescribed soil water is liquid (with predicted soil water it freezes and thaws as an option: `soil.freeze_thaw`, Phase 12, decisions 152-167) | science issue | prescribed runs, and the default: open | M |
+| O10 | No snowpack on the ground (with `soil.freeze_thaw`, snow lies on the ground as a store of water until it melts: no albedo, no insulation; decision 153) | science issue | after Phase 12 | M |
 | O11 | Root biomass 500 g m⁻² everywhere; canopy bottom height unused (grid runs) | science issue | after 8 | M |
 | O12 | Initial state from monthly means, not a spun-up restart (grid runs) | science issue | after 8 | M |
 | O13 | Forcing height fixed at setup; CLM6 uses Meier2022 roughness (varies with LAI) | science issue | after 8 | M |
@@ -228,16 +232,34 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   model's ice fraction (`SOILLIQ`, `SOILICE` are in the history files).
 - **Now:** ice always 0 (as Fortran CLM-ml).
 - **Next:** science change for global/cold sites; also activates O3.
-- **2026-11-26:** proposed as Phase 12 (freeze and thaw, the frost table and the perched
-  water table, with predicted soil water; no snowpack): [`frozen_soil_plan.md`](frozen_soil_plan.md).
-  A plan only: nothing implemented, its choices (section 8) not taken.
+- **2026-11-26, Phase 12 (branch `phase12/frozen_soil`, decisions 152-167):** with
+  predicted soil water the soil's water freezes and thaws as an option (`model.yaml`
+  `soil.freeze_thaw`, off by default): CLM's phase change, supercooled water, frost table,
+  perched water table and its drainage, each equal to CLM's Fortran; the run starts from
+  CLM's `SOILLIQ` and `SOILICE`. The plan document was deleted at the close
+  (`git show 6d1f41b:docs/design/frozen_soil_plan.md`).
+- **Still open (the maintainer's):**
+  - prescribed soil water keeps all its water liquid (the title of this item);
+  - whether `freeze_thaw` becomes the default of predicted soil water (decision 152);
+  - the canopy's side of a frozen surface: the heat of sublimation, and the humidity of
+    the pore air from liquid water plus ice as in CLM (decision 155);
+  - CLM-ml v2's rule that roots take no water from a level with any ice (decision 156);
+  - the pond does not freeze (decision 159);
+  - a stable phase change (O94).
 - **Source:** `global_input.md` issue 3.
 
 ### O10. No snowpack on the ground
 - **Kind:** science issue · **Target:** after 8 · **Decides:** M
 - **What:** snowfall is intercepted by the canopy but snow reaching the ground is not
   accumulated: no change of ground albedo, ground heat flux or LAI burial.
-- **Now:** no snow model (towers: snowfall 0, as Fortran).
+- **Now:** no snow model (towers: snowfall 0, as Fortran, unless `run.yaml`
+  `forcing.meteorology.snowfall: by_temperature`, decision 165).
+- **2026-11-26 (Phase 12):** with `soil.freeze_thaw` snow reaching the ground lies there as
+  a store of water that the top soil level's heat melts (CLM's treatment of snow too thin
+  for a snow layer, used for all snow; decision 153). It has no albedo, covers no fraction
+  of the ground, does not insulate and does not sublimate. At US-MMS (5 to 31 mm of
+  snowfall a year) the store holds at most 12 kg m⁻²; on the January globe it lies on
+  32 587 patches after ten days. A snowpack would replace it.
 - **Source:** `global_input.md` issue 4.
 
 ### O11. Root biomass 500 g m⁻² everywhere; canopy bottom height unused (grid runs)
@@ -1223,6 +1245,9 @@ The point measurement is likely unrepresentative. **Source:** CLAUDE.md.
   the predicted mode does not have: frozen soil water and snow (O9, O10; snowfall enters
   the soil as liquid), irrigation, a spun-up start (O12), soil texture by level on grids
   (O88). At US-MMS it dries the soil more than CLM (O93).
+- **Phase 12 (2026-11-26):** soil water freezes and thaws as an option of the predicted
+  mode (O9), with a store for snow on the ground (O10). Grid runs with it start out of
+  balance where CLM's monthly ice does not fit CLM-ML's soil (O12, O88; decision 167).
 - **Phase 10 closed 2026-11-25.** The plan document (`soil_water_plan.md`: the assessment
   of CLM's code, the order of work, the US-MMS set-up) was deleted at the close and is in
   git history (`git show 0e8e907:docs/design/soil_water_plan.md`). This item stays as the

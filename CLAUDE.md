@@ -15,7 +15,7 @@ Guidance for Claude (and other contributors) working in this repository.
   number, in the same commit). Don't re-open them without a new reason. Every open task, issue
   and pending decision is in `docs/design/open_items.md` (O1, O2, ...). The development logs
   were deleted in Phase 9.0 and are in git history (`git show 4f33cd7:docs/design/<file>`).
-  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 152.
+  Decision numbers 126-127 are used on branch `chats_demos` (not merged): the next is 168.
 - **Standing preferences:**
   - Commit and push when the tests required by the testing tiers pass (authorized); never
     open PRs; one branch per phase. Commit footer:
@@ -76,20 +76,37 @@ Guidance for Claude (and other contributors) working in this repository.
   repository (`/glade/work/linnia/phase10_us_mms/from_repo_495442e`). Left open (O93):
   July GPP falls less than CLM's (the stomata and the xylem are CLM-ml's); the five years
   and the globe were not run with CLM's roots.
-- **Phase 12, frozen soil** (proposed 2026-11-26, branch `phase12/frozen_soil`, built on
-  `phase11/drought_response`; O9): a plan only, `docs/design/frozen_soil_plan.md`: CLM's
-  freeze and thaw, frost table and perched water table with predicted soil water, the
-  Fortran harness and derivative checks at each step, no snowpack. Nothing is
-  implemented; the maintainer's choices are its section 8. Resume there.
+- **Phase 12, frozen soil** (closed 2026-11-26, branch `phase12/frozen_soil`, built on
+  `phase11/drought_response`; O9): soil water that freezes and thaws, an option of
+  predicted soil water (`model.yaml` `soil.freeze_thaw`, off by default; decisions
+  152-167). A translation of CLM (`ctsm5.4.004`), judged against CLM's Fortran: the phase
+  change with supercooled water (`processes/soil.py::phase_change`, CLM's routine called in
+  place by the harness), the frost table, the perched water table and its drainage
+  (`drainage.py`), the ground's vapour flux divided between liquid water and ice
+  (`surface_runoff.py`). State: ice, snow on the ground, the two tables (restart format 8).
+  Towers can divide precipitation into rain and snow (`run.yaml`
+  `forcing.meteorology.snowfall`). Where it is not CLM (each a recorded decision): no
+  snowpack (snow lies on the ground as a store of water until the top level's heat melts
+  it); the heat flux into the soil is the canopy's, so the phase change has no surface
+  feedback; heat of vaporization and CLM-ml's surface humidity at a frozen surface;
+  CLM-ml's roots take no water from a level with ice; the pond does not freeze. Found:
+  CLM's phase change overshoots where a level freezes to its supercooled water, which
+  makes runs with freezing soil sensitive to the last digit and exact derivatives
+  unbounded (O94; `numerics.phase_change_derivative: stabilized` is the default). Coupled
+  runs: US-MMS 2010-2014 and the 1° globe (decision 167); outputs in
+  `/glade/work/linnia/phase12_us_mms/`. The plan is in git history
+  (`git show 6d1f41b:docs/design/frozen_soil_plan.md`). Left open: O9 (prescribed runs, the
+  default, the canopy's side), O10 (snowpack), O94.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.
 - **Gradients, what to know:** a solver's gradient needs an exact slope and fallback values
   with their own gradient; a power with a parameter as exponent needs a base that cannot turn
   negative; check new derivatives against finite differences. Two lagged feedbacks (water
-  stress, Obukhov length) have derivative-only rules (`numerics.water_stress_derivative`,
-  `numerics.obukhov_derivative`): with them a gradient is not the exact derivative of the
-  forward values. Time gradients from the third call. A tower is 4-5× faster on the CPU than on
+  stress, Obukhov length) and the freezing of soil water have derivative-only rules
+  (`numerics.water_stress_derivative`, `numerics.obukhov_derivative`,
+  `numerics.phase_change_derivative`): with them a gradient is not the exact derivative of
+  the forward values. Time gradients from the third call. A tower is 4-5× faster on the CPU than on
   a GPU.
 - **Device-dependent hidden settings:** `numerics.table_search`, `numerics.solver_loops` and
   `numerics.checkpoint_substeps` follow the device (GPU: written out / checkpointed; CPU: loops,
@@ -160,7 +177,8 @@ using Harman & Finnigan (2007, 2008).
 - **Soil.** Soil moisture is a **prescribed boundary condition** by default; soil
   temperature from a heat-diffusion model specific to the multilayer canopy (CLM5 layer
   structure only). Not in CLM-ml v2: `soil.water: predicted` moves the soil water with
-  CLM's soil hydrology (CTSM 5.4; unfrozen, snow-free).
+  CLM's soil hydrology (CTSM 5.4), and with `soil.freeze_thaw` the water freezes and thaws
+  as in CLM (no snowpack: snow lies on the ground until the soil's heat melts it).
 - **Acclimation temperature:** a 10-day running mean (differs from CLM-ml v2's whole-run
   mean, kept as an option for validation).
 
@@ -280,6 +298,10 @@ under a patch; one per patch); **tower** (a named flux-tower location in `domain
   in the time step. Padded layers must not change results or give NaN gradients (safe `where`).
 - **Real 1° patches amplify round-off** (1e-15 in LAI -> ~8 W m-2 after sunrise): grid
   regression tests compare inputs exactly and outputs only through the night.
+- **Freezing soil amplifies round-off too** (`soil.freeze_thaw`; CLM's phase change, O94):
+  two runs 1e-12 apart can differ by 1e-2 K while a fine soil freezes. Compare such runs
+  one step ahead or against a perturbed twin, not bit for bit; take gradients with
+  `numerics.phase_change_derivative: stabilized` (the default).
 - **Memory must not depend on run length**: forcing streams read in chunks, output accumulated
   inside the compiled scan. Never design something that needs the whole run's forcing or
   per-step output in memory.

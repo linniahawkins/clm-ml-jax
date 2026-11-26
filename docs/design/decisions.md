@@ -785,7 +785,7 @@ water liquid (O9 stays open for prescribed runs).
 The phase is a translation of CLM (`ctsm5.4.004`), judged as Phase 10 was (decision 136):
 by agreement with CLM's Fortran on the same inputs, not by winter results, which need snow.
 Reason: the maintainer's choice ("accept all recommendations", choices 1 and 9 of the plan).
-Source: maintainer, 2026-11-26; `docs/design/frozen_soil_plan.md` section 8.
+Source: maintainer, 2026-11-26; the plan's section 8 (`git show 6d1f41b:docs/design/frozen_soil_plan.md`).
 
 **153. Until there is a snowpack, snow reaching the ground lies in CLM's store for snow without layers**
 2026-11-26 · Phase 12 (scoping) · maintainer · in force · Departure from CLM: yes (temporary)
@@ -1017,6 +1017,7 @@ with respect to the driving temperature and `bsw`): the stabilized derivative is
 of finite changes of 0.01 to 0.05 (typically 3 to 10 %: −6.1 against −5.7 to −6.6 kg m⁻²
 K⁻¹; −159 against −161; −175 against −176) where the exact derivative is 1e3 to 1e20 times
 too large; in sequences that do not amplify, the two differ by 3 to 14 %.
+In the model (three days of a cold tower): decision 166.
 Tests: `test_golden_frozen_sequences.py` (the rule changes no value, is bounded, follows
 finite changes; exact derivatives against finite differences in five quieter windows),
 `tests/clm_ml/test_processes_frozen_soil.py` (the slope in the supercooled limit, the other
@@ -1093,6 +1094,106 @@ reaches frozen ground as liquid water at −10 °C; it then freezes in the top l
 releases heat of fusion that the snow never had, which is what decision 153 set out to
 avoid. A tower with frost should set it; the default keeps every existing run unchanged.
 Source: `chunk_inputs.rain_and_snow`; `tests/clm_ml/test_frozen_soil_inputs.py`.
+
+**166. Freezing soil: derivatives through the model, and its cost**
+2026-11-26 · Phase 12 (12.7) · implementation · in force · Departure from Fortran: n/a
+*Derivatives* (`tests/test_gradient_accuracy_frozen_soil.py`, in the gradient tier; the
+cold CHATS of decision 164, exact water-stress derivative):
+- *Ten steps of a thawing morning (snow melting, the top level at 0 °C) and of a freezing
+  night:* forward-mode derivatives of the mean fluxes (latent heat, ground heat, phase
+  change heat, snow on the ground) and of the ice, liquid water and temperature at the end,
+  with respect to `e_ice`, `hksat`, `bsw`, `sucsat`, `watsat`, the liquid water and the ice
+  at the start and `vcmax25`: equal to central finite differences to 4-5 digits. No level
+  freezes down to its supercooled water in these windows, and the stabilized rule
+  (decision 163) gives the same numbers as the exact one.
+- *Three days in reverse mode* (143 steps): the exact derivative reaches 1e12 to 1e16 (the
+  amplification of decision 163 occurs in the model too, not only in the idealized
+  sequences). The stabilized rule is bounded; against finite changes of 1 %: mean latent
+  heat with respect to `vcmax25` 12.4 against 12.3, with respect to `e_ice` −3.1 against
+  −3.0, ground heat with respect to `e_ice` 3.82 against 3.81 (the tests require 10-15 %).
+  The ice left at the end with respect to `bsw`, `watsat` and the water has the right sign
+  and is about 4 times too small (−33 against −157 kg m⁻² per unit relative change of
+  `bsw`).
+- *Why too small:* below 0 °C a level freezes only once it is colder than the freezing
+  point of its own water; with heat to spare it is then put back at 0 °C. It freezes in
+  on-off pulses, and the retention curve decides in how many steps: a count, whose response
+  no derivative sees (exact or stabilized). A wider rule was tried (every level below
+  freezing given the derivative of the state with liquid water equal to the supercooled
+  water): closer in some sequences, 10 to 1000 times off in others (where CLM's state is
+  far from that curve), and was not kept.
+- *The soil temperature at the start is not a useful input:* a level that is changing
+  phase sits exactly at 0 °C, where CLM's thermal conductivity jumps from its thawed to its
+  frozen form (`T >= tfrz`), so a finite difference in temperature there is the jump (it
+  doubles when the step is halved); the derivative is the one-sided slope.
+The plan's statement that the phase change needs no custom derivative rule (5.1) did not
+hold: decision 163.
+*Cost* (CHATS, steady state, per model step; `timing/results_model.jsonl`,
+`results_vmap.jsonl`), predicted soil water -> with `freeze_thaw`:
+| | forward | gradient |
+|---|---|---|
+| CPU, one patch (47 steps) | 11.8 -> 11.9 ms (1.01x) | 52.3 -> 54.2 ms (1.04x; 52.2 with the exact rule) |
+| A100, 4 096 patches (8 steps) | 164.0 -> 165.5 ms (1.01x) | 987 -> 990 ms (1.00x) |
+Memory unchanged (CPU 3.6 -> 3.7 GB; A100 8.76 -> 8.78 GB for 4 096 patches). The 1° globe
+(ten days of January 2000 with their outputs): 559 s against 553 s without freezing, 6.8 GB
+against 6.2 GB of device memory.
+The timing scripts need the dependent settings spelled out since Phase 11 (`--set
+model.soil.root_redistribution=true` and the two other root options with `--set
+model.soil.water=predicted`).
+Source: plan 6.4, 6.6; jobs of 2026-11-26.
+
+**167. Freezing soil in coupled runs: US-MMS 2010-2014 beside CLM, the 1° globe in January and July**
+2026-11-26 · Phase 12 (12.8) · implementation · in force · Departure from Fortran: n/a
+Runs at commit `6d1f41b` with `soil.freeze_thaw: true` (no evaluation against measurements,
+decisions 136, 152). Outputs outside the repository:
+`/glade/work/linnia/phase12_us_mms/` (`frozen/`, `unfrozen/`, `analysis/compare.py`,
+`inputs/history_2010_2014.nc` with CLM's `SOILLIQ` and `SOILICE`); the globe in scratch.
+- *US-MMS, 2010-2014* (43 824 hourly steps, 28 min on a CPU; CLM-ml's roots; tower snowfall
+  by temperature, decision 165), beside the same run without `freeze_thaw` and CLM
+  (`ctsm5.4.004`, which has a snowpack). The run completes; the soil energy check passes at
+  every step; water balance 1.7e-12 mm per step; at most 30 Richards sub-steps (as without).
+  - *Frost:* ice in the upper 0.09 to 0.6 m each winter (CLM: 0.16 to 0.8 m), on 32 to 81
+    days (CLM: 48 to 89), column ice at most 31 to 137 kg m⁻² (CLM: 57 to 204).
+  - *Not the deep frost expected without snow:* CLM-ML's winter soil is warmer than CLM's,
+    with or without freezing: December-February mean at 1 cm 1.2 °C against CLM's 0.1 °C, at
+    0.26 m 2.6 against 1.5, coldest day at 1 cm −9.6 against −13.0 °C. Little snow falls
+    there (5 to 31 mm of water a year), so the snowpack matters little; the difference is
+    the multilayer canopy's ground energy balance in winter (its nights are warmer near
+    the ground, a known limitation of the canopy model). Freezing itself warms the coldest
+    days (−9.6 against −11.5 °C without it) and takes 1.5 W m⁻² more heat out of the ground
+    in winter (−9.8 against −8.3; CLM −11.7).
+  - *Snow:* 5 to 29 mm a year reach the ground and melt (CLM's snowfall 6 to 31 mm; the
+    rest is intercepted); at most 11.6 kg m⁻² lie on the ground, on 2 to 26 days a year.
+  - *Water:* drainage 261 to 457 mm a year (CLM 298 to 461; without freezing 264 to 462);
+    after the cold winter of 2013/14 the frozen run's 392 mm is nearer CLM's 390 than the
+    unfrozen run's 411. Column water within 44 mm of CLM's at every year's end. No surface
+    runoff (`FMAX` is 0 there). A perched zone on 8 days in the five years (CLM: 44); its
+    drainage is nil in both (1e-5 and 1e-4 mm in five years: the size CLM's parameter
+    gives it).
+  - *Winter evaporation* (decision 155): soil evaporation December-February 0.21 mm per day
+    (CLM 0.26; without freezing 0.17), a quarter of it sublimation.
+  - *Summers are unchanged:* June-August daily latent heat within 0.6 W m⁻² of the run
+    without freezing.
+- *The 1° globe, ten days of January and of July 2000* on one A100 (72 575 patches, 9 min
+  each): every patch runs in both; largest water balance error 2e-12 mm per step; at most 35
+  sub-steps.
+  - *January:* half the patches start with soil ice (from CLM's monthly `SOILLIQ` and
+    `SOILICE`; median 197 kg m⁻²). Snow lies on 32 587 patches after ten days. Ponds on
+    12 027 patches (297 without freezing): frozen ground does not take the water. Against
+    the run without freezing, sensible heat 23.4 against 17.2 W m⁻² and ground heat −18.0
+    against −11.4 (mean over all patches): freezing soil gives its latent heat upward.
+  - *July:* 28 % of the patches hold ice (permafrost and deep seasonal frost), thawing
+    (median −22 kg m⁻² in nine days); a water table perches on frozen soil on 6 515 patches.
+  - *The start is not in balance* where the monthly means of CLM's soil temperature, liquid
+    water and ice do not fit CLM-ML's soil properties (one texture per column and no
+    organic matter on grids, O88; monthly means, O12): on the first day the phase change
+    exchanges more than 300 W m⁻² in 1 % of the January patches (under 50 by day ten), and
+    ice above the pore space leaves as runoff on 2 291 patches. The hydrology's own start
+    imbalance of decision 148 is unchanged by the ice (largest first-day drainage 56 mm in
+    July, as before).
+- *Tests at the close:* 1 266 fast tests; all of `tests/regression`; the slow tests; the
+  CPU gradient tier with the new file; the GPU gradient tier. The documentation site was
+  not built: Sphinx is not in the Derecho environment (CI builds it on `main`).
+Source: plan 6.5.
 
 ## B. Configuration and user interface
 
