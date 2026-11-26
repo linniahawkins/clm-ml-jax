@@ -76,6 +76,11 @@ Guidance for Claude (and other contributors) working in this repository.
   repository (`/glade/work/linnia/phase10_us_mms/from_repo_495442e`). Left open (O93):
   July GPP falls less than CLM's (the stomata and the xylem are CLM-ml's); the five years
   and the globe were not run with CLM's roots.
+- **Phase 12, frozen soil** (proposed 2026-11-26, branch `phase12/frozen_soil`, built on
+  `phase11/drought_response`; O9): a plan only, `docs/design/frozen_soil_plan.md`: CLM's
+  freeze and thaw, frost table and perched water table with predicted soil water, the
+  Fortran harness and derivative checks at each step, no snowpack. Nothing is
+  implemented; the maintainer's choices are its section 8. Resume there.
 - **Branch `chats_demos`** (not merged, kept apart by the maintainer): gradient experiments at
   CHATS (`experiments/chats_gradients/`), open items O82-O85 and decisions 126-127 recorded
   there only.

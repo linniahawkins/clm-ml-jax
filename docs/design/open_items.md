@@ -227,6 +227,9 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   model's ice fraction (`SOILLIQ`, `SOILICE` are in the history files).
 - **Now:** ice always 0 (as Fortran CLM-ml).
 - **Next:** science change for global/cold sites; also activates O3.
+- **2026-11-26:** proposed as Phase 12 (freeze and thaw, the frost table and the perched
+  water table, with predicted soil water; no snowpack): [`frozen_soil_plan.md`](frozen_soil_plan.md).
+  A plan only: nothing implemented, its choices (section 8) not taken.
 - **Source:** `global_input.md` issue 3.
 
 ### O10. No snowpack on the ground
