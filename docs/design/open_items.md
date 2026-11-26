@@ -87,6 +87,7 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
 | O92 | ~~A run stops at the first 31 December: the step that ends at midnight of 1 January takes its middle from the calendar days 365.96 and 1.0 (found in Phase 10.8)~~ (closed 2026-11-25: decision 149) | bug | closed | M |
 | O93 | US-MMS 2012: CLM-ML's transpiration hardly falls in the drought with CLM-ml's roots (the default); with CLM's roots (decision 151) the latent heat follows CLM, GPP still falls less | science question | after Phase 11 | M |
 | O94 | CLM's phase change overshoots when a level freezes to its supercooled water: results sensitive to round-off while a fine soil freezes, exact derivatives unbounded (a stabilized derivative rule is the default, decision 163); a scheme without the overshoot would differ from CLM (found in Phase 12.5) | science question | after Phase 12 | M |
+| O95 | With predicted soil water a padded run equals the unpadded one to round-off (1e-13 at the first step), not bit for bit as with prescribed soil water (found in Phase 12; also without freezing) | robustness, not diagnosed | after Phase 12 | I |
 | **4. Housekeeping and repository organization (8a)** |||||
 | O34 | ~~`.gitignore` names absent directories (`docs/` rule removed)~~ (closed: pruned) | housekeeping | closed | I |
 | O35 | ~~Empty `.gitmodules`; CONTRIBUTING describes a submodule~~ (closed: .gitmodules deleted) | housekeeping | closed | I |
@@ -974,6 +975,21 @@ deleted in Phase 9.0 (decision 128); read them with `git show 4f33cd7:docs/desig
   size of the overshoot. A science change: the maintainer's.
 - **Source:** Phase 12 step 12.5, 2026-11-26; `tests/fortran_validation/
   test_golden_frozen_sequences.py`.
+
+### O95. Padding with predicted soil water: equal to round-off, not bit for bit
+- **Kind:** robustness, not diagnosed · **Target:** after Phase 12 · **Decides:** I
+- **What:** a tower run with two padding patches on a padding gridcell (`execution.
+  patch_count`, `gridcell_count`) gives the unpadded run's results bit for bit with
+  prescribed soil water (`tests/regression/test_patch_padding.py`). With predicted soil
+  water the fluxes of the first step already differ by 1e-13 (relative), with or without
+  `soil.freeze_thaw`; the differences stay at round-off size (1e-11 in sensible heat after
+  a day). The padding does not leak into the results; the arithmetic differs in the last
+  digit.
+- **Likely cause (not confirmed):** sums over the soil levels written as `jnp.sum`
+  (`plant_hydraulics.root_zone`, the water balance), which a batch adds in another order
+  than a single column; the hydrology's own sums are sequential.
+- **Found:** Phase 12 step 12.8, while testing padding with freezing soil
+  (`tests/regression/test_frozen_soil.py`, which compares to round-off).
 
 ## 4. Housekeeping and repository organization (8a)
 

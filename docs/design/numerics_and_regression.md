@@ -280,6 +280,20 @@ remain:
 A change that alters round-off is accepted only when it passes **both** the noise-twin test and
 an identical-input check of every routine it touches.
 
+**Runs with freezing soil are outside this tolerance** (`soil.freeze_thaw`; decisions.md
+163, open_items.md O94). CLM's phase change overshoots where a level freezes down to its
+supercooled water, and while a fine-textured soil freezes it multiplies a difference of
+round-off size by up to 1e10 within a hundred steps: two correct runs that start 1e-12
+apart can differ by 1e-2 K for a while. The committed reference (CHATS in May) has no
+freezing soil and is not affected. A change to the frozen-soil code is checked by:
+- the golden tests of the routines and the sequences *one step ahead* (every step starts
+  from CLM's Fortran state: 1e-9, no accumulation);
+- the *free-running* sequences, whose differences from the Fortran must stay within a tenth
+  of what a twin started 1e-12 away shows (`tests/fortran_validation/
+  test_golden_frozen_sequences.py`);
+- the end-to-end tests of `tests/regression/test_frozen_soil.py` (conservation, a restart
+  bit for bit, an unfrozen run equal to the run without the option).
+
 ### 6.1 When to run which tests
 
 Each end-to-end test runs the whole CHATS7 model in a fresh process. Every compiled program

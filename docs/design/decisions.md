@@ -1190,9 +1190,14 @@ decisions 136, 152). Outputs outside the repository:
     ice above the pore space leaves as runoff on 2 291 patches. The hydrology's own start
     imbalance of decision 148 is unchanged by the ice (largest first-day drainage 56 mm in
     July, as before).
-- *Tests at the close:* 1 266 fast tests; all of `tests/regression`; the slow tests; the
-  CPU gradient tier with the new file; the GPU gradient tier. The documentation site was
-  not built: Sphinx is not in the Derecho environment (CI builds it on `main`).
+- *Tests at the close:* 1 266 fast tests; all of `tests/regression` (288); the CPU gradient
+  tier (26 tests, 3 of them new); the comparison with Fortran CLM-ml over May 2007, which
+  fails in the one column it failed in before (O91: correlation 0.999896, the same number:
+  prescribed runs are unchanged). Every golden file of the CTSM harness (18, Phase 10's
+  included) was regenerated from the committed drivers: no value changed. The GPU gradient tier (19 tests on an A100, in two jobs: the first reached its 90 minutes after 17) passes. The documentation site was not built: Sphinx is
+  not in the Derecho environment (CI builds it on `main`).
+- *Found on the way:* with predicted soil water a padded run equals the unpadded one to
+  round-off, not bit for bit, with or without freezing (O95).
 Source: plan 6.5.
 
 ## B. Configuration and user interface

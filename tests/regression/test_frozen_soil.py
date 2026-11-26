@@ -9,6 +9,7 @@ Soil water that freezes and thaws, end to end (model.yaml ``soil.freeze_thaw``).
   restart written after its first day gives the same results, bit for bit: the ice, the
   snow, the frost table and the perched water table are in the restart.
 - The same with CLM's roots, which keep taking water from freezing levels as CLM does.
+- Padding patches do not change a freezing run.
 - ``freeze_thaw`` needs predicted soil water.
 - A grid run (two 1° gridcells in Minnesota, two days of January 2000) starts from the ice
   of the CLM history and keeps the water balance of every patch closed.
@@ -69,7 +70,9 @@ def _cold_files(folder: Path) -> tuple[Path, Path]:
     return tower, history
 
 
-def _experiment(workdir: Path, length: str, *, cold=None, restart=None, soil=None, snow=True):
+def _experiment(
+    workdir: Path, length: str, *, cold=None, restart=None, soil=None, snow=True, overrides=()
+):
     sys.path.insert(0, str(ROOT / "src"))
     sys.path.insert(0, str(ROOT))
     from clm_ml.experiment import load_experiment
@@ -101,7 +104,7 @@ def _experiment(workdir: Path, length: str, *, cold=None, restart=None, soil=Non
         model={"soil": {"water": "predicted", "freeze_thaw": True, **(soil or {})}},
         domain=lambda data: data["towers"]["CHATS7"]["soil"].update(SURFACE),
     )
-    return load_experiment(workdir)
+    return load_experiment(workdir, list(overrides))
 
 
 def test_unfrozen_soil_gives_the_same_run_with_and_without_freeze_thaw(tmp_path):
@@ -204,6 +207,28 @@ def test_cold_soil_with_clm_roots_and_without_snowfall(tmp_path):
     assert np.all(data["snow_on_ground"] == 0.0)
     assert data["ground_water_input"].sum() * 1800.0 > 5.0  # the night's rain, mm
     assert np.all(data["root_water_uptake"] >= 0.0)
+
+
+def test_padding_patches_do_not_change_a_freezing_run(tmp_path):
+    """The cold tower alone and with two padding patches on a padding gridcell (copies with
+    weight 0, as a domain padded to share a compiled program): the same results, to
+    round-off. (With predicted soil water a padded run is not bit for bit the run alone,
+    frozen or not: sums over the soil levels are added in another order in a batch.)"""
+    cold = _cold_files(tmp_path / "inputs")
+    alone = _experiment(tmp_path / "alone", "1 day", cold=cold).execute(quiet=True)["step"]
+    pads = ["run.execution.patch_count=3", "run.execution.gridcell_count=2"]
+    padded = _experiment(tmp_path / "padded", "1 day", cold=cold, overrides=pads)
+    padded = padded.execute(quiet=True)["step"]
+    for name in VARIABLES:
+        assert padded.data[name].shape == alone.data[name].shape, name
+        if name == "soil_water_balance_error":  # round-off itself
+            continue
+        scale = np.abs(alone.data[name]).max()
+        np.testing.assert_allclose(
+            padded.data[name], alone.data[name], rtol=1e-9, atol=1e-10 * scale, err_msg=name
+        )
+    np.testing.assert_allclose(padded.soil_temperature, alone.soil_temperature, rtol=1e-12)
+    assert alone.data["soil_ice"].max() > 0.0
 
 
 def test_freeze_thaw_needs_predicted_soil_water():

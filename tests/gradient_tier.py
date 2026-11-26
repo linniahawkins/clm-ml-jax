@@ -5,7 +5,7 @@ and this script turned LLVM optimization off for them. JAX 0.10.2 computes them 
 default optimization, so the script only forces the CPU (a login node's GPUs would otherwise
 be used)::
 
-    python tests/gradient_tier.py            # all gradient tests (25, ~30 min on a login node)
+    python tests/gradient_tier.py            # all gradient tests (26, ~30 min on a login node)
     python tests/gradient_tier.py --focused  # the chunk derivative tests only (~6 min), after
                                              # moving a routine with a hand-written gradient
 
